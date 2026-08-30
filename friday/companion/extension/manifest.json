@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Friday Companion",
+  "version": "0.1.0",
+  "description": "Lets Friday observe and operate the browser you are already signed into. Nothing leaves this machine.",
+  "minimum_chrome_version": "116",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Friday: attend this tab"
+  },
+  "options_page": "options.html",
+  "permissions": [
+    "alarms",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuLC0q1GwbLV7bbbLiwbGeXCHNaJHpA4lMGQTdfAP5sOp2NtSqmNmlcWxr4gPvJywgfhO9JMn5TcIA4ejeR2HGn3fayZsaWXDn7FND1uCFUunYKPUkGrfDQrs1z3i6Jn6Xdt0WDkGkWRisY12eir4DDgb4kFlG91Zy2kGtThnG0dE8mVzmOwsnjSbOnOkwEsI36vL/3bxbtH0nZ+fKXVj9rhB0c/LVMcGskCu4ua5RFJd1O6I+xuExo6u9PNrlpIX9UKWkA/CkwLlaJAS/5iBLsMPc7DEod7rfrOM8QGymoSXG7SoQ0mxKnUTzleJCFELV29sfTCqCiY2X3j8hULjqwIDAQAB"
+}

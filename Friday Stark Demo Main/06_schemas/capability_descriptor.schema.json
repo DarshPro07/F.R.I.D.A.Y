@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Friday Capability Descriptor",
+  "type": "object",
+  "required": [
+    "id",
+    "kind",
+    "provider",
+    "operations",
+    "risk",
+    "license_mode",
+    "health"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risk": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "restricted"
+      ]
+    },
+    "model_required": {
+      "type": "boolean"
+    },
+    "cost_class": {
+      "type": "string"
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "license_mode": {
+      "type": "string"
+    },
+    "commit": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "startup": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "shutdown": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fallbacks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "health": {
+      "type": "object"
+    }
+  }
+}

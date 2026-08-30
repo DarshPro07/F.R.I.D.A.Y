@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Friday Companion</title>
+<style>
+  body { font: 15px/1.6 system-ui, sans-serif; max-width: 46rem; margin: 2rem auto;
+         padding: 0 1rem; color: #1c1c1c; }
+  h1 { font-size: 1.4rem; }
+  h2 { margin-top: 2rem; font-size: 1.05rem; }
+  input[type=text] { width: 100%; padding: .5rem;
+                     font-family: ui-monospace, monospace; }
+  button { padding: .45rem 1rem; margin-top: .5rem; }
+  .note { color: #555; font-size: .9rem; }
+  .sites { margin-top: .75rem; }
+  code { background: #f2f2f2; padding: .1rem .3rem; }
+</style>
+
+<h1>Friday Companion</h1>
+<p class="note">Lets Friday see and operate the browser you are already signed
+into. Everything stays on this machine &mdash; the extension talks only to
+Friday on <code>127.0.0.1</code>. It never reads saved passwords, never copies
+cookies, and will not type into a password field.</p>
+
+<h2>1. Pair with Friday</h2>
+<p class="note">Paste the token from <code>data/companion/token.txt</code> in
+the Friday folder.</p>
+<input type="text" id="token" placeholder="pairing token" spellcheck="false">
+<button id="save">Save</button>
+<p id="status" class="note"></p>
+
+<h2>2. Sites Friday may work on while you are away</h2>
+<p class="note">Without this, Friday can only act on a tab you have clicked the
+Friday icon on, one tab at a time. That limit is deliberate: unattended access
+to a site you are signed into is a decision, not a default.</p>
+<input type="text" id="origin" placeholder="https://example.com" spellcheck="false">
+<button id="grant">Allow this site</button>
+<div class="sites" id="sites"></div>
+
+<script src="options.js"></script>

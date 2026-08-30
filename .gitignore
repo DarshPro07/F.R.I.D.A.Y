@@ -1,0 +1,10 @@
+node_modules/
+.venv/
+__pycache__/
+dist/
+build/
+coverage/
+.env
+*.log
+Traiining_faces
+third_party/bin/cbm/codebase-memory-mcp.exe

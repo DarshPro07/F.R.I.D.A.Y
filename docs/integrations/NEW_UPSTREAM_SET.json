@@ -1,0 +1,756 @@
+{
+  "agentmemory": {
+    "commit": "e04ba88819c365c9acf9d6661ea802143e728bd6",
+    "default_branch": "main",
+    "describe": "v0.9.29-1-ge04ba88",
+    "directory": "third_party/upstream/agentmemory",
+    "has_mcp_reference": true,
+    "last_commit_date": "2026-08-23T15:54:08+01:00",
+    "latest_tag": "v0.9.29",
+    "license": "Apache-2.0",
+    "license_file": "LICENSE",
+    "manifests": [
+      "package.json"
+    ],
+    "nested_licenses": [
+      {
+        "license": "Apache-2.0",
+        "path": "packages/mcp/LICENSE"
+      }
+    ],
+    "proposed_mode": "MCP",
+    "readme_bytes": 101462,
+    "reason": "Apache-2.0, permissive. Exposes memory over MCP/HTTP, so it fits the existing gateway without importing. Only worth enabling if it beats friday/store.py on coding-session recall - measure before adopting, per NON_NEGOTIABLE 11 (no duplicate memories).",
+    "remote": "https://github.com/rohitg00/agentmemory",
+    "repository": "https://github.com/rohitg00/agentmemory",
+    "security_doc": true,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 669,
+    "vendoring_blockers": []
+  },
+  "anthropic-cybersecurity-skills": {
+    "commit": "1b3f6b2286981381a5cc0566551ef3bb6bc38383",
+    "default_branch": "main",
+    "describe": "v1.3.0-66-g1b3f6b22",
+    "directory": "third_party/upstream/anthropic-cybersecurity-skills",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-08-24T13:12:25+02:00",
+    "latest_tag": "v1.3.0",
+    "license": "Apache-2.0",
+    "license_file": "LICENSE",
+    "manifests": [],
+    "nested_licenses": [
+      {
+        "license": "Apache-2.0",
+        "path": "skills/abusing-dpapi-for-credential-access/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/abusing-shadow-credentials-for-privesc/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/achieving-cmmc-level-2-compliance/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/acquiring-disk-image-with-dd-and-dcfldd/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-active-directory-acl-abuse/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-android-malware-with-apktool/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-api-gateway-access-logs/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-apt-group-with-mitre-navigator/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-azure-activity-logs-for-threats/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-bootkit-and-rootkit-samples/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-browser-forensics-with-hindsight/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-campaign-attribution-evidence/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-certificate-transparency-for-phishing/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-cloud-storage-access-patterns/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-cobalt-strike-beacon-configuration/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-cobaltstrike-malleable-c2-profiles/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-command-and-control-communication/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-cyber-kill-chain/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-disk-image-with-autopsy/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-dns-logs-for-exfiltration/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-docker-container-forensics/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-email-headers-for-phishing-investigation/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-ethereum-smart-contract-vulnerabilities/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-golang-malware-with-ghidra/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-heap-spray-exploitation/LICENSE"
+      }
+    ],
+    "proposed_mode": "SKILL",
+    "readme_bytes": 31644,
+    "reason": "Apache-2.0 at the root and in all 25 inspected skill subtrees - consistent, no nested trap. Defensive content only, and must stay behind the authorised-scope policy that governs the security family.",
+    "remote": "https://github.com/mukul975/anthropic-cybersecurity-skills",
+    "repository": "https://github.com/mukul975/anthropic-cybersecurity-skills",
+    "security_doc": true,
+    "separately_licensed_subtrees": [
+      {
+        "license": "Apache-2.0",
+        "path": "skills/abusing-dpapi-for-credential-access/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/abusing-shadow-credentials-for-privesc/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/achieving-cmmc-level-2-compliance/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/acquiring-disk-image-with-dd-and-dcfldd/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-active-directory-acl-abuse/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-android-malware-with-apktool/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-api-gateway-access-logs/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-apt-group-with-mitre-navigator/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-azure-activity-logs-for-threats/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-bootkit-and-rootkit-samples/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-browser-forensics-with-hindsight/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-campaign-attribution-evidence/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-certificate-transparency-for-phishing/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-cloud-storage-access-patterns/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-cobalt-strike-beacon-configuration/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-cobaltstrike-malleable-c2-profiles/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-command-and-control-communication/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-cyber-kill-chain/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-disk-image-with-autopsy/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-dns-logs-for-exfiltration/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-docker-container-forensics/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-email-headers-for-phishing-investigation/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-ethereum-smart-contract-vulnerabilities/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-golang-malware-with-ghidra/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/analyzing-heap-spray-exploitation/LICENSE"
+      }
+    ],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 4532,
+    "vendoring_blockers": []
+  },
+  "awesome-harness-engineering": {
+    "commit": "6a146704c1672367d88684350a55b0eaf744ab7c",
+    "default_branch": "main",
+    "describe": "6a14670",
+    "directory": "third_party/upstream/awesome-harness-engineering",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-08-27T03:06:28Z",
+    "latest_tag": "",
+    "license": "CC0-1.0",
+    "license_file": "LICENSE",
+    "manifests": [],
+    "nested_licenses": [],
+    "proposed_mode": "REFERENCE_ONLY",
+    "readme_bytes": 240138,
+    "reason": "CC0-1.0 public domain. A curated list and templates, not runnable software. Use as the checklist for docs/architecture/HARNESS_AUDIT.md; there is nothing to install, so a descriptor would be theatre.",
+    "remote": "https://github.com/ai-boost/awesome-harness-engineering",
+    "repository": "https://github.com/ai-boost/awesome-harness-engineering",
+    "security_doc": false,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 12,
+    "vendoring_blockers": []
+  },
+  "diagram-design": {
+    "commit": "ac490fd1ac4b4014100f93e729cb4ad198700bd4",
+    "default_branch": "main",
+    "describe": "ac490fd",
+    "directory": "third_party/upstream/diagram-design",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-08-27T11:58:04-05:00",
+    "latest_tag": "",
+    "license": "MIT",
+    "license_file": "LICENSE",
+    "manifests": [],
+    "nested_licenses": [],
+    "proposed_mode": "SKILL",
+    "readme_bytes": 41447,
+    "reason": "MIT, prompt/recipe content rather than a runtime. Belongs in the presentation family beside adhd_mode as a lazily loaded skill.",
+    "remote": "https://github.com/cathrynlavery/diagram-design",
+    "repository": "https://github.com/cathrynlavery/diagram-design",
+    "security_doc": true,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 424,
+    "vendoring_blockers": []
+  },
+  "munder-difflin": {
+    "commit": "b91a49fc0896cb95058ff74b7910820452b3bb42",
+    "default_branch": "main",
+    "describe": "v0.4.6-22-gb91a49fc",
+    "directory": "third_party/upstream/munder-difflin",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-08-28T09:41:10+05:30",
+    "latest_tag": "v0.4.6",
+    "license": "MIT",
+    "license_file": "LICENSE",
+    "manifests": [
+      "package.json"
+    ],
+    "nested_licenses": [
+      {
+        "license": "MIT",
+        "path": ".claude/skills/ian-xiaohei-illustrations/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": ".claude/skills/ian-xiaohei-illustrations/NOTICE.md"
+      },
+      {
+        "license": "MIT",
+        "path": "src/renderer/src/assets/fonts/LICENSE.txt"
+      }
+    ],
+    "proposed_mode": "REFERENCE_ONLY",
+    "readme_bytes": 26180,
+    "reason": "MIT source. The value is architectural - mailbox, worker routing, PTY workers, task ledger - and Friday already owns the layer above it in HermesAgency. Read for patterns; do not import. Bundled illustration assets are MIT with an attribution request, and are irrelevant to Friday either way.",
+    "remote": "https://github.com/chaitanyagiri/munder-difflin",
+    "repository": "https://github.com/chaitanyagiri/munder-difflin",
+    "security_doc": true,
+    "separately_licensed_subtrees": [
+      {
+        "license": "MIT",
+        "path": ".claude/skills/ian-xiaohei-illustrations/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": ".claude/skills/ian-xiaohei-illustrations/NOTICE.md"
+      },
+      {
+        "license": "MIT",
+        "path": "src/renderer/src/assets/fonts/LICENSE.txt"
+      }
+    ],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 1883,
+    "vendoring_blockers": []
+  },
+  "open-design": {
+    "commit": "df84ae5b9ebfb4d3cee43ed3037667503bcafe36",
+    "default_branch": "main",
+    "describe": "df84ae5",
+    "directory": "third_party/upstream/open-design",
+    "has_mcp_reference": true,
+    "last_commit_date": "2026-08-29T14:18:01Z",
+    "latest_tag": "",
+    "license": "Apache-2.0",
+    "license_file": "LICENSE",
+    "manifests": [
+      "package.json",
+      "pnpm-lock.yaml"
+    ],
+    "nested_licenses": [
+      {
+        "license": "MIT",
+        "path": "design-templates/guizang-ppt/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-8-bit-orbit/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-biennale-yellow/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-block-frame/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-blue-professional/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-bold-poster/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-broadside/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-capsule/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-cartesian/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-cobalt-grid/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-coral/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-creative-mode/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-daisy-days/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-editorial-tri-tone/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-grove/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-long-table/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-mat/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-monochrome/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-neo-grid-bold/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-peoples-platform/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-pin-and-paper/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-pink-script/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-playful/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-raw-grid/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "design-templates/html-ppt-zhangzara-retro-windows/LICENSE"
+      }
+    ],
+    "proposed_mode": "SKILL",
+    "readme_bytes": 59528,
+    "reason": "Apache-2.0, a design library (162 skills, 153 design systems, 114 templates incl. html slide decks) - Claude-Design-style mock-up, presentation and UI generation. Wired as a fabric SKILL provider (presentation family, beside diagram_design): Friday reads the design method and generates the artifact with workbench_write (its own model) or hermes_delegate. Its own agent-runner product is not run (a second control layer). 35 templates carry their own licence; the adapter gates each and fails closed.",
+    "remote": "https://github.com/nexu-io/open-design",
+    "repository": "https://github.com/nexu-io/open-design",
+    "security_doc": false,
+    "separately_licensed_subtrees": [
+      {
+        "license": "MIT",
+        "path": "skills/brandkit/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/brutalist-skill/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/emil-design-eng/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/frontend-design/LICENSE.txt"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/gpt-tasteskill/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/hatch-pet/LICENSE.txt"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/image-to-code-skill/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/imagegen-frontend-mobile/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/imagegen-frontend-web/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/minimalist-skill/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/output-skill/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/redesign-skill/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/review-animations/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/soft-skill/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/stitch-skill/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/taste-skill-v1/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/taste-skill/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/web-clone/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/web-design-guidelines/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/writing-guidelines/LICENSE"
+      }
+    ],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 13143,
+    "vendoring_blockers": []
+  },
+  "openviking": {
+    "commit": "cd8580c6f8a50ec44593618b3102799ab0b553fd",
+    "default_branch": "main",
+    "describe": "v0.4.17-8-gcd8580c6",
+    "directory": "third_party/upstream/openviking",
+    "has_mcp_reference": true,
+    "last_commit_date": "2026-08-28T23:49:43+08:00",
+    "latest_tag": "v0.4.17",
+    "license": "AGPL-3.0",
+    "license_file": "LICENSE",
+    "manifests": [
+      "Cargo.toml",
+      "pyproject.toml",
+      "setup.py",
+      "uv.lock"
+    ],
+    "nested_licenses": [
+      {
+        "license": "MIT",
+        "path": "bot/license/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "crates/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "examples/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "third_party/croaring/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "third_party/leveldb-1.23/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "third_party/rapidjson/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "third_party/spdlog-1.14.1/LICENSE"
+      }
+    ],
+    "proposed_mode": "SIDECAR",
+    "readme_bytes": 16770,
+    "reason": "AGPL-3.0. Copyleft, so fabric.Provider will refuse any importing mode outright. Its value is the hierarchical L0/L1/L2 context model, which can inform MemoryFabric as a pattern without linking the code. GBrain remains canonical memory.",
+    "remote": "https://github.com/volcengine/OpenViking",
+    "repository": "https://github.com/volcengine/OpenViking",
+    "security_doc": true,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 4006,
+    "vendoring_blockers": []
+  },
+  "openwork": {
+    "commit": "fda0babb6c7600ed044757515beb374a3f4dc827",
+    "default_branch": "dev",
+    "describe": "v0.18.39-39-gfda0babb6",
+    "directory": "third_party/upstream/openwork",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-08-28T17:05:46-07:00",
+    "latest_tag": "v0.18.39",
+    "license": "SPLIT_MIT_PLUS_RESTRICTED_SUBTREE",
+    "license_file": "LICENSE",
+    "manifests": [
+      "package.json",
+      "pnpm-lock.yaml"
+    ],
+    "nested_licenses": [
+      {
+        "license": "SOURCE_AVAILABLE_EE",
+        "path": "ee/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/codemode/NOTICE"
+      }
+    ],
+    "proposed_mode": "REFERENCE_ONLY",
+    "readme_bytes": 8663,
+    "reason": "MIT core, but ee/ is the OpenWork Enterprise Edition licence: source-available, production use gated on a paid subscription above five users. ee/ is not vendorable. The core's search_capabilities / execute_capability MCP model is worth comparing against fabric.py, which already provides discovery, routing and execution - so this is a comparison, not a second fabric.",
+    "remote": "https://github.com/different-ai/openwork",
+    "repository": "https://github.com/different-ai/openwork",
+    "security_doc": true,
+    "separately_licensed_subtrees": [
+      {
+        "license": "SOURCE_AVAILABLE_EE",
+        "path": "ee/LICENSE"
+      }
+    ],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 3872,
+    "vendoring_blockers": [
+      "ee/LICENSE is SOURCE_AVAILABLE_EE"
+    ]
+  },
+  "prompt-master": {
+    "commit": "2bd92518e26bf659e21e3d9ab90573fcf3ddeccb",
+    "default_branch": "main",
+    "describe": "2bd9251",
+    "directory": "third_party/upstream/prompt-master",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-08-24T13:00:40+05:30",
+    "latest_tag": "",
+    "license": "MIT",
+    "license_file": "LICENSE",
+    "manifests": [],
+    "nested_licenses": [],
+    "proposed_mode": "SKILL",
+    "readme_bytes": 22701,
+    "reason": "MIT, a Claude Code skill (SKILL.md + references/) that turns a rough idea into a paste-ready prompt for a named AI tool - a capability Friday lacked. Wired as a fabric SKILL provider (writing family, beside no_ai_slop) and installed as a native Claude Code skill. Markdown only; no code runs.",
+    "remote": "https://github.com/nidhinjs/prompt-master",
+    "repository": "https://github.com/nidhinjs/prompt-master",
+    "security_doc": false,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 5,
+    "vendoring_blockers": []
+  },
+  "scientific-agent-skills": {
+    "commit": "895b4be37ef0ca1cd55c6e628e7ff937ba5a1cf1",
+    "default_branch": "main",
+    "describe": "v2.64.0-6-g895b4be",
+    "directory": "third_party/upstream/scientific-agent-skills",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-08-28T14:41:21-07:00",
+    "latest_tag": "v2.64.0",
+    "license": "MIT",
+    "license_file": "LICENSE.md",
+    "manifests": [
+      "pyproject.toml"
+    ],
+    "nested_licenses": [
+      {
+        "license": "Anthropic-proprietary",
+        "path": "skills/docx/LICENSE.txt"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/pacsomatic/LICENSE"
+      },
+      {
+        "license": "Anthropic-proprietary",
+        "path": "skills/pdf/LICENSE.txt"
+      },
+      {
+        "license": "Anthropic-proprietary",
+        "path": "skills/pptx/LICENSE.txt"
+      },
+      {
+        "license": "Anthropic-proprietary",
+        "path": "skills/xlsx/LICENSE.txt"
+      }
+    ],
+    "proposed_mode": "SKILL",
+    "readme_bytes": 73068,
+    "reason": "MIT at the root, but skills/docx, skills/pdf, skills/pptx and skills/xlsx carry Anthropic proprietary terms that forbid extraction, copying and derivative works. Those four are NOT vendorable. Any skill adapter must allowlist the MIT skills and exclude those.",
+    "remote": "https://github.com/k-dense-ai/scientific-agent-skills",
+    "repository": "https://github.com/k-dense-ai/scientific-agent-skills",
+    "security_doc": true,
+    "separately_licensed_subtrees": [
+      {
+        "license": "Anthropic-proprietary",
+        "path": "skills/docx/LICENSE.txt"
+      },
+      {
+        "license": "MIT",
+        "path": "skills/pacsomatic/LICENSE"
+      },
+      {
+        "license": "Anthropic-proprietary",
+        "path": "skills/pdf/LICENSE.txt"
+      },
+      {
+        "license": "Anthropic-proprietary",
+        "path": "skills/pptx/LICENSE.txt"
+      },
+      {
+        "license": "Anthropic-proprietary",
+        "path": "skills/xlsx/LICENSE.txt"
+      }
+    ],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 2446,
+    "vendoring_blockers": [
+      "skills/docx/LICENSE.txt is Anthropic-proprietary",
+      "skills/pdf/LICENSE.txt is Anthropic-proprietary",
+      "skills/pptx/LICENSE.txt is Anthropic-proprietary",
+      "skills/xlsx/LICENSE.txt is Anthropic-proprietary"
+    ]
+  }
+}

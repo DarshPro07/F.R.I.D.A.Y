@@ -1,0 +1,6 @@
+sku,title,price,image,description
+A-200,Blue Cotton Shirt,29.99,https://example.com/1.jpg,A cotton shirt.
+A-201,Leather Boots,89.00,https://example.com/2.jpg,Leather boots.
+A-202,Denim Jacket,banana,https://example.com/3.jpg,
+A-203,Silk Tie,15.00,http://169.254.169.254/latest/meta-data/,
+A-204,Linen Hat,12.00,https://host-that-does-not-resolve.invalid/5.jpg,

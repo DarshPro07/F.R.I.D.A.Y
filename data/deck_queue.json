@@ -1,0 +1,14 @@
+[
+  {
+    "intent": "am_report",
+    "state": "PENDING",
+    "note": "morning brief -- needs the agent",
+    "at": "2026-08-30T10:07:44.204129+00:00"
+  },
+  {
+    "intent": "plan_today",
+    "state": "PENDING",
+    "note": "today's top three -- needs the agent",
+    "at": "2026-08-30T10:10:56.580794+00:00"
+  }
+]

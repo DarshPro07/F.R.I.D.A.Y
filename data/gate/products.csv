@@ -1,0 +1,9 @@
+sku,title,price,image,description
+T-100,Blue Cotton Shirt,29.99,https://example.com/1.jpg,A cotton shirt.
+T-101,Leather Boots,89.00,https://example.com/2.jpg,Leather boots.
+T-102,Wool Scarf,19.50,,A wool scarf.
+T-103,Denim Jacket,banana,https://example.com/4.jpg,
+T-104,Silk Tie,15.00,http://169.254.169.254/latest/meta-data/,
+T-105,Canvas Bag,22.00,https://example.com/6.jpg,
+T-105,Canvas Bag,22.00,https://example.com/6.jpg,
+T-106,Linen Hat,12.00,https://host-that-does-not-resolve.invalid/7.jpg,

@@ -1,0 +1,7 @@
+product_key,status,category,description,image,material,price,seo_title,sku,thumbnail,title,title_raw
+T-100,SUCCEEDED,apparel,A cotton shirt.,https://example.com/1.jpg,cotton,29.99,Blue Cotton Shirt | Apparel,T-100,https://example.com/1.jpg#thumb,Blue Cotton Shirt,Blue Cotton Shirt
+T-101,SUCCEEDED,footwear,Leather boots.,https://example.com/2.jpg,leather,89.0,Leather Boots | Footwear,T-101,https://example.com/2.jpg#thumb,Leather Boots,Leather Boots
+T-102,PARTIAL,accessory,A wool scarf.,,wool,19.5,Wool Scarf | Accessory,T-102,,Wool Scarf,Wool Scarf
+T-104,PARTIAL,uncategorised,,,silk,15.0,Silk Tie | Uncategorised,T-104,,Silk Tie,Silk Tie
+T-105,SUCCEEDED,accessory,,https://example.com/6.jpg,,22.0,Canvas Bag | Accessory,T-105,https://example.com/6.jpg#thumb,Canvas Bag,Canvas Bag
+T-106,PARTIAL,accessory,,,linen,12.0,Linen Hat | Accessory,T-106,,Linen Hat,Linen Hat

@@ -1,0 +1,233 @@
+{"at": "2026-08-30T17:22:35+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
+{"at": "2026-08-30T17:26:33+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:26:38+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:26:41+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:26:43+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:26:56+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:26:56+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:26:56+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:26:56+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:26:57+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:26:58+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:26:58+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:01+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:03+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:03+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:05+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:08+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:09+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:09+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:13+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:13+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:17+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:18+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:18+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:18+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:21+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:21+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:23+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:23+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:25+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:28+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:29+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:33+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:33+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:33+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:33+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:33+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:37+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:38+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:41+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:43+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:45+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:45+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:48+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:48+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:48+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:49+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:53+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:53+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:57+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:57+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:27:58+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:01+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:03+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:03+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:03+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:05+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:08+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:09+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:09+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:13+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:13+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:13+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:17+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:18+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:18+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:21+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:21+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:23+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:25+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:28+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:29+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:33+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:33+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:33+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:33+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:33+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:37+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:38+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:38+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:41+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:43+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:45+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:45+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:48+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:48+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:48+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:49+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:53+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:53+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:57+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:57+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:28:58+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:01+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:03+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:03+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:03+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:05+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:08+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:09+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:09+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:13+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:13+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:17+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:18+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:18+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:21+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:21+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:23+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:23+00:00", "kind": "blocked", "path": "/api/vault", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:23+00:00", "kind": "blocked", "path": "/api/memory/tiers", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:25+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:28+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:28+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:29+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:33+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:33+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:33+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:33+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:33+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:33+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:37+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:38+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:41+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:29:43+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:30:06+00:00", "kind": "client:click", "detail": "Add photos of me", "client": "127.0.0.1"}
+{"at": "2026-08-30T17:31:26+00:00", "kind": "client:click", "detail": "This is me: enrol my face", "client": "127.0.0.1"}
+{"at": "2026-08-30T17:31:26+00:00", "kind": "enrol", "label": "owner", "count": 1}
+{"at": "2026-08-30T17:31:28+00:00", "kind": "unlock", "distance": 0.2241}
+{"at": "2026-08-30T17:32:04+00:00", "kind": "lock"}
+{"at": "2026-08-30T17:32:06+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:32:06+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:32:06+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:32:06+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:32:06+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:32:12+00:00", "kind": "unlock", "distance": 0.2442}
+{"at": "2026-08-30T17:33:40+00:00", "kind": "lock"}
+{"at": "2026-08-30T17:33:44+00:00", "kind": "lock"}
+{"at": "2026-08-30T17:33:44+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:33:46+00:00", "kind": "client:click", "detail": "Locked\n        Locked. Scanning for you.\n        \n        \n ", "client": "127.0.0.1"}
+{"at": "2026-08-30T17:34:12+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T17:34:12+00:00", "kind": "unlock", "distance": 0.3103}
+{"at": "2026-08-30T17:34:43+00:00", "kind": "lock"}
+{"at": "2026-08-30T17:34:47+00:00", "kind": "unlock", "distance": 0.2757}
+{"at": "2026-08-30T17:35:45+00:00", "kind": "lock"}
+{"at": "2026-08-30T17:35:48+00:00", "kind": "face_rejected", "distance": 0.5103}
+{"at": "2026-08-30T17:35:50+00:00", "kind": "unlock", "distance": 0.4545}
+{"at": "2026-08-30T17:40:14+00:00", "kind": "lock"}
+{"at": "2026-08-30T17:40:30+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T17:40:33+00:00", "kind": "unlock", "distance": 0.3373}
+{"at": "2026-08-30T17:41:35+00:00", "kind": "lock"}
+{"at": "2026-08-30T17:41:40+00:00", "kind": "face_rejected", "distance": 0.681}
+{"at": "2026-08-30T17:41:41+00:00", "kind": "face_rejected", "distance": 0.7043}
+{"at": "2026-08-30T17:41:42+00:00", "kind": "face_rejected", "distance": 0.6949}
+{"at": "2026-08-30T17:41:49+00:00", "kind": "face_rejected", "distance": 0.7191}
+{"at": "2026-08-30T17:41:50+00:00", "kind": "face_rejected", "distance": 0.6583}
+{"at": "2026-08-30T17:41:58+00:00", "kind": "unlock", "distance": 0.4145}
+{"at": "2026-08-30T17:45:33+00:00", "kind": "lock"}
+{"at": "2026-08-30T17:46:36+00:00", "kind": "unlock", "distance": 0.4246}
+{"at": "2026-08-30T17:49:19+00:00", "kind": "lock"}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 2}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 3}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 4}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 5}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 6}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 7}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 8}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 9}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 10}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 11}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 12}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 13}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 14}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 15}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 16}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 17}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 18}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 19}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 20}
+{"at": "2026-08-30T17:49:34+00:00", "kind": "enrol", "label": "owner", "count": 21}
+{"at": "2026-08-30T17:49:35+00:00", "kind": "enrol", "label": "owner", "count": 22}
+{"at": "2026-08-30T17:49:35+00:00", "kind": "enrol", "label": "owner", "count": 23}
+{"at": "2026-08-30T17:49:35+00:00", "kind": "enrol", "label": "owner", "count": 24}
+{"at": "2026-08-30T17:50:20+00:00", "kind": "unlock", "distance": 0.3746}
+{"at": "2026-08-30T17:56:57+00:00", "kind": "lock"}
+{"at": "2026-08-30T17:56:57+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T17:57:56+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T17:57:56+00:00", "kind": "unlock", "distance": 0.4139}
+{"at": "2026-08-30T18:01:25+00:00", "kind": "lock"}
+{"at": "2026-08-30T18:06:07+00:00", "kind": "client:click", "detail": "Locked\n        Locked. Scanning for you.\n        \n        \n ", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:06:07+00:00", "kind": "unlock", "distance": 0.4511}
+{"at": "2026-08-30T18:08:43+00:00", "kind": "lock"}
+{"at": "2026-08-30T18:09:13+00:00", "kind": "face_rejected", "distance": 0.5038}
+{"at": "2026-08-30T18:09:13+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:09:16+00:00", "kind": "unlock", "distance": 0.3826}
+{"at": "2026-08-30T18:09:59+00:00", "kind": "lock"}
+{"at": "2026-08-30T18:10:53+00:00", "kind": "unlock", "distance": 0.4719}
+{"at": "2026-08-30T18:12:59+00:00", "kind": "lock"}
+{"at": "2026-08-30T18:13:50+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:13:52+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:14:32+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:15:50+00:00", "kind": "client:key", "detail": "MediaPlayPause", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:15:51+00:00", "kind": "unlock", "distance": 0.3627}
+{"at": "2026-08-30T18:20:31+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T18:20:31+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T18:20:36+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T18:20:49+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:20:50+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:20:51+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:20:51+00:00", "kind": "client:key", "detail": "Control", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:21:00+00:00", "kind": "client:click", "detail": "Add photos of me", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:24:07+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:24:22+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:24:23+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:24:25+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:24:26+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:24:26+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:24:27+00:00", "kind": "client:key", "detail": "Escape", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:24:32+00:00", "kind": "client:click", "detail": "Locked\n        I need the camera to see you: Device in use\n ", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:24:40+00:00", "kind": "client:click", "detail": "Locked\n        Scanning for you.\n        \n        \n         ", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:24:47+00:00", "kind": "unlock", "distance": 0.3908}
+{"at": "2026-08-30T18:38:31+00:00", "kind": "pin_refused", "reason": "the camera is free -- your face is the way in"}
+{"at": "2026-08-30T18:38:31+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
+{"at": "2026-08-30T18:43:44+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:43:45+00:00", "kind": "unlock", "distance": 0.3508}
+{"at": "2026-08-30T18:45:10+00:00", "kind": "pin_set"}
+{"at": "2026-08-30T18:45:11+00:00", "kind": "unlock_pin", "reason": "Chrome is using the camera."}
+{"at": "2026-08-30T18:46:39+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T18:46:39+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-30T18:46:58+00:00", "kind": "client:key", "detail": "3", "client": "127.0.0.1"}
+{"at": "2026-08-30T18:46:58+00:00", "kind": "unlock", "distance": 0.381}
+{"at": "2026-08-30T20:22:35+00:00", "kind": "unlock", "distance": 0.4103}
+{"at": "2026-08-30T20:29:31+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
