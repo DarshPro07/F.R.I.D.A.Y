@@ -46,6 +46,43 @@ FAMILY_DOMAIN = {
 }
 
 
+#: provider id -> what that capability DOES, in the owner's language.
+#:
+#: A provider id is an implementation detail and the control room is a product
+#: surface, so it should read "Read a web page", not "scrapling_parse". This is
+#: naming, not concealment: attribution is a licence obligation and lives in
+#: THIRD_PARTY_NOTICES.md and third_party/UPSTREAM_LOCK.json, which is where a
+#: licence expects to find it.
+#:
+#: An unknown id falls back to its own de-underscored name rather than being
+#: dropped, so a newly added provider shows up immediately instead of silently
+#: disappearing from the map.
+CAPABILITY_NAMES = {
+    "scrapling_parse": "Read a web page",
+    "adhd_mode": "Focus and task shaping",
+    "no_ai_slop": "Plain-writing check",
+    "graft": "Repository grafting",
+    "gstack_process": "Workflow library",
+    "codebase_memory": "Codebase recall",
+    "open_design": "Design systems",
+    "role_recipes": "Agent role library",
+    "science_skills": "Scientific method skills",
+    "security_skills": "Security review skills",
+    "diagram_design": "Diagrams",
+    "prompt_master": "Prompt craft",
+    "graphiti_memory": "Temporal relations",
+    "mem0_memory": "Preference memory",
+    "dummy": "Self-test",
+    "dummy_backup": "Self-test fallback",
+}
+
+
+def capability_label(provider_id: str) -> str:
+    """A human name for a provider, falling back to the id made readable."""
+    return CAPABILITY_NAMES.get(
+        provider_id, provider_id.replace("_", " ").strip().capitalize())
+
+
 def _groups():
     try:
         from friday import capability_router as cr
@@ -98,7 +135,7 @@ def build():
             if FAMILY_DOMAIN.get(fam) != name:
                 continue
             for p in items:
-                cards.append({"label": p["id"], "meta": fam,
+                cards.append({"label": capability_label(p["id"]), "meta": fam,
                               "cadence": ISOLATED if p["mode"] in
                               ("SIDECAR", "sidecar") else ON_DEMAND,
                               "kind": "skill", "state": p["state"]})

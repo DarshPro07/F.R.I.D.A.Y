@@ -9,6 +9,11 @@ camera never pretends to be scanning while it is still loading.
     .venv\\Scripts\\python.exe scripts\\run_ui.py --no-browser
     .venv\\Scripts\\python.exe scripts\\run_ui.py --password   (PIN instead of your face,
         for when the camera is to be left alone: a stream, a meeting, a call)
+    .venv\\Scripts\\python.exe scripts\\run_ui.py --bypass-face  (face recognition off
+        for this run only -- a launch flag, since the gate stands before any chat)
+    .venv\\Scripts\\python.exe scripts\\run_ui.py --log logs\\ui_server.log
+        (send output to a file. Friday.exe uses this: a GUI launcher has no
+        console, so an unredirected server dies on its first print)
 
 Env: FRIDAY_UI_HOST (127.0.0.1), FRIDAY_UI_PORT (8770), FRIDAY_UI_BROWSER
 (path to a Chrome/Edge binary), ADA_MCP_HOST/PORT (where the live MCP server
@@ -78,7 +83,31 @@ def _open_fullscreen(url: str) -> None:
     print("Opened Friday full-screen (%s)" % Path(exe).name, flush=True)
 
 
+def _log_to_file(path: str) -> None:
+    """Send stdout and stderr to a file, before uvicorn configures logging.
+
+    A GUI launcher has no console, so the server inherits handles it cannot
+    write to and dies on its first print. Giving it a real file fixes that and
+    leaves somewhere to look when a start goes wrong.
+    """
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    stream = open(p, "a", buffering=1, encoding="utf-8", errors="replace")
+    sys.stdout = sys.stderr = stream
+    print("\n=== Friday UI starting %s ===" % time.strftime("%Y-%m-%d %H:%M:%S"))
+
+
 def main():
+    if "--log" in sys.argv:
+        i = sys.argv.index("--log")
+        if i + 1 < len(sys.argv):
+            _log_to_file(sys.argv[i + 1])
+    if "--bypass-face" in sys.argv or "--no-face" in sys.argv:
+        # Face recognition off for THIS run only. It is a launch flag, not an
+        # in-app command, on purpose: the gate stands before any chat, so the
+        # only thing that may lift it is someone at this machine's terminal.
+        os.environ["FRIDAY_FACE_GATE"] = "0"
+        print("Face recognition bypassed for this run.", flush=True)
     if "--password" in sys.argv:
         # The owner has said the camera is not Friday's tonight: PIN only, no face, no capture.
         os.environ["FRIDAY_AUTH_MODE"] = "pin"

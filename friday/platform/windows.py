@@ -450,3 +450,209 @@ def power_capabilities() -> PowerCapabilities:
         modern_standby=bool(caps.AoAc),
         hibernate_file=bool(caps.HiberFilePresent),
     )
+
+
+# --- synthetic input -------------------------------------------------------
+#
+# Moving the pointer and pressing keys, for the takeover capability. `SendInput`
+# is the only supported way to do this: it goes through the same queue as real
+# hardware, so applications cannot tell the difference and none of the
+# focus-stealing tricks of `PostMessage` are needed.
+#
+# Nothing in this section decides *whether* to act. That judgement lives in
+# `friday.toolsets.desktop`, behind a CONFIRM gate. These are the hands, not
+# the will.
+
+INPUT_MOUSE = 0
+INPUT_KEYBOARD = 1
+
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_ABSOLUTE = 0x8000
+MOUSEEVENTF_VIRTUALDESK = 0x4000
+
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_UNICODE = 0x0004
+
+SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
+SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
+
+#: Virtual-key codes for the keys a task actually needs to press by name.
+VK = {
+    "enter": 0x0D, "return": 0x0D, "tab": 0x09, "esc": 0x1B, "escape": 0x1B,
+    "space": 0x20, "backspace": 0x08, "delete": 0x2E, "home": 0x24, "end": 0x23,
+    "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+    "pageup": 0x21, "pagedown": 0x22,
+    "ctrl": 0x11, "control": 0x11, "alt": 0x12, "shift": 0x10, "win": 0x5B,
+    "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73, "f5": 0x74, "f6": 0x75,
+    "f7": 0x76, "f8": 0x77, "f9": 0x78, "f10": 0x79, "f11": 0x7A, "f12": 0x7B,
+}
+
+
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG),
+                ("mouseData", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD), ("dwExtraInfo", ULONG_PTR)]
+
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
+                ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
+                ("dwExtraInfo", ULONG_PTR)]
+
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD),
+                ("wParamH", wintypes.WORD)]
+
+
+class _INPUTUNION(ctypes.Union):
+    _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
+
+
+class INPUT(ctypes.Structure):
+    _anonymous_ = ("u",)
+    _fields_ = [("type", wintypes.DWORD), ("u", _INPUTUNION)]
+
+
+SendInput = _bind(_user32, "SendInput",
+                  (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int),
+                  wintypes.UINT)
+GetSystemMetrics = _bind(_user32, "GetSystemMetrics", (ctypes.c_int,), ctypes.c_int)
+GetCursorPos = _bind(_user32, "GetCursorPos", (ctypes.POINTER(wintypes.POINT),),
+                     wintypes.BOOL)
+
+
+def make_dpi_aware() -> None:
+    """Make one pixel here mean one pixel on the screen.
+
+    Without this, `GetSystemMetrics` answers in logical pixels on a scaled
+    display while the screenshot the coordinates came from is in physical ones,
+    and every click lands off by the scale factor. Measured on this machine at
+    125%: a point asked for at x=1400 was acted on at x=1750.
+    """
+    if not AVAILABLE:                                   # pragma: no cover
+        return
+    for attempt in (
+        lambda: _user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)),
+        lambda: ctypes.WinDLL("shcore").SetProcessDpiAwareness(2),
+        lambda: _user32.SetProcessDPIAware(),
+    ):
+        try:
+            if attempt():
+                return
+        except Exception:                               # noqa: BLE001
+            continue
+
+
+def _require() -> None:
+    if not AVAILABLE or SendInput is None:              # pragma: no cover
+        raise OSError("synthetic input is a Windows notion")
+
+
+def virtual_screen() -> tuple[int, int, int, int]:
+    """(left, top, width, height) of the whole virtual desktop, in pixels."""
+    _require()
+    make_dpi_aware()
+    return (GetSystemMetrics(SM_XVIRTUALSCREEN),
+            GetSystemMetrics(SM_YVIRTUALSCREEN),
+            GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN))
+
+
+def screen_size() -> tuple[int, int]:
+    left, top, width, height = virtual_screen()
+    return width, height
+
+
+def cursor_pos() -> tuple[int, int]:
+    _require()
+    point = wintypes.POINT()
+    if not GetCursorPos(ctypes.byref(point)):
+        raise OSError("could not read the cursor position")
+    return int(point.x), int(point.y)
+
+
+def _send(*events: INPUT) -> None:
+    array = (INPUT * len(events))(*events)
+    sent = SendInput(len(events), array, ctypes.sizeof(INPUT))
+    if sent != len(events):
+        raise OSError(f"SendInput accepted {sent} of {len(events)} events "
+                      f"(error {ctypes.get_last_error()})")
+
+
+def send_mouse_move_abs(x: int, y: int) -> None:
+    """Move the pointer to an absolute pixel on the virtual desktop."""
+    _require()
+    left, top, width, height = virtual_screen()
+    if width <= 0 or height <= 0:                       # pragma: no cover
+        raise OSError("the virtual desktop has no size")
+    # SendInput's absolute space is 0..65535 across the virtual desktop, not
+    # pixels - so the pixel is converted here, once, against the real metrics.
+    nx = int(round((x - left) * 65535 / max(1, width - 1)))
+    ny = int(round((y - top) * 65535 / max(1, height - 1)))
+    nx = max(0, min(65535, nx))
+    ny = max(0, min(65535, ny))
+    event = INPUT(type=INPUT_MOUSE)
+    event.mi = MOUSEINPUT(
+        dx=nx, dy=ny, mouseData=0,
+        dwFlags=MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+        time=0, dwExtraInfo=0)
+    _send(event)
+
+
+def send_mouse_click(button: str = "left", double: bool = False) -> None:
+    """Press and release where the pointer already is."""
+    _require()
+    down, up = ((MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP)
+                if button == "right"
+                else (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP))
+    events = []
+    for _ in range(2 if double else 1):
+        for flag in (down, up):
+            event = INPUT(type=INPUT_MOUSE)
+            event.mi = MOUSEINPUT(dx=0, dy=0, mouseData=0, dwFlags=flag,
+                                  time=0, dwExtraInfo=0)
+            events.append(event)
+    _send(*events)
+
+
+def send_text(text: str) -> None:
+    """Type a string. Unicode, so it does not depend on the keyboard layout."""
+    _require()
+    events = []
+    for character in text:
+        for flags in (KEYEVENTF_UNICODE,
+                      KEYEVENTF_UNICODE | KEYEVENTF_KEYUP):
+            event = INPUT(type=INPUT_KEYBOARD)
+            event.ki = KEYBDINPUT(wVk=0, wScan=ord(character), dwFlags=flags,
+                                  time=0, dwExtraInfo=0)
+            events.append(event)
+    if events:
+        _send(*events)
+
+
+def send_key(name: str) -> None:
+    """Press a named key, optionally with modifiers: "enter", "ctrl+s"."""
+    _require()
+    parts = [p.strip().lower() for p in str(name).split("+") if p.strip()]
+    if not parts:
+        raise ValueError("no key named")
+    unknown = [p for p in parts if p not in VK]
+    if unknown:
+        raise ValueError(f"unknown key {unknown[0]!r}")
+    codes = [VK[p] for p in parts]
+    events = []
+    for code in codes:                                   # modifiers down first
+        event = INPUT(type=INPUT_KEYBOARD)
+        event.ki = KEYBDINPUT(wVk=code, wScan=0, dwFlags=0, time=0, dwExtraInfo=0)
+        events.append(event)
+    for code in reversed(codes):                         # and up in reverse
+        event = INPUT(type=INPUT_KEYBOARD)
+        event.ki = KEYBDINPUT(wVk=code, wScan=0, dwFlags=KEYEVENTF_KEYUP,
+                              time=0, dwExtraInfo=0)
+        events.append(event)
+    _send(*events)

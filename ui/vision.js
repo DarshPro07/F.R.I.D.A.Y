@@ -2,21 +2,6 @@
 const FACEAPI = "/ui/vendor_face-api.esm.js";              
 const FACE_MODELS = "/ui/models";
 
-let faceapi = null;
-export async function loadFaceApi(onStage) {
-  if (faceapi) return faceapi;
-  onStage && onStage("face library");
-  const m = await import(FACEAPI);
-  onStage && onStage("face models");
-  await Promise.all([
-    m.nets.tinyFaceDetector.loadFromUri(FACE_MODELS),
-    m.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODELS),
-    m.nets.faceRecognitionNet.loadFromUri(FACE_MODELS),
-  ]);
-  faceapi = m;
-  return m;
-}
-
 class CameraTimeout extends Error {
   constructor(msg) { super(msg); this.name = "CameraTimeout"; }
 }
@@ -68,31 +53,123 @@ export async function openCamera(video, ms = 6000) {
   return stream;
 }
 
+/**
+ * The recognition engine, living on a worker thread.
+ *
+ * tf.js spends 12-33 seconds compiling WebGL shaders the first time it runs
+ * these nets on this GPU. On the main thread that is a frozen window and
+ * Chrome offering to kill the page -- which is exactly what it used to do.
+ * Here it is a worker being busy while the boot screen keeps animating.
+ *
+ * There is no main-thread fallback on purpose: falling back would restore the
+ * freeze, quietly. If the worker cannot start, the gate says so and offers the
+ * PIN, which is the honest outcome.
+ */
+class FaceEngine {
+  constructor() {
+    this.worker = null;
+    this.readyPromise = null;
+    this.pending = null;       // one frame in flight at a time
+    this.onStage = null;
+  }
+
+  start(onStage) {
+    this.onStage = onStage;
+    if (this.readyPromise) return this.readyPromise;
+    this.readyPromise = new Promise((resolve, reject) => {
+      let worker;
+      try {
+        worker = new Worker("/ui/face-worker.js", { type: "module" });
+      } catch (e) { return reject(new Error("this browser cannot run module workers")); }
+      this.worker = worker;
+      const failed = setTimeout(() => reject(new Error("the recognition worker did not start")), 120000);
+
+      worker.onerror = (e) => { clearTimeout(failed); reject(new Error(e.message || "worker failed")); };
+      worker.onmessage = (e) => {
+        const m = e.data || {};
+        if (m.type === "stage") { this.onStage && this.onStage(m.stage); return; }
+        if (m.type === "ready") { clearTimeout(failed); resolve(this); return; }
+        if (m.type === "face" || m.type === "none") {
+          const p = this.pending; this.pending = null;
+          p && p.resolve(m.type === "face" ? m : null);
+          return;
+        }
+        if (m.type === "error") {
+          const p = this.pending; this.pending = null;
+          if (p) p.resolve(null); else { clearTimeout(failed); reject(new Error(m.error)); }
+        }
+      };
+      worker.postMessage({ type: "load", lib: FACEAPI, models: FACE_MODELS });
+    });
+    return this.readyPromise;
+  }
+
+  /** One frame in, one answer out. `want`: "descriptor" (identity) or "presence". */
+  async look(source, want) {
+    if (!this.worker || this.pending) return null;         // never queue: frames are cheap
+    let bitmap;
+    try { bitmap = await createImageBitmap(source); }
+    catch (e) { return null; }
+    return new Promise((resolve) => {
+      this.pending = { resolve };
+      try { this.worker.postMessage({ type: "frame", bitmap, want }, [bitmap]); }
+      catch (e) { this.pending = null; bitmap.close(); resolve(null); }
+      setTimeout(() => { if (this.pending && this.pending.resolve === resolve) { this.pending = null; resolve(null); } }, 8000);
+    });
+  }
+}
+
+export const faceEngine = new FaceEngine();
+
+/** Load and warm the recognition worker. Resolves when it can answer. */
+export async function loadFaceApi(onStage) {
+  return faceEngine.start(onStage);
+}
+
+/**
+ * Watches a video element for the owner's face.
+ *
+ * `light` means presence only -- is anyone there -- which skips the expensive
+ * descriptor net. That is what the post-unlock watch uses; identity was already
+ * proved at the door.
+ */
 export class FaceGate {
-  constructor(video, overlay, cb) { this.video = video; this.overlay = overlay; this.cb = cb; this.running = false; this.timer = 0; this.every = 650; this.light = false; }
+  constructor(video, overlay, cb) {
+    this.video = video; this.overlay = overlay; this.cb = cb;
+    this.running = false; this.timer = 0; this.every = 650; this.light = false;
+  }
+
   async start() {
-    await loadFaceApi(this.cb.onStage);
+    await faceEngine.start(this.cb && this.cb.onStage);
     this.running = true;
     this.tick();
   }
+
   stop() { this.running = false; clearTimeout(this.timer); }
+
   async tick() {
     if (!this.running) return;
-    if (document.hidden) { this.timer = setTimeout(() => this.tick(), this.every); return; }   // nobody is looking
+    if (document.hidden || this.video.readyState < 2 || !this.video.videoWidth) {
+      this.timer = setTimeout(() => this.tick(), this.every);
+      return;
+    }
     try {
-      if (this.video.readyState >= 2 && this.video.videoWidth) {
-        const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
-        // light = presence only (is a face there?); the descriptor is computed only when identity matters
-        const det = this.light ? await faceapi.detectSingleFace(this.video, opts)
-                               : await faceapi.detectSingleFace(this.video, opts).withFaceLandmarks(true).withFaceDescriptor();
-        if (det) {
-          const d = this.light ? det : det.detection, b = d.box;
-          this.cb.onFace(this.light ? null : Array.from(det.descriptor), { x: b.x, y: b.y, w: b.width, h: b.height, score: d.score });
-        } else this.cb.onNoFace && this.cb.onNoFace();
-      }
-    } catch (e) { this.cb.onError && this.cb.onError(e); }
+      const det = await faceEngine.look(this.video, this.light ? "presence" : "descriptor");
+      if (!this.running) return;
+      if (det) this.cb.onFace && this.cb.onFace(det.descriptor, det.box);
+      else this.cb.onNoFace && this.cb.onNoFace();
+    } catch (e) {
+      this.cb.onError && this.cb.onError(e);
+    }
     this.timer = setTimeout(() => this.tick(), this.every);
   }
+}
+
+/** A descriptor for one still image -- used when enrolling from photos. */
+export async function describeImage(source) {
+  await faceEngine.start();
+  const det = await faceEngine.look(source, "descriptor");
+  return det && det.descriptor ? det.descriptor : null;
 }
 
 /* draw boxes onto the capture overlay; the video is mirrored, so mirror x */

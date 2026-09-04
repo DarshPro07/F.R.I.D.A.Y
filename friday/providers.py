@@ -323,7 +323,7 @@ def _share_thought_signatures(*models) -> bool:
     return True
 
 
-def build_tts(provider: str = DEFAULT_TTS, *, speed: float = 1.15, http_session=None):
+def build_tts(provider: str = DEFAULT_TTS, *, speed: float = 1.0, http_session=None):
     """``http_session``: see build_stt."""
     _require_credentials("tts", provider)
 

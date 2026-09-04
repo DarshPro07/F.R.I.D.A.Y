@@ -1,0 +1,8 @@
+[core]
+	repositoryformatversion = 0
+	filemode = false
+	bare = false
+	logallrefupdates = true
+	worktree = E:/friday-tony-stark-demo-main
+	symlinks = false
+	ignorecase = true

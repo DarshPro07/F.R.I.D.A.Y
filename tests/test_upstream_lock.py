@@ -314,16 +314,27 @@ def test_cline_is_declared_for_discovery_but_has_no_builder():
     assert "cline" in executor_router.discover()["not_installed"]
 
 
-def test_hermes_is_not_one_of_the_optional_executors():
+def test_hermes_is_the_engine_not_an_option():
     """
-    NON_NEGOTIABLE 2 - Hermes is mandatory for serious agentic execution, so
-    it reaches Friday through hermes_bridge, not through a router that picks
-    between interchangeable options and can return "" when none are usable.
+    NON_NEGOTIABLE 2 - Hermes is mandatory for serious agentic execution.
+    Revised 2026-09-02: the development pipeline used to reach ONLY Claude
+    Code (DEFAULT was "claude"), which made the mandatory engine the one
+    executor that never got the work. Hermes is now the router's DEFAULT and
+    is reached through hermes_bridge (executors/hermes.py is a thin shim over
+    HermesSupervisor.delegate - the same bridge, the same WorkRun ledger, the
+    same memory bundle). Claude Code is the declared FALLBACK for a machine
+    where Hermes is absent, and every other executor is optional.
     """
     from friday import executor_router
+    from friday.executors import hermes as hx
 
-    assert "hermes" not in executor_router.BY_ID
-    assert executor_router.DEFAULT == "claude"
+    assert executor_router.DEFAULT == "hermes"
+    assert executor_router.FALLBACK == "claude"
+    assert executor_router.BY_ID["hermes"].locator == "friday.executors.hermes:_hermes_python"
+    # The shim delegates through the bridge, never a second gateway.
+    import inspect
+    src = inspect.getsource(hx.HermesExecutor.execute)
+    assert "sup.delegate(" in src and "session.create" not in src
 
 
 def test_declaring_a_new_executor_does_not_change_who_gets_the_work():

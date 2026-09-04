@@ -146,6 +146,9 @@ DESCRIPTOR = fabric.Provider(
     license_mode=fabric.PERMISSIVE,
     integration_mode=fabric.SKILL,
     permissions=("security.authorized_scope",),
+    # Knowing is not doing. The notes below already said catalogue and search
+    # are open; this is where that becomes enforceable rather than prose.
+    open_operations=("catalogue", "search"),
     cost_class="free",
     model_required=False,
     commit="1b3f6b2286981381a5cc0566551ef3bb6bc38383",

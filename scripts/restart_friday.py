@@ -113,13 +113,24 @@ def mcp_build(timeout: float = 45.0) -> dict | None:
             continue
         # Reachable. The tool itself is only callable over MCP, so read the
         # line the server prints at startup instead - same information, and
-        # it needs no client.
-        log = LOGS / "server.log"
-        if log.exists():
+        # it needs no client. The log is appended across restarts, so pick
+        # the build line whose pid is STILL ALIVE - the first line described
+        # a server from days ago and reported STALE against a server that had
+        # just been started from the very tree being checked.
+        import psutil
+        candidates = []
+        for log in (LOGS / "server.log", LOGS / "mcp_boot.log",
+                    ROOT / "logs" / "server.log", ROOT / "logs" / "mcp_boot.log"):
+            if not log.exists():
+                continue
             for line in log.read_text(errors="replace").splitlines():
                 if line.startswith("friday.build"):
-                    return _parse(line)
-        return {}
+                    candidates.append(_parse(line))
+        alive = [c for c in candidates if c.get("pid") and psutil.pid_exists(c["pid"])
+                 and "python" in (psutil.Process(c["pid"]).name() or "").lower()]
+        if alive:
+            return alive[-1]
+        return candidates[-1] if candidates else {}
     return None
 
 
@@ -132,6 +143,8 @@ def _parse(line: str) -> dict:
             found["dirty"] = "+dirty" in parts[index + 1]
         if word == "registry" and index + 1 < len(parts):
             found["registry_hash"] = parts[index + 1]
+        if word == "pid" and index + 1 < len(parts) and parts[index + 1].isdigit():
+            found["pid"] = int(parts[index + 1])
     return found
 
 

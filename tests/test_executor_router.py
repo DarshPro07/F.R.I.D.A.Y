@@ -51,6 +51,10 @@ def nothing_installed(monkeypatch):
     """
     monkeypatch.setattr(R.shutil, 'which', lambda name: None)
     monkeypatch.setattr('friday.executors.cli.claude_path', lambda: None)
+    # Same rule for Hermes: it is found through HERMES_PYTHON/HERMES_DIR (the
+    # real .env on this box sets them), not PATH, so "nothing installed"
+    # has to silence that locator too.
+    monkeypatch.setattr('friday.executors.hermes._hermes_python', lambda: None)
 
 
 def test_discovery_is_a_runtime_check_not_a_config_file(nothing_installed):
@@ -81,15 +85,18 @@ def test_discovery_separates_missing_from_unsupported(monkeypatch):
     monkeypatch.setattr(R.shutil, "which",
                         lambda name: "/usr/bin/x" if name in ("claude", "opencode")
                         else None)
+    monkeypatch.setattr('friday.executors.hermes._hermes_python', lambda: None)
     found = R.discover()
     assert found["usable"] == ["claude"]
     assert found["installed_without_a_builder"] == ["opencode"]
     assert "codex" in found["not_installed"]
+    assert "hermes" in found["not_installed"]
 
 
 def test_one_executor_needs_no_deliberation(monkeypatch):
     monkeypatch.setattr(R.shutil, "which",
                         lambda name: "/usr/bin/x" if name == "claude" else None)
+    monkeypatch.setattr('friday.executors.hermes._hermes_python', lambda: None)
     choice = R.choose("build")
     assert choice.executor == "claude"
     assert "only executor" in choice.because
@@ -103,8 +110,10 @@ def test_no_usable_executor_says_so_rather_than_guessing(nothing_installed):
 
 
 def test_without_a_record_the_default_is_used_and_labelled(two_available):
+    """Hermes is DEFAULT; when it is absent (this fixture) the declared
+    FALLBACK is chosen, and the choice is labelled as unmeasured."""
     choice = R.choose("build")
-    assert choice.executor == R.DEFAULT
+    assert choice.executor == R.FALLBACK
     assert not choice.from_evidence
     assert "not enough evidence" in choice.because
 
@@ -152,7 +161,7 @@ def test_what_was_considered_is_recorded(two_available, record):
 def test_the_choice_serialises_for_the_run_record(two_available, record):
     choice = R.choose("build", record=record)
     as_dict = choice.as_dict()
-    assert as_dict["executor"] == R.DEFAULT
+    assert as_dict["executor"] == R.FALLBACK   # hermes absent in this fixture
     assert as_dict["from_evidence"] is False
 
 

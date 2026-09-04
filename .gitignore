@@ -1,5 +1,10 @@
 node_modules/
+test-results/
+e2e-report/
+e2e-run*.log
+data/e2e-*
 .venv/
+.venv-verify/
 __pycache__/
 dist/
 build/
@@ -8,3 +13,53 @@ coverage/
 *.log
 Traiining_faces
 third_party/bin/cbm/codebase-memory-mcp.exe
+
+# ---------------------------------------------------------------------------
+# Secrets and identity. Never publish these.
+#
+# The companion key and token are what the browser bridge trusts: anyone
+# holding them can present themselves as the paired extension. The face
+# descriptors are biometric data about a real person and are not recoverable
+# by rotation the way a token is.
+# ---------------------------------------------------------------------------
+data/companion/
+data/owner_face.json
+data/owner_pin.json
+
+# ---------------------------------------------------------------------------
+# Live state. These are databases and logs the running system writes; they
+# hold real conversations, real memory and the owner's access history
+# (client IPs and user agents). Tests never read them -- conftest's
+# _never_the_real_database fixture redirects ADA_DB to a tmp_path.
+# ---------------------------------------------------------------------------
+data/ada.sqlite3
+data/*.sqlite3
+tmp*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+data/access_log.jsonl
+data/deck_queue.json
+data/response_style.json
+data/evaluation/
+
+# ---------------------------------------------------------------------------
+# Generated at runtime: captures, synthesised speech, exports and the
+# scratch workspaces the tools write into.
+# ---------------------------------------------------------------------------
+data/browser_shots/
+data/tts_cache/
+data/exports/
+data/forge/staging/
+data/workbench/
+data/workspace/
+
+# Kept deliberately: data/corpus/ (evaluation corpora, read by the eval code)
+# and data/gate/ (document-extraction fixtures: CSV, PDF, XLSX). Both are
+# checked-in inputs, not runtime output.
+
+# Settings backups made before merging team-gen output (S1, jarvis-agentic-team).
+.claude/settings.json.bak-*
+
+# junction into the pinned agents-team clone (plugin marketplace shim)
+.claude/marketplace/friday-local/agents-team/

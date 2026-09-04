@@ -188,31 +188,71 @@ def test_build_functions_work_off_the_main_thread(build, args, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_turn_handling_preserves_previous_behaviour():
-    """Same values the deprecated kwargs carried, in the new shape."""
-    assert agent_friday.turn_handling_for("sarvam") == {
-        "turn_detection": "stt",
-        "endpointing": {"min_delay": 0.07},
-    }
-    assert agent_friday.turn_handling_for("whisper") == {
-        "turn_detection": "vad",
-        "endpointing": {"min_delay": 0.3},
-    }
+def test_turn_handling_respects_a_pause(monkeypatch):
+    """The owner's rule (2026-09-02): a mid-sentence pause is not a turn.
+
+    Three guarantees, in the shape LiveKit reads:
+      - the floor is far above the old 70ms STT gate, so "yes." is not
+        committed before "yes, but..." can arrive;
+      - the ceiling exists, so a pause that really is the end still commits;
+      - detection is never the raw STT is_final boundary.
+    """
+    monkeypatch.delenv("FRIDAY_TURN_MIN_DELAY", raising=False)
+    monkeypatch.delenv("FRIDAY_TURN_MAX_DELAY", raising=False)
+    monkeypatch.setenv("FRIDAY_TURN_DETECTOR", "off")
+    h = agent_friday.turn_handling_for("sarvam")
+    assert h["turn_detection"] != "stt"
+    assert h["endpointing"]["min_delay"] >= 0.5
+    assert h["endpointing"]["max_delay"] > h["endpointing"]["min_delay"]
+    assert h["interruption"]["min_duration"] >= 0.3
 
 
-def test_turn_handling_keys_are_valid_for_installed_livekit():
-    from livekit.agents import EndpointingOptions, TurnHandlingOptions
+def test_turn_delays_come_from_the_environment_and_are_bounded(monkeypatch):
+    monkeypatch.setenv("FRIDAY_TURN_MIN_DELAY", "1.2")
+    monkeypatch.setenv("FRIDAY_TURN_MAX_DELAY", "0.1")      # below min: clamped up
+    monkeypatch.setenv("FRIDAY_TURN_DETECTOR", "off")
+    h = agent_friday.turn_handling_for("sarvam")
+    assert h["endpointing"]["min_delay"] == 1.2
+    assert h["endpointing"]["max_delay"] == 1.2
+    monkeypatch.setenv("FRIDAY_TURN_MIN_DELAY", "garbage")
+    assert agent_friday.turn_handling_for("sarvam")["endpointing"]["min_delay"] == 0.8
 
+
+def test_the_turn_detector_is_wired_at_the_entrypoint(monkeypatch):
+    """With the plugin present, `with_turn_detector` swaps the string mode
+    for the end-of-utterance MODEL - that is what lets a pause be judged by
+    what was said. The model needs a worker job context, so outside one it
+    must fall back to VAD and leave the delay bounds intact, never raise."""
+    monkeypatch.delenv("FRIDAY_TURN_DETECTOR", raising=False)
+    pytest.importorskip("livekit.plugins.turn_detector")
+    base = agent_friday.turn_handling_for("sarvam")
+    h = agent_friday.with_turn_detector(base)
+    assert h["endpointing"] == base["endpointing"]
+    assert h["turn_detection"] == "vad"          # no job context here
+    # And inside a job the model is what would be used:
+    class Fake:
+        def predict_end_of_turn(self, *a, **k): ...
+    monkeypatch.setattr(agent_friday, "turn_detector_for", lambda kind: Fake())
+    assert isinstance(agent_friday.with_turn_detector(base)["turn_detection"], Fake)
+
+
+def test_turn_handling_keys_are_valid_for_installed_livekit(monkeypatch):
+    from livekit.agents import EndpointingOptions, InterruptionOptions, \
+        TurnHandlingOptions
+
+    monkeypatch.setenv("FRIDAY_TURN_DETECTOR", "off")
     handling = agent_friday.turn_handling_for("sarvam")
     assert set(handling) <= set(TurnHandlingOptions.__annotations__)
     assert set(handling["endpointing"]) <= set(EndpointingOptions.__annotations__)
+    assert set(handling["interruption"]) <= set(InterruptionOptions.__annotations__)
 
 
-def test_agent_session_accepts_turn_handling_without_deprecated_args():
+def test_agent_session_accepts_turn_handling_without_deprecated_args(monkeypatch):
     from livekit.agents.voice import AgentSession
 
+    monkeypatch.setenv("FRIDAY_TURN_DETECTOR", "off")
     session = AgentSession(turn_handling=agent_friday.turn_handling_for("sarvam"))
-    assert session.turn_detection == "stt"
+    assert session.turn_detection == "vad"
 
 
 def test_mcp_toolset_is_constructible_with_a_stable_id():

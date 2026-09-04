@@ -1109,6 +1109,114 @@ _ALL = (
         requires_edge=True,
     ),
     Capability(
+        id='screen_point',
+        description='Put an arrow on the screen at the control the boss asked '
+                    'about, and say where it is.',
+        execution_scope='user_device',
+        side_effect='read',
+        requires_edge=True,
+        requires_auth=True,
+        operation_kind='READ',
+        verification_scope='LOCAL_REAL',
+        risk='LOW',
+        policy_tool_id='screen.point',
+        intent_examples=(
+            'where do I click to schedule this email',
+            'show me where the settings button is',
+            'point at the compose button',
+            'where is the unsubscribe link on this page',
+            'which button turns on dark mode here',
+        ),
+        negative_examples=(
+            'what is on my screen',
+            'describe what you can see on the display',
+            'take a screenshot',
+            'click the compose button for me',
+            'open the settings',
+        ),
+    ),
+    Capability(
+        id='desktop_plan',
+        description='Work out how to do something on screen and show the plan '
+                    'for approval. Touches nothing.',
+        execution_scope='user_device',
+        side_effect='read',
+        requires_edge=True,
+        requires_auth=True,
+        operation_kind='READ',
+        verification_scope='LOCAL_REAL',
+        risk='HIGH',
+        policy_tool_id='desktop.plan',
+        intent_examples=(
+            # Deliberately none of these say "screen": that word belongs to
+            # vision_inspect_screen, which has it in its name and wins any
+            # phrase containing it. A takeover is named by the taking over.
+            'take over and open a new note',
+            'take over and unsubscribe me from this',
+            'you do it, take the mouse',
+            'click through that for me',
+            'do it for me instead of telling me',
+        ),
+        negative_examples=(
+            'where do I click for that',
+            'show me where that button is',
+            'what is on my screen',
+            'open a browser tab',
+            'pay this invoice for me',
+        ),
+    ),
+    Capability(
+        id='desktop_step',
+        description='Carry out the next single step of an approved takeover, '
+                    'then stop and report.',
+        execution_scope='user_device',
+        side_effect='write',
+        requires_edge=True,
+        requires_auth=True,
+        operation_kind='FOLLOW_UP',
+        verification_scope='LOCAL_REAL',
+        risk='HIGH',
+        policy_tool_id='desktop.step',
+        intent_examples=(
+            'go ahead with the takeover',
+            'carry on with the next step on screen',
+            'continue driving the screen',
+        ),
+        negative_examples=(
+            'play the next track',
+            'skip to the next song',
+            'what is the next thing on my list',
+        ),
+    ),
+    Capability(
+        id='desktop_stop',
+        description='Stop driving the screen at once and drop the plan.',
+        execution_scope='user_device',
+        side_effect='write',
+        requires_edge=True,
+        requires_auth=True,
+        operation_kind='CANCEL',
+        verification_scope='LOCAL_REAL',
+        risk='LOW',
+        policy_tool_id='desktop.stop',
+        intent_examples=(
+            'stop driving the screen',
+            'hands off the screen',
+            'let go of the mouse',
+            'give me back the screen',
+        ),
+        negative_examples=(
+            'stop the music',
+            'kill the music',
+            'shut down the computer',
+            'pause it',
+            # "stop the restart" belongs to power_cancel; this capability only
+            # stops Friday's own hands, never a system action.
+            'stop the restart',
+            'cancel the shutdown',
+        ),
+    ),
+    Capability(
         id='music_play',
         intent_examples=(
             'play something by daft punk',
@@ -1432,6 +1540,39 @@ _ALL = (
         negative_examples=(
             'close that app',
             'force close chrome',
+            'end that process',
+            'shut down the computer',
+            'delete that reminder',
+            'cancel that automation',
+            'clear the clipboard',
+        ),
+    ),
+    Capability(
+        id='files_delete',
+        description='Permanently erase a file, or send it to the Recycle Bin. Permanent removal needs a confirmation and cannot be undone.',
+        execution_scope='user_device',
+        side_effect='write',
+        requires_edge=True,
+        requires_auth=True,
+        operation_kind='MUTATE',
+        verification_scope='LOCAL_REAL',
+        risk='HIGH',
+        policy_tool_id='files.delete',
+        intent_examples=(
+            'permanently erase that file',
+            'destroy that file for good',
+            'wipe that file forever',
+            'erase that file permanently',
+        ),
+        # A bare "delete that file" is a RECYCLE (undoable) and belongs to
+        # files_recycle; only an explicitly permanent phrasing asks for
+        # destruction. These repel the casual phrasings so the safe tool wins.
+        negative_examples=(
+            'delete that file',
+            'remove the temporary file',
+            'bin that file',
+            'get rid of that note',
+            'close that app',
             'end that process',
             'shut down the computer',
             'delete that reminder',

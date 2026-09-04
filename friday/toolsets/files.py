@@ -30,15 +30,33 @@ import time
 
 from pathlib import Path
 
+from friday import confirmation
 from friday import contracts as c
 
-from friday.fsjail import FileJail, JailError
+from friday.fsjail import FileJail, JailError, is_reparse_point
 
 from friday.policy import PolicyEngine, default_engine
 
 from friday.toolsets.system import APPROVAL_PREFIX
 
 EXECUTION_SCOPE = "local_machine"
+
+#: The outcomes files_delete reports, so a caller reads a fact, not a status
+#: code it has to interpret. RECYCLED can be undone; DELETED cannot.
+RECYCLED = "recycled"
+DELETED = "deleted"
+FAILED = "failed"
+NOT_FOUND = "not_found"
+BLOCKED = "blocked"
+
+#: Friday's own scratch outputs. A file the system created and owns here can be
+#: cleaned without asking the boss to confirm each one -- a confirmation per
+#: temp file is noise, and the directory is a fence around what that trust
+#: covers. Everything outside it still needs the yes.
+try:
+    from friday.config import ARTIFACTS_DIR
+except Exception:  # noqa: BLE001
+    ARTIFACTS_DIR = None
 
 # Restored from the .pyc oracle: proven by a LOAD_CONST/STORE_NAME
 # pair in the running system's bytecode, present in no source candidate.
@@ -654,6 +672,146 @@ def files_recycle(run: c.Run, path: str, *, engine: PolicyEngine = default_engin
                      f"it went to the Recycle Bin rather than being destroyed, "
                      f"so it can be restored"),
     ))
+
+
+def _under_artifacts(target: Path) -> bool:
+    """True when target lives inside Friday's own artifacts directory."""
+    base = ARTIFACTS_DIR
+    if not base:
+        return False
+    try:
+        target.resolve().relative_to(Path(base).resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def files_delete(run: c.Run, path: str, *, permanent: bool = False,
+                 nonce: str | None = None,
+                 engine: PolicyEngine = default_engine) -> c.ActionResult:
+    """
+    Delete a file. Recycle by default (undoable); permanent only behind a
+    confirmation the boss spends once on this exact file.
+
+    The order of the checks is the safety:
+
+      1. the jail -- a path outside the roots, or a protected one (.env, keys),
+         is refused before any question is asked;
+      2. reparse points -- a junction or symlink is not followed and deleted as
+         if it were the thing it points at;
+      3. for a permanent delete WITH a nonce, the confirmation is spent before
+         anything else, so a nonce that was already used, retargeted at a
+         different file, or expired is refused as BLOCKED rather than mistaken
+         for a missing file after the first delete succeeded;
+      4. a Friday-owned artifact is exempt from the confirmation -- the boss
+         does not confirm the deletion of the system's own scratch files;
+      5. otherwise a permanent delete with no nonce asks, and does nothing.
+    """
+    tool_id = "files.delete_permanent" if permanent else "files.delete"
+    blocked = _gate(run, tool_id, engine)
+    if blocked:
+        return blocked
+    started = c.started(run.run_id, tool_id)
+
+    target, failure = _safe(run, started, path)
+    if failure:
+        return run.record(c.started(run.run_id, tool_id).finish(
+            status=c.CANCELLED,
+            error=f"{APPROVAL_PREFIX}: path refused",
+            output=_scoped({"result": BLOCKED, "path": path, "confirm": None})))
+
+    if is_reparse_point(target):
+        return run.record(started.finish(
+            status=c.CANCELLED,
+            error="a junction or symlink is not deleted through as if it were its target",
+            output=_scoped({"result": BLOCKED, "path": str(target), "confirm": None})))
+
+    exempt = _under_artifacts(target)
+
+    # A permanent delete carrying a nonce spends it here, before existence is
+    # even checked, so a reused nonce reads as BLOCKED, not NOT_FOUND.
+    if permanent and nonce is not None and not exempt:
+        spent = confirmation.book.consume(
+            nonce, run_id=run.run_id, action=tool_id, target=str(target))
+        if not spent.ok:
+            return run.record(started.finish(
+                status=c.CANCELLED,
+                error=spent.reason,
+                output=_scoped({"result": BLOCKED, "path": str(target), "confirm": None})))
+
+    if not target.exists():
+        return run.record(started.finish(
+            status=c.OBSERVED,
+            output=_scoped({"result": NOT_FOUND, "path": str(target), "confirm": None})))
+    if target.is_dir():
+        return run.record(started.finish(
+            status=c.CANCELLED,
+            error=f"{target} is a directory - files only",
+            output=_scoped({"result": BLOCKED, "path": str(target), "confirm": None})))
+
+    if not permanent:
+        try:
+            from send2trash import send2trash
+        except ImportError:
+            return run.record(started.finish(
+                status=c.NOT_CONFIGURED,
+                error="send2trash is not installed; refusing rather than deleting permanently",
+                output=_scoped({"result": FAILED, "path": str(target), "confirm": None})))
+        size = target.stat().st_size
+        try:
+            send2trash(str(target))
+        except Exception as exc:  # noqa: BLE001
+            return run.record(started.finish(
+                status=c.FAILED,
+                error=f"could not recycle {target.name}: {exc}",
+                output=_scoped({"result": FAILED, "path": str(target), "confirm": None})))
+        # Read the disk back rather than trust the call: a recycle that left
+        # the file in place is a partial result, not a verified success.
+        if target.exists():
+            return run.record(c.partial(
+                started,
+                f"{target.name} was sent to the Recycle Bin but is still on disk",
+                output=_scoped({"result": FAILED, "path": str(target),
+                                "restorable": True, "confirm": None})))
+        return run.record(c.succeeded(started, output=_scoped(
+            {"result": RECYCLED, "mode": "recycle", "path": str(target),
+             "bytes": size, "restorable": True, "confirm": None}),
+            side_effects=(f"recycled {target.name}",),
+            verification=c.Verification(method="path_absent_after_recycle",
+                evidence=f"{target.name} ({size} bytes) went to the Recycle Bin and can be restored")))
+
+    # Permanent, and either exempt or nonce already spent above. A bare
+    # permanent delete (no nonce, not exempt) asks and does nothing.
+    if not exempt and nonce is None:
+        pending = confirmation.book.ask(
+            run.run_id, tool_id, str(target),
+            f"Permanently delete {target.name}? This cannot be undone.")
+        return run.record(started.finish(
+            status=c.CANCELLED,
+            error=f"{APPROVAL_PREFIX}: permanent deletion needs your confirmation",
+            output=_scoped({"result": None, "confirm": pending.to_dict(),
+                            "path": str(target)})))
+
+    size = target.stat().st_size
+    try:
+        target.unlink()
+    except Exception as exc:  # noqa: BLE001
+        return run.record(started.finish(
+            status=c.FAILED,
+            error=f"could not delete {target.name}: {exc}",
+            output=_scoped({"result": FAILED, "path": str(target), "confirm": None})))
+    # Same read-back on the destructive path: only call it gone if it is gone.
+    if target.exists():
+        return run.record(c.partial(
+            started,
+            f"{target.name} could not be removed; it is still on disk",
+            output=_scoped({"result": FAILED, "path": str(target), "confirm": None})))
+    return run.record(c.succeeded(started, output=_scoped(
+        {"result": DELETED, "mode": "permanent", "path": str(target),
+         "bytes": size, "restorable": False, "confirm": None}),
+        side_effects=(f"permanently deleted {target.name}",),
+        verification=c.Verification(method="path_absent_after_delete",
+            evidence=f"{target.name} ({size} bytes) is permanently gone from {target}")))
 
 
 # ---------------------------------------------------------------------------

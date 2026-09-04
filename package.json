@@ -1,0 +1,15 @@
+{
+  "name": "friday-e2e",
+  "private": true,
+  "version": "0.1.0",
+  "description": "First-party Playwright E2E suite for the Friday control room (friday/ui_server.py + ui/).",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "trace": "playwright show-trace",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

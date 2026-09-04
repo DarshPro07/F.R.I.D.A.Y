@@ -28,13 +28,28 @@ UPSTREAM = ROOT / "third_party" / "upstream"
 #: than this is a document to consult, not context to carry.
 MAX_CHARS = 40_000
 
+#: Below this an entry file has a name and nothing else. Not zero: a file
+#: holding only a title line or a stray newline is just as useless to a model
+#: as an empty one, and reporting it READY is the presence-vs-function bug.
+MIN_USEFUL_BYTES = 32
+
 
 def pack_root(upstream: str) -> pathlib.Path:
     return UPSTREAM / upstream
 
 
 def health(upstream: str, *entries: str) -> dict:
-    """READY when the pack is on disk and the files it promises exist."""
+    """READY only when an entry file exists AND has content worth reading.
+
+    This used to return READY on `path.exists()`, which is a filesystem check
+    being reported as a capability check: a pack whose entry file had been
+    truncated to nothing was indistinguishable from a working one, and the UI
+    showed a healthy fabric either way.
+
+    An empty or near-empty entry is DEGRADED, not READY - DEGRADED already
+    means "answering, but not fully; say so, use it", which is the honest
+    answer for a pack that is present but has nothing to give.
+    """
     from friday import fabric
 
     root = pack_root(upstream)
@@ -45,7 +60,21 @@ def health(upstream: str, *entries: str) -> dict:
     if missing:
         return {"state": fabric.DEGRADED,
                 "detail": f"cloned, but missing {missing}"}
-    return {"state": fabric.READY, "detail": f"{len(entries)} entry file(s) present"}
+    # The smallest real operation this family has is reading an entry, so that
+    # is what the probe does. Cheap: one stat per entry, no file is parsed.
+    empty = []
+    for entry in entries:
+        try:
+            if (root / entry).stat().st_size < MIN_USEFUL_BYTES:
+                empty.append(entry)
+        except OSError as exc:
+            return {"state": fabric.DEGRADED,
+                    "detail": f"{entry} is present but unreadable: {exc}"}
+    if empty:
+        return {"state": fabric.DEGRADED,
+                "detail": f"present but effectively empty: {empty}"}
+    return {"state": fabric.READY,
+            "detail": f"{len(entries)} entry file(s) present and non-empty"}
 
 
 def read(upstream: str, relative: str) -> str:

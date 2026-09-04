@@ -182,6 +182,7 @@ def live_probe_factory(mcp_base_url: str, timeout: float = 3.0):
     is the distinction the regression got wrong: is the MCP/gateway side
     actually gone, or is only the bridge stale?
     """
+    import urllib.error
     import urllib.request
 
     def probe(active_workruns: tuple[str, ...] = ()) -> Report:
@@ -190,9 +191,17 @@ def live_probe_factory(mcp_base_url: str, timeout: float = 3.0):
             request = urllib.request.Request(mcp_base_url, method="GET")
             with urllib.request.urlopen(request, timeout=timeout):
                 pass
+        except urllib.error.HTTPError:
+            # An HTTP status IS the proof of life. The MCP server is FastMCP
+            # over SSE and has no route at "/", so a healthy one answers GET /
+            # with 404 -- which used to be read as "the server is gone", which
+            # failed mcp_server_alive, which failed hermes_bridge_ready, which
+            # stopped Friday delegating to a Hermes that was running fine.
+            pass
         except Exception:                                    # noqa: BLE001
-            # Distinguishing refused/timeout is not worth another layer:
-            # either way the MCP server is not answering this process.
+            # Refused or timed out: nothing answered. Distinguishing the two is
+            # not worth another layer -- either way the MCP server is not
+            # reachable from this process.
             signals["mcp_server_alive"] = False
             signals["mcp_sse_connected"] = False
             signals["hermes_bridge_ready"] = False

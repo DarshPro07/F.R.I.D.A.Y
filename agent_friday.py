@@ -19,6 +19,7 @@ import logging
 import os
 import pathlib
 import re
+import time
 
 from dotenv import load_dotenv
 from livekit.agents import JobContext, WorkerOptions, cli
@@ -26,7 +27,15 @@ from livekit.agents.llm import function_tool, mcp
 from livekit.agents.voice import Agent, AgentSession
 from livekit.plugins import silero
 
-from friday import autolearn, capability_router, objective_cli, ownership, providers, resilience
+# Imported for its side effect: the plugin registers itself so
+# `agent_friday.py download-files` fetches the end-of-utterance model.
+# Optional - its absence leaves endpointing on VAD (turn_detector_for).
+try:
+    from livekit.plugins.turn_detector import multilingual as _turn_detector_plugin  # noqa: F401
+except Exception:  # noqa: BLE001
+    _turn_detector_plugin = None
+
+from friday import autolearn, capabilities, capability_router, objective_cli, ownership, providers, resilience, turn_timing
 from friday.continuous import ContinuousTaskExecutor
 
 
@@ -167,7 +176,7 @@ def session_config() -> dict:
         "llm_backend": os.getenv("LLM_BACKEND", providers.DEFAULT_LLM_BACKEND),
         "llm_role": os.getenv("LLM_ROLE", providers.DEFAULT_ROLE),
         "tts_provider": os.getenv("TTS_PROVIDER", providers.DEFAULT_TTS),
-        "tts_speed": float(os.getenv("TTS_SPEED", "1.15")),
+        "tts_speed": float(os.getenv("TTS_SPEED", "1.0")),
         "turn_handling": turn_handling_for(stt_provider),
     }
 
@@ -176,16 +185,95 @@ def turn_handling_for(stt_provider: str) -> dict:
     """
     Build TurnHandlingOptions for an STT provider.
 
-    Values are carried over verbatim from the pre-Phase-0 constructor
-    arguments (turn_detection / min_endpointing_delay). This is an API
-    migration, not latency tuning - behaviour must not change.
+    ## Why the old values were wrong (2026-09-02, owner's transcript)
 
-    Sarvam streams partial transcripts, so STT-based endpointing is both
-    viable and faster. Whisper-family models are batch, so fall back to VAD.
+    The previous shape was STT-mode detection with a 70ms min delay:
+    the moment Sarvam emitted an `is_final` chunk, 70ms later the turn was
+    committed and the half-sentence went to Gemini. The owner's words: "I
+    was singing and stopped mid-sentence to think, the system treats the
+    pause as a complete sentence." An STT's `is_final` is a transcription
+    boundary, not a thought boundary, so this could never be tuned right.
+
+    ## The rule he asked for
+
+      1. a pause is respected for a set window   -> `max_delay`, plus the
+         end-of-turn model deciding the utterance is unfinished
+      2. window expires with no more speech       -> the turn commits then,
+         and only then (`max_delay`)
+      3. speech inside the window                 -> it joins the same turn;
+         nothing has been sent yet
+
+    `min_delay` is the floor even when the model is sure the turn is over
+    (it stops "yes." from committing in 70ms and cutting off "yes, but...").
+    `max_delay` is the ceiling: the model may hold an unfinished-sounding
+    pause open this long, no longer, so a real end is never lost.
+
+    Both come from the environment because the right numbers are a property
+    of how the owner speaks, not of the code:
+
+      FRIDAY_TURN_MIN_DELAY   default 0.8  (seconds)
+      FRIDAY_TURN_MAX_DELAY   default 3.5  (seconds)
+      FRIDAY_TURN_DETECTOR    default "multilingual"; "english", or "off"
+                              to fall back to plain VAD endpointing
+
+    The detector is LiveKit's end-of-utterance model (livekit-plugins-
+    turn-detector, runs on CPU, no key). With it, `min_delay` applies when
+    it judges the turn complete and `max_delay` when it judges it not.
+    Without it (`off`, or the plugin absent) endpointing is VAD-only with
+    the same two bounds, which is still far better than the 70ms STT gate.
     """
-    if stt_provider == "sarvam":
-        return {"turn_detection": "stt", "endpointing": {"min_delay": 0.07}}
-    return {"turn_detection": "vad", "endpointing": {"min_delay": 0.3}}
+    min_delay = _env_float("FRIDAY_TURN_MIN_DELAY", 0.8, lo=0.2, hi=5.0)
+    max_delay = _env_float("FRIDAY_TURN_MAX_DELAY", 3.5, lo=min_delay, hi=15.0)
+    return {
+        "turn_detection": "vad",
+        "endpointing": {"mode": "fixed", "min_delay": min_delay,
+                        "max_delay": max_delay},
+        # A pause is not an interruption either. Half a second of real
+        # speech before Friday yields, and a false one resumes her.
+        "interruption": {"min_duration": 0.5, "resume_false_interruption": True,
+                         "false_interruption_timeout": 2.0},
+    }
+
+
+def with_turn_detector(handling: dict) -> dict:
+    """Swap the string mode for the end-of-utterance model, if it loads.
+
+    Split from `turn_handling_for` because the model needs the worker's
+    inference executor - it raises "no job context found" anywhere but
+    inside the entrypoint - while the delay bounds are plain config that
+    tests read without a worker. Called once, from `entrypoint`."""
+    detector = turn_detector_for(os.getenv("FRIDAY_TURN_DETECTOR", "multilingual"))
+    if detector is None:
+        return handling
+    return {**handling, "turn_detection": detector}
+
+
+def _env_float(name: str, default: float, *, lo: float, hi: float) -> float:
+    try:
+        value = float(os.getenv(name, "") or default)
+    except ValueError:
+        value = default
+    return max(lo, min(hi, value))
+
+
+def turn_detector_for(kind: str):
+    """The end-of-utterance model, or None when the plugin is absent/off.
+
+    Absent must not break boot (NON_NEGOTIABLE 15): the session falls back
+    to VAD endpointing with the same delay bounds and says so once."""
+    kind = (kind or "").strip().lower()
+    if kind in ("", "off", "none", "vad"):
+        return None
+    try:
+        if kind == "english":
+            from livekit.plugins.turn_detector.english import EnglishModel
+            return EnglishModel()
+        from livekit.plugins.turn_detector.multilingual import MultilingualModel
+        return MultilingualModel()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("turn detector %r unavailable (%s); VAD endpointing only",
+                       kind, exc)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +424,29 @@ that is what to search for:
 - "process this catalogue"  -> search "process a catalogue" -> product_process
 - "put this on a webpage"   -> search "build a page"        -> workbench_write
 
+## Never claim a capability is missing
+
+You have 169 tools. Almost nothing the boss asks for is genuinely absent, so
+"I am unable to" and "that capability is not available" are answers you must
+EARN, not guess. Before any such sentence leaves your mouth:
+
+1. `search_capabilities` with the verb. If it returns anything, use it.
+2. If the boss asked what you can do, call `list_capability_areas` - that is
+   the tool inventory (camera, screen, files, browser, music, ...).
+3. Only if BOTH come back empty may you say you cannot, and then say exactly
+   what you tried.
+
+`capability_families` is NOT the list of what you can do. It covers the
+curated expert skills only (writing, presentation, research, roles...). Vision,
+screen, files, music and the rest are tool AREAS and never appear there -
+"vision is not in capability_families" therefore means nothing. Answering "I
+cannot see your screen" when `vision_inspect_screen` is one search away is a
+false statement about yourself, and it is the worst kind of error you can make:
+the boss stops trusting every other answer you give.
+
+If a tool runs and FAILS, that is different and you say so plainly - what you
+tried, and what it said. A failure is honest; a refusal to look is not.
+
 ## Curated expert skills - call capability_use, do not wing it
 
 Some work has a right method that a curated skill knows and you do not. For
@@ -347,7 +458,12 @@ capability_use runs an outside expert skill and hands you back its method.
 - write/improve a prompt for another AI tool -> capability_use("writing", "instructions")
 - make a diagram (architecture, flow, ER, ...) -> capability_use("presentation", "instructions")
 - design a mock-up / UI / slide deck / presentation -> capability_use("presentation", "route", {"task": "..."}) to pick a design skill, then read it with capability_use("presentation", "skill"/"system"/"template", {"name": "..."}) and BUILD the artifact yourself with workbench_write (or hand a larger build to Hermes). The skill is the method; you produce the real file.
-- a scientific/lab method (bioinformatics, ...) -> capability_use("research", "search", {"query": "..."})
+- a scientific/lab METHOD you do not know (bioinformatics protocol, ...) -> capability_use("research", "search", {"query": "..."})
+  This returns the NAMES of expert skills, never facts or results. It is a
+  catalogue lookup. If the boss asked a question about the world - markets,
+  news, prices, "what is happening with X" - this is the wrong tool and its
+  answer will look like a dead end. Use web_search (results) or web_answer
+  (a synthesised answer with sources); both are in your core, no search first.
 - an expert review (PR, security, design, CEO)  -> capability_use("roles", "route", {"task": "..."})
 - pull structured fields out of a page's HTML   -> capability_use("scraping", "fields", {...})
 
@@ -374,6 +490,21 @@ your own plumbing.
 You therefore do not know that you lack a capability until you have searched
 for it. "I can't do that" before a search is simply wrong, and "the system
 won't let me" is always wrong.
+
+A failure in the conversation history is not evidence about now. Your recent
+turns are replayed to you, so if a tool failed an hour ago you will see
+yourself saying so - and the temptation is to repeat it rather than try. Do
+not. Servers restart, tools come back, and the earlier failure may have been
+the wrong tool for the job. "Try again" means call the tool again, this
+minute, and report what it returned this minute. Never open a conversation by
+volunteering a past failure; a greeting is answered with a greeting. When
+asked what issues you are facing, answer from a fresh check, not from memory
+of complaints.
+
+Tool error text is for you, not for the boss. It tells you which argument was
+wrong or which tool to use instead - act on it. Do not read error strings
+aloud, and never present a mistaken call of yours as the capability being
+broken.
 
 ## Act. Do not ask permission.
 
@@ -471,6 +602,122 @@ def build_instructions(now=None) -> str:
     return f"{temporal_context(now)}\n---\n\n{SYSTEM_PROMPT}"
 
 
+#: Speech is not writing: a URL read aloud is noise, and markdown asterisks
+#: become "star star". Strip both from the TTS stream only -- the transcript
+#: and logs keep the original text.
+_SPEAK_URL = re.compile(r"(?:https?://|www\.)\S+")
+_SPEAK_MD = re.compile(r"[*_`#>|~]+")
+#: How much text to gather before a synthesis request, after the first one.
+#: Each flush is a round trip to the TTS provider, and the boss hears that
+#: latency as a gap between sentences. The first chunk stays short so speech
+#: starts immediately; later chunks batch up to roughly a breath of speech.
+#: Tunable without a code change for slower or faster links.
+MIN_SPEECH_CHUNK = int(os.getenv("TTS_MIN_CHUNK_CHARS", "160"))
+MAX_SPEECH_CHUNK = int(os.getenv("TTS_MAX_CHUNK_CHARS", "320"))
+
+
+def _clean_for_speech(text: str) -> str:
+    return _SPEAK_MD.sub("", _SPEAK_URL.sub("", text))
+
+
+#: The fabric families reached through the `capability_use(family, ...)` bridge,
+#: and the words a request for each tends to use. `search_capabilities` scans
+#: these so a skill-shaped request ("make a diagram", "write a report") is
+#: pointed at its family instead of coming back empty and getting answered from
+#: the model's own head - the item-4 gap, where the fabric skills are reachable
+#: but never surfaced by a search over the core tools.
+_FAMILY_TRIGGERS: dict[str, tuple[str, ...]] = {
+    "presentation": ("diagram", "flowchart", "flow chart", "chart", "slide",
+                     "deck", "mockup", "mock-up", "wireframe", "presentation",
+                     "prototype", "ui design", "architecture diagram"),
+    # Skill-specific phrases only, so "write a file" (a core files op) does not
+    # get pushed at the writing skill.
+    "writing": ("write a report", "write an essay", "write an article",
+                "write a blog", "write copy", "draft a", "rewrite", "essay",
+                "article", "blog post", "copywriting", "prompt for",
+                "cover letter", "press release"),
+    # NOT the bare word "search". These triggers surface the expert-skill
+    # FAMILY, and the research family only returns skill names - so "search for
+    # market trends" matched here, took the catalogue path, and dead-ended with
+    # "I cannot execute that". A plain question about the world belongs to
+    # web_search / web_answer, which are already in the core.
+    "research": ("deep dive", "compare sources", "literature review",
+                 "systematic review", "research methodology", "in depth"),
+    "scraping": ("scrape", "harvest", "extract fields", "crawl the"),
+    "code_intelligence": ("refactor", "review the code", "review this pr",
+                          "analyze the code", "understand the codebase",
+                          "explain the code"),
+    "roles": ("act as", "play the role", "expert review", "as a reviewer",
+              "as a ceo"),
+    "security": ("pentest", "vulnerabilit", "security review", "harden the",
+                 "exploit"),
+}
+
+
+#: Scopes whose reads take long enough that silence reads as a hang.
+#: `agent_runtime` is in-process and answers instantly ("what time is it"),
+#: so acknowledging it would just be noise before the answer.
+_SLOW_SCOPES = frozenset({"network", "user_device", "external_service"})
+
+#: Said before a slow capability runs, chosen by what it is about to do, so
+#: the filler is at least honest about the kind of work.
+_ACK_LINES = {
+    "look": "Let me take a look, boss.",
+    "search": "Looking that up now, boss.",
+    "act": "On it, boss.",
+}
+
+
+def _ack_kind(capability: str) -> str:
+    name = (capability or "").lower()
+    if name.startswith(("vision_", "screen_", "camera_")):
+        return "look"
+    if name.startswith(("web_", "research_", "youtube_", "news_")) or "search" in name:
+        return "search"
+    return "act"
+
+
+def _ack_line(capability: str) -> str:
+    return _ACK_LINES[_ack_kind(capability)]
+
+
+def _latency_stage(capability: str) -> str:
+    """Which spoken stage a capability's time belongs to, for attribution."""
+    name = capability.lower()
+    if name.startswith(("vision_", "screen_", "desktop_")):
+        return "screen"
+    if name.startswith(("web_", "get_world_", "browser_")):
+        return "web"
+    if name.startswith("hermes_"):
+        return "hermes"
+    return "tool"
+
+
+def _should_acknowledge(capability: str) -> bool:
+    """Say something first only when the boss would otherwise wait in silence.
+
+    Writes always acknowledge - that is the original rule and it stands.
+    Reads acknowledge only when they leave this process: a screen capture or a
+    web lookup takes seconds, and a question answered by nothing at all for
+    that long sounds like a hang. Instant in-process reads stay silent so the
+    answer is not preceded by pointless filler.
+    """
+    if not ownership.is_read_only(capability):
+        return True
+    meta = capabilities.by_id(capability)
+    scope = getattr(meta, "execution_scope", None)
+    return scope in _SLOW_SCOPES
+
+
+def _family_hints(query: str) -> list[str]:
+    """Which skill-shaped fabric families a request looks like - a deliberately
+    simple keyword scan, for search_capabilities to surface alongside core
+    matches so the model reaches for capability_use instead of its own LLM."""
+    q = (query or "").lower()
+    return [family for family, triggers in _FAMILY_TRIGGERS.items()
+            if any(t in q for t in triggers)]
+
+
 class FridayAgent(Agent):
     """F.R.I.D.A.Y. - Iron Man-style voice assistant. Tools arrive via MCP."""
 
@@ -492,11 +739,18 @@ class FridayAgent(Agent):
         # Set when a reply actually went out on the current turn, so the
         # guard can tell a silent turn from a spoken one.
         self._spoke_this_turn = False
+        # True when MCP handed back no tools at all. Distinguishes "this
+        # capability does not exist" from "the tool server is down", which
+        # the model otherwise explains away as a missing feature.
+        self._tools_offline = False
         # The Phase 3 run driver, built once by start_objective_engine().
         self._objective_engine = None
         # The run id of a durable objective that owns the current turn, or
         # "" - see prepare_turn and _reply_tools.
         self._turn_owned_by = ""
+        # The session-side continuity plane, wired in the entrypoint once the
+        # AgentSession exists. None in a bare unit context.
+        self._continuity = None
         super().__init__(
             instructions=build_instructions(),
             stt=stt,
@@ -505,6 +759,104 @@ class FridayAgent(Agent):
             vad=silero.VAD.load(),
             tools=[self._toolset],
         )
+
+    async def tts_node(self, text, model_settings):
+        """Clean only what is spoken, and hand the TTS whole clauses.
+
+        Two jobs, and they pull against each other.
+
+        Cleaning needs a buffer: a URL split across two LLM chunks is only
+        recognisable once both have arrived, so the scrubber runs on complete
+        sentences rather than on whatever fragment turned up.
+
+        Latency needs the opposite: the sooner a chunk is flushed, the sooner
+        speech starts. The original flushed on EVERY sentence boundary, which
+        made each sentence its own synthesis request - and the boss hears the
+        request latency between them as a long, uneven gap mid-answer.
+
+        So: flush the FIRST sentence immediately (time-to-first-word is what
+        makes her feel responsive), then accumulate up to MAX_SPEECH_CHUNK
+        characters before flushing again. Later chunks are longer, which means
+        fewer round trips and prosody that runs across a clause instead of
+        stopping dead at every full stop. Nothing is dropped and nothing is
+        re-ordered; only the flush boundary moves. The upstream text stream the
+        caller passed in is never mutated.
+        """
+        async def cleaned():
+            buf = ""
+            spoken_once = False
+            async for chunk in text:
+                buf += chunk
+                while True:
+                    # Everything complete so far, so a flush can carry several
+                    # sentences rather than stopping at the first full stop.
+                    ends = list(re.finditer(r"[.!?](\s|$)", buf))
+                    if not ends:
+                        break
+                    if not spoken_once:
+                        cut = ends[0].end()          # start talking sooner
+                    else:
+                        ready = [m for m in ends if m.end() >= MIN_SPEECH_CHUNK]
+                        if not ready and len(buf) < MAX_SPEECH_CHUNK:
+                            break                    # let it grow a little
+                        cut = (ready[0].end() if ready else ends[-1].end())
+                    out = _clean_for_speech(buf[:cut])
+                    buf = buf[cut:]
+                    if out:
+                        spoken_once = True
+                        yield out
+            tail = _clean_for_speech(buf)
+            if tail:
+                yield tail
+        async for frame in Agent.default.tts_node(self, cleaned(), model_settings):
+            yield frame
+
+    @function_tool
+    async def list_capability_areas(self) -> str:
+        """
+        What you can do, by area. Use this when the boss asks what your
+        capabilities are, what you can do, or what is working right now.
+
+        This is the MCP tool inventory - the camera, screen, files, browser,
+        music, reminders and the rest. It is NOT the same list as
+        capability_families, which covers only the curated expert skills
+        (writing, presentation, research...). Asking capability_families
+        "do you have vision" answers no, because vision is a tool area, not
+        an expert skill - so answer this question from HERE.
+
+        Every area listed is reachable: name the area, then
+        search_capabilities for the exact tool.
+        """
+        areas = []
+        if self._tools_offline or not self._router.all_tools:
+            return json.dumps({
+                "error": "mcp_unavailable",
+                "say_this": "I can't read my own tool list right now, boss - "
+                            "the MCP server isn't answering. Everything comes "
+                            "back when it does.",
+                "do_not": "Do not list capabilities from memory and do not "
+                          "say any single one is unsupported.",
+            })
+        for group in sorted(capability_router.GROUPS):
+            names = [n for n in capability_router.GROUPS[group]
+                     if n in self._router.all_tools]
+            if not names:
+                continue                      # not exposed by this server
+            areas.append({
+                "area": group,
+                "does": capability_router.GROUP_PURPOSE.get(group, ""),
+                "tools": len(names),
+                "live_now": group in self._router.enabled,
+            })
+        core = [n for n in capability_router.CORE_TOOLS
+                if n in self._router.all_tools]
+        return json.dumps({
+            "total_tools": len(self._router.all_tools),
+            "always_available": core,
+            "areas": areas,
+            "note": "Every area here is reachable. Say what you want to do and "
+                    "search_capabilities finds the exact tool.",
+        })
 
     @function_tool
     async def search_capabilities(self, query: str) -> str:
@@ -530,10 +882,33 @@ class FridayAgent(Agent):
         "inspect project".
         """
         matches = self._router.search(query, limit=6)
-        if not matches:
+        families = _family_hints(query)
+        if self._tools_offline or not self._router.all_tools:
+            # The truth, so the model reports an outage instead of inventing a
+            # reason a specific capability is missing.
+            logger.error("search_capabilities while MCP is offline: %r", query)
+            return json.dumps({
+                "error": "mcp_unavailable",
+                "found": 0,
+                "say_this": "My tools are offline, boss - the MCP server "
+                            "isn't answering. That's a connection problem on "
+                            "my side, not something you asked for wrongly.",
+                "do_not": "Do not say a particular capability is missing or "
+                          "unsupported. Nothing is missing; the whole tool "
+                          "server is unreachable.",
+            })
+        if not matches and not families:
             return (f"nothing matches {query!r}. Capability areas: "
                     f"{', '.join(sorted(capability_router.GROUPS))}")
-        return json.dumps({"found": len(matches), "capabilities": matches})
+        result: dict = {"found": len(matches), "capabilities": matches}
+        if families:
+            # Skill-shaped work (a diagram, a report, an expert review): reach
+            # these through the fabric with capability_use(family, ...) rather
+            # than answering from your own knowledge.
+            result["expert_skills"] = families
+            result["how"] = (f"call capability_use({families[0]!r}, 'instructions') "
+                             "- see the curated expert-skill routes")
+        return json.dumps(result)
 
     @function_tool
     async def use_capability(self, capability: str, arguments: str = "{}") -> str:
@@ -595,12 +970,19 @@ class FridayAgent(Agent):
         # unable - an instruction is a thing a model can decide
         # differently about. So the boundary speaks deterministically:
         # if this capability mutates anything and nothing has been said
-        # this turn, say the acknowledgement HERE, before dispatch. Reads
-        # are exempt - "what time is it" does not need "give me a sec".
-        if (not self._spoke_this_turn
-                and not ownership.is_read_only(capability)):
+        # this turn, say the acknowledgement HERE, before dispatch.
+        #
+        # Reads are NOT blanket-exempt any more. "what time is it" is
+        # instant and an acknowledgement would be noise, but a read that
+        # goes to the network or touches the device is not instant:
+        # vision.inspect_screen measured ~15.7s end to end, and
+        # web_deep_research is longer. The boss asked a question and heard
+        # nothing at all for that whole time, which reads as a hang.
+        # `_should_acknowledge` splits on execution_scope, which is the
+        # metadata that already records the difference.
+        if not self._spoke_this_turn and _should_acknowledge(capability):
             try:
-                await self.session.say("On it, boss.",
+                await self.session.say(_ack_line(capability),
                                        allow_interruptions=True)
                 self._spoke_this_turn = True
             except Exception:                        # noqa: BLE001
@@ -629,14 +1011,29 @@ class FridayAgent(Agent):
         logger.info("use_capability %s(%s)", capability, sorted(parsed))
         self._keep_group_open(capability)
         self._router.note_used(capability)
+        started = time.monotonic()
         try:
-            return str(await self._call_capability(capability, parsed))
+            result = str(await self._call_capability(capability, parsed))
         except Exception as exc:
             # The tool failed. Say so - do not let the model narrate success.
             return json.dumps({
                 "error": f"{capability} failed: {type(exc).__name__}: {exc}",
                 "may_claim_completion": False,
             })
+        # Latency attribution (the owner's rule: report the cause, keep the
+        # quality). A slow capability is named in the tool result so the
+        # model can say WHY it took a while - and whether it was the
+        # machine rather than the work. Never alters the result itself.
+        elapsed = time.monotonic() - started
+        if elapsed >= turn_timing.SLOW_TURN_SECONDS:
+            timer = turn_timing.TurnTimer()
+            timer.add(_latency_stage(capability), elapsed)
+            note = timer.report()["note"]
+            logger.info("use_capability.slow %s %.1fs: %s", capability, elapsed, note)
+            return json.dumps({"result": result, "took_seconds": round(elapsed, 1),
+                               "latency_note": note,
+                               "say_if_asked_why_slow": note})
+        return result
 
     def _keep_group_open(self, capability: str) -> None:
         """
@@ -811,12 +1208,27 @@ class FridayAgent(Agent):
 
         Seventy-four tools was ~22,700 characters of schema on every request.
         Gemini started returning empty completions under it.
+
+        If the toolset came back EMPTY, that is not a narrowing problem - the
+        MCP server is not answering, and every capability is gone with it.
+        Measured live: the boss asked for the screen, for a capability list and
+        for market data, and got three different invented explanations
+        ("vision is not currently available", "the research skill has a
+        temporary issue") because the model had no tools and reasoned about why
+        rather than reporting it. Record the outage so `search_capabilities`
+        can say the true thing instead.
         """
         tools = list(getattr(self._toolset, "tools", []) or [])
         if not tools:
-            logger.warning("no MCP tools found; leaving the toolset as-is")
+            self._tools_offline = True
+            logger.error(
+                "MCP exposed no tools - every capability is unavailable. "
+                "Is the server up at %s?", mcp_sse_url())
             return
 
+        if self._tools_offline:
+            logger.info("MCP tools are back: %d exposed", len(tools))
+        self._tools_offline = False
         self._router.load(tools)
         orphans = capability_router.unassigned(self._router.known_names)
         if orphans:
@@ -884,6 +1296,15 @@ class FridayAgent(Agent):
             raise_what_is_still_open(turn_ctx, user_text)
         else:
             ask_about_the_idea(turn_ctx, user_text)
+
+        # Record the turn as a durable objective (resume an open one, else
+        # start it) before learning from it, so the run exists first and the
+        # learner's observation attaches to a turn the continuity plane owns.
+        if getattr(self, "_continuity", None) is not None:
+            try:
+                self._continuity.accept_user_turn(user_text)
+            except Exception:                                # noqa: BLE001
+                logger.exception("continuity.accept_user_turn failed; continuing the turn")
 
         try:
             self._learner.observe(
@@ -1864,7 +2285,10 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     logger.info("MCP toolset %r -> %s", CLOUD_TOOLSET_ID, mcp_sse_url())
 
-    session = AgentSession(turn_handling=config["turn_handling"])
+    session = AgentSession(turn_handling=with_turn_detector(config["turn_handling"]))
+    logger.info("turn handling: %s", {
+        k: (v if not hasattr(v, "predict_end_of_turn") else type(v).__name__)
+        for k, v in session_config()["turn_handling"].items()})
     agent = FridayAgent(
         stt=providers.build_stt(config["stt_provider"]),
         llm=providers.build_resilient_llm(config["llm_backend"], config["llm_role"]),
@@ -1878,6 +2302,17 @@ async def entrypoint(ctx: JobContext) -> None:
     # speaks for it, but only when a tool actually succeeded first.
     guard = resilience.TurnGuard()
     guard.attach(session)
+
+    # The session-side continuity plane: it records each user turn as a durable
+    # objective (resume an open one, else start it) and tracks claims, usage
+    # and progress against it. It shares the objective engine's store, so its
+    # runs and the executor's are one set rather than two.
+    from friday.continuity import ContinuityManager
+    from friday.continuity_livekit import LiveKitContinuity
+    agent._continuity = LiveKitContinuity(
+        ContinuityManager(objective_cli._db()),
+        worker_id=f"voice-{os.getpid()}")
+    agent._continuity.attach(session)
 
     # The durable run driver lives in this process too, so runs whose wake
     # is due are picked up without a separate worker.
@@ -1951,6 +2386,14 @@ async def entrypoint(ctx: JobContext) -> None:
 WORKER_IDLE_PROCESSES = int(os.getenv("ADA_IDLE_PROCESSES", "1"))
 #: Must stay <= 1.0; LiveKit rejects anything higher outside dev mode.
 WORKER_LOAD_THRESHOLD = float(os.getenv("ADA_LOAD_THRESHOLD", "0.99"))
+#: How many times the worker retries its link to LiveKit Cloud before it gives
+#: up and exits. The framework default (16) is tuned for a datacenter; a home
+#: connection drops for longer, and a worker that exits after a blip is a dead
+#: assistant until someone restarts it by hand - the exact "dropped mid-test"
+#: failure the readiness checklist flags. Ride out a longer outage instead.
+#: The framework still uses exponential backoff between attempts, so a higher
+#: ceiling costs nothing when the link is healthy.
+WORKER_MAX_RETRY = int(os.getenv("ADA_MAX_RETRY", "64"))
 
 
 def worker_options() -> WorkerOptions:
@@ -1958,6 +2401,7 @@ def worker_options() -> WorkerOptions:
         entrypoint_fnc=entrypoint,
         num_idle_processes=WORKER_IDLE_PROCESSES,
         load_threshold=WORKER_LOAD_THRESHOLD,
+        max_retry=WORKER_MAX_RETRY,
     )
 
 

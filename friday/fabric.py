@@ -33,11 +33,15 @@ mistake `capability_runtime` documents at its head, only shorter.
 from __future__ import annotations
 
 import importlib
+import logging
+import os
 import pkgutil
 import time
 from dataclasses import dataclass, replace
 
 from friday import contracts as c
+
+logger = logging.getLogger(__name__)
 
 # --- vocabulary ------------------------------------------------------------
 
@@ -48,6 +52,11 @@ FAMILIES = (
     "code_intelligence", "browser", "scraping", "search", "research",
     "coding", "memory", "media", "voice", "social", "security",
     "writing", "presentation", "roles", "orchestration", "diagnostic",
+    #: Product trading: catalogue, inventory, orders, customers - against a
+    #: store the owner runs (Medusa, Smartstore). Added 2026-09-02 when the
+    #: owner asked for an end-to-end product-trading system; the family is
+    #: the user-facing name, the storefront behind it is a provider.
+    "commerce",
 )
 
 #: How the upstream's license constrains the integration, not the license name.
@@ -69,10 +78,17 @@ MCP = "MCP"                           # separate process, MCP protocol
 SKILL = "SKILL"                       # prompt/recipe only, no code executed
 SIDECAR = "SIDECAR"                   # separate process/service
 REFERENCE_ONLY = "REFERENCE_ONLY"     # read for patterns; never executed
-INTEGRATION_MODES = (BUILTIN, ADAPTER, MCP, SKILL, SIDECAR, REFERENCE_ONLY)
+#: One-shot subprocess: invoke, work, exit. The seven command-line agents in
+#: third_party/upstream had no mode that described them, so they were
+#: unreachable by construction rather than by omission.
+CLI = "CLI"
+INTEGRATION_MODES = (BUILTIN, ADAPTER, MCP, SKILL, SIDECAR, REFERENCE_ONLY, CLI)
 
 #: The modes that do not link upstream code into Friday's address space.
-ISOLATED_MODES = frozenset({MCP, SIDECAR, SKILL, REFERENCE_ONLY})
+#: CLI belongs here, and that is the point: a subprocess is a process boundary,
+#: so a copyleft agent becomes integrable without touching the licence
+#: invariant. The invariant was a wall with no door; this is the door.
+ISOLATED_MODES = frozenset({MCP, SIDECAR, SKILL, REFERENCE_ONLY, CLI})
 
 #: Runtime state. Distinct from "is it in the registry", which is always true
 #: for anything this module can name.
@@ -121,6 +137,17 @@ class Provider:
     integration_mode: str
     #: Friday permission ids that must be granted before this may run.
     permissions: tuple[str, ...] = ()
+    #: Operations exempt from `permissions`, because knowing is not doing.
+    #:
+    #: A provider-wide permission list cannot say "reading the index is open,
+    #: running the procedure is not", and several providers need exactly that:
+    #: `security_skills` declares `security.authorized_scope` and its own notes
+    #: say catalogue and search "are open". While the gate was fail-open that
+    #: contradiction cost nothing; the moment `call()` started enforcing, the
+    #: blanket permission closed the open half too. This is the narrowest field
+    #: that expresses the real rule, and it fails safe: an operation not named
+    #: here is gated.
+    open_operations: tuple[str, ...] = ()
     #: Names of secrets this needs. Names only - never values, and never
     #: resolved here. The secret broker owns resolution.
     secrets: tuple[str, ...] = ()
@@ -211,6 +238,30 @@ def _discover() -> dict[str, Provider]:
     return found
 
 
+def reap_orphans() -> list[int]:
+    """Kill sidecars left holding a port by a previous, hard-killed Friday.
+
+    A hard kill leaves the child running; the next start then fails with
+    "address already in use", which looks nothing like its cause. Called once
+    from `registry()`, which every path into the fabric goes through, so there
+    is no startup hook to forget to add - and forgetting was the first version
+    of this: the function existed and nothing called it.
+    """
+    from friday import fabric_process
+    markers = {}
+    for provider in (_REGISTRY or {}).values():
+        if not provider.owns_process:
+            continue
+        try:
+            markers[provider.id] = getattr(
+                _adapter(provider), "PROCESS_MARKER", "")
+        except Exception:  # noqa: BLE001
+            continue
+    if not markers:
+        return []
+    return fabric_process.reap_orphans(markers)
+
+
 def registry() -> dict[str, Provider]:
     """The provider registry, discovered once."""
     global _REGISTRY
@@ -226,6 +277,18 @@ def registry() -> dict[str, Provider]:
                 if target == provider.id:
                     raise FabricError(f"{provider.id}: names itself as fallback")
         _REGISTRY = found
+        # Once per process, after the registry exists so markers can be read.
+        # Opt-out rather than opt-in: leaving a stale sidecar holding a port is
+        # the failure, and an env var is for the rare debugging session where
+        # you want the leftover kept.
+        if os.getenv("FRIDAY_KEEP_ORPHANS", "").lower() not in ("1", "true"):
+            try:
+                killed = reap_orphans()
+                if killed:
+                    logger.info("fabric reaped %d orphaned sidecar(s): %s",
+                                len(killed), killed)
+            except Exception:  # noqa: BLE001 - never block the registry
+                logger.exception("orphan reap failed; continuing")
     return _REGISTRY
 
 
@@ -316,6 +379,26 @@ def activate(provider_id: str) -> Activation:
         _ACTIVE[provider_id] = activation
         return activation
 
+    # A PROCESS_SPEC means the fabric owns the child, not the adapter: port,
+    # readiness, logs, restart and a stop that actually stops. Adapters that
+    # already implement start() keep working untouched, which is what lets
+    # this land without editing codebase_memory or graft.
+    spec = getattr(module, "PROCESS_SPEC", None)
+    if spec is not None:
+        from friday import fabric_process
+        try:
+            activation.handle = fabric_process.spawn(provider_id, spec)
+        except Exception as exc:                   # noqa: BLE001 - reported
+            activation.state = UNAVAILABLE
+            activation.detail = str(exc)
+            _ACTIVE[provider_id] = activation
+            return activation
+        _ACTIVE[provider_id] = activation
+        probe = health(provider_id, _activation=activation)
+        activation.state = probe["state"]
+        activation.detail = probe.get("detail", "")
+        return activation
+
     start = getattr(module, "start", None)
     if start is not None:
         try:
@@ -339,13 +422,19 @@ def deactivate(provider_id: str) -> None:
     if activation is None:
         return
     provider = get(provider_id)
+    from friday import fabric_process
+    if fabric_process.child(provider_id) is not None:
+        # The supervisor escalates terminate -> kill and verifies. Swallowing
+        # the failure here is what used to leave a port held after a restart.
+        fabric_process.stop(provider_id)
+        return
     stop = getattr(_adapter(provider), "stop", None)
     if stop is not None:
         try:
             stop(activation.handle)
         except Exception:                          # noqa: BLE001
-            # A provider that will not stop cleanly is a process-table problem,
-            # which `processes()` reports. It is not worth failing a shutdown.
+            # An adapter-owned child we cannot stop is a process-table problem,
+            # which `processes()` reports. Not worth failing a shutdown over.
             pass
 
 
@@ -455,15 +544,27 @@ def candidates(family: str, operation: str = "", *,
     if not allow_model:
         pool = tuple(p for p in pool if not p.model_required)
     if authorized is not None:
-        pool = tuple(p for p in pool
-                     if all(perm in authorized for perm in p.permissions))
+        # Same exemption `call()` applies, so ranking and enforcement agree.
+        # They must: a provider filtered out here that call() would have
+        # allowed is a capability that silently disappears from the menu.
+        pool = tuple(
+            p for p in pool
+            if operation in p.open_operations
+            or all(perm in authorized for perm in p.permissions))
     pool = tuple(p for p in pool if p.integration_mode != REFERENCE_ONLY)
-    return tuple(sorted(pool, key=lambda p: (
+    ordered = tuple(sorted(pool, key=lambda p: (
         COST_ORDER[p.cost_class],
         RISK_LEVELS.index(p.risk),
         p.model_required,
         p.id,
     )))
+    # Then, and only then, what use has taught us. Cost and risk are the
+    # primary rule and stay so; this is a stable re-sort, so it moves nothing
+    # between providers it has learned nothing about. Without it a provider
+    # failing nine calls in ten was picked exactly as readily as one that
+    # always worked, and the fallback chain rediscovered that every request.
+    from friday import fabric_memory
+    return fabric_memory.rank(ordered, operation)
 
 
 def select(family: str, operation: str = "", *,
@@ -501,7 +602,51 @@ def route(family: str, operation: str = "", **kwargs) -> tuple[Provider, ...]:
 # --- invocation ------------------------------------------------------------
 
 
+def _resolve_secrets(provider: Provider) -> tuple[dict, str]:
+    """(values by alias, missing alias) for a provider's declared secrets.
+
+    Adapters used to reach into `os.environ` themselves. That stops here: the
+    supervisor scrubs a child's environment, so an adapter that keeps doing it
+    would silently get nothing, and "silently gets nothing" is how a credential
+    bug becomes a mystery. Values are returned to `call()` and never stored,
+    never logged, never put in an ActionResult.
+    """
+    if not provider.secrets:
+        return {}, ""
+    try:
+        from friday.secret_broker import SecretBroker
+        broker = SecretBroker()
+    except Exception as exc:  # noqa: BLE001
+        return {}, f"secret broker unavailable: {exc}"
+    values = {}
+    for alias in provider.secrets:
+        try:
+            value = broker.resolve_for_process(alias)
+        except Exception:  # noqa: BLE001
+            value = ""
+        if not value:
+            return {}, alias
+        values[alias] = value
+    return values, ""
+
+
+def _remember(provider_id: str, operation: str, ok: bool) -> None:
+    """Feed one outcome to the selection prior. Never costs a call its result.
+
+    Only invocation outcomes are recorded - not refusals. A permission gate
+    firing says nothing about whether the provider works, and counting it as a
+    failure would teach the fabric to avoid providers whose only sin is being
+    correctly gated.
+    """
+    try:
+        from friday import fabric_memory
+        fabric_memory.record(provider_id, operation, ok)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def call(provider_id: str, operation: str, *, run_id: str = "",
+         authorized: frozenset[str] | None = None,
          **arguments) -> c.ActionResult:
     """
     Invoke one operation and return an honest envelope.
@@ -520,6 +665,28 @@ def call(provider_id: str, operation: str, *, run_id: str = "",
     tool_id = f"fabric.{provider_id}.{operation}"
     result = c.started(run_id or c.new_run_id(), tool_id)
 
+    # The authorisation gate, ahead of activation on purpose: a call that is
+    # not allowed must not be able to start a process as a side effect of being
+    # refused. `authorized=None` means no grants, not all grants - the same
+    # fail-closed rule `capabilities.requires_approval` applies to an unknown
+    # tool id, because unaudited must not mean allowed. `candidates()` filters
+    # too, but that is a convenience for ranking; this is the enforcement, and
+    # it sits at the one function every path funnels through.
+    granted = authorized if authorized is not None else frozenset()
+    required = (() if operation in getattr(provider, "open_operations", ())
+                else provider.permissions)
+    missing = [perm for perm in required if perm not in granted]
+    if missing:
+        return c.failed(
+            result,
+            f"{provider_id}.{operation} needs {sorted(missing)}; not granted")
+
+    secrets, missing_secret = _resolve_secrets(provider)
+    if missing_secret:
+        # The alias, never the value, and never a partial value.
+        return c.failed(
+            result, f"{provider_id} needs the secret {missing_secret!r}")
+
     activation = activate(provider_id)
     if activation.state not in (READY, DEGRADED):
         return c.failed(
@@ -530,14 +697,22 @@ def call(provider_id: str, operation: str, *, run_id: str = "",
         return c.failed(result, f"{provider_id}'s adapter declares no call()")
 
     try:
+        # `secrets=` is additive: an adapter that ignores it keeps working
+        # unchanged, which is what makes this safe to land on the three
+        # existing ADAPTER providers without touching them.
+        if secrets:
+            arguments = {**arguments, "secrets": secrets}
         value = invoke(operation, activation.handle, **arguments)
     except Exception as exc:                       # noqa: BLE001 - reported
+        _remember(provider_id, operation, False)
         return c.failed(result, f"{provider_id}.{operation} raised: {exc}")
 
     # An adapter may return a finished ActionResult when it has real evidence.
     # That is the preferred shape and is passed through untouched.
     if isinstance(value, c.ActionResult):
+        _remember(provider_id, operation, value.status == "succeeded")
         return value
+    _remember(provider_id, operation, True)
     return c.succeeded(
         result,
         verification=c.Verification(
@@ -571,7 +746,8 @@ def call_with_fallback(family: str, operation: str, *, run_id: str = "",
 
     tried: list[str] = []
     for provider in chain:
-        result = call(provider.id, operation, run_id=run_id, **arguments)
+        result = call(provider.id, operation, run_id=run_id,
+                      authorized=authorized, **arguments)
         if result.status == c.SUCCEEDED:
             if tried:
                 return replace(
@@ -631,4 +807,8 @@ def processes() -> dict:
 
     duplicates = [{"provider": pid, "pids": pids}
                   for pid, pids in seen.items() if len(pids) > 1]
-    return {"supported": True, "providers": seen, "duplicates": duplicates}
+    from friday import fabric_process
+    return {"supported": True, "providers": seen, "duplicates": duplicates,
+            # Distinguishes "our child" from "someone else's leftover", which
+            # is what duplicate detection could not do before.
+            "supervised": fabric_process.running()}

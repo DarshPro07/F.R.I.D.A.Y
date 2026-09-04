@@ -231,3 +231,394 @@
 {"at": "2026-08-30T18:46:58+00:00", "kind": "unlock", "distance": 0.381}
 {"at": "2026-08-30T20:22:35+00:00", "kind": "unlock", "distance": 0.4103}
 {"at": "2026-08-30T20:29:31+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
+{"at": "2026-08-31T08:33:14+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T08:33:14+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-31T08:38:12+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T08:38:16+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-31T08:38:38+00:00", "kind": "client:key", "detail": "0", "client": "127.0.0.1"}
+{"at": "2026-08-31T08:38:40+00:00", "kind": "client:key", "detail": "7", "client": "127.0.0.1"}
+{"at": "2026-08-31T08:38:43+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-31T08:38:50+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T08:38:51+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-31T08:39:30+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-08-31T08:41:06+00:00", "kind": "face_rejected", "distance": 0.5335}
+{"at": "2026-08-31T08:41:06+00:00", "kind": "client:face_rejected", "detail": "distance 0.5335", "client": "127.0.0.1"}
+{"at": "2026-08-31T08:41:07+00:00", "kind": "unlock", "distance": 0.4919}
+{"at": "2026-08-31T08:59:25+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 40}
+{"at": "2026-08-31T08:59:26+00:00", "kind": "desk", "what": "selection", "ok": false, "chars": 0}
+{"at": "2026-08-31T09:06:14+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:07:59+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:08:44+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:10:35+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:11:20+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:11:44+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:12:29+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:13:08+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:14:49+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:16:31+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:18:08+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:21:51+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:22:56+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:23:58+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"}
+{"at": "2026-08-31T09:26:24+00:00", "kind": "blocked", "path": "/api/desk", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
+{"at": "2026-08-31T10:03:37+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 5}
+{"at": "2026-08-31T11:15:20+00:00", "kind": "desk", "what": "clipboard", "ok": false, "chars": 0}
+{"at": "2026-08-31T11:15:33+00:00", "kind": "desk", "what": "selection", "ok": false, "chars": 0}
+{"at": "2026-08-31T17:27:08+00:00", "kind": "desk", "what": "selection", "ok": false, "chars": 0}
+{"at": "2026-09-01T04:26:43+00:00", "kind": "lock"}
+{"at": "2026-09-01T04:26:48+00:00", "kind": "unlock", "distance": 0.4341}
+{"at": "2026-09-01T04:26:54+00:00", "kind": "lock"}
+{"at": "2026-09-01T04:26:57+00:00", "kind": "unlock", "distance": 0.3808}
+{"at": "2026-09-01T04:32:35+00:00", "kind": "lock"}
+{"at": "2026-09-01T04:32:36+00:00", "kind": "unlock", "distance": 0.3782}
+{"at": "2026-09-01T04:32:38+00:00", "kind": "lock"}
+{"at": "2026-09-01T04:32:38+00:00", "kind": "unlock", "distance": 0.3421}
+{"at": "2026-09-01T04:32:43+00:00", "kind": "lock"}
+{"at": "2026-09-01T04:32:49+00:00", "kind": "unlock", "distance": 0.3318}
+{"at": "2026-09-01T05:25:05+00:00", "kind": "lock"}
+{"at": "2026-09-01T05:25:05+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-01T05:25:17+00:00", "kind": "client:key", "detail": "Escape", "client": "127.0.0.1"}
+{"at": "2026-09-01T05:25:19+00:00", "kind": "client:key", "detail": "F11", "client": "127.0.0.1"}
+{"at": "2026-09-01T05:28:30+00:00", "kind": "lock"}
+{"at": "2026-09-01T05:28:33+00:00", "kind": "face_rejected", "distance": 0.5186}
+{"at": "2026-09-01T05:28:35+00:00", "kind": "unlock", "distance": 0.4234}
+{"at": "2026-09-01T05:50:30+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-01T05:50:35+00:00", "kind": "client:key", "detail": "Escape", "client": "127.0.0.1"}
+{"at": "2026-09-01T05:50:37+00:00", "kind": "client:key", "detail": "F11", "client": "127.0.0.1"}
+{"at": "2026-09-01T05:50:45+00:00", "kind": "face_rejected", "distance": 0.579}
+{"at": "2026-09-01T05:50:45+00:00", "kind": "client:face_rejected", "detail": "distance 0.579", "client": "127.0.0.1"}
+{"at": "2026-09-01T05:50:46+00:00", "kind": "face_rejected", "distance": 0.5248}
+{"at": "2026-09-01T05:50:47+00:00", "kind": "face_rejected", "distance": 0.551}
+{"at": "2026-09-01T05:50:47+00:00", "kind": "client:face_rejected", "detail": "distance 0.551", "client": "127.0.0.1"}
+{"at": "2026-09-01T05:50:49+00:00", "kind": "face_rejected", "distance": 0.5837}
+{"at": "2026-09-01T05:50:49+00:00", "kind": "client:face_rejected", "detail": "distance 0.5837", "client": "127.0.0.1"}
+{"at": "2026-09-01T05:50:49+00:00", "kind": "face_rejected", "distance": 0.5818}
+{"at": "2026-09-01T05:50:50+00:00", "kind": "face_rejected", "distance": 0.5729}
+{"at": "2026-09-01T05:50:50+00:00", "kind": "client:face_rejected", "detail": "distance 0.5729", "client": "127.0.0.1"}
+{"at": "2026-09-01T05:50:51+00:00", "kind": "face_rejected", "distance": 0.5751}
+{"at": "2026-09-01T05:50:51+00:00", "kind": "client:face_rejected", "detail": "distance 0.5751", "client": "127.0.0.1"}
+{"at": "2026-09-01T05:50:52+00:00", "kind": "face_rejected", "distance": 0.5961}
+{"at": "2026-09-01T05:50:53+00:00", "kind": "unlock", "distance": 0.3728}
+{"at": "2026-09-01T06:20:27+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-01T06:20:27+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-01T06:20:45+00:00", "kind": "unlock", "distance": 0.3742}
+{"at": "2026-09-01T12:47:56+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-01T12:48:07+00:00", "kind": "unlock", "distance": 0.4891}
+{"at": "2026-09-01T12:58:03+00:00", "kind": "lock"}
+{"at": "2026-09-01T12:58:13+00:00", "kind": "unlock", "distance": 0.2945}
+{"at": "2026-09-02T04:27:37+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T04:27:41+00:00", "kind": "client:key", "detail": "F11", "client": "127.0.0.1"}
+{"at": "2026-09-02T04:28:17+00:00", "kind": "unlock", "distance": 0.3472}
+{"at": "2026-09-02T05:15:42+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T05:15:44+00:00", "kind": "client:key", "detail": "F11", "client": "127.0.0.1"}
+{"at": "2026-09-02T05:15:54+00:00", "kind": "unlock", "distance": 0.3498}
+{"at": "2026-09-02T05:25:13+00:00", "kind": "lock"}
+{"at": "2026-09-02T05:25:15+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-02T05:25:19+00:00", "kind": "unlock", "distance": 0.3743}
+{"at": "2026-09-02T05:26:32+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
+{"at": "2026-09-02T05:26:41+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
+{"at": "2026-09-02T05:26:41+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
+{"at": "2026-09-02T06:23:17+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T06:23:33+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-02T06:23:35+00:00", "kind": "unlock", "distance": 0.3735}
+{"at": "2026-09-02T06:25:29+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T06:25:29+00:00", "kind": "unlock", "distance": 0.3691}
+{"at": "2026-09-02T06:33:39+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T06:33:51+00:00", "kind": "unlock", "distance": 0.36}
+{"at": "2026-09-02T06:37:59+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T06:38:01+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T06:38:14+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-02T06:38:15+00:00", "kind": "unlock", "distance": 0.3693}
+{"at": "2026-09-02T06:49:08+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-02T06:49:10+00:00", "kind": "unlock", "distance": 0.3142}
+{"at": "2026-09-02T06:56:00+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T06:56:15+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-02T06:56:45+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-02T06:56:59+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-02T06:57:01+00:00", "kind": "unlock", "distance": 0.3537}
+{"at": "2026-09-02T07:00:44+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-02T07:02:34+00:00", "kind": "unlock", "distance": 0.3218}
+{"at": "2026-09-02T07:03:51+00:00", "kind": "blocked", "path": "/api/tts", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
+{"at": "2026-09-02T07:07:09+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:09+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:09+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:09+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:09+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:09+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:09+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:09+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:09+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:33+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:33+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:33+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:33+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:33+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:33+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:33+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:33+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:07:33+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:08:22+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:08:22+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:08:22+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:08:22+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:08:22+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:08:22+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:08:22+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:08:22+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:08:22+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:08:22+00:00", "kind": "client:key", "detail": "Enter", "client": "127.0.0.1"}
+{"at": "2026-09-02T07:09:06+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:06+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:06+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:06+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:06+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:06+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:06+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:06+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:06+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:08+00:00", "kind": "client:key", "detail": "Enter", "client": "127.0.0.1"}
+{"at": "2026-09-02T07:09:26+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:26+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:26+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:26+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:26+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:26+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:26+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:26+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:26+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:32+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:32+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:32+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:32+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:32+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:32+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:32+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:32+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:09:32+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:27+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:27+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:27+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:27+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:27+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:27+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:27+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:27+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:27+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:34+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:34+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:34+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:34+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:34+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:34+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:34+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:34+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:34+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:34+00:00", "kind": "client:key", "detail": "Enter", "client": "127.0.0.1"}
+{"at": "2026-09-02T07:15:55+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:55+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:55+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:55+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:55+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:55+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:55+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:55+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:15:55+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:16:39+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:16:39+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:16:39+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:16:39+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:16:39+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:16:39+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:16:39+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:16:39+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:16:39+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:16:39+00:00", "kind": "client:key", "detail": "Enter", "client": "127.0.0.1"}
+{"at": "2026-09-02T07:17:10+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:10+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:10+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:10+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:10+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:10+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:10+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:10+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:10+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:11+00:00", "kind": "client:key", "detail": "Enter", "client": "127.0.0.1"}
+{"at": "2026-09-02T07:17:18+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:18+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:18+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:18+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:18+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:18+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:18+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:18+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:18+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:59+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:59+00:00", "kind": "blocked", "path": "/api/org", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:59+00:00", "kind": "blocked", "path": "/api/memory_snapshot", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:59+00:00", "kind": "blocked", "path": "/api/deck", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:59+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:59+00:00", "kind": "blocked", "path": "/api/control", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:59+00:00", "kind": "blocked", "path": "/api/os_map", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:59+00:00", "kind": "blocked", "path": "/api/graph", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:17:59+00:00", "kind": "blocked", "path": "/api/doctor", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:22:26+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:22:33+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36"}
+{"at": "2026-09-02T07:24:31+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-02T07:26:37+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T07:27:13+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-02T07:28:03+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Mobile Safari/537.3"}
+{"at": "2026-09-02T07:28:07+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Mobile Safari/537.3"}
+{"at": "2026-09-02T07:28:38+00:00", "kind": "client:click", "detail": "Locked\n        Scanning for you.\n        \n        \n        \n", "client": "127.0.0.1"}
+{"at": "2026-09-02T07:28:39+00:00", "kind": "unlock", "distance": 0.3344}
+{"at": "2026-09-02T07:28:39+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-02T09:27:34+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-02T09:51:51+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T09:52:29+00:00", "kind": "unlock", "distance": 0.3538}
+{"at": "2026-09-02T11:22:29+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-02T13:24:04+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T13:24:21+00:00", "kind": "unlock", "distance": 0.4532}
+{"at": "2026-09-02T15:23:46+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T15:26:00+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T15:26:05+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-02T15:26:08+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-02T15:27:22+00:00", "kind": "blocked", "path": "/api/build", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
+{"at": "2026-09-02T15:30:04+00:00", "kind": "unlock", "distance": 0.4545}
+{"at": "2026-09-02T15:30:59+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 8438}
+{"at": "2026-09-02T15:41:16+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T15:41:17+00:00", "kind": "blocked", "path": "/api/state", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T15:41:17+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-02T15:42:03+00:00", "kind": "blocked", "path": "/api/hermes/progress", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
+{"at": "2026-09-03T04:34:06+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-03T05:38:28+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-03T06:06:30+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-03T06:06:30+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-03T06:06:30+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-03T06:06:30+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-03T06:13:17+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 314}
+{"at": "2026-09-03T06:32:53+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-03T06:33:25+00:00", "kind": "unlock", "distance": 0.4029}
+{"at": "2026-09-03T06:33:40+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 17002}
+{"at": "2026-09-03T06:53:03+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-03T07:19:00+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-03T07:19:00+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-03T07:19:00+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-03T07:19:00+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-03T07:19:01+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T07:19:01+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T07:19:01+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T08:12:56+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-03T08:12:56+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-03T08:12:56+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-03T08:12:56+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-03T09:13:31+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T09:13:31+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T09:13:31+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T09:17:11+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T09:17:11+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T09:17:11+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T09:24:22+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-03T09:24:22+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-03T09:24:22+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-03T09:24:22+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-03T09:24:22+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T09:24:22+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T09:24:22+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T09:27:33+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T09:27:33+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T09:27:33+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T09:28:49+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-03T09:31:56+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T09:31:56+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T09:31:56+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T09:36:17+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-03T09:36:52+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T09:36:52+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T09:36:52+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T09:41:13+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-03T09:41:13+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-03T09:41:13+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-03T09:41:13+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-03T09:50:40+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-03T10:08:23+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-03T10:09:55+00:00", "kind": "client:key", "detail": "w", "client": "127.0.0.1"}
+{"at": "2026-09-03T10:09:57+00:00", "kind": "client:click", "detail": "Locked\n        Scanning for you.\n        \n        \n        \n", "client": "127.0.0.1"}
+{"at": "2026-09-03T10:09:58+00:00", "kind": "unlock", "distance": 0.4748}
+{"at": "2026-09-03T12:22:46+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 19965}
+{"at": "2026-09-03T12:38:53+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T12:38:53+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T12:38:53+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T12:38:53+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-03T12:38:53+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-03T12:38:53+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-03T12:39:10+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-03T12:44:02+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T12:44:02+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T12:44:02+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T12:44:02+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-03T12:44:02+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-03T12:44:02+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-03T12:44:33+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-03T12:46:15+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-03T12:46:17+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-03T12:46:22+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-03T12:47:16+00:00", "kind": "unlock", "distance": 0.3988}
+{"at": "2026-09-03T12:48:06+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Are you in full autonomy right now? One sentence."}
+{"at": "2026-09-03T12:48:59+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T12:48:59+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T12:48:59+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T12:48:59+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-03T12:48:59+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-03T12:48:59+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-03T12:50:35+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-03T12:50:40+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-03T12:51:15+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-03T12:51:16+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-03T12:51:17+00:00", "kind": "unlock", "distance": 0.3885}
+{"at": "2026-09-03T12:51:20+00:00", "kind": "client:click", "detail": "Use this window instead", "client": "127.0.0.1"}
+{"at": "2026-09-03T12:54:49+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T12:54:49+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T12:54:49+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T12:54:49+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-03T12:54:49+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-03T12:54:49+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-03T12:56:26+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T12:56:26+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T12:56:26+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T12:56:26+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-03T12:56:26+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-03T12:56:26+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-03T12:59:35+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T12:59:35+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T12:59:35+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T12:59:35+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-03T12:59:35+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-03T12:59:35+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-03T13:01:21+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T13:01:21+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T13:01:21+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T13:01:21+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-03T13:01:21+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-03T13:01:21+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-03T13:18:12+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-03T13:18:12+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-03T13:18:27+00:00", "kind": "unlock", "distance": 0.4237}
+{"at": "2026-09-03T13:18:38+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 9553}
+{"at": "2026-09-03T13:24:14+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T13:24:14+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T13:24:14+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T13:24:14+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-03T13:24:14+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-03T13:24:14+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-03T13:27:11+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-03T13:27:11+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-03T13:27:11+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-03T13:27:11+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-03T13:27:11+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-03T13:27:11+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-03T13:28:08+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-03T13:28:09+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-03T13:37:00+00:00", "kind": "face_rejected", "distance": 0.5013}
+{"at": "2026-09-03T13:37:00+00:00", "kind": "client:face_rejected", "detail": "distance 0.5013", "client": "127.0.0.1"}
+{"at": "2026-09-03T13:37:02+00:00", "kind": "unlock", "distance": 0.449}
+{"at": "2026-09-03T13:37:03+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-03T13:37:20+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 9553}

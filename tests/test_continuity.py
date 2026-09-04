@@ -240,22 +240,22 @@ def test_each_wake_kind_maps_to_one_truthful_nonterminal_state(manager, wake, st
     assert snapshot.wake['kind'] == wake.kind
 
 
-def test_action_budget_is_enforced_at_the_next_claim(store):
+def test_action_budget_is_enforced_when_the_spend_lands(store):
+    # S3: the total budget used to be checked only at the NEXT claim, which let
+    # a run overshoot by a whole portion. Same outcome, recorded immediately.
     manager = C.ContinuityManager(store, clock=lambda: NOW)
     started = manager.start_run('bound actions', initial_task='work', total_budget=C.RunBudget(max_actions=1))
     claim = manager.claim_run(started.run_id, 'worker-a')
-    manager.record_actions(claim, count=1)
-    manager.checkpoint(claim, summary='more remains', wake=C.WakeCondition.immediate())
+    assert manager.record_actions(claim, count=1).outcome == 'budget_exhausted:actions'
     assert manager.claim_run(started.run_id, 'worker-b') is None
     assert manager.status(started.run_id).outcome == 'budget_exhausted:actions'
 
 
-def test_model_token_budget_is_enforced_at_the_next_claim(store):
+def test_model_token_budget_is_enforced_when_the_spend_lands(store):
     manager = C.ContinuityManager(store, clock=lambda: NOW)
     started = manager.start_run('bound tokens', initial_task='work', total_budget=C.RunBudget(max_model_tokens=5))
     claim = manager.claim_run(started.run_id, 'worker-a')
-    manager.record_model_tokens(claim, 5)
-    manager.checkpoint(claim, summary='more remains', wake=C.WakeCondition.immediate())
+    assert manager.record_model_tokens(claim, 5).outcome == 'budget_exhausted:model_tokens'
     assert manager.claim_run(started.run_id, 'worker-b') is None
     assert manager.status(started.run_id).outcome == 'budget_exhausted:model_tokens'
 
@@ -279,3 +279,34 @@ def test_retry_budget_exhaustion_is_an_explicit_failure(store):
     assert failed.state == 'failed'
     assert failed.outcome == 'provider_retries_exhausted'
     assert failed.wake is None
+
+def test_portion_token_cap_marks_claim_exhausted(store):
+    manager = C.ContinuityManager(store, clock=lambda: NOW)
+    started = manager.start_run('bound one portion', initial_task='work', portion_budget=C.PortionBudget(max_model_tokens=32000))
+    claim = manager.claim_run(started.run_id, 'worker-a')
+    snapshot = manager.record_model_tokens(claim, 33000)
+    assert snapshot.budget_exhausted.startswith('portion')
+    assert snapshot.state == 'working'
+    assert ('budget_exhausted', 'portion:model_tokens 33000/32000') in [(e['kind'], e['message']) for e in manager.events(started.run_id)]
+
+
+def test_run_budget_finishes_immediately_not_at_next_claim(store):
+    manager = C.ContinuityManager(store, clock=lambda: NOW)
+    started = manager.start_run('bound the whole run', initial_task='work', total_budget=C.RunBudget(max_model_tokens=250))
+    claim = manager.claim_run(started.run_id, 'worker-a')
+    snapshot = manager.record_model_tokens(claim, 300)
+    assert snapshot.state == 'partial'
+    assert snapshot.outcome == 'budget_exhausted:model_tokens'
+    assert snapshot.budget_exhausted == 'run:model_tokens'
+    assert snapshot.wake is None
+
+
+def test_remaining_budget_reports_what_is_left(store):
+    manager = C.ContinuityManager(store, clock=lambda: NOW)
+    started = manager.start_run('size the next call', initial_task='work', portion_budget=C.PortionBudget(max_actions=3, max_model_tokens=1000), total_budget=C.RunBudget(max_actions=10, max_model_tokens=5000, max_portions=4))
+    claim = manager.claim_run(started.run_id, 'worker-a')
+    manager.record_model_tokens(claim, 400)
+    manager.record_actions(claim, count=1)
+    left = manager.remaining_budget(claim)
+    assert left['portion'] == {'model_tokens': 600, 'actions': 2}
+    assert left['run'] == {'model_tokens': 4600, 'actions': 9, 'portions': 3}

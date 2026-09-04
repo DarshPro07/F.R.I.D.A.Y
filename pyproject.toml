@@ -11,7 +11,7 @@ dependencies = [
     # Phase 0.
     "mcp",
     "httpx",
-    "livekit-agents[deepgram,groq,openai,sarvam,silero]>=1.5.1",
+    "livekit-agents[deepgram,groq,openai,sarvam,silero,turn-detector]>=1.5.1",
     "livekit-plugins-google>=1.5.1",
     "python-dotenv",
     # Phase 1A system toolset. Each replaces a large amount of ctypes/COM

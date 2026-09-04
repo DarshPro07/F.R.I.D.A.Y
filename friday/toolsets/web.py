@@ -37,7 +37,11 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
+from friday import breaker
+
 from friday import contracts as c
+
+from friday import netguard
 
 from friday import sensitive_domains
 
@@ -250,11 +254,17 @@ async def web_search(
     ))
 
 
+#: Raw HTML handed to a parser (Scrapling) is capped so one page cannot
+#: become a multi-megabyte tool result; the readable text is capped separately.
+HTML_CAP = 400_000
+
+
 async def web_fetch(
-    run: c.Run, url: str, *, max_chars: int = 8000,
+    run: c.Run, url: str, *, max_chars: int = 8000, include_html: bool = False,
     engine: PolicyEngine = default_engine,
 ) -> c.ActionResult:
-    """Fetch a URL and return readable text."""
+    """Fetch a URL and return readable text (and, on request, the raw HTML for
+    a structured parse - same gates, same fetch, nothing new on the wire)."""
     tool_id = "web.fetch"
     blocked = _gate(run, tool_id, engine)
     if blocked:
@@ -267,18 +277,43 @@ async def web_fetch(
     blocked_reason = sensitive_domains.refusal(url)
     if blocked_reason:
         return run.record(c.failed(started, blocked_reason))
+    # sensitive_domains only knows about authenticated/financial hosts; it says
+    # nothing about WHERE a name resolves. Without netguard a fetch of
+    # http://169.254.169.254/... or http://127.0.0.1:8000/sse is served happily
+    # and hands back cloud credentials or this machine's own control plane.
+    try:
+        netguard.check(url)
+    except netguard.UrlRefused as exc:
+        return run.record(c.failed(started, str(exc)))
+    # A host that is already failing is not worth another 25s wait: fail fast
+    # with the reason instead of stalling the turn.
+    try:
+        breaker.allow(url)
+    except breaker.CircuitOpen as exc:
+        return run.record(c.failed(started, str(exc)))
 
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=25) as client:
             response = await client.get(url, headers={"User-Agent": USER_AGENT})
         response.raise_for_status()
     except Exception as exc:
+        if breaker.is_transport_failure(exc):
+            breaker.record_failure(url)
+        else:
+            breaker.record_success(url)   # it answered; the status is the issue
         return run.record(c.failed(started, f"fetch failed: {type(exc).__name__}: {exc}"))
+    breaker.record_success(url)
     # Where it landed, not just where it was sent: a redirect can end up
     # on a site the request was never allowed to reach.
     blocked_reason = sensitive_domains.refusal(str(response.url))
     if blocked_reason:
         return run.record(c.failed(started, blocked_reason))
+    # Same reasoning for the resolve-time guard: checking only the URL we sent
+    # leaves an open-redirect path straight to the metadata endpoint.
+    try:
+        netguard.check(str(response.url))
+    except netguard.UrlRefused as exc:
+        return run.record(c.failed(started, str(exc)))
 
     body = response.text
     stripped = re.sub(r"(?is)<(script|style|noscript)\b.*?</\1>", " ", body)
@@ -286,11 +321,13 @@ async def web_fetch(
     title_match = re.search(r"(?is)<title[^>]*>(.*?)</title>", body)
     title = _clean(title_match.group(1)) if title_match else ""
 
+    extra = {"html": body[:HTML_CAP], "html_truncated": len(body) > HTML_CAP} if include_html else {}
+
     if not text:
         return run.record(c.partial(
             started, "fetched but no readable text extracted",
             output=_scoped({"url": str(response.url), "status": response.status_code,
-                            "bytes": len(body)}),
+                            "bytes": len(body), **extra}),
         ))
 
     return run.record(c.succeeded(
@@ -298,7 +335,7 @@ async def web_fetch(
         output=_scoped({"url": str(response.url), "final_url": str(response.url),
                         "status": response.status_code, "title": title,
                         "text": text[:max_chars], "truncated": len(text) > max_chars,
-                        "chars": len(text)}),
+                        "chars": len(text), **extra}),
         verification=c.Verification(
             method="http_get",
             evidence=f"HTTP {response.status_code} from {response.url}, "

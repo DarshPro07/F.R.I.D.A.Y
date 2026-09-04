@@ -140,19 +140,46 @@ async def crawl_one(client: httpx.AsyncClient, url: str, *, max_chars: int,
     """One page, cleaned. Never raises: a failed source is a reported source."""
     if not _valid(url):
         return {"url": url, "ok": False, "error": "url must be http(s)"}
+    from friday import breaker
+    from friday import netguard
     from friday import sensitive_domains
     blocked = sensitive_domains.refusal(url)
     if blocked:
         return {"url": url, "ok": False, "error": blocked}
+    # sensitive_domains knows authenticated/financial hosts; it does not know
+    # where a name RESOLVES. Research crawls URLs chosen by a search engine or
+    # by page content, so without netguard a crafted result can point the
+    # crawler at cloud metadata, loopback, or the LAN.
+    try:
+        netguard.check(url)
+    except netguard.UrlRefused as exc:
+        return {"url": url, "ok": False, "error": str(exc)}
+    # Research crawls many URLs at once; one dead host must not spend the
+    # timeout budget over and over while the boss waits.
+    try:
+        breaker.allow(url)
+    except breaker.CircuitOpen as exc:
+        return {"url": url, "ok": False, "error": str(exc), "skipped": True}
 
     try:
         html, final_url, status = await _fetch(client, url)
     except Exception as exc:
+        if breaker.is_transport_failure(exc):
+            breaker.record_failure(url)
+        else:
+            breaker.record_success(url)
         return {"url": url, "ok": False,
                 "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+    breaker.record_success(url)
     blocked = sensitive_domains.refusal(final_url)
     if blocked:
         return {"url": final_url, "ok": False, "error": blocked}
+    # Redirects are the interesting case: a public URL is allowed to answer
+    # with a 302 to 169.254.169.254, so the landing URL must be re-checked.
+    try:
+        netguard.check(final_url)
+    except netguard.UrlRefused as exc:
+        return {"url": final_url, "ok": False, "error": str(exc)}
 
     title, text = to_markdown(html, final_url)
     how = "http"

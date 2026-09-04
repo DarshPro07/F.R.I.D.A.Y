@@ -21,11 +21,14 @@ Design constraints, from the adjudicated H spec:
 from __future__ import annotations
 
 import functools
+import logging
 import os
 import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # H1 - task economics (deterministic classification)
@@ -175,33 +178,161 @@ def choose_route(econ: TaskEconomics) -> Route:
                  "bounded engineering task: standard tier")
 
 
+#: The built-in tier ladder, used when the friday profile declares no
+#: `routing.tiers`. Every id here appears in the friday profile's own
+#: provider_models_cache.json (anthropic) - the router never invents a
+#: model name. The profile block, when present, overrides per tier: the
+#: owner picks the models; this is the default that makes the tiers MEAN
+#: something without a config edit, instead of all three collapsing onto the
+#: profile default (measured: tier table {} -> every tier resolved to "").
+DEFAULT_TIERS = {
+    TIER_ECONOMY: "claude-haiku-4-5-20251001",
+    TIER_STANDARD: "claude-sonnet-5",
+    TIER_DEEP: "",            # the profile default (claude-opus-5 here)
+}
+
+
 @functools.lru_cache(maxsize=1)
-def _tier_table() -> dict:
-    """
-    tier -> concrete model, from the friday profile's `routing.tiers`
-    config block (optional). Absent block = empty mapping = every tier
-    resolves to the profile default model. The router never invents a
-    model name: only this table or "" (default) can appear.
-    """
+def known_models() -> frozenset:
+    """Model ids the friday profile's provider cache actually lists.
+
+    Empty when the cache is absent, which disables validation rather than
+    refusing every model - an absent cache is a fresh install, not a wrong
+    id. Read once per process; `capability_reload` clears it."""
     from friday.hermes_bridge import ENV_PROFILE, ENV_PROFILE_HOME, \
         profile_home
     home = os.environ.get(ENV_PROFILE_HOME) or profile_home(
         os.environ.get(ENV_PROFILE, "friday"))
     if not home:
-        return {}
+        return frozenset()
+    path = Path(home) / "provider_models_cache.json"
     try:
-        import yaml
-        config = yaml.safe_load(
-            (Path(home) / "config.yaml").read_text(encoding="utf-8"))
-        tiers = ((config or {}).get("routing") or {}).get("tiers") or {}
-        return {str(k): str(v) for k, v in tiers.items() if v}
-    except Exception:                                        # noqa: BLE001
-        return {}
+        import json
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    found: set[str] = set()
+    # Shape on this host: {provider: {"models": ["id", ...]}}. Older caches
+    # carried [{"id": ...}] lists; both are read, and anything else is
+    # ignored rather than guessed at.
+    for entry in (raw.values() if isinstance(raw, dict) else []):
+        models = entry.get("models") if isinstance(entry, dict) else entry
+        for m in models or []:
+            if isinstance(m, str):
+                found.add(m)
+            elif isinstance(m, dict) and m.get("id"):
+                found.add(str(m["id"]))
+    return frozenset(found)
+
+
+@functools.lru_cache(maxsize=1)
+def _tier_table() -> dict:
+    """
+    tier -> concrete model. The friday profile's `routing.tiers` block wins
+    where it names a tier; DEFAULT_TIERS fills the rest. "" means the
+    profile default model. The router never invents a model name: only this
+    table or "" can appear, and a name the provider cache does not list is
+    dropped to "" with a log line - a typo in config must degrade to the
+    default, not fail every delegation with a 404 from the gateway.
+    """
+    from friday.hermes_bridge import ENV_PROFILE, ENV_PROFILE_HOME, \
+        profile_home
+    table = dict(DEFAULT_TIERS)
+    home = os.environ.get(ENV_PROFILE_HOME) or profile_home(
+        os.environ.get(ENV_PROFILE, "friday"))
+    if home:
+        try:
+            import yaml
+            config = yaml.safe_load(
+                (Path(home) / "config.yaml").read_text(encoding="utf-8"))
+            tiers = ((config or {}).get("routing") or {}).get("tiers") or {}
+            table.update({str(k): str(v) for k, v in tiers.items() if v})
+        except Exception:                                    # noqa: BLE001
+            pass
+    known = known_models()
+    if known:
+        for tier, model in list(table.items()):
+            if model and model not in known:
+                logger.warning("routing tier %s names %r, which the provider "
+                               "cache does not list; using the profile default",
+                               tier, model)
+                table[tier] = ""
+    return table
+
+
+#: Spoken requirements -> tier. "Java, use the cheapest model for this" or
+#: "think hard about this" should pick a tier without the planner having
+#: to guess from the goal text. Longest phrase wins; absent means "let the
+#: classifier decide".
+REQUIREMENT_TIERS = (
+    ("strongest", TIER_DEEP), ("best model", TIER_DEEP), ("think hard", TIER_DEEP),
+    ("deep", TIER_DEEP), ("careful", TIER_DEEP), ("thorough", TIER_DEEP),
+    ("cheapest", TIER_ECONOMY), ("cheap", TIER_ECONOMY), ("fast", TIER_ECONOMY),
+    ("quick", TIER_ECONOMY), ("economy", TIER_ECONOMY), ("small model", TIER_ECONOMY),
+    ("standard", TIER_STANDARD), ("normal", TIER_STANDARD),
+)
+
+
+def tier_from_requirements(text: str) -> str:
+    """The tier a request asks for by name, or "" when it does not say."""
+    low = (text or "").lower()
+    for phrase, tier in REQUIREMENT_TIERS:
+        if phrase in low:
+            return tier
+    return ""
 
 
 def resolve_model(tier: str) -> str:
     """Concrete model for a tier, or "" meaning the profile default."""
     return _tier_table().get(tier, "")
+
+
+#: Tier -> Hermes reasoning effort. This is the token-aware depth knob: the
+#: gateway's session.create accepts `reasoning_effort` (parsed by
+#: hermes_constants.parse_reasoning_effort; levels none..ultra) as a
+#: PER-SESSION override, so a bounded rename does not pay for the thinking
+#: budget a cross-file design question needs, and vice versa. The model
+#: choice and the effort choice are independent: the profile default model
+#: with `low` effort is a real, cheap route.
+EFFORT_BY_TIER = {
+    TIER_ECONOMY: "low",
+    TIER_STANDARD: "medium",
+    TIER_DEEP: "high",
+}
+
+
+def resolve_effort(tier: str) -> str:
+    """Hermes reasoning effort for a tier; "" means inherit the profile."""
+    return EFFORT_BY_TIER.get(tier, "")
+
+
+def plan_delegation(text: str, *, code_refs: int = 0, acceptance: int = 0,
+                    model: str = "", effort: str = "") -> dict:
+    """
+    One deterministic pass from a task description to the Hermes route:
+    level, tier, model, reasoning effort and the reason - zero model calls
+    spent deciding which model to call. Explicit `model`/`effort` from the
+    caller win untouched and are recorded as such.
+    """
+    econ = classify_task(text, code_refs=code_refs, acceptance=acceptance)
+    route = choose_route(econ)
+    asked = tier_from_requirements(text)
+    if asked and not model:
+        # A named requirement beats the classifier's guess - but only for
+        # the tier. Consequence still decides the route LEVEL: "quick" does
+        # not turn a core-touching change into an unverified one.
+        route = Route(route.level, asked,
+                      f"tier {asked} requested in the goal; {route.reason}")
+    chosen_model = model or resolve_model(route.tier)
+    chosen_effort = effort or resolve_effort(route.tier)
+    reason = (f"{route.level}/{route.tier}: {route.reason} "
+              f"[class={econ.kind}, consequence={econ.consequence}, "
+              f"effort={chosen_effort or 'profile'}]")
+    if model:
+        reason = f"model pinned by caller ({model}); " + reason
+    return {"level": route.level, "tier": route.tier, "model": chosen_model,
+            "effort": chosen_effort, "reason": reason, "kind": econ.kind,
+            "consequence": econ.consequence}
 
 
 # ---------------------------------------------------------------------------

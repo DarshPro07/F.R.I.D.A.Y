@@ -32,18 +32,39 @@ export function createOrbScene(container, opts = {}) {
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(width, height);
-  let pixelRatio = Math.min(window.devicePixelRatio, opts.quality === "low" ? 1 : 1.25);
-  const RATIO_FLOOR = 1;                      // never render the core below 1:1 -- it reads as blur, not as speed
+  // A GTX 1650 at fullscreen cannot feed the bloom composer AND the camera at
+  // 1.25x -- the camera stutters because the GPU is saturated. Start at 1.0
+  // (0.7 in ?lite mode) and let adapt() climb back up only on a machine that
+  // proves it can hold 60fps. Sub-native rendering when struggling reads as a
+  // soft core, which beats a stuttering one.
+  const LITE = opts.quality === "low" || /[?&]lite\b/.test(location.search)
+    || (() => { try { return localStorage.getItem("fridayLite") === "1"; } catch (e) { return false; } })();
+  let pixelRatio = Math.min(window.devicePixelRatio, LITE ? 0.7 : 1);
+  const RATIO_FLOOR = LITE ? 0.55 : 0.72;
   renderer.setPixelRatio(pixelRatio);
-  // ponytail: adaptive resolution, not adaptive geometry. Slow frames -> render smaller (bloom/chromatic scale with it);
+  // Adaptive resolution, not adaptive geometry. Slow frames -> render smaller (bloom/chromatic scale with it);
   // fast frames -> step back up. Same look, cost follows the machine.
-  let frameEma = 16, adaptAt = 0, chromaticOn = true;
+  let frameEma = 16, adaptAt = 0, chromaticOn = !LITE;
+  let gestureBusy = false;
+  function setGestureBusy(on) {
+    on = !!on;
+    if (on === gestureBusy) return;
+    gestureBusy = on;
+    if (on) {                                 // hands are driving: cheapest render
+      pixelRatio = RATIO_FLOOR;
+      renderer.setPixelRatio(pixelRatio); composer.setPixelRatio(pixelRatio);
+      if (chromaticOn) { chromaticOn = false; chromaticPass.enabled = false; }
+    }
+    // on release, adapt() lifts it back up on its own as frames come in fast.
+  }
   function adapt(now) {
-    if (now - adaptAt < 1500) return;
-    const ceiling = Math.min(window.devicePixelRatio, opts.quality === "low" ? 1 : 1.25);
-    if (frameEma > 34 && pixelRatio > RATIO_FLOOR) { pixelRatio = Math.max(RATIO_FLOOR, pixelRatio - 0.25); renderer.setPixelRatio(pixelRatio); composer.setPixelRatio(pixelRatio); adaptAt = now; }
-    else if (frameEma > 40 && chromaticOn) { chromaticOn = false; chromaticPass.enabled = false; adaptAt = now; }   // the last thing to go
-    else if (frameEma < 16 && (pixelRatio < ceiling || !chromaticOn)) {
+    if (gestureBusy) return;                  // do not fight the hand for the GPU
+
+    if (now - adaptAt < 900) return;          // react quicker than the old 1.5s
+    const ceiling = Math.min(window.devicePixelRatio, LITE ? 0.7 : 1);
+    if (frameEma > 28 && pixelRatio > RATIO_FLOOR) { pixelRatio = Math.max(RATIO_FLOOR, pixelRatio - 0.2); renderer.setPixelRatio(pixelRatio); composer.setPixelRatio(pixelRatio); adaptAt = now; }
+    else if (frameEma > 34 && chromaticOn) { chromaticOn = false; chromaticPass.enabled = false; adaptAt = now; }   // the last thing to go
+    else if (frameEma < 15 && (pixelRatio < ceiling || !chromaticOn)) {
       if (!chromaticOn) { chromaticOn = true; chromaticPass.enabled = true; }
       else { pixelRatio = Math.min(ceiling, pixelRatio + 0.25); renderer.setPixelRatio(pixelRatio); composer.setPixelRatio(pixelRatio); }
       adaptAt = now;
@@ -56,7 +77,8 @@ export function createOrbScene(container, opts = {}) {
   // ——— POST PROCESSING ———
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(width / 2, height / 2), 1.8, 0.4, 0.2);   // half-res bloom: same look, a quarter of the fill
+  const bloomDiv = LITE ? 3 : 2;             // third-res bloom on a weak GPU: much less fill, close enough look
+  const bloom = new UnrealBloomPass(new THREE.Vector2(width / bloomDiv, height / bloomDiv), 1.8, 0.4, 0.2);
   composer.addPass(bloom);
 
   const chromaticShader = {
@@ -78,6 +100,7 @@ export function createOrbScene(container, opts = {}) {
   };
   const chromaticPass = new ShaderPass(chromaticShader);
   composer.addPass(chromaticPass);
+  chromaticPass.enabled = chromaticOn;       // off from the start in ?lite mode
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -219,7 +242,7 @@ export function createOrbScene(container, opts = {}) {
     "latency", "200 OK", "PATCH /", "fn main", "use std", "impl Orb", "async {}", "spawn()", "arc::new", ".unwrap",
   ];
   // ——— TEXT FIELD ———
-  // ponytail: one instanced draw per layer instead of ~1,700 Sprites (1,700 draw calls a frame).
+  // One instanced draw per layer instead of ~1,700 Sprites (1,700 draw calls a frame).
   // Every snippet is baked once into an atlas; each instance picks a tile, and the orbit is
   // computed in the vertex shader, so the CPU writes one uniform per layer per frame instead of
   // 1,700 positions. Same snippets, same density, same look.
@@ -506,7 +529,7 @@ export function createOrbScene(container, opts = {}) {
 
   return {
     rotateBy, zoomBy, zoomIn: () => zoomBy(0.65), zoomOut: () => zoomBy(1.55), resetView, dispose,
-    setLevel, setTone, setState, setMotion, setPalette, pulse, render: frame,
+    setLevel, setTone, setState, setMotion, setPalette, pulse, setGestureBusy, render: frame,
     get palette() { return paletteName; },
     get motion() { return motion; },
     pause() { paused = true; cancelAnimationFrame(rafId); },

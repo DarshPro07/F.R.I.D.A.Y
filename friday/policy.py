@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 AUTO = "AUTO"
 ASK = "ASK"
@@ -60,6 +61,15 @@ CLIPBOARD_WRITE = "CLIPBOARD_WRITE"
 MEDIA_CONTROL = "MEDIA_CONTROL"
 SCREEN_CAPTURE = "SCREEN_CAPTURE"
 CAMERA_CAPTURE = "CAMERA_CAPTURE"
+#: Looking at the screen and drawing an arrow on it. Read-only by construction:
+#: nothing in this category can move a pointer or press a key.
+SCREEN_POINT = "SCREEN_POINT"
+#: Taking the mouse and keyboard. See the CONFIRM note below for why this is
+#: not ASK: a misrouted takeover can click and type anything, in any window.
+DESKTOP_CONTROL = "DESKTOP_CONTROL"
+#: Typing a password, card number or bank detail into anything. Never, at any
+#: autonomy level - the same tier as reading a secret.
+DESKTOP_CREDENTIAL_ENTRY = "DESKTOP_CREDENTIAL_ENTRY"
 REMINDER = "REMINDER"
 BROWSER_CONTROL = "BROWSER_CONTROL"
 BROWSER_AUTOMATION = "BROWSER_AUTOMATION"
@@ -123,6 +133,9 @@ DEFAULT_POLICY: dict[str, str] = {
     MEDIA_CONTROL: AUTO,
     SCREEN_CAPTURE: AUTO,
     CAMERA_CAPTURE: AUTO,
+    # Pointing is looking out loud. It draws a picture and can do nothing else,
+    # so it costs a glance to be wrong and needs no ceremony.
+    SCREEN_POINT: AUTO,
     # Setting a reminder is the thing the user just asked for, and cancelling
     # one only removes something ADA created. Registering a scheduled task is
     # a system change, but a narrow and self-owned one.
@@ -156,12 +169,27 @@ DEFAULT_POLICY: dict[str, str] = {
     # itself, or what it is running inside.
     SYSTEM_CRITICAL_PROCESS_TERMINATION: DENY,
     POWER_ACTION: CONFIRM,
+    # Taking the mouse and keyboard. CONFIRM for exactly the reason written at
+    # the top of this file: FULL autonomy turns ASK into a yes, and the routing
+    # evidence shows requests landing on capabilities that merely share their
+    # vocabulary. A misrouted "take over and ..." is strictly worse than a
+    # misrouted shutdown - it can click and type anything, in any window, and
+    # most of what it could reach is not gated by this engine at all. So a
+    # human says yes to a takeover, every time, whatever the autonomy setting.
+    DESKTOP_CONTROL: CONFIRM,
     SECRET_READ: DENY,
+    # Typing a credential, card or bank detail. Never, and not grantable - the
+    # boss types his own passwords. Prose in a prompt cannot hold this line,
+    # because an instruction is a thing a model can decide differently about.
+    DESKTOP_CREDENTIAL_ENTRY: DENY,
 }
 
 #: Categories a session approval can never upgrade. Escalating these requires
 #: changing configuration deliberately, not saying "yes" mid-conversation.
-NON_APPROVABLE = frozenset({SECRET_READ, SYSTEM_CRITICAL_PROCESS_TERMINATION})
+NON_APPROVABLE = frozenset({SECRET_READ, SYSTEM_CRITICAL_PROCESS_TERMINATION,
+                            # A session approval must not be able to unlock
+                            # typing the boss's password for him.
+                            DESKTOP_CREDENTIAL_ENTRY})
 
 #: The categories that end something. Used by the provenance gate: an
 #: objective Friday read somewhere rather than heard from the person may not
@@ -178,6 +206,12 @@ DESTRUCTIVE = frozenset({
     FORCE_PROCESS_TERMINATION, SESSION_LOCK, SLEEP, HIBERNATE, SHUTDOWN,
     RESTART, FORCED_SHUTDOWN, SYSTEM_CRITICAL_PROCESS_TERMINATION,
     POWER_ACTION,
+    # Driving the mouse and keyboard belongs here for the same reason, and
+    # more sharply: text on a page saying "take over and click here" would be
+    # an instruction to act on the boss's own desktop, with his session and
+    # his logins. No answer to that question could make it safe, so it never
+    # becomes a question.
+    DESKTOP_CONTROL, DESKTOP_CREDENTIAL_ENTRY,
 })
 
 
@@ -232,9 +266,40 @@ def provenance_verdict(tool_id: str, provenance: str) -> Verdict | None:
 
 FULL = "full"
 GUARDED = "guarded"
-AUTONOMY_MODES = (FULL, GUARDED)
+#: The owner's 2026-09-03 instruction: no "say okay and I'll start", no
+#: yes/no round trips - a CONFIRM is answered yes in advance. What this does
+#: NOT touch: DENY, NON_APPROVABLE, and the categories
+#: `toolsets.desktop.forbidden()` refuses in code (credentials, money,
+#: destroying data, security settings). Those are refusals, not questions,
+#: and no autonomy setting is an answer to them.
+DANGEROUS = "dangerous"
+AUTONOMY_MODES = (FULL, GUARDED, DANGEROUS)
 
-DEFAULT_AUTONOMY = os.getenv("ADA_AUTONOMY", FULL).strip().lower()
+#: The spoken choice ("full autonomy on") outlives the process through this
+#: file; ADA_AUTONOMY is the fallback for a fresh checkout. data/ is runtime state.
+AUTONOMY_FILE = Path(__file__).resolve().parent.parent / "data" / "autonomy.json"
+
+
+def current_autonomy() -> str:
+    """The mode in force: the persisted spoken choice, else the env, else DANGEROUS.
+
+    DANGEROUS is the default since 2026-09-03 18:00 at the owner's insistence
+    ("get it full autonomy"): Friday acts first and reports, on both voice
+    paths, without anyone having to say a switch phrase. "Full autonomy off"
+    (persisted) or ADA_AUTONOMY=full|guarded is how he steps back from it.
+    """
+    try:
+        import json
+        mode = str(json.loads(AUTONOMY_FILE.read_text(encoding="utf-8")).get("mode", "")).strip().lower()
+        if mode in AUTONOMY_MODES:
+            return mode
+    except (OSError, ValueError):
+        pass
+    mode = os.getenv("ADA_AUTONOMY", DANGEROUS).strip().lower()
+    return mode if mode in AUTONOMY_MODES else DANGEROUS
+
+
+DEFAULT_AUTONOMY = current_autonomy()
 
 
 def resolve_policy(mode: str) -> dict[str, str]:
@@ -247,8 +312,35 @@ def resolve_policy(mode: str) -> dict[str, str]:
     # the things that need a human specifically - CONFIRM passes through
     # untouched, which is the whole point of it being a separate decision
     # rather than a stricter flavour of ASK.
-    return {category: (AUTO if decision == ASK else decision)
-            for category, decision in DEFAULT_POLICY.items()}
+    table = {category: (AUTO if decision == ASK else decision)
+             for category, decision in DEFAULT_POLICY.items()}
+    if mode == DANGEROUS:
+        # The owner answered every question in advance. NON_APPROVABLE is
+        # exactly the set nobody can answer, so it is the one thing left out.
+        for category, decision in table.items():
+            if decision == CONFIRM and category not in NON_APPROVABLE:
+                table[category] = AUTO
+    return table
+
+
+def set_autonomy(mode: str) -> str:
+    """Switch the live engine and persist the choice. Returns the mode."""
+    mode = (mode or "").strip().lower()
+    if mode not in AUTONOMY_MODES:
+        raise ValueError(f"unknown autonomy mode {mode!r}; known: {list(AUTONOMY_MODES)}")
+    import json
+    from datetime import datetime, timezone
+    AUTONOMY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    AUTONOMY_FILE.write_text(json.dumps({
+        "mode": mode, "set_by": "owner",
+        "at": datetime.now(timezone.utc).isoformat()}), encoding="utf-8")
+    default_engine.set_autonomy(mode)
+    return mode
+
+
+def skip_permissions() -> bool:
+    """True when the owner switched on dangerous autonomy."""
+    return default_engine.autonomy == DANGEROUS
 
 #: tool id -> category. A tool with no entry is ASK by default: unknown means
 #: unaudited, and unaudited must not mean allowed.
@@ -307,8 +399,25 @@ TOOL_CATEGORIES: dict[str, str] = {
     'music.stop': MEDIA_CONTROL,
     'music.next': MEDIA_CONTROL,
     'music.current': READ_LOCAL_SAFE,
+    # The media toolset drives Spotify under spotify.* ids; same trust as the
+    # music.* aliases above -- reading what plays is a safe read, and transport
+    # (play/pause/skip) is trivially reversible by the user who is listening.
+    'spotify.current': READ_LOCAL_SAFE,
+    'spotify.play': MEDIA_CONTROL,
+    'spotify.pause': MEDIA_CONTROL,
+    'spotify.resume': MEDIA_CONTROL,
+    'spotify.next': MEDIA_CONTROL,
+    'spotify.previous': MEDIA_CONTROL,
+    'spotify.search': MEDIA_CONTROL,
     'vision.screen_capture': SCREEN_CAPTURE,
     'vision.inspect_screen': SCREEN_CAPTURE,
+    # Jarvis screen powers. Pointing looks; driving acts; stopping is always
+    # allowed, because a stop that needs permission is not a stop.
+    'screen.point': SCREEN_POINT,
+    'desktop.plan': DESKTOP_CONTROL,
+    'desktop.step': DESKTOP_CONTROL,
+    'desktop.stop': READ_LOCAL_SAFE,
+    'desktop.credential_entry': DESKTOP_CREDENTIAL_ENTRY,
     'vision.camera_frame': CAMERA_CAPTURE,
     'vision.inspect_camera': CAMERA_CAPTURE,
     'reminders.create': REMINDER,
@@ -333,6 +442,8 @@ TOOL_CATEGORIES: dict[str, str] = {
     'files.search': READ_LOCAL_SAFE,
     'files.create': FILE_WRITE,
     'files.write': FILE_WRITE,
+    'files.delete': DELETE,
+    'files.delete_permanent': DELETE,
     'files.edit': FILE_WRITE,
     'files.copy': FILE_WRITE,
     'files.move': FILE_WRITE,
@@ -472,7 +583,14 @@ class PolicyEngine:
             if decision not in DECISIONS:
                 raise ValueError(f"unknown decision {decision!r}")
             self._policy[category] = decision
+        self._overrides = {k: v for k, v in (overrides or {}).items()}
         self._session_approvals: set[str] = set()
+
+    def set_autonomy(self, mode: str) -> None:
+        """Re-resolve the table for a new mode; explicit overrides survive."""
+        self.autonomy = (mode or "").strip().lower()
+        self._policy = resolve_policy(self.autonomy)
+        self._policy.update(self._overrides)
 
     # -- the whole API takes a tool id and nothing else ---------------------
 

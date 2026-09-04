@@ -98,21 +98,19 @@ def register(mcp):
             acceptance=split(acceptance), constraints=split(constraints),
             code_refs=split(code_refs), skill_hints=split(skill_hints))
         # H1/H2: when the caller did not pin a model, one deterministic
-        # pass picks the minimum capable route - zero model calls spent
-        # deciding which model to call. An explicit `model` argument is
-        # the user-override path and wins untouched.
-        if not model:
-            econ = ee.classify_task(goal, code_refs=len(bundle.code_refs),
-                                    acceptance=len(bundle.acceptance))
-            route = ee.choose_route(econ)
-            model = ee.resolve_model(route.tier)
-            if not route_reason:
-                route_reason = (f"{route.level}/{route.tier}: {route.reason}"
-                                f" [class={econ.kind},"
-                                f" consequence={econ.consequence}]")
+        # pass picks the minimum capable route AND its reasoning depth -
+        # zero model calls spent deciding which model to call. An explicit
+        # `model` argument is the user-override path and wins untouched.
+        plan = ee.plan_delegation(goal, code_refs=len(bundle.code_refs),
+                                  acceptance=len(bundle.acceptance),
+                                  model=model)
+        model = plan["model"]
+        if not route_reason:
+            route_reason = plan["reason"]
         try:
             out = supervisor().delegate(bundle, model=model,
                                         route_reason=route_reason,
+                                        reasoning_effort=plan["effort"],
                                         wait=False)
         except hb.HermesUnavailable as exc:
             return {"status": "failed", "error": str(exc)}

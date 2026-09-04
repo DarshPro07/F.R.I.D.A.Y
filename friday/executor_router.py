@@ -39,8 +39,12 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger("friday-agent")
 
-#: Chosen when nothing else can be. The one that is installed and proven.
-DEFAULT = "claude"
+#: Chosen when nothing else can be. Hermes is the mandatory execution engine
+#: (NON_NEGOTIABLE 2): it carries the shared-memory bundle, the route/effort
+#: economics and the durable WorkRun ledger. Claude Code remains as the
+#: explicit fallback for when Hermes is not on this machine.
+DEFAULT = "hermes"
+FALLBACK = "claude"
 
 
 @dataclass(frozen=True)
@@ -91,10 +95,16 @@ class Executor:
 
 #: Everything Friday knows about. Being here is not a promise it works.
 KNOWN: tuple[Executor, ...] = (
+    Executor(id="hermes", binary="hermes", title="Hermes",
+             buildable=True,
+             locator="friday.executors.hermes:_hermes_python",
+             notes="the execution engine; the gateway is located through "
+                   "HERMES_PYTHON/HERMES_DIR or the install convention, not "
+                   "PATH, so discovery defers to hermes_bridge.locate()"),
     Executor(id="claude", binary="claude", title="Claude Code",
              buildable=True,
              locator="friday.executors.cli:claude_path",
-             notes="the executor this codebase was built around"),
+             notes="fallback executor for when Hermes is absent"),
     Executor(id="opencode", binary="opencode", title="OpenCode",
              buildable=False,
              notes="declared for discovery; no builder written, because it "
@@ -205,7 +215,8 @@ def choose(task: str = "", *, record=None, minimum: int = 3,
                          + (f" ({rate:.0%} of attempts passed)"
                             if rate is not None else "")))
 
-    fallback = DEFAULT if DEFAULT in choices else choices[0]
+    fallback = (DEFAULT if DEFAULT in choices
+                else FALLBACK if FALLBACK in choices else choices[0])
     return Choice(
         executor=fallback, considered=scores,
         alternatives=tuple(c for c in choices if c != fallback),
@@ -230,6 +241,11 @@ def build(executor_id: str, store, **kwargs):
     if not known.installed():
         raise FileNotFoundError(
             f"{known.binary} is not on PATH, so {executor_id} cannot run")
+
+    if executor_id == "hermes":
+        from friday.executors.hermes import HermesExecutor
+
+        return HermesExecutor(store, **kwargs)
 
     from friday.executors.claude_code import ClaudeCodeExecutor
 

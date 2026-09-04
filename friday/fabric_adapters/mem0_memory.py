@@ -18,7 +18,9 @@ import importlib.util
 
 from friday import fabric
 
-UPSTREAM = "https://github.com/mem0ai/mem0"
+UPSTREAM = "mem0"          # the clone directory, which is what the
+                           # lock is keyed by -- a URL here never matches
+
 
 
 def _installed():

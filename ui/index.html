@@ -74,20 +74,43 @@ button.quiet:hover{color:var(--ink);border-color:transparent;background:transpar
 .blk h3 span{margin-left:auto;font-weight:400;letter-spacing:0;text-transform:none;color:var(--mid)}
 .b-title{left:24px;top:18px;font-size:13px;letter-spacing:.35em;color:var(--amber);text-shadow:0 0 10px rgba(var(--g),.8);opacity:.85;pointer-events:none}
 .b-title::after{content:"";display:block;margin-top:6px;width:120px;height:1px;background:linear-gradient(to right,rgba(var(--g),.8),transparent)}
-.b-obj{left:24px;top:64px;width:380px}
+.b-obj{left:24px;top:64px;width:340px}
 .b-obj .o{font-family:var(--sans);font-size:14px;line-height:1.45;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .b-obj .meta{color:var(--mid);margin-top:4px;font-size:12px}
-.b-org{left:24px;top:176px;width:250px;max-height:calc(100% - 330px);overflow:auto}
+.b-org{left:24px;top:168px;width:260px;max-height:calc(48vh - 168px);overflow:auto}
 .chain{color:var(--mid);margin-bottom:8px;font-size:12px}.chain b{color:var(--ink);font-weight:500}.chain .down{color:var(--alert)}
 .trow{display:grid;grid-template-columns:1fr 64px 28px;align-items:center;gap:8px;padding:3px 0;cursor:pointer}
 .trow:hover{color:#fff}.trow .bar{height:2px;background:var(--rule-2)}.trow .bar i{display:block;height:100%;background:var(--amber)}.trow .n{text-align:right;color:var(--mid);font-variant-numeric:tabular-nums}
-.b-mem{right:24px;top:64px;width:236px}
+.b-mem{left:24px;top:calc(48vh + 12px);width:260px}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:2px 0}.kv .k{color:var(--mid)}.kv .v{font-variant-numeric:tabular-nums}.kv .v.alert{color:var(--alert)}
 .b-hint{left:24px;bottom:22px;font-size:11px;line-height:1.7;letter-spacing:.1em;opacity:.55;color:var(--amber);pointer-events:none}
 .b-hint .key{display:inline-block;padding:0 4px;border:1px solid rgba(var(--g),.5);border-radius:3px;margin-right:4px;font-size:10px}
 .build{position:absolute;left:24px;bottom:84px;z-index:20;font:11px var(--mono);color:var(--dim);letter-spacing:.04em;pointer-events:none}
 /* capture box + side strip (bottom right; face, hands and objects all live here) */
 .b-cap{right:24px;bottom:22px;display:flex;gap:10px;align-items:flex-end}
+.b-log{right:24px;top:64px;width:340px;bottom:300px;display:flex;flex-direction:column;z-index:23;
+  background:rgba(10,5,0,.92);border:1px solid var(--rule-2);border-radius:5px;padding:10px 12px}
+.log-in{flex:none;display:flex;gap:6px;margin-top:8px;border-top:1px solid var(--rule-2);padding-top:8px}
+.log-in input{flex:1;min-width:0;background:var(--solid);border:1px solid var(--rule);border-radius:3px;
+  color:var(--ink);font:12px var(--mono);padding:7px 9px}
+.log-in input::placeholder{color:var(--dim)}
+.log-in input:focus{outline:none;border-color:var(--amber)}
+.log-in button{flex:none;background:rgba(var(--g),.12);border:1px solid var(--rule);border-radius:3px;
+  color:var(--amber);font:11px var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:0 12px;cursor:pointer}
+.log-in button:hover{background:rgba(var(--g),.22)}
+.b-log h3 .clr{margin-left:8px;font:400 10px var(--mono);color:var(--dim);cursor:pointer}
+.b-log h3 .clr:hover{color:var(--ink)}
+.log-scroll{flex:1;min-height:0;overflow:auto;margin-top:4px;padding-right:4px;
+  font-size:12px;line-height:1.55;scrollbar-width:thin}
+.log-line{display:flex;gap:8px;padding:3px 0;border-bottom:1px solid rgba(var(--g),.05)}
+.log-line .w{flex:none;min-width:52px;font:10px var(--mono);letter-spacing:.06em;padding-top:2px;text-transform:uppercase}
+.log-line.you .w{color:var(--dim)}.log-line.friday .w{color:var(--amber)}.log-line.act .w{color:var(--mid)}
+.log-line.you .t{color:var(--ink)}.log-line.friday .t{color:var(--ink)}
+.log-line.act .t{color:var(--mid);font-family:var(--mono);font-size:11px}
+.log-line .t{overflow-wrap:anywhere}
+.log-line .t code,.log-line.code .t{font-family:var(--mono);font-size:11px;white-space:pre-wrap;color:var(--mid)}
+.log-line.friday.speaking .w{color:var(--amber)}
+.log-line.friday.speaking .w::after{content:"";display:inline-block;width:5px;height:5px;margin-left:5px;border-radius:50%;background:var(--amber);box-shadow:0 0 6px rgba(var(--g),.9);animation:pulse 1s infinite;vertical-align:middle}
 .side{width:150px;font-size:11px;line-height:1.7;color:var(--mid)}
 .side b{display:block;color:var(--ink);font-weight:500}
 .side .m{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber)}
@@ -106,6 +129,13 @@ button.quiet:hover{color:var(--ink);border-color:transparent;background:transpar
 .bootbox .ring{width:64px;height:64px;border-radius:50%;border:1px solid rgba(var(--g),.2);border-top-color:var(--amber);animation:spin 1s linear infinite}
 .bootbox .bt{font-size:12px;letter-spacing:.4em;color:var(--amber);text-shadow:0 0 12px rgba(var(--g),.8)}
 .bootbox .bs{font-size:11px;letter-spacing:.12em;color:var(--mid);min-height:16px}
+/* indeterminate loading sweep on the lock screen, so the slow first-run model
+   load + shader warm-up reads as working, not frozen */
+.loadwrap{width:220px;height:3px;background:rgba(var(--g),.12);border-radius:2px;overflow:hidden;margin:10px auto 0;display:none}
+.loadwrap.on{display:block}
+.loadwrap .loadbar{height:100%;width:38%;border-radius:2px;background:linear-gradient(90deg,transparent,var(--amber),transparent);animation:lslide 1.1s ease-in-out infinite}
+@keyframes lslide{0%{transform:translateX(-110%)}100%{transform:translateX(330%)}}
+@media (prefers-reduced-motion:reduce){.loadwrap .loadbar{animation:none;width:100%;opacity:.5}}
 .orb-load{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;pointer-events:none;z-index:15}
 .orb-load .ring{width:56px;height:56px;border-radius:50%;border:1px solid rgba(var(--g),.25);border-top-color:var(--amber);animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -131,10 +161,10 @@ button.quiet:hover{color:var(--ink);border-color:transparent;background:transpar
 .unlocking #lock{opacity:1;visibility:visible;pointer-events:none;background:transparent}
 .unlocking .locktxt{opacity:0;transform:translateX(12px);transition:opacity .45s ease,transform .45s ease}
 .unlocking .lockcam{transition:transform .8s cubic-bezier(.2,.7,.2,1),border-color .8s;transform-origin:top left}
-.dock,.b-obj,.b-org,.b-mem,.b-cap{transition:opacity .55s ease,transform .55s ease}
-[data-locked] .dock,[data-locked] .b-obj,[data-locked] .b-org,[data-locked] .b-mem,[data-locked] .b-cap{opacity:0;pointer-events:none;transform:translateY(10px)}
+.dock,.b-obj,.b-org,.b-mem,.b-cap,.b-log{transition:opacity .55s ease,transform .55s ease}
+[data-locked] .dock,[data-locked] .b-obj,[data-locked] .b-org,[data-locked] .b-mem,[data-locked] .b-cap,[data-locked] .b-log{opacity:0;pointer-events:none;transform:translateY(10px)}
 [data-locked] .b-cap{transform:none}
-.b-obj{transition-delay:.15s}.b-org{transition-delay:.3s}.b-mem{transition-delay:.25s}.dock{transition-delay:.4s}.b-cap{transition-delay:0s}
+.b-obj{transition-delay:.15s}.b-org{transition-delay:.3s}.b-mem{transition-delay:.25s}.dock{transition-delay:.4s}.b-cap{transition-delay:0s}.b-log{transition-delay:.35s}
 .lockbox{display:flex;gap:26px;align-items:flex-start}
 .lockcam{position:relative;width:320px;height:240px;border:1px solid rgba(var(--g),.5);background:var(--solid);overflow:hidden}
 .lockcam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);filter:sepia(1) hue-rotate(-15deg) saturate(2.2) brightness(.75) contrast(1.15);opacity:.85}
@@ -296,6 +326,7 @@ button.quiet:hover{color:var(--ink);border-color:transparent;background:transpar
       <div class="locktxt">
         <h2 id="lockh">Locked</h2>
         <div class="s" id="locks">Starting the camera</div>
+        <div class="loadwrap" id="loadwrap"><div class="loadbar"></div></div>
         <div class="l" id="lockl"></div>
         <div class="a" id="lockact">
           <button id="enrolbtn" style="display:none" onclick="enrolLive()">This is me: enrol my face</button>
@@ -317,6 +348,8 @@ button.quiet:hover{color:var(--ink);border-color:transparent;background:transpar
   <div class="build" id="buildline"></div>
   <div class="blk b-hint"><div><span class="key">DRAG</span> spin&nbsp;&nbsp;<span class="key">SCROLL</span> zoom&nbsp;&nbsp;<span class="key">R</span> reset</div><div id="hintline"><span class="key">PINCH + MOVE</span> spin&nbsp;&nbsp;<span class="key">PINCH BOTH HANDS ± SPREAD</span> zoom</div></div>
 
+  <div class="blk b-log"><h3>Transcript <span class="clr" onclick="toggleSTT()" id="sttmode" title="Speech engine — auto (headset via Deepgram when attached, else browser), or force one. Click to cycle.">voice: auto</span> <span class="clr" onclick="toggleLite()" id="litebtn" title="Low-power mode for weaker GPUs: lighter orb, gestures off. Reloads to apply.">lite: off</span> <span class="clr" onclick="clearLog()">clear</span></h3><div class="log-scroll" id="logbox"></div><div class="log-in"><input id="asktext" type="text" autocomplete="off" placeholder="Type or paste a prompt, then Enter" onkeydown="if(event.key==='Enter'){event.preventDefault();sendAsk();}"><button type="button" onclick="sendAsk()">Send</button></div></div>
+
   <div class="blk b-cap">
     <div class="side" id="side">
       <div class="m" id="sidemode">standby</div>
@@ -333,10 +366,10 @@ button.quiet:hover{color:var(--ink);border-color:transparent;background:transpar
 
   <div class="dock">
     <div class="row">
-      <button class="mic" id="mic" onclick="toggleMic()" aria-pressed="false" aria-label="Unmute microphone" title="Unmute. Friday listens until you mute again.">
+      <button class="mic" id="mic" onclick="toggleMic()" aria-pressed="false" aria-label="Unmute microphone" title="Your microphone. Muting stops her hearing you; she keeps talking.">
         <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/></svg></button>
       <div class="meter" id="meter" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div>
-      <button class="snd" id="snd" onclick="toggleSound()" aria-pressed="true" aria-label="Mute Friday's voice" title="Friday's voice on or off">
+      <button class="snd" id="snd" onclick="toggleSound()" aria-pressed="true" aria-label="Mute Friday's voice" title="Her voice. Off = she works silently; your mic is unaffected.">
         <svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
     </div>
     <div class="conv" id="conv"></div>
@@ -361,16 +394,38 @@ button.quiet:hover{color:var(--ink);border-color:transparent;background:transpar
 <div class="toolgates" id="toolgates"></div>
 
 <script type="module">
-  import { createOrbScene, HandTracker } from "/ui/orb.js";
-  import { FaceGate, openCamera, drawBoxes, cues, loadFaceApi } from "/ui/vision.js";
-  window.__lib = { createOrbScene, HandTracker, FaceGate, openCamera, drawBoxes, cues, loadFaceApi };
+  import { FaceGate, openCamera, drawBoxes, cues, loadFaceApi, describeImage } from "/ui/vision.js";
+  window.__lib = { FaceGate, openCamera, drawBoxes, cues, loadFaceApi, describeImage };
+  let orbPromise = null;
+  window.__loadOrb = () => orbPromise || (orbPromise = import("/ui/orb.js").then((m) => {
+    window.__lib.createOrbScene = m.createOrbScene;
+    window.__lib.HandTracker    = m.HandTracker;
+    return m;
+  }));
   window.dispatchEvent(new Event("lib-ready"));
 </script>
 <script>
 "use strict";
 const $=(id)=>document.getElementById(id);
-const esc=(s)=>String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc=(s)=>String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const el=(h)=>{const t=document.createElement("template");t.innerHTML=h.trim();return t.content.firstChild;};
+/* ---------------- delegated actions (F2b) ----------------
+   Rendered rows used to carry inline handlers built by string interpolation:
+     onclick="gateApprove('${c.nonce}')"
+   That put attacker-influenced values (gate nonces, vault filenames, division
+   ids) inside a JS string inside an HTML attribute — two nested contexts, so a
+   single stray quote became script execution. Escaping alone is one typo away
+   from a hole, and one site here shipped with a RAW nonce.
+   Markup now carries data-act/data-arg only; the value never reaches a parser
+   as code. The whitelist means a forged data-act cannot call anything else. */
+const DELEGATED=new Set(["openDivision","toggleDivision","gateApprove","gateReject","runIntent","openVault"]);
+function runAct(node){const name=node.dataset.act;if(!DELEGATED.has(name))return;
+  const fn=window[name];if(typeof fn==="function")fn(node.dataset.arg||"");}
+document.addEventListener("click",(ev)=>{const n=ev.target.closest&&ev.target.closest("[data-act]");
+  if(n){ev.preventDefault();runAct(n);}});
+document.addEventListener("keydown",(ev)=>{if(ev.key!=="Enter")return;
+  const n=ev.target.closest&&ev.target.closest("[data-act][data-keyact]");
+  if(n){ev.preventDefault();runAct(n);}});
 const fmt=(n)=>{n=+n||0;return n>=1e6?(n/1e6).toFixed(2)+"M":n>=1e3?(n/1e3).toFixed(1)+"k":""+n;};
 const hhmm=(iso)=>{if(!iso)return"";const d=new Date(iso);return isNaN(d)?"":d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});};
 const OS_REDUCE=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -382,7 +437,28 @@ const jpost=async(u,b)=>{const r=await fetch(u,{method:"POST",headers:{"content-
 function toast(t){const x=$("toast");x.textContent=t;x.classList.add("on");clearTimeout(x._t);x._t=setTimeout(()=>x.classList.remove("on"),2600);}
 function dotFor(s){s=(s||"").toLowerCase();if(["up","healthy","available","ok","ready","online","completed","done","succeeded"].includes(s))return"up";if(["degraded","warn","partial","running","pending","clone_only","waiting_user","queued"].includes(s))return"warn";return"down";}
 const ORB_STATE={listening:"listening",thinking:"thinking",speaking:"speaking",gate:"gate"};
-function setIsland(state,text){const i=$("island");i.className="island"+(state?" "+state:"");$("islandtxt").textContent=text||"idle";if(orbApi)orbApi.setState(ORB_STATE[state]||"idle");}
+// The island is written by ~12 independent callers (gate poll every 4s, state
+// poll every 6s, the mic engine, TTS, ask). Last-writer-wins meant a PENDING
+// CONFIRMATION could be overwritten by "listening" a moment later, which is the
+// one state that must never be hidden. States now carry a rank: a lower-ranked
+// state cannot silently replace a higher-ranked one, and a state clears only
+// when its own owner clears it (or something equal/higher takes over).
+const ISLAND_RANK={locked:5,gate:4,speaking:3,thinking:2,listening:1,"":0};
+let ISLAND_STATE="";
+function setIsland(state,text){
+  state=state||"";
+  const cur=ISLAND_RANK[ISLAND_STATE]??0, next=ISLAND_RANK[state]??0;
+  // Clearing (state "") is always allowed to be requested, but only by
+  // something that is not stepping on a still-active higher state.
+  if(next<cur&&state!=="")return;
+  if(state===""&&cur>=ISLAND_RANK.gate)return;   // gate/locked clear explicitly
+  ISLAND_STATE=state;
+  const i=$("island");i.className="island"+(state?" "+state:"");
+  $("islandtxt").textContent=text||"idle";
+  if(orbApi)orbApi.setState(ORB_STATE[state]||"idle");}
+// Force the island down, for the owner of a high-rank state that is genuinely
+// over (gate resolved, unlock). Bypasses the ladder on purpose.
+function clearIsland(state,text){ISLAND_STATE="";setIsland(state||"",text);}
 setInterval(()=>{$("clock").textContent=new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});},1000);
 /* everything a locked visitor does is logged, throttled */
 let lastLog=0;function auditClient(kind,detail){if(!LOCKED)return;const now=Date.now();if(now-lastLog<800)return;lastLog=now;fetch("/api/auth/log",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({kind,detail})}).catch(()=>{});}
@@ -390,9 +466,12 @@ window.addEventListener("pointerdown",(e)=>{if(LOCKED)auditClient("click",(e.tar
 window.addEventListener("keydown",(e)=>{if(LOCKED)auditClient("key",e.key);},true);
 
 /* ---------------- the orb ---------------- */
-function bootOrb(){if(orbApi||!LIB)return;
+let orbBooting=false;
+async function bootOrb(){if(orbApi||orbBooting||!LIB)return;orbBooting=true;
+  try{await window.__loadOrb();}catch(e){$("orbload").innerHTML='<div class="gnote err">CORE UNAVAILABLE</div>';orbBooting=false;return;}
   try{orbApi=LIB.createOrbScene($("orbroot"),{reduce:!MOTION,quality:(navigator.deviceMemory&&navigator.deviceMemory<=8)?"low":"high"});$("orbload").classList.add("gone");if(VIEW!=="hud")orbApi.pause();setMotionUI();}
-  catch(e){$("orbload").innerHTML='<div class="gnote err">CORE FAILED: '+esc(e.message)+'</div>';}}
+  catch(e){$("orbload").innerHTML='<div class="gnote err">CORE FAILED: '+esc(e.message)+'</div>';}
+  orbBooting=false;}
 // The core animates for as long as the page is open. There is no switch: a still core reads as
 // a frozen system, and every gesture and every word she says is expressed through its movement.
 function setMotionUI(){}
@@ -404,7 +483,7 @@ window.addEventListener("keydown",(e)=>{if(LOCKED)return;
 /* ---------------- the gate: camera, face, unlock ---------------- */
 let faceGate=null,lastFaceAt=0,verifying=false,lastDescriptor=null;
 const RELOCK_MS=120000;
-function setLocked(on){LOCKED=on;document.body.toggleAttribute("data-locked",on);setIsland(on?"locked":"","");$("islandtxt").textContent=on?"locked":"idle";}
+function setLocked(on){LOCKED=on;document.body.toggleAttribute("data-locked",on);clearIsland(on?"locked":"","");$("islandtxt").textContent=on?"locked":"idle";}
 const wait=(ms)=>new Promise(r=>setTimeout(r,ms));
 /* recognised: the capture box glides from the centre into its corner slot while the lock text fades and the core swells */
 async function glideOpen(){const lc=$("lockv").parentElement,to=$("camv").parentElement.getBoundingClientRect(),from=lc.getBoundingClientRect();
@@ -439,13 +518,28 @@ async function startGate(){
   AUTH=s;ENROLLED=!!s.enrolled;
   if(!s.gate||!s.locked){$("boot").classList.add("gone");await unlock(false);return;}
   setLocked(true);
-  boot("LOADING","face recognition model");
-  try{await LIB.loadFaceApi((st)=>boot("LOADING",st));}
-  catch(e){boot("MODEL FAILED",String(e.message||e).slice(0,60));}
+  // Both start together. The camera is instant; the worker has shaders to
+  // compile. As soon as there is a picture the boot screen gets out of the way,
+  // so the wait is spent looking at yourself rather than at a spinner.
+  let recognitionStage="starting";
+  const camReady=LIB.openCamera($("lockv")).then(()=>null).catch((e)=>e);
+  boot("PREPARING","recognition — the first run takes a moment");
+  camReady.then((err)=>{
+    if(err||LOCKED===false)return;
+    $("boot").classList.add("gone");
+    $("locks").textContent="Getting recognition ready — "+recognitionStage+".";
+  });
+  const _lw=$("loadwrap");if(_lw)_lw.classList.add("on");                  // loading sweep on while the model loads
+  try{await LIB.loadFaceApi((st)=>{recognitionStage=st;boot("PREPARING",st);
+        const hint=/warm/i.test(st)?" — first run is slower":"";
+        if($("boot").classList.contains("gone")){if(_lw)_lw.classList.add("on");$("locks").textContent="Loading face recognition — "+st+hint;}});}
+  catch(e){$("boot").classList.add("gone");
+    return pinPath({why:"I could not start face recognition on this machine. Use your PIN.",noCamera:true});}
   boot("CAMERA","opening");
   $("enrolbtn").style.display=ENROLLED?"none":"";
   clearInterval(window._enrolPoll);window._enrolPoll=setInterval(async()=>{if(!LOCKED){clearInterval(window._enrolPoll);return;}
     try{const x=await fetch("/api/auth/status").then(r=>r.json());if(x.enrolled&&!ENROLLED){ENROLLED=true;$("enrolbtn").style.display="none";$("locks").textContent="Enrolled. Scanning for you.";}}catch(e){}},4000);
+  if(_lw)_lw.classList.remove("on");                                       // model ready — stop the sweep
   $("locks").textContent=ENROLLED?"Scanning for you.":"No owner is enrolled yet. Look at the camera and press Enrol, or add photos.";
 
   if(TABS)TABS.postMessage({type:"claim",id:TAB_ID});
@@ -453,8 +547,11 @@ async function startGate(){
   if(s.auth_mode==="pin"){$("boot").classList.add("gone");return pinPath({why:"You started me with --password.",noCamera:true});}
   if(CAM_OWNER){$("boot").classList.add("gone");return pinPath({why:"Friday is already open in another window, and it has the camera.",otherTab:true});}
 
-  try{await LIB.openCamera($("lockv"));window._hasCam=true;holdBeat(true);}
-  catch(e){$("boot").classList.add("gone");return cameraBlocked(e);}
+  const camErr=await camReady;
+  if(camErr){$("boot").classList.add("gone");return cameraBlocked(camErr);}
+  window._hasCam=true;holdBeat(true);
+  $("locks").textContent=ENROLLED?"Scanning for you."
+    :"No owner is enrolled yet. Look at the camera and press Enrol, or add photos.";
   $("boot").classList.add("gone");
   faceGate=new LIB.FaceGate($("lockv"),$("lockc"),{onStage:()=>{},
     onFace:async(desc,box)=>{lastDescriptor=desc;LIB.drawBoxes($("lockc"),$("lockv"),[{box,label:"face"}],{color:"#ffaa30"});
@@ -538,15 +635,36 @@ async function pinSubmit(ev){
 async function enrolLive(){if(!lastDescriptor){$("locks").textContent="Look at the camera first.";return;}
   const r=await fetch("/api/auth/enrol",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({descriptor:lastDescriptor})}).then(x=>x.json());
   if(r.ok){ENROLLED=true;$("enrolbtn").style.display="none";$("locks").textContent="Enrolled. Scanning for you.";}else $("locks").textContent="Enrol failed: "+(r.error||"");}
-async function enrolPhotos(files){if(!files||!files.length)return;$("locks").textContent="Reading "+files.length+" photo(s)";
-  const faceapi=await LIB.loadFaceApi((st)=>{$("lockl").textContent="loading "+st;});let ok=0,skipped=[];
-  for(const f of files){try{const img=await faceapi.bufferToImage(f);const dets=await faceapi.detectAllFaces(img,new faceapi.TinyFaceDetectorOptions({inputSize:416,scoreThreshold:0.5})).withFaceLandmarks(true).withFaceDescriptors();
-      if(dets.length!==1){skipped.push(f.name+": "+dets.length+" faces");continue;}
-      const r=await fetch("/api/auth/enrol",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({descriptor:Array.from(dets[0].descriptor),label:"owner"})}).then(x=>x.json());
-      if(r.ok)ok++;else skipped.push(f.name+": "+(r.error||"refused"));}catch(e){skipped.push(f.name+": "+e.message);}}
+async function enrolPhotos(files){
+  if(!files||!files.length)return;
+  $("locks").textContent="Reading "+files.length+" photo"+(files.length>1?"s":"")+"...";
+  try{await LIB.loadFaceApi((st)=>{$("lockl").textContent=st;});}
+  catch(e){$("locks").textContent="I could not start recognition: "+e.message;return;}
+  $("lockl").textContent="";
+  let ok=0;const skipped=[];
+  for(const f of files){
+    try{
+      const d=await LIB.describeImage(f);          // the worker: no frozen window
+      if(!d){skipped.push(f.name+": no clear face");continue;}
+      const r=await fetch("/api/auth/enrol",{method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({descriptor:d,label:"owner"})}).then(x=>x.json());
+      if(r.ok)ok++;else skipped.push(f.name+": "+(r.error||"refused"));
+    }catch(e){skipped.push(f.name+": "+(e.message||"failed"));}
+    $("locks").textContent="Read "+(ok+skipped.length)+" of "+files.length+"...";
+  }
   ENROLLED=ENROLLED||ok>0;$("enrolbtn").style.display=ENROLLED?"none":"";
-  $("locks").textContent=ok+" photo(s) enrolled"+(skipped.length?". Skipped: "+skipped.join("; "):".");$("lockl").textContent="";}
+  $("locks").textContent=ok+" photo"+(ok===1?"":"s")+" enrolled"+
+    (skipped.length?". Skipped "+skipped.length+": "+skipped.slice(0,3).join("; "):".");
+}
+
 async function unlock(announce,opt){opt=opt||{};if(faceGate){faceGate.stop();faceGate=null;}
+  // The orb is a CDN import plus a WebGL shader compile - seconds on a weak
+  // GPU, and the exact freeze measured earlier on this machine. It must not sit
+  // between "your face is verified" and "you can talk to me": kick it off and
+  // let it arrive when it arrives. Found live 2026-09-02 - the e2e suite's
+  // prompt tests failed only because unlock was waiting on this.
+  bootOrb().catch(()=>{});                     // no-op if the idle callback already built it
+  LAST_EXCHANGE=Date.now();                    // she just greeted you: you are in conversation
   clearInterval(window._camPoll);
   if(!opt.noCamera)LIB&&LIB.cues.unlock();
   if(announce&&!opt.noCamera)await glideOpen();
@@ -565,7 +683,7 @@ async function unlock(announce,opt){opt=opt||{};if(faceGate){faceGate.stop();fac
     $("sidefacet").textContent="signed in by PIN";$("sidehandst").textContent="camera busy";
     $("gnote").textContent="The camera is busy, so gestures and sight are off. I will pick them up when it frees.";}
   if(announce){await wait(250);const hi=opt.noCamera?"Signed in, sir. The camera is busy, so I am listening only.":"Welcome back, sir.";convAdd("Friday",hi);speak(hi);}
-  setTimeout(()=>{try{if(!LISTEN)startListening();}catch(e){}},900);}   // she listens from the moment she knows you
+  AUTO_LISTEN_T=setTimeout(()=>{try{if(!LISTEN)startListening();}catch(e){}},900);}   // she listens from the moment she knows you
 function onLockedResponse(){if(!LOCKED){lockNow(true);}}
 async function lockNow(silent){if(!silent)try{await fetch("/api/auth/lock",{method:"POST"});}catch(e){}
   stopListening();shutUp();if(tracker){tracker.stop();tracker=null;}clearInterval(window._presence);
@@ -575,16 +693,24 @@ async function lockNow(silent){if(!silent)try{await fetch("/api/auth/lock",{meth
       try{const r=await fetch("/api/auth/verify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({descriptor:desc})}).then(x=>x.json());if(r.ok)await unlock(true);else $("locks").textContent="Face seen, not recognised.";}catch(e){}verifying=false;},
     onNoFace:()=>{LIB.drawBoxes($("lockc"),$("lockv"),[],{});}});await faceGate.start();}}
 /* presence: after unlock, keep seeing the owner; two minutes of nobody -> lock again */
-function startPresence(){lastFaceAt=Date.now();clearInterval(window._presence);
+function startPresence(){
+  // --bypass-face means "do not gate on my face" - and locking the room after
+  // two minutes of not seeing a face is gating on his face by another name. So
+  // when the gate is off, presence is off; the camera stays for sight and hands.
+  if(AUTH&&AUTH.gate===false){$("sidefacet").textContent="off";return;}
+  lastFaceAt=Date.now();clearInterval(window._presence);
   const fg=new LIB.FaceGate($("camv"),document.createElement("canvas"),{onFace:()=>{lastFaceAt=Date.now();$("sidefacet").textContent="verified";},onNoFace:()=>{$("sidefacet").textContent="not in view";}});
   fg.light=true;fg.every=4000;fg.start();window._presenceGate=fg;      // presence only; identity was checked at unlock
   window._presence=setInterval(()=>{
     if(document.hidden){lastFaceAt=Date.now();return;}      // another window in front is not "you left"
     if(!LOCKED&&Date.now()-lastFaceAt>RELOCK_MS){convAdd("Friday","I have not seen you for a while. Locking.");lockNow();}},5000);}
 /* hands: gestures are always on once unlocked; the camera is already open */
-async function startHands(){if(tracker||!orbApi)return;$("gnote").className="gnote";
+async function startHands(){if(tracker||!orbApi||!LIB.HandTracker)return;
+  if(/[?&](lite|nogestures)\b/.test(location.search)||LITE_ON()){const g=$("gnote");if(g){g.className="gnote";g.textContent="Gestures off (lite) — GPU saved for the camera.";}return;}
+  $("gnote").className="gnote";
   const t=new LIB.HandTracker($("camv"),$("camc"),{onRotate:(dt,dp)=>orbApi.rotateBy(dt,dp),onZoom:(f)=>orbApi.zoomBy(f),onStage:(s)=>{$("camst").textContent=s==="camera"?"CAMERA":s==="model"?"HAND MODEL":"CAPTURE";},
     onStatus:(s)=>{$("sidemode").textContent=({idle:"standby",spin:"spin",zoom:"zoom"})[s.mode];$("sidehandst").textContent=s.hands?s.hands+" seen":"none";
+      if(orbApi&&orbApi.setGestureBusy)orbApi.setGestureBusy(s.mode!=="idle");   // hand driving -> cheap render, no lag
       if(s.mode!=="idle"&&window._lastMode==="idle")LIB.cues.pinch();if(s.mode==="idle"&&window._lastMode&&window._lastMode!=="idle")LIB.cues.release();window._lastMode=s.mode;}});
   try{await t.start();tracker=t;}catch(err){$("gnote").className="gnote err";$("gnote").textContent="Hand tracking failed: "+String(err&&err.message||err).slice(0,80);}}
 /* ---------------- sight ----------------
@@ -595,10 +721,36 @@ async function startHands(){if(tracker||!orbApi)return;$("gnote").className="gno
 function attending(){return Date.now()-LAST_EXCHANGE<OPEN_WINDOW;}
 setInterval(()=>{if(!LOCKED)$("fmode").classList.toggle("on",attending());},1000);
 
+const CLIP=/\b(clip ?board|what did i copy|what i copied|copied text)\b/i;
+const SEL=/\b(selected|highlighted|this text|the text i|read (it|this|that) (out|aloud|to me)?)\b/i;
+/* Grab what he is looking at, then reason about it -- reading it back verbatim
+   is rarely the point; "what is this", "summarise it", "is this safe" are. */
+async function readDesk(what,question){
+  setIsland("thinking",what==="selection"?"reading your selection":"reading your clipboard");
+  let d;
+  try{ d=await jget("/api/desk?what="+what); }
+  catch(e){ return "I could not reach your clipboard."; }
+  if(!d.ok) return d.message||d.error||"There was nothing there to read.";
+  const body=d.text||"";
+  if(!body.trim()) return "It is empty.";
+  const asked=(question||"").trim();
+  const bare=/\b(read (it|this|that)|what does it say|out loud|aloud)\b/i.test(asked);
+  if(bare) return body.length>600?body.slice(0,600)+" ... that is the first part of it.":body;
+  try{
+    const r=await jpost("/api/ask",{text:asked+"\n\n--- the text he is referring to ("+d.source+") ---\n"+body,history:HIST});
+    return r.reply||body.slice(0,400);
+  }catch(e){ return body.length>600?body.slice(0,600)+" ...":body; }
+}
 const LOOK=/\b(see|look(ing)?|watch|show(ing)?|view|glance|check out|tell me what|what is this|what'?s this|what am i|how do i look|how does (this|it|my)|which (one|is better)|rate|analyz|analys|judge|compare|read (this|the))\b/i;
 const SCREEN=/\b(screen|display|monitor|desktop|this (tab|page|window)|what i'?m looking at|the code|this error|the terminal)\b/i;
 const SUBJECT=/\b(holding|wearing|outfit|shirt|dress|hair|face|background|behind me|room|setup|desk|this|it|me)\b/i;
+/* A request about CODE or FILES is never a look - "add a comment to
+   friday/answer.py quoting three rules" went to the camera because "rules ...
+   you already know" matched LOOK's "tell me what". The brain routes these to
+   files/hermes now, so the page must not intercept them. */
+const CODEWORK=/(\.(py|js|ts|md|json|html|css|txt|yaml|toml|sql|cs|java|go|rs)\b|\b(file|folder|directory|repo|codebase|function|variable|comment|delegate|hermes|refactor|implement|rename|create a|write a|commit|test file)\b)/i;
 function wantsSight(text){
+  if(CODEWORK.test(text)&&!/\b(screen|camera|webcam|monitor|wearing|holding)\b/i.test(text))return null;
   if(!LOOK.test(text))return null;
   if(SCREEN.test(text))return "screen";
   if(SUBJECT.test(text)||/\b(camera|webcam)\b/i.test(text))return "camera";
@@ -626,21 +778,21 @@ function setView(v){if(LOCKED&&v!=="hud"){auditClient("tab",v);toast("Locked. Le
   if(orbApi){v==="hud"?orbApi.resume():orbApi.pause();}
   if(v==="mem"){ensureGraph();pollVault();pollTiers();}
   if(v==="room"){renderRoom();if(!window._DECK)pollDeck();}
-  if(v==="os"){renderOS();if(!ORG)pollOrg();if(!window._MAP)pollMap();}
+  if(v==="os"){renderOS();if(!ORG)pollOrg();if(!window._MAP)pollMap();if(!window._HELPERS)pollHelpers();}
   if(G3){(v==="mem"&&MOTION)?G3.resumeAnimation():G3.pauseAnimation();}}
 
 /* ---------------- status + objective ---------------- */
 function renderChips(s){const c=s.connections||{},a=window._AGENT||{};const st=(n,v)=>`<span class="st ${dotFor(v)}"><i></i>${n}</span>`;
   $("chips").innerHTML=st("MCP",c.mcp_server&&c.mcp_server.status)+st("Hermes",c.hermes&&c.hermes.status)+st("GBrain",c.gbrain&&c.gbrain.status)+st(a.reachable?("Agent · "+a.tools+" tools"):"Agent",a.reachable?"up":"down");
   const o=s.objective||{},m=s.metrics||{};$("objtext").textContent=o.objective||"Nothing running. Say what you want done.";$("objstate").textContent=(o.state||"").toLowerCase();
-  $("objmeta").textContent=o.objective?["since "+hhmm(o.created_at),(m.open_tasks||0)+" tasks open",fmt(m.model_tokens)+" tokens"].filter(Boolean).join("  ·  "):"";
+  $("objmeta").textContent=o.objective?["since "+hhmm(o.created_at),(m.open_tasks||0)+" tasks open (this objective)",fmt((m.all_time&&m.all_time.model_tokens)||0)+" tokens all-time"].filter(Boolean).join("  ·  "):"";
   if(s.build&&s.build.text)$("buildline").textContent=s.build.text.replace(/ pid .*/,"").replace(/^commit /,"build ");}
 
 /* ---------------- organisation ---------------- */
 function renderOrgHud(){if(!ORG)return;$("orgn").textContent=ORG.agents_total+" agents";const c=ORG.chain;
   $("chain").innerHTML=c.map(t=>`<b class="${dotFor(t.status)==='down'?'down':''}" title="${esc(t.detail)}">${esc(t.label)}</b>`).join(' <span class="dim">→</span> ');
   const box=$("teams");box.innerHTML="";const max=Math.max(1,...ORG.divisions.map(d=>d.size));
-  ORG.divisions.forEach(d=>box.appendChild(el(`<div class="trow" role="button" tabindex="0" onclick="openDivision('${esc(d.id)}')" onkeydown="if(event.key==='Enter')openDivision('${esc(d.id)}')"><span>${esc(d.label)}</span><span class="bar"><i style="width:${Math.round(100*d.size/max)}%"></i></span><span class="n">${d.size}</span></div>`)));}
+  ORG.divisions.forEach(d=>box.appendChild(el(`<div class="trow" role="button" tabindex="0" data-act="openDivision" data-keyact data-arg="${esc(d.id)}"><span>${esc(d.label)}</span><span class="bar"><i style="width:${Math.round(100*d.size/max)}%"></i></span><span class="n">${d.size}</span></div>`)));}
 function openDivision(id){setView("os");setTimeout(()=>{const t=document.getElementById("div-"+id);
   if(t){t.scrollIntoView({behavior:"smooth",block:"center"});if(!t.classList.contains("open"))toggleDivision(id);}},90);}
 
@@ -676,7 +828,7 @@ function closeDetail(){$("gdetail").classList.remove("on");}
 async function toggleAdj(){const a=$("gadj");if(a.classList.contains("on")){a.classList.remove("on");return;}try{const rows=await jget("/api/graph/adjacency");$("adjn").textContent=rows.length;$("adjtable").innerHTML=rows.map(r=>`<tr><td>${esc(r.from)}</td><td class="muted">${esc(r.kind)}</td><td>${esc(r.to)}</td></tr>`).join("");a.classList.add("on");}catch(e){toast("adjacency failed: "+e.message);}}
 
 /* ---------------- voice: the only way in ---------------- */
-let LISTEN=false,REC=null,SPEAKING=false,SOUND=true,AC=null,micAn=null,micStream=null,outAn=null,curAudio=null,LEVEL=0,TONE=0;
+let LISTEN=false,REC=null,SPEAKING=false,SOUND=true,AC=null,micAn=null,micStream=null,outAn=null,curAudio=null,LEVEL=0,TONE=0,SPK=0,SPKT=0,speakSeq=0,speakAbort=null;
 /* Only you, not the room. Three cheap filters, in the order of how much they do:
    1. near-field loudness -- your voice at this mic is far louder than a conversation across the room;
    2. the recogniser's own confidence -- cross-talk transcribes badly;
@@ -685,6 +837,37 @@ let UTT_PEAK=0,NOISE=0.02,LAST_EXCHANGE=0;
 const OPEN_WINDOW=45000;                    // once you are talking, keep talking; no name needed
 const MIN_CONF=0.55;
 const STOPW=/^\s*(stop|quiet|shut up|cancel|enough|never ?mind)\s*[.!]?\s*$/i;
+/* The pause rule (owner, 2026-09-02): a mid-sentence pause is NOT the end
+   of a turn. Both engines hand us a "final" chunk the moment the recogniser
+   closes a phrase, and that boundary is a transcription boundary, not a
+   thought boundary -- "I was singing and stopped mid-sentence to think, the
+   system treats the pause as a complete sentence."
+
+   So finals are ACCUMULATED, never sent directly. The window restarts on
+   every chunk; when it lapses with no more speech, one utterance goes out.
+   If nothing arrives within the window that is exactly the rule: the pause
+   was respected, then the turn closed. Interim speech (partials) inside
+   the window holds it open too, so a breath before the next clause never
+   commits early. Tunable, persisted: localStorage fridayPauseMs. */
+let PAUSE_MS=(function(){try{const v=parseInt(localStorage.getItem("fridayPauseMs")||"",10);if(v>=300&&v<=8000)return v;}catch(e){}return 1800;})();
+let TURN_BUF="",TURN_T=null,TURN_PEAK=0,TURN_CONF=1;
+function turnPush(fin,peak,conf){
+  TURN_BUF=(TURN_BUF+" "+fin).trim();TURN_PEAK=Math.max(TURN_PEAK,peak||0);if(conf>0)TURN_CONF=Math.min(TURN_CONF,conf);
+  setIsland("listening",TURN_BUF.slice(-60));turnArm();}
+function turnArm(){clearTimeout(TURN_T);TURN_T=setTimeout(turnCommit,PAUSE_MS);}
+function turnHold(){if(TURN_BUF)turnArm();}            // a partial: he is still talking
+function turnCommit(){
+  clearTimeout(TURN_T);TURN_T=null;const text=TURN_BUF.trim(),peak=TURN_PEAK,conf=TURN_CONF;
+  TURN_BUF="";TURN_PEAK=0;TURN_CONF=1;if(!text)return;
+  const near=peak===0||peak>Math.max(0.05,NOISE*2.2), sure=conf>=MIN_CONF;
+  if(!near){note("too far from the mic");return;}
+  if(!sure){note("did not catch that");return;}
+  logAction("turn closed after "+PAUSE_MS+"ms of quiet");
+  handleUtterance(text);}
+function turnDrop(){clearTimeout(TURN_T);TURN_T=null;TURN_BUF="";TURN_PEAK=0;TURN_CONF=1;}
+function setPauseMs(ms){ms=Math.max(300,Math.min(8000,ms|0));PAUSE_MS=ms;try{localStorage.setItem("fridayPauseMs",String(ms));}catch(e){}logAction("pause window → "+ms+"ms");}
+function getPauseMs(){return PAUSE_MS;}
+function turnOpen(){return TURN_BUF;}                     // what is held, for tests and the island
 function setMicUI(){const m=$("mic");m.classList.toggle("on",LISTEN);m.setAttribute("aria-pressed",LISTEN?"true":"false");m.setAttribute("aria-label",LISTEN?"Mute microphone":"Unmute microphone");}
 async function startMeter(){try{if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();if(AC.state==="suspended")await AC.resume();micStream=await navigator.mediaDevices.getUserMedia({audio:true});const src=AC.createMediaStreamSource(micStream);micAn=AC.createAnalyser();micAn.fftSize=512;src.connect(micAn);}catch(e){micAn=null;}}
 function stopMeter(){try{if(micStream)micStream.getTracks().forEach(t=>t.stop());}catch(e){}micStream=null;micAn=null;}
@@ -697,58 +880,302 @@ function meterLoop(){const a=LISTEN?analyse(micAn):{level:0,tone:0,bins:null},o=
   const lv=Math.max(a.level,o.level),tn=lv>0.02?(a.level>=o.level?a.tone:o.tone):0;LEVEL+=(lv-LEVEL)*0.35;TONE+=(tn-TONE)*0.25;
   if(LISTEN&&!SPEAKING){UTT_PEAK=Math.max(UTT_PEAK,a.level);
     NOISE=a.level<NOISE?NOISE+(a.level-NOISE)*0.25:NOISE+(a.level-NOISE)*0.002;}   // falls fast, rises slowly: the room, not you
-  if(orbApi){orbApi.setLevel(LEVEL);orbApi.setTone(TONE);}
+  // The core moves to HER voice only -- her speaking, not the room or the
+  // owner's mic (which used to make it twitch at his every word). The dock
+  // meter below still shows his input; the sphere is hers.
+  SPK+=((SPEAKING?o.level:0)-SPK)*0.35; SPKT+=((SPEAKING?o.tone:0)-SPKT)*0.25;
+  if(orbApi){orbApi.setLevel(SPK);orbApi.setTone(SPKT);}
   if((meterN++&1)||document.hidden){requestAnimationFrame(meterLoop);return;}      // bars at 30 Hz is plenty
   const bins=a.bins||o.bins;const n=meterBars.length;
   meterBars.forEach((b,i)=>{let v=0;if(bins){const from=Math.floor(i*bins.length/n/2),to=Math.max(from+1,Math.floor((i+1)*bins.length/n/2));let m=0;for(let k=from;k<to;k++)m=Math.max(m,bins[k]);v=m/255;}b.style.transform="scaleY("+(0.08+v*0.92)+")";b.style.opacity=.3+v*.7;});
   vizBars.forEach((b,i)=>{const v=SPEAKING?Math.max(0,o.level*(0.6+Math.sin(Date.now()/90+i)*0.4)):0;b.style.transform="scaleY("+(0.2+v*0.8)+")";b.style.opacity=.5+v*.5;});
   requestAnimationFrame(meterLoop);}
-function idleIsland(){setIsland(LISTEN?"listening":"",LISTEN?"listening":"idle");}
+// Called when speaking/thinking genuinely ends, so it must be able to step DOWN
+// the ladder. It still refuses to clear a pending confirmation: a gate is
+// released only by renderToolGates() once the gate itself is gone.
+function idleIsland(){if(ISLAND_STATE==="gate"||ISLAND_STATE==="locked")return;
+  clearIsland(LISTEN?"listening":"",LISTEN?"listening":"idle");}
 /* why she stayed quiet -- shown in the island, never spoken */
 function note(why){if(!LISTEN)return;$("islandtxt").textContent=why;clearTimeout(window._noteT);window._noteT=setTimeout(idleIsland,2200);}
-function shutUp(){if(curAudio){try{curAudio.pause();}catch(e){}curAudio=null;}try{window.speechSynthesis&&speechSynthesis.cancel();}catch(e){}SPEAKING=false;if(!LOCKED)idleIsland();}
-function startListening(){if(LOCKED)return;const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){convAdd("Friday","Voice input needs Chrome or Edge.");return;}
-  LISTEN=true;setMicUI();startMeter();setIsland("listening","listening");try{localStorage.setItem("fridayListen","1");}catch(e){}
+function _markSpeaking(on){
+  document.querySelectorAll(".log-line.friday.speaking").forEach(e=>e.classList.remove("speaking"));
+  if(on){const l=document.querySelectorAll("#logbox .log-line.friday");if(l.length)l[l.length-1].classList.add("speaking");}
+}
+function shutUp(){
+  speakSeq++;                                     // anything generating for an older turn is now stale
+  if(speakAbort){try{speakAbort.abort();}catch(e){}speakAbort=null;}
+  if(curAudio){try{curAudio.pause();}catch(e){}curAudio=null;}
+  try{window.speechSynthesis&&speechSynthesis.cancel();}catch(e){}
+  SPEAKING=false;_markSpeaking(false);if(!LOCKED)idleIsland();
+}
+/* Microphone device. SpeechRecognition binds to the WINDOWS DEFAULT input and
+   cannot be pointed at a device from JS, so we follow the OS default and
+   re-attach whenever it changes: unplug a headset and Windows falls back to the
+   built-in mic -- this restarts recognition on the new default so Jarvis keeps
+   going without a manual step. Plug a headset back in (Windows usually makes it
+   the default) and the next restart binds to it. */
+let _micWired=false;
+/* Speech engine. "browser" = the built-in SpeechRecognition (OS-default mic,
+   no device choice). "deepgram" = stream the CHOSEN mic (headset preferred) to
+   Deepgram over /api/stt, which DOES let us pick the device and hot-swap it.
+   Opt-in; the toggle sits on the transcript header. Default stays browser. */
+let STT_MODE=(()=>{try{
+  // Profiles from before "auto" existed persisted the old default ("browser")
+  // without the boss ever choosing it - which pins them to the laptop mic and
+  // quietly disables the headset behaviour. Seen live on 2026-09-02: the
+  // toggle read "browser" on a machine that had never been switched. Only a
+  // value the boss picked by clicking the toggle counts; anything else is auto.
+  const saved=localStorage.getItem("fridaySTT"),chosen=localStorage.getItem("fridaySTTChosen")==="1";
+  return (chosen&&saved)?saved:"auto";}catch(e){return "auto";}})();
+let DG=null,dgAC=null,dgNode=null,dgSrc=null,dgMute=null,dgStream=null,dgWantStop=false,dgOpened=false;
+async function activeInput(){
+  try{const ds=await navigator.mediaDevices.enumerateDevices();
+    const ins=ds.filter(d=>d.kind==="audioinput"&&d.deviceId&&d.deviceId!=="communications");
+    const def=ins.find(d=>d.deviceId==="default")||ins[0];
+    const label=((def&&def.label)||"microphone").replace(/^Default\s*-\s*/i,"");
+    const headset=ins.find(d=>/head\s?set|head\s?phone|earbud|airpod|hands[-\s]?free/i.test(d.label));
+    const defIsHeadset=!!def&&/head\s?set|head\s?phone|earbud|airpod|hands[-\s]?free/i.test(def.label||"");
+    return {label, headset, defIsHeadset, count:ins.length};
+  }catch(e){return {label:"microphone", headset:null, defIsHeadset:false, count:0};}
+}
+function wireMicDevice(){
+  if(_micWired||!navigator.mediaDevices||!navigator.mediaDevices.addEventListener)return;
+  _micWired=true;
+  navigator.mediaDevices.addEventListener("devicechange",async()=>{
+    if(!LISTEN)return;
+    const d=await activeInput();
+    logAction("audio device changed → now on "+d.label+" · re-attaching");
+    if(STT_MODE==="deepgram"){stopDeepgram();setTimeout(()=>{if(LISTEN&&STT_MODE==="deepgram")startDeepgram();},400);return;}
+    stopMeter();try{if(REC)REC.stop();}catch(e){}      // onend restarts REC on the new OS default while LISTEN is true
+    setTimeout(()=>{if(LISTEN)startMeter();},400);
+  });
+}
+async function announceMic(){
+  const d=await activeInput();
+  logAction("listening on "+d.label);
+  if(d.headset&&!d.defIsHeadset)
+    logAction("headset detected but Windows' default input is "+d.label+" — set the headset as default in Sound settings to speak through it");
+}
+/* ---- Deepgram STT: the device-selectable path (headset preferred) ---- */
+async function preferredMicId(){
+  try{const ds=await navigator.mediaDevices.enumerateDevices();
+    const ins=ds.filter(x=>x.kind==="audioinput"&&x.deviceId&&x.deviceId!=="communications"&&x.deviceId!=="default");
+    const hs=ins.find(x=>/head\s?set|head\s?phone|earbud|airpod|hands[-\s]?free/i.test(x.label||""));
+    return hs?hs.deviceId:null;                          // null -> let getUserMedia use the default
+  }catch(e){return null;}
+}
+async function resolveEngine(){
+  if(STT_MODE==="deepgram")return "deepgram";
+  if(STT_MODE==="browser")return "browser";
+  // auto: a headset is only reachable through Deepgram, so use it when one is
+  // attached; otherwise the browser recogniser on the default mic is fine.
+  try{return (await preferredMicId())?"deepgram":"browser";}catch(e){return "browser";}
+}
+async function startDeepgram(){
+  if(DG||dgAC)return;
+  dgWantStop=false;dgOpened=false;
+  let stream,id=null;
+  try{id=await preferredMicId();
+    const _c={echoCancellation:true,noiseSuppression:true,autoGainControl:true};   // don't transcribe her own voice
+    stream=await navigator.mediaDevices.getUserMedia({audio:id?Object.assign({deviceId:{exact:id}},_c):_c});
+  }catch(e){logAction("mic capture failed ("+(e&&e.message||e)+") — using the browser recogniser");stopDeepgram();if(LISTEN)startBrowserSR();return;}
+  dgStream=stream;
+  let devLabel="the default microphone";
+  try{const ds=await navigator.mediaDevices.enumerateDevices();const dv=ds.find(x=>x.deviceId===id);
+      if(dv&&dv.label)devLabel=dv.label;else devLabel=(await activeInput()).label;}catch(e){}
+  logAction("Deepgram STT · listening on "+devLabel);
+  try{dgAC=new (window.AudioContext||window.webkitAudioContext)();if(dgAC.state==="suspended")await dgAC.resume();}catch(e){}
+  // Drive the voice-intensity meter from the CHOSEN mic straight away, so the
+  // bar moves (and reflects the headset, not the laptop) even before the socket
+  // is up. dgSrc is reused for the recogniser tap below.
+  try{if(dgAC){dgSrc=dgAC.createMediaStreamSource(stream);micStream=stream;micAn=dgAC.createAnalyser();micAn.fftSize=512;dgSrc.connect(micAn);}}catch(e){}
+  const rate=Math.round((dgAC&&dgAC.sampleRate)||48000);
+  const proto=location.protocol==="https:"?"wss":"ws";
+  DG=new WebSocket(proto+"://"+location.host+"/api/stt?rate="+rate);
+  DG.binaryType="arraybuffer";
+  DG.onmessage=(e)=>{try{const m=JSON.parse(e.data);
+    if(m.type==="transcript"){ if(m.final&&(m.text||"").trim()){turnPush(m.text.trim(),0,0);}
+      else if(!m.final&&m.text){turnHold();setIsland("listening",(TURN_BUF+" "+m.text).trim().slice(-60));} }
+    else if(m.type==="error"){convAdd("Friday","Deepgram STT unavailable ("+m.error+") — using the browser mic.");dgWantStop=true;stopDeepgram();if(LISTEN)startBrowserSR();}
+  }catch(err){}};
+  DG.onclose=()=>{const opened=dgOpened;DG=null;if(!dgWantStop&&opened&&LISTEN&&STT_MODE!=="browser"){stopDeepgram();setTimeout(()=>{if(LISTEN&&STT_MODE!=="browser"&&!DG)startDeepgram();},700);}};
+  DG.onerror=()=>{};
+  await new Promise((res)=>{DG.onopen=res;setTimeout(res,4000);});
+  if(!DG||DG.readyState!==1){logAction("Deepgram STT unreachable — restart the UI server so /api/stt exists. Using the browser mic for now.");stopDeepgram();if(LISTEN)startBrowserSR();return;}
+  try{
+    if(!dgSrc)dgSrc=dgAC.createMediaStreamSource(stream);
+    dgNode=dgAC.createScriptProcessor(16384,1,1);         // big buffer -> ~3 callbacks/sec -> minimal main-thread lag
+    dgMute=dgAC.createGain();dgMute.gain.value=0;         // never play your own mic back through the speakers
+    dgNode.onaudioprocess=(ev)=>{ if(!DG||DG.readyState!==1)return;
+      const f=ev.inputBuffer.getChannelData(0),pcm=new Int16Array(f.length);
+      for(let i=0;i<f.length;i++){let s=f[i];s=s<-1?-1:s>1?1:s;pcm[i]=s<0?s*0x8000:s*0x7fff;}
+      DG.send(pcm.buffer);};
+    dgSrc.connect(dgNode);dgNode.connect(dgMute);dgMute.connect(dgAC.destination);
+    dgOpened=true;
+  }catch(e){convAdd("Friday","Audio capture failed: "+(e&&e.message||e));}
+}
+function stopDeepgram(){
+  dgWantStop=true;
+  try{if(dgNode){dgNode.onaudioprocess=null;dgNode.disconnect();}}catch(e){}
+  try{if(dgMute)dgMute.disconnect();}catch(e){}
+  try{if(dgSrc)dgSrc.disconnect();}catch(e){}
+  try{if(dgStream)dgStream.getTracks().forEach(t=>t.stop());}catch(e){}
+  try{if(DG){try{DG.send("__close__");}catch(e){}DG.close();}}catch(e){}
+  try{if(dgAC)dgAC.close();}catch(e){}
+  DG=null;dgNode=null;dgMute=null;dgSrc=null;dgStream=null;dgAC=null;micAn=null;micStream=null;
+}
+function setSTTMode(m){STT_MODE=(m==="deepgram"||m==="browser")?m:"auto";try{localStorage.setItem("fridaySTT",STT_MODE);}catch(e){}const el=$("sttmode");if(el)el.textContent="voice: "+STT_MODE;}
+function toggleSTT(){const was=LISTEN;if(was){turnDrop();stopListening();}
+  setSTTMode({auto:"deepgram",deepgram:"browser",browser:"auto"}[STT_MODE]||"auto");
+  try{localStorage.setItem("fridaySTTChosen","1");}catch(e){}   // a click is a choice; a default is not
+  logAction("speech engine → "+STT_MODE+(STT_MODE==="deepgram"?" (headset, Deepgram)":STT_MODE==="browser"?" (OS default mic, browser)":" (auto — headset when attached)"));
+  if(was)setTimeout(startListening,250);}
+try{setSTTMode(STT_MODE);}catch(e){}
+/* Low-power mode for weaker GPUs (e.g. GTX 1650): lighter orb + gestures off.
+   Persisted so it survives a Friday.exe relaunch; applied at load, so toggling
+   it reloads the page. */
+function LITE_ON(){try{return localStorage.getItem("fridayLite")==="1"||/[?&]lite\b/.test(location.search);}catch(e){return /[?&]lite\b/.test(location.search);}}
+function initLite(){const el=$("litebtn");if(el)el.textContent="lite: "+(LITE_ON()?"on":"off");}
+function toggleLite(){let on=false;try{on=localStorage.getItem("fridayLite")==="1";localStorage.setItem("fridayLite",on?"0":"1");}catch(e){}location.reload();}
+try{initLite();}catch(e){}
+async function startListening(){if(LOCKED)return;
+  LISTEN=true;setMicUI();wireMicDevice();setIsland("listening","listening");try{localStorage.setItem("fridayListen","1");}catch(e){}
+  const eng=await resolveEngine();
+  if(!LISTEN)return;                                    // stopped while resolving the device
+  if(eng==="deepgram"){startDeepgram();return;}
+  startBrowserSR();}
+function startBrowserSR(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){convAdd("Friday","Voice input needs Chrome or Edge.");LISTEN=false;setMicUI();return;}
+  startMeter();announceMic();
   REC=new SR();REC.lang="en-US";REC.continuous=true;REC.interimResults=true;
   REC.onerror=(e)=>{if(e&&e.error==="not-allowed"){stopListening();convAdd("Friday","The microphone is blocked. Allow it in the address bar, then unmute.");}};
-  REC.onend=()=>{if(LISTEN){try{REC.start();}catch(e){setTimeout(()=>{try{REC.start();}catch(e2){}},300);}}};
+  REC.onend=()=>{if(LISTEN&&STT_MODE!=="deepgram"&&!DG){try{REC.start();}catch(e){setTimeout(()=>{try{REC.start();}catch(e2){}},300);}}};
   REC.onresult=(e)=>{let fin="",it="",conf=0;for(let k=e.resultIndex;k<e.results.length;k++){const r=e.results[k][0];
       if(e.results[k].isFinal){fin+=r.transcript;conf=Math.max(conf,r.confidence||0);}else it+=r.transcript;}
     const heard=(fin||it||"").trim();if(!heard)return;
-    if(SPEAKING&&UTT_PEAK>Math.max(0.1,NOISE*3))shutUp();                 // barge-in, but only for a close voice
-    if(!fin)return;
+    // Barge-in, immediate: runs on interim results, so "stop" (or just talking
+    // over her at close range) cuts the audio the instant it is heard.
+    if(SPEAKING&&(STOPW.test(heard)||UTT_PEAK>Math.max(0.06,NOISE*2.4))){shutUp();logAction("stopped -- you spoke");}
+    if(!fin){turnHold();return;}
     const text=fin.trim(),peak=UTT_PEAK;UTT_PEAK=0;
-    if(STOPW.test(text))return;
-    const near=peak>Math.max(0.09,NOISE*2.6), sure=conf===0||conf>=MIN_CONF,
-          named=/\bfriday\b/i.test(text), open=Date.now()-LAST_EXCHANGE<OPEN_WINDOW;
-    if(!near){note("not you · too far");return;}
-    if(!sure){note("unclear");return;}
-    if(text.split(/\s+/).length<2&&!named){note("too short");return;}
-    if(!named&&!open){note("say Friday first");return;}
-    handleUtterance(text);};
+    if(STOPW.test(text)){turnDrop();return;}
+    turnPush(text,peak,conf);};
   try{REC.start();}catch(e){}}
-function stopListening(){LISTEN=false;setMicUI();try{if(REC)REC.stop();}catch(e){}REC=null;stopMeter();try{localStorage.setItem("fridayListen","0");}catch(e){}if(!SPEAKING&&!LOCKED)setIsland("","idle");}
+var AUTO_LISTEN_T=0;   // the pending auto-listen after unlock; a mute inside that 900ms must stick
+function stopListening(){LISTEN=false;clearTimeout(AUTO_LISTEN_T);
+  // Mute is YOUR mic, never her voice: nothing here touches speak()/curAudio.
+  // Whatever you had already said is sent, not discarded - muting mid-sentence
+  // is how a turn ends when the room gets loud, not a request to forget it.
+  if(turnOpen())turnCommit();else turnDrop();
+  setMicUI();stopDeepgram();try{if(REC)REC.stop();}catch(e){}REC=null;stopMeter();try{localStorage.setItem("fridayListen","0");}catch(e){}if(!SPEAKING&&!LOCKED)idleIsland();}
 function toggleMic(){if(LOCKED){toast("Locked. Let me see you first.");return;}LISTEN?stopListening():startListening();}
-function toggleSound(){SOUND=!SOUND;const b=$("snd");b.classList.toggle("muted",!SOUND);b.setAttribute("aria-pressed",SOUND?"true":"false");if(!SOUND)shutUp();}
-async function speak(text){if(!SOUND||!text)return;shutUp();
-  try{const r=await fetch("/api/tts?text="+encodeURIComponent(text.slice(0,800)));if(!r.ok)throw new Error("tts "+r.status);const a=new Audio(URL.createObjectURL(await r.blob()));curAudio=a;
-    if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();if(AC.state==="suspended")await AC.resume();
-    try{const src=AC.createMediaElementSource(a);outAn=AC.createAnalyser();outAn.fftSize=512;src.connect(outAn);outAn.connect(AC.destination);}catch(e){}
-    a.onplay=()=>{SPEAKING=true;setIsland("speaking",text.slice(0,70));};a.onended=a.onpause=()=>{if(curAudio===a){SPEAKING=false;curAudio=null;idleIsland();}};await a.play();}
-  catch(e){if(!window.speechSynthesis)return;const u=new SpeechSynthesisUtterance(text);u.rate=1.05;u.onstart=()=>{SPEAKING=true;setIsland("speaking",text.slice(0,70));};u.onend=()=>{SPEAKING=false;idleIsland();};speechSynthesis.speak(u);}}
+function toggleSound(){SOUND=!SOUND;const b=$("snd");b.classList.toggle("muted",!SOUND);b.setAttribute("aria-pressed",SOUND?"true":"false");b.setAttribute("aria-label",SOUND?"Mute Friday's voice":"Unmute Friday's voice");if(!SOUND)shutUp();}
+function _sentences(text){
+  const raw=(text||"").replace(/\s+/g," ").match(/[^.!?]+[.!?]+|[^.!?]+$/g)||[text];
+  const out=[];                                   // merge tiny fragments so we do not over-chunk
+  for(const r of raw){const p=r.trim();if(!p)continue;
+    if(out.length&&out[out.length-1].length<44)out[out.length-1]+=" "+p;else out.push(p);}
+  return out.length?out:[text];
+}
+function _play(blob,mySeq){
+  return new Promise((resolve)=>{
+    if(mySeq!==speakSeq)return resolve();
+    const a=new Audio(URL.createObjectURL(blob));curAudio=a;
+    try{if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();if(AC.state==="suspended")AC.resume();
+      const src=AC.createMediaElementSource(a);outAn=AC.createAnalyser();outAn.fftSize=512;src.connect(outAn);outAn.connect(AC.destination);}catch(e){}
+    a.onplay=()=>{SPEAKING=true;_markSpeaking(true);setIsland("speaking","");};
+    a.onended=a.onpause=()=>{if(curAudio===a)curAudio=null;resolve();};
+    a.play().catch(()=>resolve());
+  });
+}
+async function speak(text){
+  if(!SOUND||!text)return;
+  shutUp();
+  const mySeq=++speakSeq, parts=_sentences(text);
+  for(let i=0;i<parts.length;i++){
+    if(mySeq!==speakSeq)return;                    // a newer turn took over
+    const ac=new AbortController();speakAbort=ac;
+    let blob=null;
+    try{const r=await fetch("/api/tts?text="+encodeURIComponent(parts[i].slice(0,800)),{signal:ac.signal});
+        if(mySeq!==speakSeq)return; if(r.ok)blob=await r.blob();}
+    catch(e){if(mySeq!==speakSeq||ac.signal.aborted)return;}
+    if(mySeq!==speakSeq)return;
+    if(blob)await _play(blob,mySeq);
+    else if(window.speechSynthesis){               // per-part fallback if TTS is down
+      await new Promise((res)=>{const u=new SpeechSynthesisUtterance(parts[i]);u.rate=1.05;
+        u.onstart=()=>{SPEAKING=true;_markSpeaking(true);setIsland("speaking","");};u.onend=res;u.onerror=res;
+        speechSynthesis.speak(u);});
+    }
+  }
+  if(mySeq===speakSeq){SPEAKING=false;_markSpeaking(false);if(!LOCKED)idleIsland();}
+}
 
 /* ---------------- what she does with what she hears ---------------- */
 let HIST=[];
-function convAdd(who,text){const c=$("conv");const j=who!=="you";c.appendChild(el(`<div><span class="w ${j?"j":""}">${esc(who)}</span><span class="t ${j?"j":""}">${esc(text)}</span></div>`));while(c.children.length>6)c.removeChild(c.firstChild);c.scrollTop=c.scrollHeight;}
+function _logRow(kind,who,text){const box=$("logbox");if(!box)return;
+  const code=/```|(^|\n)\s{2,}\S|function |=>|;\s*$|\bconst \b|\bimport \b/.test(text)&&text.length>60;
+  box.appendChild(el(`<div class="log-line ${kind}${code?" code":""}"><span class="w">${esc(who)}</span><span class="t">${esc(text)}</span></div>`));
+  while(box.children.length>200)box.removeChild(box.firstChild);
+  box.scrollTop=box.scrollHeight;}
+function clearLog(){const b=$("logbox");if(b)b.innerHTML="";}
+function logAction(text){_logRow("act","·",text);}
+function convAdd(who,text){
+  const j=who!=="you";
+  // the dock keeps the last few lines; the transcript keeps everything, scrollable
+  const c=$("conv");if(c){c.appendChild(el(`<div><span class="w ${j?"j":""}">${esc(who)}</span><span class="t ${j?"j":""}">${esc(text)}</span></div>`));while(c.children.length>6)c.removeChild(c.firstChild);c.scrollTop=c.scrollHeight;}
+  _logRow(j?"friday":"you", j?"friday":"you", text);
+}
+function sendAsk(){const i=$("asktext");if(!i)return;const t=i.value.trim();if(!t)return;i.value="";handleUtterance(t);}
 async function handleUtterance(text){const low=text.toLowerCase();LAST_EXCHANGE=Date.now();
   if(/\bfriday\b/.test(low)){const rest=low.replace(/.*\bfriday\b[,.!]?\s*/,"").trim();if(!rest){convAdd("you",text);convAdd("Friday","Yes, sir.");speak("Yes, sir.");return;}text=rest;}
   if(/^\s*(lock|lock (it|up|yourself)|go to sleep)\s*[.!]?$/.test(low)){convAdd("you",text);convAdd("Friday","Locking.");speak("Locking.");setTimeout(lockNow,900);return;}
+  if(CLIP.test(low)||SEL.test(low)){
+    convAdd("you",text);
+    const what=CLIP.test(low)?"clipboard":"selection";
+    logAction("read "+what);
+    const answer=await readDesk(what,text);
+    convAdd("Friday",answer);speak(answer);LAST_EXCHANGE=Date.now();return;
+  }
   const sight=wantsSight(text);
-  if(sight){convAdd("you",text);const d=await look(sight,text);convAdd("Friday",d);speak(d);LAST_EXCHANGE=Date.now();return;}
+  if(sight){convAdd("you",text);logAction(sight==="screen"?"read the screen":"looked through the camera");const d=await look(sight,text);convAdd("Friday",d);speak(d);LAST_EXCHANGE=Date.now();return;}
   askJarvis(text);}
 async function askJarvis(text){text=(text||"").trim();if(!text||LOCKED)return;LAST_EXCHANGE=Date.now();convAdd("you",text);HIST.push({role:"user",text});HIST=HIST.slice(-16);setIsland("thinking","thinking");
-  try{const d=await jpost("/api/ask",{text,history:HIST});const rep=d.reply||"(no reply)";convAdd("Friday",rep);HIST.push({role:"jarvis",text:rep});speak(rep);if(d.action==="browser.open")toast("Opened in the gated browser: "+(d.status||""));}
+  try{const d=await jpost("/api/ask",{text,history:HIST});const rep=d.reply||"(no reply)";
+    // Log what the system actually DID, alongside what it said.
+    if(d.action)logAction(d.action.replace(/[._]/g," ")+(d.status?" · "+d.status:""));
+    if(d.used_capabilities&&d.used_capabilities.length)logAction("used "+[...new Set(d.used_capabilities)].join(", "));
+    if(d.latency_note)logAction("slow · "+d.latency_note);
+    convAdd("Friday",rep);HIST.push({role:"jarvis",text:rep});speak(rep);if(d.action==="browser.open")toast("Opened in the gated browser: "+(d.status||""));
+    if(d.work_run_id)followHermes(d.work_run_id);}
   catch(e){if(e.message!=="locked"){convAdd("Friday","I could not reach my brain: "+e.message);}idleIsland();}}
+
+/* Hermes progress, spoken. After a delegation the page follows the run:
+   every time the bridge's progress `seq` changes she says the new line
+   ("Hermes is editing policy.py - step 4, 40s in"), and when it settles she
+   reads the result once and stops. Between changes: silence, not the same
+   sentence every poll. Owner (2026-09-02): "it does not tell me anything
+   time to time - updates are needed for my clarification". */
+const HERMES_FOLLOW={};                                 // work_run_id -> {seq, said, lastSpokeAt}
+const HERMES_MIN_GAP=12000;                             // never more than one update per 12s per run
+function followHermes(id){if(!id||HERMES_FOLLOW[id])return;HERMES_FOLLOW[id]={seq:-1,done:false,lastSpokeAt:0};logAction("following hermes "+id);pollHermes();}
+function hermesFollowing(){return Object.keys(HERMES_FOLLOW);}  // for tests
+function soundOn(){return SOUND;}                                // for tests
+async function pollHermes(){
+  const ids=Object.keys(HERMES_FOLLOW).filter(k=>!HERMES_FOLLOW[k].done);if(!ids.length||LOCKED)return;
+  let r;try{r=await jget("/api/hermes/progress?ids="+encodeURIComponent(ids.join(",")));}catch(e){return;}
+  for(const run of (r.runs||[])){
+    const f=HERMES_FOLLOW[run.work_run_id];if(!f)continue;
+    const settled=/^(COMPLETE|PARTIAL|FAILED)$/.test(run.status||"");
+    if(settled){f.done=true;
+      const head=run.status==="COMPLETE"?"Hermes is done, sir.":run.status==="PARTIAL"?"Hermes stopped part way, sir.":"Hermes could not finish, sir.";
+      const body=(run.result||"").replace(/```[\s\S]*?```/g," (code omitted) ").replace(/\s+/g," ").trim().slice(0,600);
+      const say=head+(body?" "+body:"");convAdd("Friday",say);logAction("hermes "+run.status.toLowerCase()+" · "+run.tools+" steps");speak(say);continue;}
+    if(run.seq!==f.seq&&run.line&&Date.now()-f.lastSpokeAt>(window.HERMES_MIN_GAP_OVERRIDE??HERMES_MIN_GAP)){
+      f.seq=run.seq;f.lastSpokeAt=Date.now();convAdd("Friday",run.line);logAction("hermes · "+run.line);
+      if(!SPEAKING)speak(run.line);                     // never talk over herself or over you
+    } else if(run.seq!==f.seq){f.seq=run.seq;}         // changed, but too soon: note it silently
+  }
+}
 
 /* ---------------- control room ---------------- */
 function sec(title,meta,body){return `<section class="sec"><h2>${esc(title)}${meta?` <span>${esc(meta)}</span>`:""}</h2>${body}</section>`;}
@@ -757,13 +1184,13 @@ function renderRoom(){const s=STATE;if(!s.system){$("cr").innerHTML='<div class=
   const m=s.metrics||{},sy=s.system||{},c=s.connections||{},mem=window._MEM||{},deck=window._DECK||{},gates=window._GATES||{},o=s.objective||{},al=window._ACCESS||[];
   const bar=(v)=>`<div class="bar"><i class="${v>85?"hot":""}" style="width:${Math.min(100,v)}%"></i></div>`;let L="",R="";
   L+=sec("Objective",(o.state||"idle").toLowerCase(),`<div style="font-size:14px;line-height:1.5;max-width:64ch">${esc(o.objective||"Nothing running.")}</div>${o.objective?`<div class="muted small">since ${hhmm(o.created_at)}</div>`:""}
-    <div class="stats"><div class="stat"><div class="l">Model tokens</div><div class="big">${fmt(m.model_tokens)}</div></div><div class="stat"><div class="l">Open tasks</div><div class="big">${m.open_tasks||0}</div></div><div class="stat"><div class="l">Average run</div><div class="big">${m.avg_run_secs||0}<span class="u">s</span></div></div><div class="stat"><div class="l">Memory facts</div><div class="big">${(mem.local&&mem.local.count||0)+(mem.gbrain&&mem.gbrain.count||0)}</div></div></div>
+    <div class="stats"><div class="stat"><div class="l">Model tokens (all-time)</div><div class="big">${fmt((m.all_time&&m.all_time.model_tokens)||0)}</div></div><div class="stat"><div class="l">Open tasks (this objective)</div><div class="big">${m.open_tasks||0}</div></div><div class="stat"><div class="l">Average run</div><div class="big">${m.avg_run_secs||0}<span class="u">s</span></div></div><div class="stat"><div class="l">Memory facts</div><div class="big">${(mem.local&&mem.local.count||0)+(mem.gbrain&&mem.gbrain.count||0)}</div></div></div>
     <div class="muted small">${(m.runs_by_state||[]).map(r=>r.n+" "+r.state).join("  ·  ")}</div>`);
   const bg=(gates.browser_gates||[]).concat(gates.tool_gates||[]);
-  const gh=bg.map(g=>`<div class="gate"><b>${esc(g.action)}</b><div class="muted small">${esc(g.question||"")} · ${Math.round(g.seconds_left)}s left</div><div class="a"><button onclick="gateApprove('${g.nonce}')">Approve</button><button class="quiet" onclick="gateReject('${g.nonce}')">Reject</button></div></div>`).join("");
+  const gh=bg.map(g=>`<div class="gate"><b>${esc(g.action)}</b><div class="muted small">${esc(g.question||"")} · ${Math.round(g.seconds_left)}s left</div><div class="a"><button data-act="gateApprove" data-arg="${esc(g.nonce)}">Approve</button><button class="quiet" data-act="gateReject" data-arg="${esc(g.nonce)}">Reject</button></div></div>`).join("");
   const dur=(gates.durable&&gates.durable.waiting_runs||[]).map(r=>row("waiting on you",esc((r.request||"").slice(0,80)),hhmm(r.created_at))).join("");
   L+=sec("Waiting on you",bg.length?bg.length+" to approve":"",`${gh}${dur}${!gh&&!dur?'<div class="empty">Nothing. Anything destructive stops here first.</div>':''}`);
-  const di=(deck.intents||[]).map(it=>`<button class="${it.mode==="queued"?"q":it.mode==="gated"?"g":""}" id="di-${esc(it.id)}" title="${esc(it.says||"")}" onclick="runIntent('${esc(it.id)}')">${esc(it.label.toLowerCase())}</button>`).join("");
+  const di=(deck.intents||[]).map(it=>`<button class="${it.mode==="queued"?"q":it.mode==="gated"?"g":""}" id="di-${esc(it.id)}" title="${esc(it.says||"")}" data-act="runIntent" data-arg="${esc(it.id)}">${esc(it.label.toLowerCase())}</button>`).join("");
   L+=sec("Command deck",deck.queued?deck.queued+" queued":"",`<div class="deck">${di||'<div class="skel"></div>'}</div><div class="out" id="deckout"></div>`);
   const sch=(deck.schedule||[]).map(r=>row(r.at,esc(r.what),r.state)).join("");L+=sec("Schedule","today",sch||'<div class="empty">Nothing scheduled.</div>');
   const facts=((mem.gbrain&&mem.gbrain.facts)||[]).slice(0,6).map(f=>row("brain",esc(f.slice(0,120)))).join("")+((mem.local&&mem.local.facts)||[]).slice(0,10).map(f=>row(f.subject.split(".").slice(-2).join("."),esc((f.value||"").slice(0,100)))).join("");
@@ -787,8 +1214,20 @@ async function runIntent(id){const b=$("di-"+id),o=$("deckout");if(b)b.classList
   catch(e){if(o)o.textContent="failed: "+e.message;}if(b)b.classList.remove("busy");}
 async function gateApprove(n){try{const r=await jpost("/api/gate/approve",{nonce:n});toast(r.ok?"Approved and run":("Not run: "+(r.reason||r.error||"")));if(r.text)convAdd("Friday",String(r.text).slice(0,300));}catch(e){toast("approve failed: "+e.message);}pollGates();}
 async function gateReject(n){try{await jpost("/api/gate/reject",{nonce:n,reason:"rejected from UI"});toast("Rejected");}catch(e){}pollGates();}
-function renderToolGates(){const g=window._GATES||{};const tg=(g.tool_gates||[]);const box=$("toolgates");if(!tg.length){box.innerHTML="";return;}
-  box.innerHTML=tg.map(c=>`<div class="gate" style="background:var(--solid)"><b>${esc(c.action)}</b><div class="muted small">${esc(c.question||"")} · ${Math.round(c.seconds_left)}s left</div><div class="a"><button onclick="gateApprove('${c.nonce}')">Approve and run</button><button class="quiet" onclick="gateReject('${c.nonce}')">Reject</button></div></div>`).join("");setIsland("gate",tg.length+" waiting for you");}
+function renderToolGates(){const g=window._GATES||{};const tg=(g.tool_gates||[]);const box=$("toolgates");if(!tg.length){box.innerHTML="";window._GATESIG="";
+  // The gate is over: release the island explicitly, since "gate" outranks
+  // whatever the pollers would otherwise have set.
+  if(ISLAND_STATE==="gate")clearIsland(LISTEN?"listening":"",LISTEN?"listening":"idle");
+  return;}
+  // Rebuild only when the SET of gates changes. The 4s poll used to replace
+  // this HTML on every tick purely to redraw the countdown, which destroyed
+  // and recreated the Approve/Reject buttons under the pointer - a click
+  // landing between two ticks hit a detached node and did nothing.
+  const sig=tg.map(c=>c.nonce).join("|");
+  if(sig!==window._GATESIG){window._GATESIG=sig;
+    box.innerHTML=tg.map(c=>`<div class="gate" data-nonce="${esc(c.nonce)}" style="background:var(--solid)"><b>${esc(c.action)}</b><div class="muted small"><span class="gq">${esc(c.question||"")}</span> · <span class="gs">${Math.round(c.seconds_left)}</span>s left</div><div class="a"><button data-act="gateApprove" data-arg="${esc(c.nonce)}">Approve and run</button><button class="quiet" data-act="gateReject" data-arg="${esc(c.nonce)}">Reject</button></div></div>`).join("");}
+  else{tg.forEach(c=>{const el=box.querySelector(`.gate[data-nonce="${CSS.escape(c.nonce)}"] .gs`);if(el)el.textContent=Math.round(c.seconds_left);});}
+  setIsland("gate",tg.length+" waiting for you");}
 
 /* ---------------- organisation view ---------------- */
 function renderOS(){const o=ORG,map=window._MAP;
@@ -800,7 +1239,7 @@ function renderOS(){const o=ORG,map=window._MAP;
       <div class="d">${esc(t.detail||"")}</div></div>`).join("");
   const max=Math.max(1,...o.divisions.map(d=>d.size));
   const cards=o.divisions.map(d=>`<div class="dcard" id="div-${esc(d.id)}" role="button" tabindex="0"
-      onclick="toggleDivision('${esc(d.id)}')" onkeydown="if(event.key==='Enter')toggleDivision('${esc(d.id)}')">
+      data-act="toggleDivision" data-keyact data-arg="${esc(d.id)}">
       <div class="t"><b>${esc(d.label)}</b><span class="n">${d.size}</span></div>
       <div class="m"><i style="width:${Math.round(100*d.size/max)}%"></i></div>
       <div class="w">${esc(d.agents.slice(0,3).map(a=>a.name).join(" · "))}${d.size>3?" · +"+(d.size-3):""}</div>
@@ -813,6 +1252,15 @@ function renderOS(){const o=ORG,map=window._MAP;
       <h2>Capabilities</h2><div class="c"><b>${map.status.tools}</b> tools · <b>${map.status.skills}</b> skills</div></div>
       <div class="cols">`+map.columns.filter(c=>c.cards.length).map(c=>`<div class="dcol"><h4>${esc(c.name)}<span>${esc(c.subtitle)}</span></h4>`+
         c.cards.map(x=>`<div class="mcard"><i class="${esc(x.cadence)}"></i>${esc(x.label)}<span>${esc(x.meta)}</span></div>`).join("")+`</div>`).join("")+`</div></div>`;}
+  const helpers=window._HELPERS;
+  if(helpers){const dot=s=>({READY:"always_on",AUTH_REQUIRED:"scheduled",DEGRADED:"scheduled",
+      UNAVAILABLE:"isolated",DISABLED:"isolated"}[s]||"");
+    h+=`<div class="mapwrap"><div class="vhd" style="padding-left:0;padding-right:0;position:static;background:none">
+      <h2>Helpers</h2><div class="c"><b>${helpers.providers.length}</b> providers</div></div>
+      <div class="cols"><div class="dcol">`+
+      helpers.providers.map(p=>`<div class="mcard"><i class="${esc(dot(p.state))}"></i>${esc(p.provider)}
+        <span>${esc(p.family)} · ${esc(p.integration_mode||"")} · ${esc(p.license_mode||"")} · ${esc(p.state)}</span></div>`).join("")+
+      `</div></div></div>`;}
   $("os").innerHTML=h+`</div>`;}
 function toggleDivision(id){const c=document.getElementById("div-"+id);if(!c)return;
   const open=c.classList.toggle("open");c.querySelector(".roster").style.display=open?"":"none";}
@@ -834,7 +1282,7 @@ async function pollTiers(){try{const o=await jget("/api/memory/tiers");const box
   else{const cp=$("ctxprev");if(cp)cp.textContent="no active objective";}}catch(e){}}
 
 /* ---------------- vault ---------------- */
-async function pollVault(){try{const t=await jget("/api/vault");$("vstat").textContent=t.count+" pages";const box=$("vlist");box.innerHTML="";["wiki","raw","outputs"].forEach(sec=>{const fs=(t.sections||{})[sec]||[];box.appendChild(el(`<div class="vsec">${sec} · ${fs.length}</div>`));fs.forEach(f=>box.appendChild(el(`<button class="vf" data-p="${esc(f.path)}" onclick="openVault('${esc(f.path)}')">${esc(f.name)}</button>`)));});}catch(e){$("vstat").textContent="vault unavailable";}}
+async function pollVault(){try{const t=await jget("/api/vault");$("vstat").textContent=t.count+" pages";const box=$("vlist");box.innerHTML="";["wiki","raw","outputs"].forEach(sec=>{const fs=(t.sections||{})[sec]||[];box.appendChild(el(`<div class="vsec">${sec} · ${fs.length}</div>`));fs.forEach(f=>box.appendChild(el(`<button class="vf" data-p="${esc(f.path)}" data-act="openVault" data-arg="${esc(f.path)}">${esc(f.name)}</button>`)));});}catch(e){$("vstat").textContent="vault unavailable";}}
 async function openVault(p){document.querySelectorAll(".vf").forEach(b=>b.classList.toggle("on",b.dataset.p===p));const d=$("vdoc");d.textContent="loading";try{const x=await jget("/api/vault/file?path="+encodeURIComponent(p));d.textContent=(x.edited?"[ hand-edited, sync will not overwrite ]\n\n":"")+(x.text||"");}catch(e){d.textContent="could not read "+p;}}
 async function vaultSync(){$("vstat").textContent="syncing";try{const r=await jpost("/api/vault/sync");$("vstat").textContent=r.written.length+" written, "+r.unchanged+" unchanged";}catch(e){$("vstat").textContent="sync failed";}pollVault();}
 
@@ -847,18 +1295,21 @@ async function pollDeck(){if(LOCKED)return;try{window._DECK=await jget("/api/dec
 async function pollGates(){if(LOCKED)return;try{window._GATES=await jget("/api/gate");renderToolGates();if(VIEW==="room")renderRoom();}catch(e){}}
 async function pollControl(){if(LOCKED)return;try{window._AGENT=await jget("/api/control");if(STATE.connections)renderChips(STATE);}catch(e){window._AGENT={reachable:false};}}
 async function pollMap(){if(LOCKED)return;try{window._MAP=await jget("/api/os_map");if(VIEW==="os")renderOS();}catch(e){}}
+async function pollHelpers(){if(LOCKED)return;try{window._HELPERS=await jget("/api/helpers");if(VIEW==="os")renderOS();}catch(e){}}
 async function pollGraphStats(){if(LOCKED)return;try{const g=await jget("/api/graph");if(G3&&g.stats.nodes!==(GRAPH&&GRAPH.stats.nodes)){GRAPH=g;G3.graphData(g);renderLegend();}else if(!GRAPH)GRAPH=g;renderMemSummary();}catch(e){}}
 async function pollDoctor(force){if(LOCKED)return;try{window._DOCTOR=await jget("/api/doctor");if(VIEW==="room"||force)renderRoom();}catch(e){}}
 async function pollAccess(){if(LOCKED)return;try{window._ACCESS=(await jget("/api/auth/recent")).events||[];}catch(e){}}
-function startAll(){if(timers.length)return;poll();pollOrg();pollMem();pollDeck();pollGates();pollControl();pollMap();pollGraphStats();pollAccess();
+function startAll(){if(timers.length)return;poll();pollOrg();pollMem();pollDeck();pollGates();pollControl();pollMap();pollHelpers();pollGraphStats();pollAccess();
   pollDoctor();
-  timers=[setInterval(pollDoctor,120000),setInterval(poll,6000),setInterval(pollMem,20000),setInterval(pollDeck,15000),setInterval(pollGates,4000),setInterval(pollControl,30000),setInterval(pollOrg,90000),setInterval(pollGraphStats,60000),setInterval(pollAccess,30000)];}
+  timers=[setInterval(pollDoctor,120000),setInterval(poll,6000),setInterval(pollMem,20000),setInterval(pollDeck,15000),setInterval(pollGates,4000),setInterval(pollControl,30000),setInterval(pollOrg,90000),setInterval(pollGraphStats,60000),setInterval(pollAccess,30000),setInterval(pollHermes,5000)];}
 
 /* ---------------- boot ---------------- */
 (function boot(){let v=new URLSearchParams(location.search).get("view");try{v=v||localStorage.getItem("fridayView");}catch(e){}if(v==="vault")v="mem";
   VIEW="hud";document.querySelectorAll(".tabs button").forEach(b=>b.classList.toggle("on",b.dataset.v==="hud"));
   meterLoop();
-  const go=()=>{LIB=window.__lib;bootOrb();startGate().then(()=>{if(!LOCKED&&v&&v!=="hud")setView(v);});};
+  const idle=(fn)=>(window.requestIdleCallback||((f)=>setTimeout(f,200)))(fn,{timeout:2500});
+  const go=()=>{LIB=window.__lib;
+    startGate().then(()=>{ idle(bootOrb); if(!LOCKED&&v&&v!=="hud")setView(v); });};
   if(window.__lib)go();else window.addEventListener("lib-ready",go);
 })();
 </script>

@@ -37,6 +37,11 @@ import re
 import subprocess
 from dataclasses import dataclass
 
+#: bun is spawned for every health check and every verb call. Without this the
+#: console it opens flashes a black window over whatever the owner is doing --
+#: once a minute, forever, because the UI polls the brain's health.
+_NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
 logger = logging.getLogger("friday-agent.brain")
 
 #: The pinned clone. `bun run src/cli.ts` is the launcher the install
@@ -137,7 +142,7 @@ class SharedBrainAdapter:
             [self._bun, "run", self._cli, "serve", "--surface", "verbs"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
-            cwd=os.path.dirname(self._cli))
+            cwd=os.path.dirname(self._cli), **_NO_WINDOW)
         import threading
         answer: dict = {}
         error: list = []

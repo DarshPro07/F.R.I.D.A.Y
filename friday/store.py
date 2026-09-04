@@ -17,13 +17,14 @@ Raw and normalized utterances are kept in separate columns (§14). The raw
 utterance is never overwritten; a correction adds the normalized form plus the
 reason, evidence and confidence for the change.
 
-stdlib sqlite3 only - no ORM. ponytail: a schema this small does not need one.
+Uses stdlib sqlite3 directly; a schema this small does not justify an ORM.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -386,6 +387,38 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conversation
     ON messages(conversation_id, id);
+
+-- People Friday is expected to know about. Not a CRM: the fields are the ones
+-- that come up in a spoken turn ("call my sister", "what's Ravi's email"), and
+-- everything else goes in `notes`. `name` is the natural key because that is
+-- what a request says; aliases are matched too so "mum" reaches "Sunita Rao".
+CREATE TABLE IF NOT EXISTS contacts (
+    name            TEXT PRIMARY KEY,
+    relation        TEXT,
+    phone           TEXT,
+    email           TEXT,
+    aliases         TEXT NOT NULL DEFAULT '',
+    notes           TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
+-- Which fabric providers actually work, per operation.
+--
+-- On disk rather than in memory, and that is the whole point: an in-process
+-- tally is relearned from zero after every restart, and Friday restarts most
+-- days. "Self-improving" that forgets overnight improves nothing. Rows are one
+-- outcome each rather than a running count, so a rolling window can be applied
+-- at read time and an upstream fixed last week is not judged on last month.
+CREATE TABLE IF NOT EXISTS fabric_outcomes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_id TEXT NOT NULL,
+    operation   TEXT NOT NULL DEFAULT '',
+    ok          INTEGER NOT NULL,
+    at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fabric_outcomes_provider
+    ON fabric_outcomes(provider_id, operation, at);
 
 -- Phase 1H: the user model.
 -- An observation is a candidate the extractor found in a turn. It carries the
@@ -1334,6 +1367,99 @@ class Store:
             (conversation_id, limit),
         )
         return [dict(r) for r in rows][::-1]
+
+    def recent_messages(self, limit: int = 30) -> list[dict]:
+        """
+        The last N turns Friday had with anyone, oldest first.
+
+        Deliberately NOT scoped to one conversation. The failure this exists
+        for is "say hey, and the next session has forgotten yesterday": recall
+        that stops at a conversation boundary is the same amnesia with extra
+        steps. Conversation id is still on every row for anyone who wants one
+        thread.
+        """
+        rows = self._conn.execute(
+            "SELECT conversation_id, role, content, created_at FROM messages "
+            "ORDER BY id DESC LIMIT ?", (limit,))
+        return [dict(r) for r in rows][::-1]
+
+    # -- fabric outcomes ----------------------------------------------------
+
+    def record_fabric_outcome(self, provider_id: str, operation: str,
+                              ok: bool) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO fabric_outcomes (provider_id, operation, ok, at) "
+                "VALUES (?,?,?,?)",
+                (provider_id, operation or "", 1 if ok else 0, now_iso()))
+
+    def fabric_outcomes(self, since_iso: str = "") -> list[dict]:
+        """Every outcome since `since_iso`, newest last.
+
+        Returned whole rather than per provider: ranking asks about every
+        candidate on a request, so one query the caller caches beats one query
+        per candidate on a voice turn.
+        """
+        if since_iso:
+            rows = self._conn.execute(
+                "SELECT provider_id, operation, ok FROM fabric_outcomes "
+                "WHERE at >= ? ORDER BY id", (since_iso,))
+        else:
+            rows = self._conn.execute(
+                "SELECT provider_id, operation, ok FROM fabric_outcomes "
+                "ORDER BY id")
+        return [dict(r) for r in rows]
+
+    def prune_fabric_outcomes(self, before_iso: str) -> int:
+        with self._tx() as conn:
+            cur = conn.execute(
+                "DELETE FROM fabric_outcomes WHERE at < ?", (before_iso,))
+            return int(cur.rowcount or 0)
+
+    # -- contacts -----------------------------------------------------------
+
+    def save_contact(self, name: str, **fields) -> None:
+        """Upsert by name. Only the fields given are written; the rest survive."""
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("a contact needs a name")
+        cols = ("relation", "phone", "email", "aliases", "notes")
+        given = {k: str(v).strip() for k, v in fields.items()
+                 if k in cols and v is not None}
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO contacts (name, created_at, updated_at) "
+                "VALUES (?,?,?)", (name, now_iso(), now_iso()))
+            for key, value in given.items():
+                conn.execute(
+                    f"UPDATE contacts SET {key}=?, updated_at=? WHERE name=?",
+                    (value, now_iso(), name))
+
+    def contacts(self, limit: int = 100) -> list[dict]:
+        return [dict(r) for r in self._conn.execute(
+            "SELECT * FROM contacts ORDER BY name LIMIT ?", (limit,))]
+
+    def find_contacts(self, query: str, limit: int = 5) -> list[dict]:
+        """
+        Contacts a request is plausibly about, by name, alias or relation.
+
+        Substring on purpose: "call mum" has to reach the row whose alias list
+        is "mum, mummy", and a request never spells a name the way the row
+        does.
+        """
+        words = {w for w in re.split(r"[^a-z0-9]+", (query or "").lower()) if len(w) > 1}
+        if not words:
+            return []
+        hits = []
+        for row in self.contacts(limit=500):
+            hay = " ".join(str(row.get(k) or "") for k in
+                           ("name", "aliases", "relation")).lower()
+            terms = {w for w in re.split(r"[^a-z0-9]+", hay) if w}
+            if words & terms:
+                hits.append(row)
+            if len(hits) >= limit:
+                break
+        return hits
 
     def close_conversation(self, conversation_id: str, summary: str) -> None:
         with self._tx() as conn:

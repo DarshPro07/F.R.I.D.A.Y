@@ -145,7 +145,10 @@ CORE_TOOLS: tuple[str, ...] = (
 GROUPS: dict[str, tuple[str, ...]] = {
     "files": (
         "files_read", "files_write", "files_create", "files_edit", "files_copy", "files_move",
-        "files_recycle", "files_list", "files_info", "files_search", "files_roots",
+        "files_recycle", "files_delete", "files_list", "files_info", "files_search", "files_roots",
+    ),
+    "screen": (
+        "screen_point", "desktop_plan", "desktop_step", "desktop_stop",
     ),
     "browser": (
         "browser_open", "browser_navigate", "browser_inspect", "browser_close",
@@ -238,6 +241,7 @@ GROUP_PURPOSE: dict[str, str] = {
     'files': 'read, write, edit, search or list files and folders',
     'browser': 'open a web page, read it, or drive a site by clicking',
     'research': 'read whole pages, compare sources, research a topic deeply',
+    'screen': 'point at where to click, or take the mouse and do it (asks first)',
     'documents': 'read a pdf, word document, spreadsheet, slide deck or zip',
     'hardware': 'battery, disks and free space, screens, network adapters',
     'windows': 'what windows are open, and moving, snapping or minimising one',
@@ -391,6 +395,12 @@ class Router:
         call, adds no latency to a voice turn, and the tool names and
         descriptions here are already written in the words a request uses.
 
+        Keyword scoring, but no longer only static. `routing_memory.prior()`
+        adds what this request shape taught us the last time it was asked -
+        the boss's corrections first, settled shadow outcomes second - so a
+        sentence that was mis-routed once stops being mis-routed identically
+        forever. The metadata still decides; the prior decides the ties.
+
         Words alone are not enough inside one domain, though. Every product
         tool is named "product_something" and described in terms of
         catalogues, so "retry the network failures" scores about the same
@@ -409,6 +419,11 @@ class Router:
                               say otherwise, which `_STARTING_OVER` catches.
         """
         lowered = (query or "").lower()
+        # What this request shape taught us last time. Read once per search,
+        # not once per candidate: the module caches, but a dict lookup in the
+        # loop below is still cheaper than trusting that.
+        from friday import routing_memory
+        learned = routing_memory.prior(lowered)
         # The same content filter the phrase scorer uses, and for the same
         # reason twice over. Two-letter tokens were admitted and matched as
         # SUBSTRINGS: "at", from "every morning at seven", is inside
@@ -474,6 +489,12 @@ class Router:
                         score -= 8 if started_here else 0
             operation, _target = semantics.for_capability(name)
             score += semantics.target_affinity(about, name)
+            # The learned prior, applied last and additively. A correction the
+            # boss gave for this exact shape is worth more than a tool-name
+            # word match and less than a confident intent example, so it wins
+            # the close calls and loses to a request that plainly says
+            # otherwise. See friday/routing_memory.py for the weights.
+            score += learned.get(name, 0)
             if wanted and wanted != semantics.READ and operation == wanted:
                 score += 12
             # Known bias: a description match scores the same whether the

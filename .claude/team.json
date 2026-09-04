@@ -1,0 +1,133 @@
+{
+  "team_name": "F.R.I.D.A.Y",
+  "services": ["voice-brain", "mcp-tools", "fabric", "objective-engine"],
+  "primary_locale": "en",
+  "orchestrator": {
+    "archetype": "orchestrator",
+    "values": {
+      "name": "friday-orch",
+      "description": "Routes and sequences Friday tasks across voice-brain, mcp-tools, fabric, and objective-engine specialists. Use when a task spans 2+ services. MUST BE USED before any multi-file Friday change ships.",
+      "color": "#FF6B35",
+      "display_name": "Friday Orchestrator",
+      "role_title": "Routing & Sequencing",
+      "specialists": "friday-voice-engineer, friday-tools-engineer, friday-fabric-engineer, friday-objective-engineer, friday-qa-engineer, friday-security-engineer, friday-tech-lead, friday-monitor",
+      "delegations": "Voice/UI change (friday/voice_brain.py, friday/ui_server.py, ui/) -> friday-voice-engineer\nMCP tool/server change (friday/tools/, friday/toolsets/, server.py) -> friday-tools-engineer\nCapability fabric / upstream pack change (friday/fabric.py, friday/fabric_adapters/, scripts/upstream_lock.py, third_party/) -> friday-fabric-engineer\nContinuity/planner/objective/Hermes change (friday/continuity*.py, friday/planner*.py, friday/objectives.py, friday/hermes_bridge.py, friday/executors/, friday/execution_economics.py) -> friday-objective-engineer\nArchitecture question or cross-service trade-off -> friday-tech-lead (advisory review)\nFeature ready for end-to-end verification -> friday-qa-engineer (isolation: worktree)\nAuth, secrets, input handling, or external traffic touched -> friday-security-engineer\nBackground signal / deterministic gate in 4 chunks -> friday-monitor"
+    }
+  },
+  "agents": [
+    {
+      "archetype": "tech-leader",
+      "values": {
+        "name": "friday-tech-lead",
+        "description": "Reviews architecture and cross-service trade-offs for Friday, read-only. Use when the orchestrator needs a second opinion on a design decision spanning 2+ Friday services.",
+        "color": "#6B5B95",
+        "display_name": "Friday Tech Lead",
+        "boundary_rule": "the Friday-is-manager / Hermes-is-executor split and the one-fabric-registry rule in .claude/rules/14-friday-house-rules.md"
+      }
+    },
+    {
+      "archetype": "domain-engineer",
+      "values": {
+        "name": "friday-voice-engineer",
+        "description": "Implements and fixes the LiveKit voice pipeline and browser control-room UI. Use when work touches friday/voice_brain.py, friday/ui_server.py, or ui/.",
+        "color": "#22C55E",
+        "display_name": "Friday Voice Engineer",
+        "domain": "Voice & Brain",
+        "owned_paths": "friday/voice_brain.py, friday/ui_server.py, ui/",
+        "primary_language": "Python 3.11",
+        "test_framework": "pytest",
+        "build_command": "no build step",
+        "lint_command": "none configured"
+      }
+    },
+    {
+      "archetype": "domain-engineer",
+      "values": {
+        "name": "friday-tools-engineer",
+        "description": "Implements and fixes MCP tool wrappers and their toolset implementations. Use when work touches friday/tools/, friday/toolsets/, or server.py.",
+        "color": "#06B6D4",
+        "display_name": "Friday Tools Engineer",
+        "domain": "MCP Tools",
+        "owned_paths": "friday/tools/, friday/toolsets/, server.py",
+        "primary_language": "Python 3.11",
+        "test_framework": "pytest",
+        "build_command": "no build step",
+        "lint_command": "none configured"
+      }
+    },
+    {
+      "archetype": "domain-engineer",
+      "values": {
+        "name": "friday-fabric-engineer",
+        "description": "Implements and fixes the capability fabric and upstream provider adapters. Use when work touches friday/fabric.py, friday/fabric_adapters/, scripts/upstream_lock.py, or third_party/.",
+        "color": "#A855F7",
+        "display_name": "Friday Fabric Engineer",
+        "domain": "Capability Fabric",
+        "owned_paths": "friday/fabric.py, friday/fabric_adapters/, scripts/upstream_lock.py, third_party/",
+        "primary_language": "Python 3.11",
+        "test_framework": "pytest",
+        "build_command": "no build step",
+        "lint_command": "none configured"
+      }
+    },
+    {
+      "archetype": "domain-engineer",
+      "values": {
+        "name": "friday-objective-engineer",
+        "description": "Implements and fixes the durable-objective engine and Hermes execution bridge. Use when work touches continuity, planner, objectives, hermes_bridge, executors, or execution_economics.",
+        "color": "#F59E0B",
+        "display_name": "Friday Objective Engineer",
+        "domain": "Objective Engine",
+        "owned_paths": "friday/continuity*.py, friday/planner*.py, friday/objectives.py, friday/hermes_bridge.py, friday/executors/, friday/execution_economics.py",
+        "primary_language": "Python 3.11",
+        "test_framework": "pytest",
+        "build_command": "no build step",
+        "lint_command": "none configured"
+      }
+    },
+    {
+      "archetype": "qa-engineer",
+      "values": {
+        "name": "friday-qa-engineer",
+        "description": "Writes and runs end-to-end and integration tests for Friday changes in an isolated worktree. Use when a feature needs verification. MUST BE USED before any change is reported done.",
+        "color": "#EF4444",
+        "display_name": "Friday QA Engineer",
+        "e2e_framework": "pytest (tests/test_*.py) plus e2e-run.bat for the :8770 UI",
+        "integration_framework": "pytest -m \"not live and not slow\"",
+        "unit_framework": "pytest"
+      }
+    },
+    {
+      "archetype": "security-engineer",
+      "values": {
+        "name": "friday-security-engineer",
+        "description": "Secures Friday changes touching auth, secrets, or screen/PC control and patches the specific issues found. Use when a change touches policy.py, confirmation.py, sensitive_domains.py, credentials, or device-control capabilities.",
+        "color": "#DC2626",
+        "display_name": "Friday Security Engineer"
+      }
+    },
+    {
+      "archetype": "monitor",
+      "values": {
+        "name": "friday-monitor",
+        "description": "Watches the deterministic pytest gate and activity log for Friday, background and silent unless urgent. Use when the team needs a background pass over the 4-chunk pytest gate.",
+        "color": "#64748B",
+        "display_name": "Friday Monitor"
+      }
+    }
+  ],
+  "skills": [],
+  "rules": [
+    "01-plan-first",
+    "02-service-boundaries",
+    "03-definition-of-done",
+    "04-clarify-unknowns",
+    "08-client-first-communication",
+    "09-no-quick-fixes",
+    "10-style-per-service",
+    "12-security-vapt",
+    "13-model-selection"
+  ],
+  "hooks": ["notify", "session-init", "teammate-idle-gate", "post-commit-check"],
+  "settings_extras": {}
+}

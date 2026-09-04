@@ -156,46 +156,39 @@ REVISED = {
         "mandatory for serious agentic execution per NON_NEGOTIABLE 2; this "
         "is an additional executor, never a replacement."),
     "open-notebook": (
-        "REFERENCE_ONLY",
-        "A NotebookLM-style research application, v1.14.0, needing SurrealDB "
-        "and its own container. Friday already has both halves it would "
-        "provide. The pipeline: toolsets/research.py does crawl_all, dedupe, "
-        "relevance and build_corpus against a token budget, behind "
-        "web_answer, web_crawl and web_deep_research. The workspace: "
-        "memory_remember/recall/search store facts with provenance, and "
-        "project_record_decision, project_context, projects_list and "
-        "project_resume already give a durable per-project surface - which is "
-        "what a notebook is. Standing up a database and an application to "
-        "restate that is not proportionate, and the brief says plainly not to "
-        "replace GBrain. The pattern worth keeping is its explicit "
-        "source/note/citation vocabulary, which is clearer than Friday's "
-        "fact-with-provenance and could shape the research store."),
+        "SIDECAR",
+        "Built 2026-09-03 as a remote HTTP helper (fabric_adapters/"
+        "open_notebook_research.py, family research) against an instance the "
+        "owner runs at OPEN_NOTEBOOK_URL: notebooks, notebook and ask are open "
+        "reads, add_source is a write kept out of the spoken surface. Friday does "
+        "not host it (no Docker here) and stores none of its answers as facts, so "
+        "GBrain stays the one memory; the 2026-08 verdict that its pipeline "
+        "duplicates toolsets/research.py still holds for the crawl half - what is "
+        "used is the notebook the owner already keeps there, asked by voice. "
+        "Honest 'unreachable, set OPEN_NOTEBOOK_URL' until an instance exists."),
     "anythingllm": (
-        "REFERENCE_ONLY",
-        "The sequence admits this one only if measurable capability remains "
-        "after Open Notebook, and none does: research pipeline, corpus "
-        "building, durable project memory and workspace isolation are all "
-        "present, so a second document/RAG application would duplicate "
-        "storage and answer generation both. Licensing independently argues "
-        "for caution - the root is MIT but open-computer/ is AGPL-3.0, which "
-        "the build pack's own policy misses, so any future use must treat "
-        "that subtree as copyleft regardless of the root."),
+        "SIDECAR",
+        "Built 2026-09-03 as a remote HTTP helper (fabric_adapters/"
+        "anythingllm_research.py, family research): Friday asks an instance the "
+        "owner runs at ANYTHINGLLM_URL - workspaces, ask, documents, all reads - "
+        "and says 'unreachable, set ANYTHINGLLM_URL' until one exists. It is a "
+        "helper that answers questions over the owner's own document workspaces, "
+        "not a second memory: nothing it returns is stored as a Friday fact "
+        "(NON_NEGOTIABLE 11 holds). Earlier verdict (REFERENCE_ONLY, 2026-08) "
+        "stands on the licence point: the root is MIT but open-computer/ is "
+        "AGPL-3.0, so only the HTTP surface is used and nothing is imported."),
     "agent-reach": (
-        "REFERENCE_ONLY",
-        "The pattern is already built. The reason to want Agent-Reach was its "
-        "capability routing - platform, preferred backend, fallback, doctor - "
-        "and friday/fabric.py already is that: families, candidates(), "
-        "select(), declared fallbacks, health() and report(). Meanwhile its "
-        "CLI exposes no search, read or fetch verb at all; the subcommands are "
-        "setup, install, configure, doctor, uninstall, skill, format, "
-        "transcribe, check-update, watch and version. Retrieval reaches an "
-        "agent by `skill` registration writing skill files into the host "
-        "agent's config - the same surprise Friday refuses for `graft init` "
-        "and codebase-memory `install`. Eight of its fifteen channels need "
-        "per-platform cookies or tokens, several for sites whose terms forbid "
-        "automated access. Worth revisiting narrowly for `transcribe` (Whisper "
-        "via Groq/OpenAI), which is a clean verb and a capability Friday "
-        "genuinely lacks."),
+        "CLI",
+        "First revised to REFERENCE_ONLY (2026-08): its capability routing is "
+        "what fabric.py already is, `skill` rewrites the host agent's config, "
+        "and eight of fifteen channels need per-site cookies. That note ended "
+        "'worth revisiting narrowly for `transcribe` (Whisper via Groq/OpenAI), "
+        "a clean verb and a capability Friday genuinely lacks' - and this is "
+        "that revisit (2026-09-02): friday/fabric_adapters/"
+        "agent_reach_transcribe.py exposes `transcribe` and `doctor` ONLY, as "
+        "a subprocess of the clone's own venv, with the Groq key delivered as "
+        "environment through the secret broker. setup/install/skill/configure "
+        "are not reachable."),
     "vane": (
         "REFERENCE_ONLY",
         "A Next.js application with its own container, database and SearxNG "
@@ -221,32 +214,47 @@ REVISED = {
         "measured turn. BSD-2-Clause, so that stays open."),
     "openmontage": (
         "SIDECAR",
-        "AGPL-3.0, so the fabric refuses any importing mode. A media/video "
-        "production studio; deferred rather than built because it is a heavy "
-        "service and Friday has no media pipeline for it to slot beside yet. "
-        "Its own .claude/skills carry separate manim licences (recorded in the "
-        "nested-licence scan). Revisit when a real video-production objective "
-        "exists to justify the sidecar."),
+        "AGPL-3.0, so the fabric refuses any importing mode. Built 2026-09-03 as "
+        "a remote HTTP helper (fabric_adapters/openmontage_media.py, family "
+        "media): at the pin its Backlot server (backlot/server.py, FastAPI, port "
+        "4750) exposes a small project-board API - projects and project {id}, "
+        "both reads, no auth, no write route - which Friday asks at "
+        "OPENMONTAGE_URL. The render pipeline itself is not driven. Its own "
+        ".claude/skills carry separate manim licences (recorded in the "
+        "nested-licence scan). Honest 'unreachable, set OPENMONTAGE_URL' until "
+        "the owner runs it."),
     "postiz": (
         "SIDECAR",
-        "AGPL-3.0, isolated by the same rule. A full social-scheduling "
-        "application with its own database and worker. Deferred: Friday has no "
-        "social-publishing objective today, and NON_NEGOTIABLE 13 already "
-        "requires human confirmation before any external publish, so the value "
-        "of a scheduler is bounded until there is content to schedule. Revisit "
-        "as an isolated service if social publishing becomes a real need."),
+        "AGPL-3.0, isolated by the same rule. Built 2026-09-03 as a remote HTTP "
+        "helper (fabric_adapters/postiz_social.py, family social) against an "
+        "instance the owner runs at POSTIZ_API_URL with the postiz_api_key "
+        "secret: integrations, queue and status are open reads; schedule is a "
+        "write behind the social.publish permission, so NON_NEGOTIABLE 13's "
+        "human confirmation before an external publish still applies (answered "
+        "in advance only by the owner's own full-autonomy switch). Honest "
+        "'unreachable, set POSTIZ_API_URL' until an instance exists."),
     "strix": (
-        "REFERENCE_ONLY",
+        "CLI",
         "strix-agent 1.5.3, 'Open-source AI Hackers for your apps' - a full "
         "autonomous security agent with its own LLM loop (openai-agents, "
-        "litellm) and a Docker runtime. Friday genuinely lacks active security "
-        "scanning, which is the one place a remaining upstream addresses a real "
-        "gap - but installing Strix is a second agent brain and a second model "
-        "loop, the NON_NEGOTIABLE 11 problem browser-use and OpenHands already "
-        "hit. security_skills (implemented, Apache-2.0, scope-gated) covers the "
-        "knowledge side. Active scanning belongs in a future restricted, "
-        "authorised sidecar with its own scope policy, not an in-process "
-        "adapter - so this is REFERENCE_ONLY now, with the gap named."),
+        "litellm) and a Docker runtime. First revised to REFERENCE_ONLY on "
+        "2026-08 because the only executing modes imported code into Friday's "
+        "process, which would have been a second agent brain (NON_NEGOTIABLE "
+        "11); the note asked for 'a future restricted, authorised sidecar with "
+        "its own scope policy'. That is what FABRIC-CLI-01 now provides: "
+        "revised again 2026-09-02 to CLI as friday/fabric_adapters/"
+        "strix_pentest.py - a one-shot subprocess (process boundary, no "
+        "import, no shared model loop), gated by security.authorized_scope "
+        "before activation, with --target/--instruction each a single argv "
+        "element. security_skills still covers the knowledge side."),
+    "openworker": (
+        "CLI",
+        "MIT, `openworker <skill> --cwd <dir>` is a genuine headless coding "
+        "coworker that runs one skill and exits. Registered 2026-09-02 as "
+        "friday/fabric_adapters/openworker_cli.py in the `coding` family as an "
+        "OPTIONAL worker beside Hermes, which remains the mandatory engine "
+        "(NON_NEGOTIABLE 2). `run` needs coding.workspace_write; `plan` is "
+        "read-only; the upstream's bypass-approvals mode is not exposed."),
     "crewai": (
         "REFERENCE_ONLY",
         "A multi-agent orchestration framework, and Friday already owns "
@@ -257,23 +265,65 @@ REVISED = {
         "HermesAgency, but as code it would be a second orchestrator competing "
         "for the turn. MIT, so the patterns are free to read."),
     "agenticseek": (
-        "REFERENCE_ONLY",
-        "GPL-3.0, so an importing mode is refused outright. A local-first "
-        "autonomous assistant; its value is the local-model, zero-API-key "
-        "pattern for a privacy-sensitive user, which is a configuration "
-        "question for Friday's own provider selection rather than a component "
-        "to vendor. If a local worker is ever wanted it belongs behind the "
-        "executor_router as an OPTIONAL_WORKER like Cline, not copied in."),
+        "CLI",
+        "GPL-3.0, so an importing mode is refused outright - and until "
+        "FABRIC-CLI-01 there was no isolated executing mode at all, which is "
+        "why it was REFERENCE_ONLY. Revised 2026-09-02 to CLI as "
+        "friday/fabric_adapters/agenticseek_cli.py: a subprocess is a process "
+        "boundary, so the copyleft invariant holds by construction "
+        "(Provider.__post_init__ still refuses ADAPTER for it). Gated behind "
+        "orchestration.local_agent; it runs its own local model and browser."),
     "maxun": (
         "SIDECAR",
         "AGPL-3.0, so the fabric would refuse any importing mode regardless. "
         "Mode normalised from the template's ISOLATED_SIDECAR to the fabric's "
-        "vocabulary. Deferred rather than built: docker-compose stands up "
-        "postgres, minio, a backend, a frontend and its own browser service - "
-        "a third browser alongside Friday's Playwright and anything else - "
-        "for scheduled scraping robots. Revisit when a real recurring "
-        "extraction job exists to justify five services; Scrapling covers "
-        "one-shot structured extraction today."),
+        "vocabulary. Built 2026-09-03 as a remote HTTP helper "
+        "(fabric_adapters/maxun_scraping.py, family scraping): Friday asks an "
+        "instance the owner runs at MAXUN_API_URL with the maxun_api_key secret "
+        "- robots, runs and results are open reads, run_robot is a write behind "
+        "scraping.run. Friday still does not host its five services or its "
+        "browser (the one-browser rule stands; Scrapling covers one-shot "
+        "extraction); the robots the owner already keeps there become askable. "
+        "Honest 'unreachable, set MAXUN_API_URL' until an instance exists."),
+    "auto-company": (
+        "SKILL",
+        "Demoted to REFERENCE_ONLY on 2026-08-31 as 'a whole control layer'. "
+        "That is true of its runner and false of its content: fourteen "
+        "executive playbooks and ~36 business skills are markdown, exactly "
+        "what agency-agents already contributes as role_recipes. Promoted "
+        "2026-09-02 to SKILL as friday/fabric_adapters/company_playbooks.py "
+        "(roles family): one playbook or skill per call, no bulk read, the "
+        "Claude Code agent loop never run. This is the HR/operations "
+        "assistant pack the owner asked for."),
+    "awesome-harness-engineering": (
+        "SKILL",
+        "'A reading list, not software' was the REFERENCE_ONLY reason, and it "
+        "missed the four templates: AGENTS.md, PLAN.md, IMPLEMENT.md and "
+        "HARNESS_CHECKLIST.md. Promoted 2026-09-02 to SKILL as friday/"
+        "fabric_adapters/harness_templates.py (orchestration family) so the "
+        "self-build loop can read the checklist as acceptance criteria. The "
+        "reading list is not an operation. CC0-1.0."),
+    "agents-team": (
+        "SKILL",
+        "REFERENCE_ONLY was the audit's first-pass read of the plugin as a "
+        "whole (scaffold.py/lint.py is a second control layer, never run - "
+        "NON_NEGOTIABLE 1). Revised 2026-09-03: the same audit that ruled "
+        "out the generator found eight archetype templates, thirteen team "
+        "rules and four SKILL.md briefs underneath it that are plain "
+        "markdown, exactly what role_recipes already contributes. Promoted "
+        "to SKILL as friday/fabric_adapters/agents_team_pack.py (roles "
+        "family): archetype/rule/skill each read one file, allowlisted "
+        "against a fixed tuple. MIT."),
+    "awesome-claude-code-subagents": (
+        "SKILL",
+        "Confirmed SKILL on first audit: 158 Claude Code subagent briefs "
+        "across ten categories (01-core-development .. 10-research-analysis), "
+        "each frontmatter-only (name, description, tools, model) - no code, "
+        "no generator, nothing this pack could run even by mistake. "
+        "Implemented as friday/fabric_adapters/claude_subagents.py (roles "
+        "family): catalogue/search/category return names only, recipe "
+        "reads one brief allowlisted against the same index catalogue "
+        "builds. MIT (VoltAgent)."),
 }
 
 

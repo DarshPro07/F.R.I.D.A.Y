@@ -57,6 +57,20 @@ CAMERA_WARMUP_FRAMES = 5  # webcams return dark or garbage frames at first
 
 VISION_MODEL = os.getenv("ADA_VISION_MODEL", "gemini-2.5-flash")
 
+#: A hung model call must not hang the assistant. Without a deadline, a stalled
+#: request leaves "where do I click" spinning indefinitely and a takeover plan
+#: never returning; with one, the caller reports a failure and the boss is
+#: told. 30s is generous for one image. Milliseconds, per google-genai.
+VISION_TIMEOUT_MS = int(os.getenv("ADA_VISION_TIMEOUT_MS", "30000"))
+
+
+def _client():
+    """One place that builds the vision client, so every call has the deadline."""
+    from google import genai
+    from google.genai import types
+    return genai.Client(api_key=os.getenv("GOOGLE_API_KEY"),
+                        http_options=types.HttpOptions(timeout=VISION_TIMEOUT_MS))
+
 
 def captures_dir() -> Path:
     path = Path(os.getenv("ADA_VISION_DIR") or DATA_DIR / "vision")
@@ -85,11 +99,18 @@ class CaptureError(RuntimeError):
 class Frame:
     """A captured image plus everything needed to prove it is real and recent."""
 
-    def __init__(self, png: bytes, width: int, height: int, source: str) -> None:
+    def __init__(self, png: bytes, width: int, height: int, source: str,
+                 origin_x: int = 0, origin_y: int = 0) -> None:
         self.png = png
         self.width = width
         self.height = height
         self.source = source
+        # Where this image sits on the virtual desktop. A capture of the second
+        # monitor starts at x=1920, so a point measured inside the image is
+        # 1920 further right in the coordinates a click uses. Without this the
+        # arrow is right and the click is a screen away.
+        self.origin_x = origin_x
+        self.origin_y = origin_y
         self.captured_at = time.monotonic()
         self.captured_iso = datetime.now(timezone.utc).isoformat()
         self.digest = hashlib.sha256(png).hexdigest()[:16]
@@ -108,6 +129,7 @@ class Frame:
     def describe(self) -> dict:
         return {
             "source": self.source, "width": self.width, "height": self.height,
+            "origin_x": self.origin_x, "origin_y": self.origin_y,
             "bytes": len(self.png), "sha256": self.digest,
             "captured_at": self.captured_iso,
             "path": str(self.path) if self.path else None,
@@ -142,7 +164,8 @@ def capture_screen(monitor: int = 1, region: dict | None = None) -> Frame:
 
     if not png:
         raise CaptureError("screen grab produced no image data")
-    return Frame(png, shot.width, shot.height, "screen")
+    return Frame(png, shot.width, shot.height, "screen",
+                 origin_x=int(box.get("left", 0)), origin_y=int(box.get("top", 0)))
 
 
 def capture_camera(device: int = 0, warmup: int = CAMERA_WARMUP_FRAMES) -> Frame:
@@ -275,7 +298,7 @@ def analyse_frame(frame: Frame, question: str) -> dict:
     payload = _downscaled(frame.png, frame.width, frame.height)
     mime = "image/jpeg" if payload is not frame.png else "image/png"
 
-    client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+    client = _client()
     response = client.models.generate_content(
         model=VISION_MODEL,
         contents=[
@@ -300,6 +323,108 @@ def analyse_frame(frame: Frame, question: str) -> dict:
     confidence = parsed.get("confidence")
     if not isinstance(confidence, (int, float)) or not 0.0 <= confidence <= 1.0:
         raise CaptureError(f"vision model gave no usable confidence: {confidence!r}")
+    return parsed
+
+
+#: Where something IS, rather than what it is. Coordinates are the fraction of
+#: the way across (x) and down (y) the image, 0.0-1.0 - never pixels. The image
+#: is downscaled before upload (see `_downscaled`), so a pixel the model named
+#: would be in a coordinate space that no longer exists by the time the caller
+#: reads it. A fraction survives the resize; a pixel does not.
+LOCATE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "found": {"type": "boolean"},
+        "x": {"type": "number"},
+        "y": {"type": "number"},
+        "label": {"type": "string"},
+        "confidence": {"type": "number"},
+        "why": {"type": "string"},
+    },
+    "required": ["found", "confidence"],
+}
+
+_LOCATE_SYSTEM = """You are locating one control in a screenshot for a voice
+assistant that will draw an arrow at the point you give.
+
+Return the CENTRE of the single control the user means, as fractions of the
+image: x is how far across from the left edge (0.0 = left edge, 1.0 = right
+edge), y is how far down from the top (0.0 = top, 1.0 = bottom). Never return
+pixels. Never return a bounding box.
+
+label is 2-4 words naming what you found, as it reads on screen.
+
+If the control is not visible in this screenshot, set found to false and say
+why. Do not guess a plausible position for something you cannot see - an arrow
+pointing confidently at the wrong place is worse than an honest "it is not on
+this screen". Scrolled out of view, behind another window, or on a different
+tab all count as not visible.
+
+confidence is your calibrated probability, 0.0 to 1.0, that an arrow drawn at
+your x,y would land on the control the user asked for:
+  0.9+  you can see it plainly and the point is unambiguous
+  0.75  you can see it; the exact centre is slightly uncertain
+  0.5   you think that is it, but a similar control is nearby
+  0.2   guessing from layout convention alone
+  0.0   cannot tell
+"""
+
+
+def locate_in_frame(frame: Frame, target: str, hint: str = "") -> dict:
+    """Where is `target` in this frame? Returns normalised 0.0-1.0 coordinates.
+
+    Same client and downscale path as `analyse_frame`; only the schema and the
+    system prompt differ, because the question is "where" rather than "what".
+    """
+    if not os.getenv("GOOGLE_API_KEY", "").strip():
+        raise CaptureError("locating things on screen needs GOOGLE_API_KEY")
+
+    from google import genai
+    from google.genai import types
+
+    payload = _downscaled(frame.png, frame.width, frame.height)
+    mime = "image/jpeg" if payload is not frame.png else "image/png"
+    question = f"Where is: {target}".strip()
+    if hint:
+        # A correction ("a little further left") is the previous answer plus a
+        # nudge, not a fresh guess - so the nudge travels with the question.
+        question += f"\n\nThe user has corrected a previous attempt: {hint}"
+
+    client = _client()
+    response = client.models.generate_content(
+        model=VISION_MODEL,
+        contents=[
+            types.Part.from_bytes(data=payload, mime_type=mime),
+            types.Part(text=question),
+        ],
+        config=types.GenerateContentConfig(
+            system_instruction=_LOCATE_SYSTEM,
+            response_mime_type="application/json",
+            response_schema=LOCATE_SCHEMA,
+            temperature=0.0,          # a coordinate is not a creative act
+        ),
+    )
+    text = (response.text or "").strip()
+    if not text:
+        raise CaptureError("vision model returned nothing")
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise CaptureError(f"vision model returned unparseable JSON: {exc}") from exc
+
+    confidence = parsed.get("confidence")
+    if not isinstance(confidence, (int, float)) or not 0.0 <= confidence <= 1.0:
+        raise CaptureError(f"vision model gave no usable confidence: {confidence!r}")
+
+    if parsed.get("found"):
+        # A model that says "found" without a usable point has not found it.
+        for axis in ("x", "y"):
+            value = parsed.get(axis)
+            if not isinstance(value, (int, float)) or not 0.0 <= value <= 1.0:
+                parsed["found"] = False
+                parsed["why"] = (f"the model reported {axis}={value!r}, which is "
+                                 "not a fraction of the image")
+                break
     return parsed
 
 

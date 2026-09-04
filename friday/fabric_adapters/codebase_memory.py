@@ -53,6 +53,17 @@ PROJECT = "friday-core"
 
 #: Operation -> (upstream tool, required flags). Kept as data so a new
 #: operation is a table row rather than another branch.
+#: Args a given operation cannot run without. Checked before shelling out, so a
+#: missing one is a sentence rather than a native crash dump.
+REQUIRED = {
+    "search": ("project",),
+    "trace": ("project", "from", "to"),
+    "architecture": ("project",),
+    "snippet": ("project", "qualified_name"),
+    "status": ("project",),
+    "index": ("repo_path",),
+}
+
 OPERATIONS = {
     "index": ("index_repository", ("repo_path", "name", "mode")),
     "search": ("search_graph", ("project", "name_pattern", "node_type",
@@ -109,6 +120,13 @@ def health(handle) -> dict:
 
 def call(operation: str, handle, **arguments):
     tool, allowed = OPERATIONS[operation]
+    missing = [a for a in REQUIRED.get(operation, ())
+               if arguments.get(a) in (None, "")]
+    if missing:
+        raise ValueError(
+            "%s needs %s. Known projects come from the `projects` operation; "
+            "Friday's own tree is 'friday-core'."
+            % (operation, " and ".join("`%s`" % m for m in missing)))
     args = ["cli", "--json", tool]
     for key in allowed:
         value = arguments.get(key)

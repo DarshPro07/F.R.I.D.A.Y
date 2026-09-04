@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import io
+import logging
 import os
 import socket
 import sqlite3
@@ -33,24 +34,31 @@ from pathlib import Path
 from starlette.applications import Starlette
 from starlette.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.middleware import Middleware
-from starlette.routing import Mount, Route
+from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from friday import access
 from friday import camera as camera_mod
+from friday import desk as desk_mod
 from friday.store import DEFAULT_DB
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 MCP_HOST = os.getenv("ADA_MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.getenv("ADA_MCP_PORT", "8000"))
 
-# ponytail: health checks spawn a bun subprocess (GBrain) / do HTTP (Hermes).
-# Cache the whole connections block briefly so a 3s UI poll never spawns bun.
+# Health checks are expensive: GBrain's spawns a bun subprocess and Hermes' makes
+# an HTTP call. Cache the whole connections block so a 3s UI poll never spawns bun.
 _CONN_CACHE = {"at": 0.0, "value": None}
 _CONN_TTL = 10.0
+_HELPERS_CACHE = {"at": 0.0, "value": None}
+_HELPERS_TTL = 10.0
 _GBRAIN_TTL = 60.0          # available() spawns bun; once a minute is plenty
 _GBRAIN_CACHE = {"at": 0.0, "value": None}
+#: Hermes is probed the same way, and for the same reason: the round-trip that
+#: proves the bridge is alive is far too slow to sit on a request.
+_HERMES_TTL = 20.0
+_HERMES_CACHE = {"at": 0.0, "value": None}
 
 # The shared-memory snapshot, kept warm in the background so the UI's center
 # panel is instant (GBrain recall spawns a bun subprocess -- never on the
@@ -83,15 +91,35 @@ def _compute_mem_snapshot():
             "at": _now()}
 
 
+log = logging.getLogger("friday.ui")
+
+
 def _mem_refresher():
+    """Warm the shared-memory cache. Never dies silently: a broken refresher
+    means every reader quietly gets stale data, so the failure is logged once
+    and then at most every twentieth cycle while it persists."""
+    failures = 0
     while True:
         try:
             snap = _compute_mem_snapshot()
             with _MEM_LOCK:
                 _MEM_CACHE["data"], _MEM_CACHE["at"] = snap, time.time()
+            if failures:
+                log.info("memory snapshot recovered after %d failed refresh(es)", failures)
+            failures = 0
         except Exception:  # noqa: BLE001
-            pass
-        time.sleep(60)
+            failures += 1
+            if failures == 1 or failures % 20 == 0:
+                log.exception("memory snapshot refresh failed (%d in a row); "
+                              "/api/memory_snapshot is serving stale data", failures)
+        for cache, ttl, probe in ((_GBRAIN_CACHE, _GBRAIN_TTL, _probe_gbrain),
+                                  (_HERMES_CACHE, _HERMES_TTL, _probe_hermes)):
+            if time.time() - cache["at"] > ttl:                  # off the request path
+                try:
+                    cache.update(at=time.time(), value=probe())
+                except Exception:  # noqa: BLE001
+                    log.exception("health probe failed")
+        time.sleep(20)
 
 
 def memory_snapshot():
@@ -209,34 +237,76 @@ def _tcp_up(host, port, timeout=0.6):
         return False
 
 
-def _gbrain_status():
-    now = time.time()
-    if _GBRAIN_CACHE["value"] is not None and now - _GBRAIN_CACHE["at"] < _GBRAIN_TTL:
-        return _GBRAIN_CACHE["value"]
+def _probe_gbrain():
+    """~7 seconds: it spawns bun and waits. Never call this from a request."""
     try:
         from friday.brain import SharedBrainAdapter
         up = SharedBrainAdapter().available()
-        value = {"status": "available" if up else "unavailable"}
+        return {"status": "available" if up else "unavailable"}
     except Exception as exc:  # noqa: BLE001
-        value = {"status": "unavailable", "error": str(exc)}
-    _GBRAIN_CACHE.update(at=now, value=value)
-    return value
+        return {"status": "unavailable", "error": str(exc)[:200]}
+
+
+def _cached(cache, probe):
+    """The warmed value, probing once if this process has never had one."""
+    if cache["value"] is None:
+        _start_background_health()
+        try:
+            cache.update(at=time.time(), value=probe())
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "unavailable", "error": str(exc)[:160]}
+    return cache["value"]
+
+
+def _gbrain_status():
+    return _cached(_GBRAIN_CACHE, _probe_gbrain)
+
+
+def _probe_hermes():
+    """
+    Is Hermes actually usable?
+
+    The layered probe answers "where is the fault", not "is it up": it sets
+    hermes_bridge_ready False on purpose, because reaching MCP is not proof the
+    bridge behind it is alive. Its own recovery note says what settles that --
+    one hermes_status round-trip, since the supervisor connects on demand and a
+    successful answer IS the bridge, verified rather than assumed.
+
+    Reporting the deferred layer as a fault made the control room say "degraded"
+    while Hermes was answering perfectly. So we ask.
+    """
+    try:
+        from friday import hermes_health as hh
+        report = hh.live_probe_factory("http://%s:%s" % (MCP_HOST, MCP_PORT),
+                                       timeout=2.0)()
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "unavailable", "error": str(exc)[:160]}
+
+    failed = _val(report, "failed_layer", "")
+    if _val(report, "healthy", False):
+        return {"status": "healthy", "summary": _val(report, "summary", ""),
+                "failed_layer": ""}
+
+    if failed in ("hermes_bridge_ready", "active_workrun_reachable"):
+        try:
+            from friday import control
+            answer = control.call("hermes_status", {})
+            if isinstance(answer, dict) and answer.get("ok"):
+                return {"status": "healthy", "failed_layer": "",
+                        "summary": "bridge answered hermes_status"}
+            detail = str(answer)[:120]
+        except Exception as exc:  # noqa: BLE001
+            detail = "%s: %s" % (type(exc).__name__, str(exc)[:100])
+        return {"status": "degraded", "failed_layer": failed,
+                "summary": "%s; hermes_status did not answer (%s)"
+                           % (_val(report, "summary", ""), detail)}
+
+    return {"status": "degraded", "summary": _val(report, "summary", ""),
+            "failed_layer": failed}
 
 
 def _hermes_status():
-    try:
-        from friday import hermes_health as hh
-        probe = hh.live_probe_factory("http://%s:%s" % (MCP_HOST, MCP_PORT),
-                                      timeout=2.0)
-        report = probe()
-        healthy = bool(_val(report, "healthy", False))
-        return {
-            "status": "healthy" if healthy else "degraded",
-            "summary": _val(report, "summary", ""),
-            "failed_layer": _val(report, "failed_layer", ""),
-        }
-    except Exception as exc:  # noqa: BLE001
-        return {"status": "unavailable", "error": str(exc)}
+    return _cached(_HERMES_CACHE, _probe_hermes)
 
 
 def _connections():
@@ -315,15 +385,31 @@ def _objective(conn):
     return {"objective": "", "state": "idle"}
 
 
-def _metrics(conn):
+OPEN_TASK = ("WHERE status NOT IN "
+             "('done','completed','verified','cancelled','failed')")
+
+
+def _metrics(conn, run_id=None):
+    """Metrics for the objective in `_objective`, plus the all-time totals.
+
+    The header used to read "340 tasks open . 1.71M tokens" beside ONE
+    objective: both numbers were sums over every row ever written. Scoped keys
+    now name `run_id` only. Caveat on tokens: `run_portions.run_id` is the
+    continuity engine's id space and `objective_runs.run_id` the objective
+    engine's -- they never overlap in the live database, so the scoped token
+    count is 0 until one run id spans both. The real total is in `all_time`,
+    which is what the header labels.
+    """
     # model_tokens lives on run_portions in this schema; [] -> 0 (honest).
-    tok = _rows(conn, "SELECT COALESCE(SUM(model_tokens),0) AS t FROM run_portions")
+    tok = _rows(conn, "SELECT COALESCE(SUM(model_tokens),0) AS t FROM run_portions "
+                      "WHERE run_id=?", (run_id,)) if run_id else []
     tokens = (tok[0]["t"] if tok else 0) or 0
+    all_tok = _rows(conn, "SELECT COALESCE(SUM(model_tokens),0) AS t FROM run_portions")
     by_state = _rows(conn, "SELECT state, COUNT(*) AS n FROM runs "
                            "GROUP BY state ORDER BY n DESC")
     open_tasks = _rows(conn, "SELECT COUNT(*) AS n FROM objective_tasks "
-                             "WHERE status NOT IN "
-                             "('done','completed','verified','cancelled','failed')")
+                             + OPEN_TASK + " AND run_id=?", (run_id,)) if run_id else []
+    all_open = _rows(conn, "SELECT COUNT(*) AS n FROM objective_tasks " + OPEN_TASK)
     dur = _rows(conn, "SELECT AVG((julianday(updated_at)-julianday(created_at))"
                       "*86400.0) AS s FROM (SELECT created_at, updated_at FROM "
                       "runs WHERE updated_at IS NOT NULL "
@@ -333,6 +419,8 @@ def _metrics(conn):
         "runs_by_state": by_state,
         "open_tasks": (open_tasks[0]["n"] if open_tasks else 0),
         "avg_run_secs": round(dur[0]["s"], 1) if dur and dur[0]["s"] else 0,
+        "all_time": {"model_tokens": (all_tok[0]["t"] if all_tok else 0) or 0,
+                     "open_tasks": (all_open[0]["n"] if all_open else 0)},
     }
 
 
@@ -375,6 +463,7 @@ def build_state():
     try:
         conns = _connections()
         gbrain_up = conns.get("gbrain", {}).get("status") == "available"
+        objective = _objective(conn)
         return {
             "v": 1,
             "at": _now(),
@@ -386,8 +475,8 @@ def build_state():
             "todos": _todos(conn),
             "business": _business(conn),
             "agents": _agents(conn),
-            "objective": _objective(conn),
-            "metrics": _metrics(conn),
+            "objective": objective,
+            "metrics": _metrics(conn, objective.get("run_id")),
             "agency": _agency(conn),
             "browser": _browser_status(),
             "build": _build(),
@@ -667,6 +756,47 @@ async def api_camera_hold(request):
     return JSONResponse({"ok": True})
 
 
+def _same_origin(headers) -> bool:
+    """True unless a browser says the request came from another site.
+
+    Origin (always sent on WebSocket handshakes and cross-site fetches) or,
+    failing that, Referer must name this server. No header at all is a
+    same-origin GET from the page, curl or a test client - allowed, as before.
+    The session cookie is SameSite=Strict, so with the face gate ON a
+    cross-site request never carries it; this closes the same two doors in
+    --bypass-face runs: the desk endpoint (a synthetic Ctrl+C is a side
+    effect) and the speech socket (paid transcription on the owner's key).
+    """
+    from urllib.parse import urlsplit
+    src = headers.get("origin") or headers.get("referer") or ""
+    if not src:
+        return True
+    return urlsplit(src).netloc == headers.get("host", "")
+
+
+async def api_desk(request):
+    """The clipboard, or the text highlighted in the foreground window.
+
+    Pressing Ctrl+C at another window is a real side effect, so it happens only
+    when asked for by name: ?what=selection or ?what=auto.
+    """
+    what = request.query_params.get("what", "clipboard")
+    if what not in ("clipboard", "selection", "auto"):
+        return JSONResponse({"ok": False, "error": "what must be clipboard, selection or auto"},
+                            status_code=400)
+    # Strict here: a cross-site <img referrerpolicy="no-referrer"> sends neither
+    # Origin nor Referer, so header-less is treated as cross-site for this
+    # endpoint (review, 2026-09-03). The page's own fetch always carries Referer.
+    src = request.headers.get("origin") or request.headers.get("referer")
+    if not src or not _same_origin(request.headers):
+        access.log({"kind": "desk", "what": what, "blocked": "cross-origin"})
+        return JSONResponse({"ok": False, "error": "cross-origin blocked"}, status_code=403)
+    out = await run_in_threadpool(desk_mod.grab, what)
+    access.log({"kind": "desk", "what": what, "ok": bool(out.get("ok")),
+                "chars": out.get("chars", 0)})          # what she read, never the text itself
+    return JSONResponse(out)
+
+
 async def api_camera(request):
     """Who holds the camera. Open while locked: the lock screen needs it to explain itself."""
     return JSONResponse(await run_in_threadpool(camera_mod.status))
@@ -811,6 +941,32 @@ async def api_ask(request):
     return JSONResponse(await run_in_threadpool(V.reply, text, data.get("history") or []))
 
 
+async def api_hermes_progress(request):
+    """Live progress of the Hermes runs the browser is following.
+
+    The page polls this after a delegation and SPEAKS the line each time
+    `seq` changes, then the result once, then stops following. Owner's
+    ask (2026-09-02): "it just said 'Sir, I delegated the task to Hermes'
+    but it does not tell me anything time to time".
+    """
+    ids = [i for i in (request.query_params.get("ids") or "").split(",") if i]
+    if not ids:
+        return JSONResponse({"runs": []})
+
+    def _read():
+        from friday.tools.hermes_control import supervisor
+        sup = supervisor()
+        out = []
+        for wid in ids[:8]:
+            try:
+                out.append(sup.progress(wid))
+            except Exception as exc:  # noqa: BLE001
+                out.append({"work_run_id": wid, "status": "UNKNOWN",
+                            "line": "", "seq": 0, "error": str(exc)[:120]})
+        return out
+    return JSONResponse({"runs": await run_in_threadpool(_read)})
+
+
 async def api_browser_open(request):
     from friday import ui_browser as B
     try:
@@ -912,12 +1068,74 @@ async def api_org_assemble(request):
         org.assemble, request.query_params.get("goal", "")))
 
 
+def _probe_helpers():
+    from friday import fabric
+    return {"providers": fabric.report(), "families": fabric.family_report(),
+            "processes": fabric.processes()}
+
+
+async def api_helpers(request):
+    now = time.time()
+    if _HELPERS_CACHE["value"] is not None and \
+            now - _HELPERS_CACHE["at"] < _HELPERS_TTL:
+        return JSONResponse(_HELPERS_CACHE["value"])
+    value = await run_in_threadpool(_probe_helpers)
+    _HELPERS_CACHE.update(at=now, value=value)
+    return JSONResponse(value)
+
+
 _TTS_DIR = Path(__file__).resolve().parent.parent / "data" / "tts_cache"
 
 
+#: One warm HTTP client for Deepgram, so the TLS handshake is paid once, not on
+#: every line. A cold call is ~3s; a warm one is ~1s, which is the whole point.
+_DG_CLIENT = None
+
+
+def _deepgram_tts(text, dg_key):
+    global _DG_CLIENT
+    import httpx
+    if _DG_CLIENT is None:
+        _DG_CLIENT = httpx.Client(timeout=20)
+    model = os.getenv("TTS_DG_MODEL", "aura-2-thalia-en")
+    r = _DG_CLIENT.post(
+        "https://api.deepgram.com/v1/speak?model=%s&encoding=mp3" % model,
+        headers={"Authorization": "Token " + dg_key, "Content-Type": "application/json"},
+        json={"text": text})
+    r.raise_for_status()
+    return r.content
+
+
+def _openai_tts(text, key):
+    from openai import OpenAI
+    client = OpenAI(api_key=key)
+    resp = client.audio.speech.create(
+        model=os.getenv("TTS_MODEL", "tts-1"),
+        voice=os.getenv("TTS_VOICE", "nova"),
+        # Same default as the LiveKit agent (friday.providers / TTS_SPEED) so
+        # she does not talk faster in the browser than in the room.
+        speed=float(os.getenv("TTS_SPEED", "1.0")),
+        input=text, response_format="mp3")
+    return resp.content if hasattr(resp, "content") else resp.read()
+
+
+def _tts_provider():
+    """OpenAI tts-1 'nova' unless told otherwise - the voice the LiveKit agent
+    uses, so Friday sounds like one person whichever way the boss talks to her.
+
+    Deepgram Aura is faster (~1s warm against ~4s) and is worth having, but it
+    is a different voice, and picking it automatically because a key happened
+    to be in .env is how her voice changed under the owner without anyone
+    asking. So it is opt-in: TTS_PROVIDER=deepgram."""
+    forced = os.getenv("TTS_PROVIDER", "").lower()
+    if forced in ("deepgram", "openai"):
+        return forced
+    return "openai"
+
+
 def _tts_bytes(text):
-    """The LiveKit Friday voice, exactly: OpenAI tts-1 / nova / 1.15x. Cached
-    by text hash so a repeated line costs nothing. Empty bytes if no key."""
+    """Friday's spoken voice, cached by (provider, voice, text) so switching
+    provider never serves the wrong cached clip. Empty bytes if no key."""
     import hashlib
     text = (text or "").strip()[:800]
     if not text:
@@ -926,25 +1144,32 @@ def _tts_bytes(text):
         import friday.config  # noqa: F401  loads .env
     except Exception:  # noqa: BLE001
         pass
-    key = os.getenv("OPENAI_API_KEY")
-    if not key:
-        return b""
+    provider = _tts_provider()
+    voice = (os.getenv("TTS_DG_MODEL", "aura-2-thalia-en") if provider == "deepgram"
+             else os.getenv("TTS_VOICE", "nova"))
     _TTS_DIR.mkdir(parents=True, exist_ok=True)
-    f = _TTS_DIR / (hashlib.sha256(text.encode("utf-8")).hexdigest()[:24] + ".mp3")
+    tag = "%s|%s|%s" % (provider, voice, text)
+    f = _TTS_DIR / (hashlib.sha256(tag.encode("utf-8")).hexdigest()[:24] + ".mp3")
     if f.exists():
         return f.read_bytes()
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=key)
-        resp = client.audio.speech.create(
-            model=os.getenv("TTS_MODEL", "tts-1"),
-            voice=os.getenv("TTS_VOICE", "nova"),
-            speed=float(os.getenv("TTS_SPEED", "1.15")),
-            input=text, response_format="mp3")
-        data = resp.content if hasattr(resp, "content") else resp.read()
-        f.write_bytes(data)
+        if provider == "deepgram":
+            data = _deepgram_tts(text, os.getenv("DEEPGRAM_API_KEY"))
+        else:
+            if not os.getenv("OPENAI_API_KEY"):
+                return b""
+            data = _openai_tts(text, os.getenv("OPENAI_API_KEY"))
+        if data:
+            f.write_bytes(data)
         return data
     except Exception:  # noqa: BLE001
+        # A failed fast provider should not leave Friday mute: fall back to OpenAI.
+        if provider == "deepgram" and os.getenv("OPENAI_API_KEY"):
+            try:
+                data = _openai_tts(text, os.getenv("OPENAI_API_KEY"))
+                return data
+            except Exception:  # noqa: BLE001
+                return b""
         return b""
 
 
@@ -1032,9 +1257,129 @@ async def events(request):
     return EventSourceResponse(gen())
 
 
+def _start_background_health():
+    """Start the warmer at boot.
+
+    It used to start lazily, on the first memory_snapshot() call, so a control
+    room that never opened the memory view showed GBrain and Hermes as
+    "checking" for as long as it was open.
+    """
+    global _MEM_THREAD
+    with _MEM_LOCK:
+        if _MEM_THREAD is not None:
+            return
+        _MEM_THREAD = threading.Thread(target=_mem_refresher, daemon=True,
+                                       name="health-refresh")
+        _MEM_THREAD.start()
+
+
+async def api_stt(ws):
+    """Device-selectable speech-to-text. The browser streams PCM from the mic
+    it chose (the headset when present); this relays it to Deepgram and streams
+    transcripts back. Opt-in from the UI -- the default path is the browser's
+    own recogniser, which cannot pick a device. The gate leaves websocket scope
+    alone, and only the owner's own microphone audio crosses this socket.
+    """
+    # Browsers always send Origin on a WebSocket handshake, so no Origin at all
+    # is not a page: it is curl, a script, or something on this machine that
+    # wants transcription on the owner's key. Fail closed here (the HTTP
+    # endpoints keep allowing header-less same-origin GETs; a socket is not one).
+    if not ws.headers.get("origin") or not _same_origin(ws.headers):
+        await ws.close(code=4403)      # another site's page: not this owner's mic
+        return
+    await ws.accept()
+    try:
+        import friday.config  # noqa: F401  loads .env
+    except Exception:  # noqa: BLE001
+        pass
+    key = os.getenv("DEEPGRAM_API_KEY")
+    if not key:
+        try:
+            await ws.send_json({"type": "error", "error": "no DEEPGRAM_API_KEY"})
+        finally:
+            await ws.close()
+        return
+    rate = ws.query_params.get("rate", "48000")
+    try:
+        int(rate)
+    except (TypeError, ValueError):
+        rate = "48000"
+    model = os.getenv("STT_DG_MODEL", "nova-2")
+    # Deepgram's `endpointing` is the quiet (ms) after which it CLOSES a
+    # phrase and marks it final. 300 fired a final on every breath, and the
+    # page used to send each one straight to the brain - the "pause treated
+    # as a complete sentence" bug. The page now accumulates finals behind
+    # its own pause window; this just stops the stream fragmenting on a
+    # breath in the first place. Tunable: STT_DG_ENDPOINTING_MS.
+    endpointing = os.getenv("STT_DG_ENDPOINTING_MS", "1000")
+    if not endpointing.isdigit():
+        endpointing = "1000"
+    dg_url = ("wss://api.deepgram.com/v1/listen?model=%s&encoding=linear16"
+              "&sample_rate=%s&channels=1&interim_results=true&smart_format=true"
+              "&punctuate=true&endpointing=%s" % (model, rate, endpointing))
+    import websockets as _wslib
+    try:
+        try:
+            dg = await _wslib.connect(dg_url, additional_headers={"Authorization": "Token " + key})
+        except TypeError:                       # websockets < 14 used extra_headers
+            dg = await _wslib.connect(dg_url, extra_headers={"Authorization": "Token " + key})
+    except Exception as exc:  # noqa: BLE001
+        try:
+            await ws.send_json({"type": "error", "error": "deepgram connect failed: %s" % exc})
+        finally:
+            await ws.close()
+        return
+
+    async def browser_to_dg():
+        try:
+            while True:
+                msg = await ws.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                chunk = msg.get("bytes")
+                if chunk:
+                    await dg.send(chunk)
+                elif msg.get("text") == "__close__":
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await dg.send(json.dumps({"type": "CloseStream"}))
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def dg_to_browser():
+        try:
+            async for raw in dg:
+                try:
+                    data = json.loads(raw)
+                except Exception:  # noqa: BLE001
+                    continue
+                alts = (data.get("channel") or {}).get("alternatives") or []
+                text = (alts[0].get("transcript") if alts else "") or ""
+                if text:
+                    await ws.send_json({"type": "transcript", "text": text,
+                                        "final": bool(data.get("is_final"))})
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        await asyncio.gather(browser_to_dg(), dg_to_browser())
+    finally:
+        try:
+            await dg.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await ws.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def create_app():
     # The face gate is middleware: while locked, only "/", /ui/*, /health and
     # /api/auth/* answer; everything else is 423 and written to the access log.
+    _start_background_health()
     return Starlette(middleware=[Middleware(access.GateMiddleware)], routes=[
         Route("/", index),
         Route("/health", health),
@@ -1052,6 +1397,7 @@ def create_app():
         Route("/api/org", api_org),
         Route("/api/org/route", api_org_route),
         Route("/api/org/assemble", api_org_assemble),
+        Route("/api/helpers", api_helpers),
         Route("/api/tts", api_tts),
         Route("/api/memory/context", api_memory_context),
         Route("/api/memory/tiers", api_memory_tiers),
@@ -1065,6 +1411,7 @@ def create_app():
         Route("/api/vision/describe", api_vision_describe, methods=["POST"]),
         Route("/api/vision/screen", api_vision_screen, methods=["POST"]),
         Route("/api/camera", api_camera),
+        Route("/api/desk", api_desk),
         Route("/api/camera/hold", api_camera_hold, methods=["POST"]),
         Route("/api/auth/pin/set", api_pin_set, methods=["POST"]),
         Route("/api/auth/pin/verify", api_pin_verify, methods=["POST"]),
@@ -1074,6 +1421,8 @@ def create_app():
         Route("/api/harness", api_harness),
         Route("/api/objective", api_objective, methods=["POST"]),
         Route("/api/ask", api_ask, methods=["POST"]),
+        Route("/api/hermes/progress", api_hermes_progress),
+        WebSocketRoute("/api/stt", api_stt),
         Route("/api/browser/open", api_browser_open, methods=["POST"]),
         Route("/api/browser/act", api_browser_act, methods=["POST"]),
         Route("/api/browser/shot", api_browser_shot),

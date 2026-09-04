@@ -102,6 +102,7 @@ class RunSnapshot:
     portion_budget: dict
     total_budget: dict
     checkpoint_version: int
+    budget_exhausted: str = ''
 
 
 @dataclass(frozen=True)
@@ -160,7 +161,10 @@ class ContinuityManager:
         tasks = tuple((dict(task) for task in self.store._conn.execute('SELECT * FROM run_tasks WHERE run_id=? ORDER BY created_at, task_id', (run_id,))))
         wake_row = self.store._conn.execute('SELECT * FROM run_wakes WHERE run_id=?', (run_id,)).fetchone()
         wake = dict(wake_row) if wake_row else None
-        return RunSnapshot(run_id=run_id, objective=row['request'], state=row['state'], outcome=row['outcome'], provenance=row['provenance'], attended=bool(row['attended']), tasks=tasks, wake=wake, counters=_loads(row['counters'], {}), portion_budget=_loads(row['portion_budget'], {}), total_budget=_loads(row['total_budget'], {}), checkpoint_version=int(row['checkpoint_version']))
+        counters = _loads(row['counters'], {})
+        outcome = row['outcome'] or ''
+        exhausted = counters.get('budget_exhausted') or (f"run:{outcome.split(':', 1)[1]}" if outcome.startswith('budget_exhausted:') else '')
+        return RunSnapshot(run_id=run_id, objective=row['request'], state=row['state'], outcome=row['outcome'], provenance=row['provenance'], attended=bool(row['attended']), tasks=tasks, wake=wake, counters=counters, portion_budget=_loads(row['portion_budget'], {}), total_budget=_loads(row['total_budget'], {}), checkpoint_version=int(row['checkpoint_version']), budget_exhausted=exhausted)
 
     def claim_next_due(self, worker_id: str) -> PortionClaim | None:
         self.recover_expired_leases()
@@ -235,6 +239,7 @@ class ContinuityManager:
             generation = int(row['generation']) + 1
             counters = _loads(row['counters'], {})
             counters['portions'] = int(counters.get('portions', 0)) + 1
+            counters.pop('budget_exhausted', None)  # a fresh portion starts with a fresh portion budget
             conn.execute('UPDATE run_controls SET lease_owner=?, lease_token=?, lease_until=?, wake_generation=?, counters=? WHERE run_id=?', (worker_id, lease_token, lease_until, generation, json.dumps(counters), run_id))
             conn.execute("UPDATE runs SET state='working', error=NULL, updated_at=? WHERE run_id=?", (now, run_id))
             conn.execute('UPDATE run_wakes SET generation=?, kind=?, due_at=NULL, detail=?, signal_key=?, created_at=? WHERE run_id=?', (generation, TOOL_COMPLETION, 'active portion must settle', portion_id, now, run_id))
@@ -357,6 +362,7 @@ class ContinuityManager:
             conn.execute('UPDATE run_portions SET action_count=action_count+? WHERE portion_id=?', (count, claim.portion_id))
             if count:
                 self._event(conn, claim.run_id, 'actions_observed', f"{count} tool action(s) settled", task_id=claim.task_id, portion_id=claim.portion_id, evidence_refs=evidence_refs, at=now)
+            self._enforce_budgets(conn, claim, self.clock())
         return self.status(claim.run_id)
 
     def record_model_tokens(self, claim: PortionClaim, count: int) -> RunSnapshot:
@@ -368,7 +374,53 @@ class ContinuityManager:
             counters['model_tokens'] = int(counters.get('model_tokens', 0)) + count
             conn.execute('UPDATE run_controls SET counters=? WHERE run_id=?', (json.dumps(counters), claim.run_id))
             conn.execute('UPDATE run_portions SET model_tokens=model_tokens+? WHERE portion_id=?', (count, claim.portion_id))
+            self._enforce_budgets(conn, claim, self.clock())
         return self.status(claim.run_id)
+
+    def remaining_budget(self, claim: PortionClaim) -> dict:
+        """What this portion and this run may still spend, for pre-call sizing.
+
+        A caller that knows the remaining headroom can shrink the next request
+        instead of discovering the cap only after the tokens are gone.
+        """
+        control = self.store._conn.execute('SELECT portion_budget, total_budget, counters FROM run_controls WHERE run_id=?', (claim.run_id,)).fetchone()
+        portion = self.store._conn.execute('SELECT action_count, model_tokens FROM run_portions WHERE portion_id=?', (claim.portion_id,)).fetchone()
+        if control is None or portion is None:
+            raise LookupError(f"no claimed portion {claim.portion_id}")
+        pb, tb, counters = _loads(control['portion_budget'], {}), _loads(control['total_budget'], {}), _loads(control['counters'], {})
+        return {
+            'portion': {'model_tokens': max(0, int(pb.get('max_model_tokens', 0)) - int(portion['model_tokens'])), 'actions': max(0, int(pb.get('max_actions', 0)) - int(portion['action_count']))},
+            'run': {'model_tokens': max(0, int(tb.get('max_model_tokens', 0)) - int(counters.get('model_tokens', 0))), 'actions': max(0, int(tb.get('max_actions', 0)) - int(counters.get('actions', 0))), 'portions': max(0, int(tb.get('max_portions', 0)) - int(counters.get('portions', 0)))},
+        }
+
+    def _enforce_budgets(self, conn, claim: PortionClaim, now: datetime) -> None:
+        """Stop at the spend, not at the next claim.
+
+        Tokens arrive after the fact from provider usage events, and the only
+        old check ran when the NEXT portion was claimed -- so single portions
+        burned 229k against a 32k cap and runs ended 100k past a 250k total.
+        A crossed total budget ends the run here; a crossed portion budget
+        records one event and marks the claim so the caller stops this portion.
+        """
+        stamp = _iso(now)
+        row = conn.execute('SELECT rc.counters, rc.portion_budget, rc.total_budget, r.created_at FROM run_controls rc JOIN runs r ON r.run_id=rc.run_id WHERE rc.run_id=?', (claim.run_id,)).fetchone()
+        total = self._budget_exhausted(row, now)
+        if total:
+            self._finish_budget(conn, claim.run_id, total, stamp)
+            self._validate(conn, claim.run_id)
+            return
+        counters = _loads(row['counters'], {})
+        if counters.get('budget_exhausted'):
+            return
+        portion = conn.execute('SELECT action_count, model_tokens FROM run_portions WHERE portion_id=?', (claim.portion_id,)).fetchone()
+        budget = _loads(row['portion_budget'], {})
+        for name, spent in (('model_tokens', portion['model_tokens']), ('actions', portion['action_count'])):
+            cap = int(budget.get(f"max_{name}", 0))
+            if cap and int(spent) >= cap:
+                counters['budget_exhausted'] = f"portion:{name}"
+                conn.execute('UPDATE run_controls SET counters=? WHERE run_id=?', (json.dumps(counters), claim.run_id))
+                self._event(conn, claim.run_id, 'budget_exhausted', f"portion:{name} {spent}/{cap}", task_id=claim.task_id, portion_id=claim.portion_id, at=stamp)
+                return
 
     def reserve_narration(self, claim: PortionClaim, *, milestone_key: str, speech_id: str) -> bool:
         """Atomically reserve one semantic milestone narration for this run."""
@@ -536,7 +588,9 @@ class ContinuityManager:
     @staticmethod
     def _budget_exhausted(row, now: datetime) -> str:
         counters = _loads(row['counters'], {})
-        budget = _loads(row['total_budget'], {})
+        # Stored JSON from an older run may lack a key; a KeyError here would
+        # be swallowed upstream and silently end enforcement (review, 2026-09-03).
+        budget = {**asdict(RunBudget()), **_loads(row['total_budget'], {})}
         if int(counters.get('portions', 0)) >= int(budget['max_portions']):
             return 'portions'
         if int(counters.get('actions', 0)) >= int(budget['max_actions']):

@@ -19,15 +19,98 @@
   },
   "agent-reach": {
     "commit": "06c202b03400a7d31886bf4399213706da1a0324",
-    "integration_mode": "REFERENCE_ONLY",
+    "integration_mode": "CLI",
     "integration_mode_proposed": "ADAPTER_MCP",
+    "integration_mode_source": "descriptor",
     "license": "MIT",
     "license_declared": "MIT",
     "license_file": "LICENSE",
     "license_verified": "MIT",
-    "nested_licenses": [],
+    "nested_licenses": [
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/agent_reach-1.5.0.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/brotli-1.2.0.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MPL-2.0",
+        "path": ".venv/Lib/site-packages/certifi-2026.7.22.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/charset_normalizer-3.5.1.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": ".venv/Lib/site-packages/colorama-0.4.6.dist-info/licenses/LICENSE.txt"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": ".venv/Lib/site-packages/feedparser-6.0.14.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": ".venv/Lib/site-packages/feedparser_sgmllib-2.1.0.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "BSD-3-Clause",
+        "path": ".venv/Lib/site-packages/idna-3.19.dist-info/licenses/LICENSE.md"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/markdown_it_py-4.2.0.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/markdown_it_py-4.2.0.dist-info/licenses/LICENSE.markdown-it"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/mdurl-0.1.2.dist-info/LICENSE"
+      },
+      {
+        "license": "BSD-2-Clause",
+        "path": ".venv/Lib/site-packages/pycryptodomex-3.23.0.dist-info/LICENSE.rst"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": ".venv/Lib/site-packages/pygments-2.21.0.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": ".venv/Lib/site-packages/python_dotenv-1.2.3.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/pyyaml-6.0.3.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": ".venv/Lib/site-packages/requests-2.34.2.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/rich-15.0.0.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/urllib3-2.7.0.dist-info/licenses/LICENSE.txt"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": ".venv/Lib/site-packages/websockets-17.1.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/win32_setctime-1.2.0.dist-info/LICENSE"
+      }
+    ],
     "patches": [],
-    "revision_reason": "The pattern is already built. The reason to want Agent-Reach was its capability routing - platform, preferred backend, fallback, doctor - and friday/fabric.py already is that: families, candidates(), select(), declared fallbacks, health() and report(). Meanwhile its CLI exposes no search, read or fetch verb at all; the subcommands are setup, install, configure, doctor, uninstall, skill, format, transcribe, check-update, watch and version. Retrieval reaches an agent by `skill` registration writing skill files into the host agent's config - the same surprise Friday refuses for `graft init` and codebase-memory `install`. Eight of its fifteen channels need per-platform cookies or tokens, several for sites whose terms forbid automated access. Worth revisiting narrowly for `transcribe` (Whisper via Groq/OpenAI), which is a clean verb and a capability Friday genuinely lacks.",
+    "provider_id": "agent_reach_transcribe",
+    "revision_reason": "First revised to REFERENCE_ONLY (2026-08): its capability routing is what fabric.py already is, `skill` rewrites the host agent's config, and eight of fifteen channels need per-site cookies. That note ended 'worth revisiting narrowly for `transcribe` (Whisper via Groq/OpenAI), a clean verb and a capability Friday genuinely lacks' - and this is that revisit (2026-09-02): friday/fabric_adapters/agent_reach_transcribe.py exposes `transcribe` and `doctor` ONLY, as a subprocess of the clone's own venv, with the Groq key delivered as environment through the secret broker. setup/install/skill/configure are not reachable.",
     "role": "Platform-specific research",
     "status": "CLONED",
     "upstream_tests": "NOT_RUN",
@@ -36,15 +119,17 @@
   },
   "agenticseek": {
     "commit": "ae57a2357745a9706cb12d0fd76d954c84d166fa",
-    "integration_mode": "REFERENCE_ONLY",
+    "integration_mode": "CLI",
     "integration_mode_proposed": "REFERENCE_OR_ISOLATED_ADAPTER",
+    "integration_mode_source": "descriptor",
     "license": "GPL-3.0",
     "license_declared": "GPL-3.0",
     "license_file": "LICENSE",
     "license_verified": "GPL-3.0",
     "nested_licenses": [],
     "patches": [],
-    "revision_reason": "GPL-3.0, so an importing mode is refused outright. A local-first autonomous assistant; its value is the local-model, zero-API-key pattern for a privacy-sensitive user, which is a configuration question for Friday's own provider selection rather than a component to vendor. If a local worker is ever wanted it belongs behind the executor_router as an OPTIONAL_WORKER like Cline, not copied in.",
+    "provider_id": "agenticseek_cli",
+    "revision_reason": "GPL-3.0, so an importing mode is refused outright - and until FABRIC-CLI-01 there was no isolated executing mode at all, which is why it was REFERENCE_ONLY. Revised 2026-09-02 to CLI as friday/fabric_adapters/agenticseek_cli.py: a subprocess is a process boundary, so the copyleft invariant holds by construction (Provider.__post_init__ still refuses ADAPTER for it). Gated behind orchestration.local_agent; it runs its own local model and browser.",
     "role": "Local assistant patterns",
     "status": "CLONED",
     "upstream_tests": "NOT_RUN",
@@ -72,6 +157,27 @@
     "url": "https://github.com/rohitg00/agentmemory",
     "vendoring_blockers": [],
     "version": "v0.9.29-1-ge04ba88"
+  },
+  "agents-team": {
+    "added_by": "new_upstream_set.py",
+    "commit": "7f2f83927109dfac878dc78a53f27925f083aaeb",
+    "integration_mode": "SKILL",
+    "integration_mode_proposed": "REFERENCE_ONLY",
+    "integration_mode_source": "descriptor",
+    "license": "MIT",
+    "license_declared": "MIT",
+    "license_file": "LICENSE",
+    "license_verified": "MIT",
+    "nested_licenses": [],
+    "patches": [],
+    "provider_id": "agents_team_pack",
+    "revision_reason": "REFERENCE_ONLY was the audit's first-pass read of the plugin as a whole (scaffold.py/lint.py is a second control layer, never run - NON_NEGOTIABLE 1). Revised 2026-09-03: the same audit that ruled out the generator found eight archetype templates, thirteen team rules and four SKILL.md briefs underneath it that are plain markdown, exactly what role_recipes already contributes. Promoted to SKILL as friday/fabric_adapters/agents_team_pack.py (roles family): archetype/rule/skill each read one file, allowlisted against a fixed tuple. MIT.",
+    "role": "MIT. Ships a Claude Code plugin (agents/, lib/, scaffold.py, lint.py) that generates and grades a team of agent files --",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/fadymondy/agents-team",
+    "vendoring_blockers": [],
+    "version": "v0.1.0-20-g7f2f839"
   },
   "anthropic-cybersecurity-skills": {
     "added_by": "new_upstream_set.py",
@@ -176,8 +282,9 @@
   },
   "anythingllm": {
     "commit": "35c58d89907e675a8c4fb10544c19be0f050f611",
-    "integration_mode": "REFERENCE_ONLY",
+    "integration_mode": "SIDECAR",
     "integration_mode_proposed": "OPTIONAL_SIDECAR",
+    "integration_mode_source": "descriptor",
     "license": "MIT",
     "license_declared": "MIT",
     "license_file": "LICENSE",
@@ -190,29 +297,107 @@
       }
     ],
     "patches": [],
-    "revision_reason": "The sequence admits this one only if measurable capability remains after Open Notebook, and none does: research pipeline, corpus building, durable project memory and workspace isolation are all present, so a second document/RAG application would duplicate storage and answer generation both. Licensing independently argues for caution - the root is MIT but open-computer/ is AGPL-3.0, which the build pack's own policy misses, so any future use must treat that subtree as copyleft regardless of the root.",
+    "provider_id": "anythingllm_research",
+    "revision_reason": "Built 2026-09-03 as a remote HTTP helper (fabric_adapters/anythingllm_research.py, family research): Friday asks an instance the owner runs at ANYTHINGLLM_URL - workspaces, ask, documents, all reads - and says 'unreachable, set ANYTHINGLLM_URL' until one exists. It is a helper that answers questions over the owner's own document workspaces, not a second memory: nothing it returns is stored as a Friday fact (NON_NEGOTIABLE 11 holds). Earlier verdict (REFERENCE_ONLY, 2026-08) stands on the licence point: the root is MIT but open-computer/ is AGPL-3.0, so only the HTTP surface is used and nothing is imported.",
     "role": "Document/RAG workspace",
     "status": "CLONED",
     "upstream_tests": "NOT_RUN",
     "url": "https://github.com/Mintplex-Labs/anything-llm",
     "version": "35c58d8"
   },
+  "auto-company": {
+    "added_by": "new_upstream_set.py",
+    "commit": "ebfab9b4bd5f0ab5ad452a1ff85285b3c141acdd",
+    "integration_mode": "SKILL",
+    "integration_mode_proposed": "REFERENCE_ONLY",
+    "integration_mode_source": "descriptor",
+    "license": "NONE",
+    "license_declared": "NONE",
+    "license_file": "",
+    "license_verified": "NONE",
+    "nested_licenses": [
+      {
+        "license": "MIT",
+        "path": ".claude/skills/github-explorer/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": ".claude/skills/skill-creator/LICENSE.txt"
+      }
+    ],
+    "patches": [],
+    "provider_id": "company_playbooks",
+    "revision_reason": "Demoted to REFERENCE_ONLY on 2026-08-31 as 'a whole control layer'. That is true of its runner and false of its content: fourteen executive playbooks and ~36 business skills are markdown, exactly what agency-agents already contributes as role_recipes. Promoted 2026-09-02 to SKILL as friday/fabric_adapters/company_playbooks.py (roles family): one playbook or skill per call, no bulk read, the Claude Code agent loop never run. This is the HR/operations assistant pack the owner asked for.",
+    "role": "MIT (declared in package.json; no LICENSE file, so the audit reads it as UNIDENTIFIED). A fully autonomous AI 'company' ",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/maxmiksa/auto-company",
+    "vendoring_blockers": [],
+    "version": "ebfab9b"
+  },
+  "awesome-claude-code-subagents": {
+    "added_by": "new_upstream_set.py",
+    "commit": "009544a05267426b3896c77230177967f99f6360",
+    "integration_mode": "SKILL",
+    "integration_mode_proposed": "SKILL",
+    "integration_mode_source": "descriptor",
+    "license": "MIT",
+    "license_declared": "MIT",
+    "license_file": "LICENSE",
+    "license_verified": "MIT",
+    "nested_licenses": [
+      {
+        "license": "MPL-2.0",
+        "path": "categories/08-business-product/license-engineer.md"
+      }
+    ],
+    "patches": [],
+    "provider_id": "claude_subagents",
+    "revision_reason": "Confirmed SKILL on first audit: 158 Claude Code subagent briefs across ten categories (01-core-development .. 10-research-analysis), each frontmatter-only (name, description, tools, model) - no code, no generator, nothing this pack could run even by mistake. Implemented as friday/fabric_adapters/claude_subagents.py (roles family): catalogue/search/category return names only, recipe reads one brief allowlisted against the same index catalogue builds. MIT (VoltAgent).",
+    "role": "MIT (VoltAgent). 158 Claude Code subagent briefs across ten categories, each frontmatter-only (name, description, tools,",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/VoltAgent/awesome-claude-code-subagents",
+    "vendoring_blockers": [],
+    "version": "009544a"
+  },
   "awesome-harness-engineering": {
     "added_by": "new_upstream_set.py",
     "commit": "6a146704c1672367d88684350a55b0eaf744ab7c",
-    "integration_mode": "REFERENCE_ONLY",
+    "integration_mode": "SKILL",
+    "integration_mode_proposed": "REFERENCE_ONLY",
+    "integration_mode_source": "descriptor",
     "license": "CC0-1.0",
     "license_declared": "CC0-1.0",
     "license_file": "LICENSE",
     "license_verified": "UNIDENTIFIED",
     "nested_licenses": [],
     "patches": [],
+    "provider_id": "harness_templates",
+    "revision_reason": "'A reading list, not software' was the REFERENCE_ONLY reason, and it missed the four templates: AGENTS.md, PLAN.md, IMPLEMENT.md and HARNESS_CHECKLIST.md. Promoted 2026-09-02 to SKILL as friday/fabric_adapters/harness_templates.py (orchestration family) so the self-build loop can read the checklist as acceptance criteria. The reading list is not an operation. CC0-1.0.",
     "role": "CC0-1.0 public domain. A curated list and templates, not runnable software. Use as the checklist for docs/architecture/H",
     "status": "CLONED",
     "upstream_tests": "NOT_RUN",
     "url": "https://github.com/ai-boost/awesome-harness-engineering",
     "vendoring_blockers": [],
     "version": "6a14670"
+  },
+  "bolt.diy": {
+    "added_by": "new_upstream_set.py",
+    "commit": "2e254ac19a696394030601bc602f54945b12bfc4",
+    "integration_mode": "REFERENCE_ONLY",
+    "license": "MIT",
+    "license_declared": "MIT",
+    "license_file": "LICENSE",
+    "license_verified": "MIT",
+    "nested_licenses": [],
+    "patches": [],
+    "role": "MIT, but WebContainer -- the tech it is built on -- needs a commercial licence for for-profit production use, and it is ",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/stackblitz-labs/bolt.diy",
+    "vendoring_blockers": [],
+    "version": "2e254ac"
   },
   "browser-use": {
     "commit": "28670f720f63cc5f525a2acd6d6072867689ab68",
@@ -325,6 +510,23 @@
     "vendoring_blockers": [],
     "version": "ac490fd"
   },
+  "firstmate": {
+    "added_by": "new_upstream_set.py",
+    "commit": "0866a770234502364c268a768cb7c66cc321c629",
+    "integration_mode": "REFERENCE_ONLY",
+    "license": "MIT",
+    "license_declared": "MIT",
+    "license_file": "LICENSE",
+    "license_verified": "MIT",
+    "nested_licenses": [],
+    "patches": [],
+    "role": "MIT. An 'agent distro' -- a portable directory of instructions, skills, policies and state conventions for running a cre",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/kunchenguid/firstmate",
+    "vendoring_blockers": [],
+    "version": "0866a77"
+  },
   "graft": {
     "commit": "268e30d750b50df39d7f13873f696c4523fea6b1",
     "integration_mode": "SIDECAR",
@@ -342,6 +544,26 @@
     "upstream_tests": "NOT_RUN",
     "url": "https://github.com/trailhq/Graft",
     "version": "v0.15.0"
+  },
+  "graphiti": {
+    "added_by": "new_upstream_set.py",
+    "commit": "8b61fce9f003cc3a05e246f6201f8b782dfe6546",
+    "integration_mode": "ADAPTER",
+    "integration_mode_proposed": "ADAPTER",
+    "integration_mode_source": "descriptor",
+    "license": "Apache-2.0",
+    "license_declared": "Apache-2.0",
+    "license_file": "LICENSE",
+    "license_verified": "Apache-2.0",
+    "nested_licenses": [],
+    "patches": [],
+    "provider_id": "graphiti_memory",
+    "role": "Apache-2.0, permissive, so an importing mode is allowed. It is the temporal-relations tier of the owner's four-tier memo",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/getzep/graphiti",
+    "vendoring_blockers": [],
+    "version": "8b61fce"
   },
   "gstack": {
     "commit": "a3749bfa4b0fcb33aebf875134d9f21252f23c46",
@@ -383,18 +605,174 @@
     "commit": "4fc597d9ca7ed0960e7564e2ddfbbc810c2d6618",
     "integration_mode": "SIDECAR",
     "integration_mode_proposed": "ISOLATED_SIDECAR",
+    "integration_mode_source": "descriptor",
     "license": "AGPL-3.0",
     "license_declared": "AGPL-3.0",
     "license_file": "LICENSE",
     "license_verified": "AGPL-3.0",
     "nested_licenses": [],
     "patches": [],
-    "revision_reason": "AGPL-3.0, so the fabric would refuse any importing mode regardless. Mode normalised from the template's ISOLATED_SIDECAR to the fabric's vocabulary. Deferred rather than built: docker-compose stands up postgres, minio, a backend, a frontend and its own browser service - a third browser alongside Friday's Playwright and anything else - for scheduled scraping robots. Revisit when a real recurring extraction job exists to justify five services; Scrapling covers one-shot structured extraction today.",
+    "provider_id": "maxun_scraping",
+    "revision_reason": "AGPL-3.0, so the fabric would refuse any importing mode regardless. Mode normalised from the template's ISOLATED_SIDECAR to the fabric's vocabulary. Built 2026-09-03 as a remote HTTP helper (fabric_adapters/maxun_scraping.py, family scraping): Friday asks an instance the owner runs at MAXUN_API_URL with the maxun_api_key secret - robots, runs and results are open reads, run_robot is a write behind scraping.run. Friday still does not host its five services or its browser (the one-browser rule stands; Scrapling covers one-shot extraction); the robots the owner already keeps there become askable. Honest 'unreachable, set MAXUN_API_URL' until an instance exists.",
     "role": "Persistent scraping robots",
     "status": "CLONED",
     "upstream_tests": "NOT_RUN",
     "url": "https://github.com/getmaxun/maxun",
     "version": "v0.0.46"
+  },
+  "medusa": {
+    "added_by": "new_upstream_set.py",
+    "commit": "6a2fce501f3bcd459c21a67f586c7a15b905ff0f",
+    "integration_mode": "SIDECAR",
+    "integration_mode_proposed": "SIDECAR",
+    "integration_mode_source": "descriptor",
+    "license": "MIT",
+    "license_declared": "MIT",
+    "license_file": "LICENSE",
+    "license_verified": "MIT",
+    "nested_licenses": [
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/admin/dashboard/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/core/core-flows/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/core/framework/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/core/instantsearch-adapter/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/core/js-sdk/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/core/types/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/core/utils/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "packages/design-system/icons/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "packages/design-system/ui-preset/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "packages/design-system/ui/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/medusa/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/modules/link-modules/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/modules/providers/auth-oidc/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/modules/rbac/LICENSE"
+      }
+    ],
+    "patches": [],
+    "provider_id": "medusa_commerce",
+    "role": "MIT core; ENTERPRISE-LICENSE.md carves out enterprise materials, which are never touched. Medusa v2 is the product-tradi",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/medusajs/medusa",
+    "vendoring_blockers": [],
+    "version": "6a2fce50"
+  },
+  "mem0": {
+    "added_by": "new_upstream_set.py",
+    "commit": "19cb89aff472325c707f64b2f34ae6afdbf7faf7",
+    "integration_mode": "ADAPTER",
+    "integration_mode_proposed": "ADAPTER",
+    "integration_mode_source": "descriptor",
+    "license": "Apache-2.0",
+    "license_declared": "Apache-2.0",
+    "license_file": "LICENSE",
+    "license_verified": "Apache-2.0",
+    "nested_licenses": [
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/deepseek-plugin/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/mem0-plugin/.opencode-plugin/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/mem0-plugin/skills/mem0/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/mem0-strands/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "integrations/n8n-nodes-mem0/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/openclaw/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/pi-agent-plugin/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/zapier-mem0/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-cli/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-integrate/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-oss-to-platform/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-test-integration/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-vercel-ai-sdk/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0/LICENSE"
+      }
+    ],
+    "patches": [],
+    "provider_id": "mem0_memory",
+    "role": "Apache-2.0, permissive. Supplies the preferences tier of the same four-tier memory design, behind friday/fabric_adapters",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/mem0ai/mem0",
+    "vendoring_blockers": [],
+    "version": "19cb89a"
   },
   "munder-difflin": {
     "added_by": "new_upstream_set.py",
@@ -439,6 +817,40 @@
     "upstream_tests": "NOT_RUN",
     "url": "https://github.com/petergyang/no-ai-slop",
     "version": "d30eddb"
+  },
+  "nodriver": {
+    "added_by": "new_upstream_set.py",
+    "commit": "a71cda374651d13815a42c5eeb61af04a711eaa7",
+    "integration_mode": "REFERENCE_ONLY",
+    "license": "AGPL-3.0",
+    "license_declared": "AGPL-3.0",
+    "license_file": "LICENSE.txt",
+    "license_verified": "AGPL-3.0",
+    "nested_licenses": [],
+    "patches": [],
+    "role": "AGPL-3.0, so fabric.Provider refuses any importing mode outright -- it could only ever be an isolated sidecar. More to t",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/ultrafunkamsterdam/nodriver",
+    "vendoring_blockers": [],
+    "version": "a71cda3"
+  },
+  "onlook": {
+    "added_by": "new_upstream_set.py",
+    "commit": "423e2e924366419e418ee049093872d535eea41a",
+    "integration_mode": "REFERENCE_ONLY",
+    "license": "Apache-2.0",
+    "license_declared": "Apache-2.0",
+    "license_file": "LICENSE.md",
+    "license_verified": "Apache-2.0",
+    "nested_licenses": [],
+    "patches": [],
+    "role": "Apache-2.0. A web-based visual editor that needs Supabase, the CodeSandbox SDK and Docker to run -- a whole hosted appli",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/onlook-dev/onlook",
+    "vendoring_blockers": [],
+    "version": "423e2e9"
   },
   "open-design": {
     "added_by": "new_upstream_set.py",
@@ -541,17 +953,36 @@
     "vendoring_blockers": [],
     "version": "df84ae5"
   },
-  "open-notebook": {
-    "commit": "a7de90d38aaf18ee85fd661854d35c11e44613e2",
+  "open-lovable": {
+    "added_by": "new_upstream_set.py",
+    "commit": "69bd93bae7a9c97ef989eb70aabe6797fb3dac89",
     "integration_mode": "REFERENCE_ONLY",
-    "integration_mode_proposed": "SIDECAR_MCP",
     "license": "MIT",
     "license_declared": "MIT",
     "license_file": "LICENSE",
     "license_verified": "MIT",
     "nested_licenses": [],
     "patches": [],
-    "revision_reason": "A NotebookLM-style research application, v1.14.0, needing SurrealDB and its own container. Friday already has both halves it would provide. The pipeline: toolsets/research.py does crawl_all, dedupe, relevance and build_corpus against a token budget, behind web_answer, web_crawl and web_deep_research. The workspace: memory_remember/recall/search store facts with provenance, and project_record_decision, project_context, projects_list and project_resume already give a durable per-project surface - which is what a notebook is. Standing up a database and an application to restate that is not proportionate, and the brief says plainly not to replace GBrain. The pattern worth keeping is its explicit source/note/citation vocabulary, which is clearer than Friday's fact-with-provenance and could shape the research store.",
+    "role": "MIT, but it mandates paid Firecrawl scraping and a paid E2B/Vercel sandbox, and is a full Next.js app with its own UI. I",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/firecrawl/open-lovable",
+    "vendoring_blockers": [],
+    "version": "69bd93b"
+  },
+  "open-notebook": {
+    "commit": "a7de90d38aaf18ee85fd661854d35c11e44613e2",
+    "integration_mode": "SIDECAR",
+    "integration_mode_proposed": "SIDECAR_MCP",
+    "integration_mode_source": "descriptor",
+    "license": "MIT",
+    "license_declared": "MIT",
+    "license_file": "LICENSE",
+    "license_verified": "MIT",
+    "nested_licenses": [],
+    "patches": [],
+    "provider_id": "open_notebook_research",
+    "revision_reason": "Built 2026-09-03 as a remote HTTP helper (fabric_adapters/open_notebook_research.py, family research) against an instance the owner runs at OPEN_NOTEBOOK_URL: notebooks, notebook and ask are open reads, add_source is a write kept out of the spoken surface. Friday does not host it (no Docker here) and stores none of its answers as facts, so GBrain stays the one memory; the 2026-08 verdict that its pipeline duplicates toolsets/research.py still holds for the crawl half - what is used is the notebook the owner already keeps there, asked by voice. Honest 'unreachable, set OPEN_NOTEBOOK_URL' until an instance exists.",
     "role": "Research notebook",
     "status": "CLONED",
     "upstream_tests": "NOT_RUN",
@@ -575,10 +1006,52 @@
     "url": "https://github.com/OpenHands/OpenHands",
     "version": "d104ffd"
   },
+  "openmausbot": {
+    "added_by": "new_upstream_set.py",
+    "commit": "a3d2870528fbe185c978bb6ffda0decc8fd8a365",
+    "integration_mode": "SKILL",
+    "integration_mode_proposed": "SKILL",
+    "integration_mode_source": "descriptor",
+    "license": "Apache-2.0",
+    "license_declared": "Apache-2.0",
+    "license_file": "LICENSE",
+    "license_verified": "Apache-2.0",
+    "nested_licenses": [
+      {
+        "license": "Apache-2.0",
+        "path": "enterprise/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "enterprise/server/license.test.ts"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "enterprise/server/license.ts"
+      },
+      {
+        "license": "MIT",
+        "path": "third_party/cua-driver/LICENSE.md"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "third_party/playwright-injected/LICENSE"
+      }
+    ],
+    "patches": [],
+    "provider_id": "mausbot_skills",
+    "role": "Apache-2.0 at the root (relicensed from MIT per NOTICE); enterprise/ carries its own all-rights-reserved licence and is ",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/milind-soni/OpenMausBot",
+    "vendoring_blockers": [],
+    "version": "a3d2870"
+  },
   "openmontage": {
     "commit": "cd9f3c1f03368be87b140af494914b8ee4e3c7a4",
     "integration_mode": "SIDECAR",
     "integration_mode_proposed": "ISOLATED_SIDECAR_SKILLS",
+    "integration_mode_source": "descriptor",
     "license": "AGPL-3.0",
     "license_declared": "AGPL-3.0",
     "license_file": "LICENSE",
@@ -602,7 +1075,8 @@
       }
     ],
     "patches": [],
-    "revision_reason": "AGPL-3.0, so the fabric refuses any importing mode. A media/video production studio; deferred rather than built because it is a heavy service and Friday has no media pipeline for it to slot beside yet. Its own .claude/skills carry separate manim licences (recorded in the nested-licence scan). Revisit when a real video-production objective exists to justify the sidecar.",
+    "provider_id": "openmontage_media",
+    "revision_reason": "AGPL-3.0, so the fabric refuses any importing mode. Built 2026-09-03 as a remote HTTP helper (fabric_adapters/openmontage_media.py, family media): at the pin its Backlot server (backlot/server.py, FastAPI, port 4750) exposes a small project-board API - projects and project {id}, both reads, no auth, no write route - which Friday asks at OPENMONTAGE_URL. The render pipeline itself is not driven. Its own .claude/skills carry separate manim licences (recorded in the nested-licence scan). Honest 'unreachable, set OPENMONTAGE_URL' until the owner runs it.",
     "role": "Video production",
     "status": "CLONED",
     "upstream_tests": "NOT_RUN",
@@ -683,6 +1157,27 @@
     ],
     "version": "v0.18.39-39-gfda0babb6"
   },
+  "openworker": {
+    "added_by": "new_upstream_set.py",
+    "commit": "fb1bfc627201f1e159a9380ada25e954174271a5",
+    "integration_mode": "CLI",
+    "integration_mode_proposed": "REFERENCE_ONLY",
+    "integration_mode_source": "descriptor",
+    "license": "MIT",
+    "license_declared": "MIT",
+    "license_file": "LICENSE",
+    "license_verified": "MIT",
+    "nested_licenses": [],
+    "patches": [],
+    "provider_id": "openworker_cli",
+    "revision_reason": "MIT, `openworker <skill> --cwd <dir>` is a genuine headless coding coworker that runs one skill and exits. Registered 2026-09-02 as friday/fabric_adapters/openworker_cli.py in the `coding` family as an OPTIONAL worker beside Hermes, which remains the mandatory engine (NON_NEGOTIABLE 2). `run` needs coding.workspace_write; `plan` is read-only; the upstream's bypass-approvals mode is not exposed.",
+    "role": "MIT. A self-updating desktop AI coworker that runs on the machine with your own model key. It is a complete rival cowork",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/andrewyng/openworker",
+    "vendoring_blockers": [],
+    "version": "fb1bfc6"
+  },
   "pipecat": {
     "commit": "5ff3201996bae0be588191b2ea06ac336e057e16",
     "integration_mode": "REFERENCE_ONLY",
@@ -704,13 +1199,15 @@
     "commit": "0f1647f7491a217d43eb5ae7a480484bdf0aff3e",
     "integration_mode": "SIDECAR",
     "integration_mode_proposed": "ISOLATED_SIDECAR",
+    "integration_mode_source": "descriptor",
     "license": "AGPL-3.0",
     "license_declared": "AGPL-3.0",
     "license_file": "LICENSE",
     "license_verified": "AGPL-3.0",
     "nested_licenses": [],
     "patches": [],
-    "revision_reason": "AGPL-3.0, isolated by the same rule. A full social-scheduling application with its own database and worker. Deferred: Friday has no social-publishing objective today, and NON_NEGOTIABLE 13 already requires human confirmation before any external publish, so the value of a scheduler is bounded until there is content to schedule. Revisit as an isolated service if social publishing becomes a real need.",
+    "provider_id": "postiz_social",
+    "revision_reason": "AGPL-3.0, isolated by the same rule. Built 2026-09-03 as a remote HTTP helper (fabric_adapters/postiz_social.py, family social) against an instance the owner runs at POSTIZ_API_URL with the postiz_api_key secret: integrations, queue and status are open reads; schedule is a write behind the social.publish permission, so NON_NEGOTIABLE 13's human confirmation before an external publish still applies (answered in advance only by the owner's own full-autonomy switch). Honest 'unreachable, set POSTIZ_API_URL' until an instance exists.",
     "role": "Social scheduling",
     "status": "CLONED",
     "upstream_tests": "NOT_RUN",
@@ -806,22 +1303,188 @@
     "url": "https://github.com/D4Vinci/Scrapling",
     "version": "458e2a2"
   },
+  "smartstore": {
+    "added_by": "new_upstream_set.py",
+    "commit": "3b7d986ecb6c8525b63f5243b686531511c285f9",
+    "integration_mode": "SIDECAR",
+    "integration_mode_proposed": "SIDECAR",
+    "integration_mode_source": "descriptor",
+    "license": "AGPL-3.0",
+    "license_declared": "AGPL-3.0",
+    "license_file": "LICENSE",
+    "license_verified": "AGPL-3.0",
+    "nested_licenses": [
+      {
+        "license": "UNIDENTIFIED",
+        "path": "src/Smartstore.Web/App_Data/Geo/LICENSE.txt"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "src/Smartstore.Web/Areas/Admin/Models/Modularity/LicenseModuleModel.cs"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "src/Smartstore.Web/Areas/Admin/Views/Module/LicenseModule.cshtml"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "src/Smartstore.Web/Areas/Admin/Views/Module/Partials/LicenseLabel.cshtml"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "src/Smartstore.Web/Views/Shared/LicenseRequired.cshtml"
+      },
+      {
+        "license": "MIT",
+        "path": "src/Smartstore.Web/wwwroot/lib/bootstrap/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "src/Smartstore.Web/wwwroot/lib/drift/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "src/Smartstore.Web/wwwroot/lib/fa6/LICENSE.txt"
+      },
+      {
+        "license": "MIT",
+        "path": "src/Smartstore.Web/wwwroot/lib/fa7/LICENSE.txt"
+      },
+      {
+        "license": "MIT",
+        "path": "src/Smartstore.Web/wwwroot/lib/photoswipe/LICENSE"
+      },
+      {
+        "license": "GPL-3.0",
+        "path": "src/Smartstore.Web/wwwroot/lib/roxyfm/LICENSE.txt"
+      }
+    ],
+    "patches": [],
+    "provider_id": "smartstore_commerce",
+    "role": "AGPL-3.0, so the fabric refuses any importing mode. friday/fabric_adapters/smartstore_commerce.py is an HTTP client to t",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/smartstore/Smartstore",
+    "vendoring_blockers": [],
+    "version": "3b7d986"
+  },
   "strix": {
     "commit": "cbb0f57058a97cc78d19c3cdd0171d1b41d498fd",
-    "integration_mode": "REFERENCE_ONLY",
+    "integration_mode": "CLI",
     "integration_mode_proposed": "RESTRICTED_SECURITY_ADAPTER",
+    "integration_mode_source": "descriptor",
     "license": "Apache-2.0",
     "license_declared": "Apache-2.0",
     "license_file": "LICENSE",
     "license_verified": "Apache-2.0",
-    "nested_licenses": [],
+    "license_warning": "root is Apache-2.0 but 1 nested component(s) are copyleft: .venv/Lib/site-packages/adodbapi/license.txt",
+    "nested_licenses": [
+      {
+        "license": "GPL-3.0",
+        "path": ".venv/Lib/site-packages/adodbapi/license.txt"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": ".venv/Lib/site-packages/aiohappyeyeballs-2.6.2.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": ".venv/Lib/site-packages/aiohttp-3.14.1.dist-info/licenses/LICENSE.txt"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/aiohttp-3.14.1.dist-info/licenses/vendor/llhttp/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": ".venv/Lib/site-packages/aiosignal-1.4.0.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/altgraph-0.17.5.dist-info/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/annotated_doc-0.0.4.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/annotated_types-0.7.0.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/anyio-4.14.1.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/ast_serialize-0.5.0.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/attrs-26.1.0.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/backoff-2.2.1.dist-info/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": ".venv/Lib/site-packages/bandit-1.9.4.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MPL-2.0",
+        "path": ".venv/Lib/site-packages/certifi-2026.6.17.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/cffi-2.0.0.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/cfgv-3.5.0.dist-info/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": ".venv/Lib/site-packages/charset_normalizer-3.4.7.dist-info/licenses/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": ".venv/Lib/site-packages/click-8.4.2.dist-info/licenses/LICENSE.txt"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": ".venv/Lib/site-packages/colorama-0.4.6.dist-info/licenses/LICENSE.txt"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": ".venv/Lib/site-packages/cryptography-48.0.1.dist-info/licenses/LICENSE"
+      }
+    ],
     "patches": [],
-    "revision_reason": "strix-agent 1.5.3, 'Open-source AI Hackers for your apps' - a full autonomous security agent with its own LLM loop (openai-agents, litellm) and a Docker runtime. Friday genuinely lacks active security scanning, which is the one place a remaining upstream addresses a real gap - but installing Strix is a second agent brain and a second model loop, the NON_NEGOTIABLE 11 problem browser-use and OpenHands already hit. security_skills (implemented, Apache-2.0, scope-gated) covers the knowledge side. Active scanning belongs in a future restricted, authorised sidecar with its own scope policy, not an in-process adapter - so this is REFERENCE_ONLY now, with the gap named.",
+    "provider_id": "strix_pentest",
+    "revision_reason": "strix-agent 1.5.3, 'Open-source AI Hackers for your apps' - a full autonomous security agent with its own LLM loop (openai-agents, litellm) and a Docker runtime. First revised to REFERENCE_ONLY on 2026-08 because the only executing modes imported code into Friday's process, which would have been a second agent brain (NON_NEGOTIABLE 11); the note asked for 'a future restricted, authorised sidecar with its own scope policy'. That is what FABRIC-CLI-01 now provides: revised again 2026-09-02 to CLI as friday/fabric_adapters/strix_pentest.py - a one-shot subprocess (process boundary, no import, no shared model loop), gated by security.authorized_scope before activation, with --target/--instruction each a single argv element. security_skills still covers the knowledge side.",
     "role": "Authorized app security",
     "status": "CLONED",
     "upstream_tests": "NOT_RUN",
     "url": "https://github.com/usestrix/strix",
     "version": "cbb0f57"
+  },
+  "ultron": {
+    "added_by": "new_upstream_set.py",
+    "commit": "a65306f5a9568655551ec27445f773f20273223a",
+    "integration_mode": "REFERENCE_ONLY",
+    "license": "MIT",
+    "license_declared": "MIT",
+    "license_file": "LICENSE",
+    "license_verified": "MIT",
+    "nested_licenses": [],
+    "patches": [],
+    "role": "MIT. The control room's core is a hand-port of its orbScene and hand tracker into ui/orb.js, not a runtime import, so no",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/SAGAR-TAMANG/ultron-by-sagar-builds",
+    "vendoring_blockers": [],
+    "version": "a65306f"
   },
   "vane": {
     "commit": "7dc5d088f7262fbc5e39037f84940a8a2193c5fb",

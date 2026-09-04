@@ -1,0 +1,19 @@
+{
+  "name": "friday-local",
+  "owner": {
+    "name": "Friday repo (local)"
+  },
+  "metadata": {
+    "description": "Local marketplace shim to install the pinned agents-team plugin from third_party/upstream without modifying the pinned clone.",
+    "version": "0.0.1"
+  },
+  "plugins": [
+    {
+      "name": "agents-team",
+      "source": "./agents-team",
+      "description": "Generate a complete Claude Code agent team (orchestrator + specialists, skills, rules, hooks) from a product description.",
+      "version": "0.2.0-dev",
+      "license": "MIT"
+    }
+  ]
+}

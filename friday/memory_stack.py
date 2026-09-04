@@ -190,10 +190,99 @@ def relations(task="", limit=12):
 # aggregate: one context block under a budget
 # ---------------------------------------------------------------------------
 
-def aggregate(task, budget_tokens=None):
+# ---------------------------------------------------------------------------
+# tier 5: episodes -- what was actually said, across sessions
+# ---------------------------------------------------------------------------
+
+#: How many past turns travel with every request. The owner asked for 20-30
+#: chats of continuity; 30 turns of a spoken conversation is roughly 1-2k
+#: characters, which the budget in `aggregate` trims further if it has to.
+EPISODE_TURNS = int(os.getenv("FRIDAY_EPISODE_TURNS", "30"))
+
+#: The most of the context budget the raw transcript may take.
+EPISODE_BUDGET_SHARE = float(os.getenv("FRIDAY_EPISODE_SHARE", "0.45"))
+
+
+def _store():
+    from friday.toolsets.memory import store
+    return store()
+
+
+def episodes(task="", limit=None):
+    """
+    Recent conversation turns, oldest first.
+
+    The four tiers above are all *derived* memory - preferences extracted from
+    talk, specs written by hand, rules committed to git, edges inferred. None
+    of them is the talk itself, which is why a new session could greet the
+    owner as a stranger while every tier reported healthy. This is the raw
+    record, and it is deliberately not scoped to the current conversation:
+    continuity that ends at a session boundary is the bug, not the feature.
+    """
+    limit = limit or EPISODE_TURNS
+    try:
+        rows = _store().recent_messages(limit=limit)
+    except Exception:  # noqa: BLE001
+        return {"tier": "episodes", "items": []}
+    return {"tier": "episodes", "items": rows}
+
+
+# ---------------------------------------------------------------------------
+# tier 6: contacts -- the people a request is about
+# ---------------------------------------------------------------------------
+
+def contacts(task="", limit=5):
+    """Contacts this request plausibly names. Empty for a request about no one."""
+    try:
+        rows = _store().find_contacts(task, limit=limit)
+    except Exception:  # noqa: BLE001
+        return {"tier": "contacts", "items": []}
+    return {"tier": "contacts", "items": rows}
+
+
+# ---------------------------------------------------------------------------
+# tier 7: hermes outcomes -- what the last delegations actually did
+# ---------------------------------------------------------------------------
+
+def hermes_outcomes(task="", limit=3):
+    """Recent terminal Hermes work runs (friday.hermes_bridge.on_terminal).
+
+    Not a new table: `project_decisions` already exists and, unlike
+    episodes, already survives `include_episodes=False` - the one thing a
+    follow-up Hermes bundle needs. "What did the last delegation do" is a
+    recency question, not a keyword match, so this is unscored like
+    episodes rather than ranked like specs/preferences.
+    """
+    try:
+        rows = _store().decisions("hermes")
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger("friday.memory").warning(
+            "outcomes tier unavailable (%s): 'what did Hermes do' will answer nothing", exc)
+        return {"tier": "outcomes", "items": [], "error": str(exc)[:120]}
+    return {"tier": "outcomes", "items": rows[:limit]}
+
+
+def aggregate(task, budget_tokens=None, include_episodes=True):
+    """The task-scoped slice of every tier, within `budget_tokens`.
+
+    `include_episodes=False` is the delegation shape. The episode tier is
+    the last thirty spoken turns, and it takes EPISODE_BUDGET_SHARE of the
+    budget by design so the voice brain keeps continuity - but a Hermes
+    sub-agent handed a coding goal has no use for "he: we would be," and
+    measured, that share crowded out 6 of 8 rules, all 4 specs and all 12
+    relations from a 600-token bundle. What Friday knows that a worker
+    needs is the rules, specs, relations and preferences; what was said is
+    already in the goal.
+    """
     budget = budget_tokens or BUDGET_TOKENS
     t1, t2, t3, t4 = preferences(task), specs(task), rules(task), relations(task)
-    used, lines, injected = 0, [], {"preferences": 0, "specs": 0, "rules": 0, "relations": 0}
+    t5 = episodes(task) if include_episodes else {"items": []}
+    t6 = contacts(task)
+    t7 = hermes_outcomes(task)
+    used, lines, injected = 0, [], {"preferences": 0, "specs": 0, "rules": 0,
+                                    "relations": 0, "episodes": 0, "contacts": 0,
+                                    "outcomes": 0}
 
     def take(section, text, key):
         nonlocal used
@@ -205,6 +294,48 @@ def aggregate(task, budget_tokens=None):
         injected[key] += 1
         return True
 
+    # Ordered before the derived tiers on purpose. `take` stops at the budget,
+    # so whatever is appended last is what gets dropped - and the thing that
+    # must never be dropped is what he actually said last time.
+    if t6["items"]:
+        lines.append("PEOPLE HE MENTIONED:")
+        for c in t6["items"]:
+            detail = ", ".join(x for x in (
+                c.get("relation"), c.get("phone"), c.get("email"),
+                (c.get("notes") or "")[:80]) if x)
+            if not take("contact", "- %s: %s" % (c["name"], detail or "no details on file"),
+                        "contacts"):
+                break
+    if t5["items"]:
+        # Thirty turns can be 1,800 tokens on their own, which under the 900
+        # the voice brain asks for would leave nothing for preferences, rules
+        # or specs - continuity bought by making Friday forget everything she
+        # was taught. So the transcript gets a share, not the lot: the newest
+        # turns are kept and the oldest fall off first.
+        room = max(1, int(budget * EPISODE_BUDGET_SHARE))
+        kept, spent = [], 0
+        for m in reversed(t5["items"]):
+            line = "- %s: %s" % ("he" if m.get("role") == "user" else "you",
+                                 (m.get("content") or "")[:240].replace(chr(10), " "))
+            cost = _approx_tokens(line)
+            if spent + cost > room:
+                break
+            kept.append(line)
+            spent += cost
+        if kept:
+            lines.append("WHAT WAS SAID BEFORE (most recent last):")
+            for line in reversed(kept):
+                if not take("episode", line, "episodes"):
+                    break
+    if t7["items"]:
+        # High priority, same reasoning as contacts/episodes above: this is
+        # the one thing a Hermes follow-up bundle needs (include_episodes
+        # =False skips episodes entirely, so this must not depend on it),
+        # and it is also what "what did Hermes just do?" needs live.
+        lines.append("RECENT HERMES OUTCOMES:")
+        for d in t7["items"]:
+            if not take("outcome", "- %s" % d["decision"][:300], "outcomes"):
+                break
     if t1["items"]:
         lines.append("YOUR PREFERENCES AND RULES:")
         for it in t1["items"]:
@@ -228,7 +359,8 @@ def aggregate(task, budget_tokens=None):
         for c in t4["conflicts"]:
             take("rel", "- OPEN CONTRADICTION on %s: '%s' vs '%s'" % (c["subject"], c["existing"], c["proposed"]), "relations")
     return {"task": task, "budget_tokens": budget, "tokens_used": used, "injected": injected,
-            "tiers": {"preferences": t1, "specs": t2, "rules": t3, "relations": t4},
+            "tiers": {"preferences": t1, "specs": t2, "rules": t3, "relations": t4,
+                      "episodes": t5, "contacts": t6, "outcomes": t7},
             "prompt": "\n".join(lines)}
 
 

@@ -675,6 +675,15 @@ def record_correction(text: str, *, previous: dict | None = None,
         logger.info("shadow.correction previous=%s corrected=%s",
                     entry["previous_capability"] or "-",
                     entry["corrected_capability"] or "-")
+        # The router caches what it learned per request shape; a correction is
+        # exactly the event that makes that cache wrong. Dropping it here is
+        # what makes "no, I meant the other one" take effect on the next turn
+        # rather than after the TTL.
+        try:
+            from friday import routing_memory
+            routing_memory.forget()
+        except Exception:  # noqa: BLE001
+            pass
         return entry
     except Exception:                                       # noqa: BLE001
         logger.exception("shadow.correction failed")

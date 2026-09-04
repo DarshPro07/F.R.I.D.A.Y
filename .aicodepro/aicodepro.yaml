@@ -1,0 +1,47 @@
+# AiCodePro workspace manifest.
+#
+# `.aicodepro/` is the CANONICAL source for this project's AiCodePro items.
+# Provider folders such as `.claude/` and `.codex/` are GENERATED from it —
+# enable them under `spec.generation` below, then edit only what is here.
+#
+# Created when this workspace was trusted. Edit it freely; AiCodePro will
+# not overwrite it.
+
+apiVersion: aicodepro.ai/v1
+kind: Workspace
+
+metadata:
+  name: friday-tony-stark-demo-main
+  version: 0.1.0
+
+spec:
+  # Instruction documents the agent should read. Add paths relative to
+  # `.aicodepro/`, e.g. `instructions/PROJECT.md`.
+  instructions: []
+
+  skills:
+    discovery:
+      - skills/*
+    items: []
+
+  agents:
+    discovery:
+      - agents/*
+    items: []
+
+  tools:
+    discovery:
+      - tools/*
+    items: []
+
+  workflows:
+    discovery:
+      - workflows/*
+
+  providers:
+    enabled: []
+
+  # Off by default. Turning a provider on makes AiCodePro RENDER that
+  # vendor's folder from this manifest — which will overwrite a hand-
+  # maintained one, so opt in deliberately.
+  generation: {}

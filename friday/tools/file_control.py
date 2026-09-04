@@ -142,3 +142,36 @@ def register(mcp):
         Directories are refused. So is anything outside the workspace.
         """
         return _execute(f"recycle {path}", F.files_recycle, path)
+
+    @mcp.tool()
+    def files_delete(path: str, permanent: bool = False, nonce: str = "") -> dict:
+        """
+        Delete a file. By default this recycles it (undoable, goes to the
+        Recycle Bin). `permanent=True` destroys it for good, and needs the
+        boss's confirmation: the first call returns a `confirm` with a nonce and
+        does nothing; call again with that nonce once he has approved it. A
+        confirmation is spent once, on that exact file. Friday's own artifacts
+        are exempt and delete without a nonce.
+
+        Directories, protected files (.env, keys), symlinks and anything outside
+        the workspace are refused.
+        """
+        from friday import confirmation
+        n = nonce or None
+        # A nonce was minted for a specific run; reuse that run so the question
+        # and the act are one record, not two, and the confirmation matches.
+        run = None
+        if n:
+            pend = confirmation.book.pending.get(n)
+            if pend:
+                run = c.Run(run_id=pend.run_id, request=f"delete {path}", capability="files")
+        if run is None:
+            run = c.Run.create(f"delete {path}", capability="files")
+        result = F.files_delete(run, path, permanent=permanent, nonce=n, engine=_get_engine())
+        run.transition("completed" if run.all_succeeded else "partial",
+                       None if run.all_succeeded else (result.error or "not verified"))
+        try:
+            _get_store().save_run(run)
+        except Exception:  # noqa: BLE001
+            pass
+        return result.to_dict()

@@ -177,6 +177,15 @@ def call(operation: str, handle, **arguments):
 
     if operation == "skill":
         name = (arguments.get("name") or "").strip()
+        if not name:
+            # The model called for a skill without naming one. Observed live:
+            # the reply "'' is not an offered skill" was read back to the boss
+            # verbatim and taken as the capability being broken. Say what to
+            # do instead, so the next call is the right one.
+            raise fabric.FabricError(
+                "operation 'skill' needs arguments={'name': <skill-id>}; get the "
+                "id from operation 'search' first. If you want facts, not a "
+                "method, this is the wrong family - use web_search / web_answer.")
         blocked = _blocked()
         if name in blocked:
             raise fabric.FabricError(

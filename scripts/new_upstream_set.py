@@ -33,6 +33,32 @@ OUT = ROOT / "docs" / "integrations" / "NEW_UPSTREAM_SET.json"
 
 #: Every repository the operator asked for, verbatim.
 REQUESTED = (
+    # Added after the original set, and cloned before they were listed here --
+    # which is exactly what test_no_upstream_was_staged_without_being_requested
+    # caught. All three are in use and permissively licensed:
+    #   graphiti  Apache-2.0, tier-4 relations   (friday/fabric_adapters/graphiti_memory.py)
+    #   mem0      Apache-2.0, tier-1 preferences (friday/fabric_adapters/mem0_memory.py)
+    #   ultron    MIT, the control room's core   (ui/orb.js is a port of it)
+    "https://github.com/getzep/graphiti",
+    "https://github.com/mem0ai/mem0",
+    "https://github.com/SAGAR-TAMANG/ultron-by-sagar-builds",
+    # Three the owner asked for on 2026-08-31. All MIT (auto-company declares MIT
+    # in package.json; it has no LICENSE file, so the audit will show it
+    # UNIDENTIFIED and the decision below records why it is safe). All three are
+    # whole applications / orchestration patterns, not components -- reference,
+    # not import, so none touches the single-control-layer rule.
+    "https://github.com/kunchenguid/firstmate",
+    "https://github.com/maxmiksa/auto-company",
+    "https://github.com/andrewyng/openworker",
+    # Three app-builders the owner sent on 2026-08-31. All whole applications
+    # with their own UIs and heavy external deps (WebContainer's commercial
+    # licence, Firecrawl + E2B paid APIs, Supabase + CodeSandbox), so all three
+    # are reference, never wired -- Friday delivers their capability natively
+    # (Hermes builds; the browser + scrapling clone a site's UI). See DECISIONS.
+    "https://github.com/stackblitz-labs/bolt.diy",
+    "https://github.com/firecrawl/open-lovable",
+    "https://github.com/onlook-dev/onlook",
+    "https://github.com/ultrafunkamsterdam/nodriver",
     "https://github.com/OpenHands/openhands",
     "https://github.com/getmaxun/maxun",
     "https://github.com/browser-use/browser-use",
@@ -64,16 +90,42 @@ REQUESTED = (
     "https://github.com/different-ai/openwork",
     "https://github.com/nidhinjs/prompt-master",
     "https://github.com/nexu-io/open-design",
+    # Three the owner sent on 2026-09-02 with the product-trading brief.
+    #   OpenMausBot  Apache-2.0 (enterprise/ carved out), a multi-bot chat
+    #                app - a second control layer; its two skills are read.
+    #   medusa       MIT core (ENTERPRISE-LICENSE.md carved out), headless
+    #                commerce - the trading backend, reached over admin REST.
+    #   Smartstore   AGPL-3.0, .NET commerce - HTTP client to its OData API
+    #                only, never linked.
+    "https://github.com/milind-soni/OpenMausBot",
+    "https://github.com/medusajs/medusa",
+    "https://github.com/smartstore/Smartstore",
+    # Two the owner sent on 2026-09-03 for the "roles" family (jarvis-agentic-
+    # team S4). Both MIT, both markdown-only content behind a control layer
+    # that Friday never runs -- see DECISIONS below.
+    #   agents-team                     a Claude Code plugin (scaffold.py /
+    #                                    lint.py); its templates/rules/skills
+    #                                    are read as friday/fabric_adapters/
+    #                                    agents_team_pack.py.
+    #   awesome-claude-code-subagents   158 agent briefs, ten categories,
+    #                                    frontmatter only; read as friday/
+    #                                    fabric_adapters/claude_subagents.py.
+    "https://github.com/fadymondy/agents-team",
+    "https://github.com/VoltAgent/awesome-claude-code-subagents",
 )
 
 #: The build pack named two directories differently from their repositories.
 #: Spelled out rather than pattern-matched, because a rule that strips "-app"
 #: or removes hyphens would also silently merge two genuinely distinct repos.
-ALIASES = {"anything-llm": "anythingllm", "postiz-app": "postiz"}
+ALIASES = {"anything-llm": "anythingllm", "postiz-app": "postiz",
+           "ultron-by-sagar-builds": "ultron"}
 
 #: How many the operator and the build pack agree should be left over. The
 #: script asserts this rather than trusting the arithmetic.
-EXPECTED_NEW = 10
+#: graphiti, mem0 and ultron were added after the build pack was written,
+#: so they are 'new to the pack' too -- 10 + 3 + 3 (firstmate, auto-company, openworker, then bolt.diy, open-lovable, onlook -- all added 2026-08-31),
+#: then + 2 (agents-team, awesome-claude-code-subagents -- 2026-09-03).
+EXPECTED_NEW = 25
 
 
 def slug(url: str) -> str:
@@ -171,6 +223,74 @@ MANIFESTS = ("package.json", "pyproject.toml", "requirements.txt", "go.mod",
 #:
 #: Mode vocabulary is `fabric.INTEGRATION_MODES` plus REJECTED.
 DECISIONS = {
+    "nodriver": (
+        "REFERENCE_ONLY",
+        "AGPL-3.0, so fabric.Provider refuses any importing mode outright -- it "
+        "could only ever be an isolated sidecar. More to the point, its whole "
+        "purpose is defeating Captcha, Cloudflare and anti-bot systems, which is "
+        "detection-evasion Friday will not do; her browsing goes through the "
+        "gated Playwright path inside netguard. Pinned only as a record of the "
+        "direct-CDP automation technique, never wired."),
+    "bolt.diy": (
+        "REFERENCE_ONLY",
+        "MIT, but WebContainer -- the tech it is built on -- needs a commercial "
+        "licence for for-profit production use, and it is a whole standalone app "
+        "(Electron/browser) with its own agent loop and UI. Building an app from "
+        "a prompt is already Friday delegating to Hermes, so this is pinned as a "
+        "reference for its streaming full-stack build patterns, not imported."),
+    "open-lovable": (
+        "REFERENCE_ONLY",
+        "MIT, but it mandates paid Firecrawl scraping and a paid E2B/Vercel "
+        "sandbox, and is a full Next.js app with its own UI. Its value -- read a "
+        "site's UI into clean data -- Friday now does natively via its gated "
+        "browser and scrapling (friday/ui_browser.study_url), inside netguard "
+        "with no paid services. Pinned as reference for the clone pipeline."),
+    "onlook": (
+        "REFERENCE_ONLY",
+        "Apache-2.0. A web-based visual editor that needs Supabase, the "
+        "CodeSandbox SDK and Docker to run -- a whole hosted application, not a "
+        "component. Visual editing is not a backend capability Friday can host, "
+        "so it is pinned as a reference for its AST-safe code-editing patterns."),
+    "firstmate": (
+        "REFERENCE_ONLY",
+        "MIT. An 'agent distro' -- a portable directory of instructions, skills, "
+        "policies and state conventions for running a crew of agents. It is an "
+        "orchestration convention, which is Friday's own job (NON_NEGOTIABLE 1), "
+        "so it is pinned as a pattern to learn from; its skills/ directory could "
+        "later feed the roles family through an adapter if that proves worth it."),
+    "auto-company": (
+        "REFERENCE_ONLY",
+        "MIT (declared in package.json; no LICENSE file, so the audit reads it as "
+        "UNIDENTIFIED). A fully autonomous AI 'company' of 14 agents that ideate, "
+        "build, deploy and market, powered by Claude Code. It is a whole control "
+        "layer, so it is reference only: Friday is the single orchestrator "
+        "(NON_NEGOTIABLE 1, 11), and its value is the company workflow as a "
+        "blueprint, not code to import."),
+    "openworker": (
+        "REFERENCE_ONLY",
+        "MIT. A self-updating desktop AI coworker that runs on the machine with "
+        "your own model key. It is a complete rival coworker application, not a "
+        "component, so wiring it would duplicate Friday herself; pinned as "
+        "reference for its task-execution and self-update patterns."),
+    "graphiti": (
+        "ADAPTER",
+        "Apache-2.0, permissive, so an importing mode is allowed. It is the "
+        "temporal-relations tier of the owner's four-tier memory design and "
+        "friday/fabric_adapters/graphiti_memory.py already targets it. The "
+        "adapter reports UNAVAILABLE until graphiti-core is installed, which "
+        "is the required behaviour for an absent optional upstream."),
+    "mem0": (
+        "ADAPTER",
+        "Apache-2.0, permissive. Supplies the preferences tier of the same "
+        "four-tier memory design, behind friday/fabric_adapters/mem0_memory.py. "
+        "Reports UNAVAILABLE until mem0ai is installed. GBrain stays canonical: "
+        "this is a feed into the one memory, never a second one."),
+    "ultron": (
+        "REFERENCE_ONLY",
+        "MIT. The control room's core is a hand-port of its orbScene and hand "
+        "tracker into ui/orb.js, not a runtime import, so nothing links to the "
+        "clone. It is pinned as the provenance record for that port and for the "
+        "amber palette DESIGN.md commits to."),
     "openviking": (
         "SIDECAR",
         "AGPL-3.0. Copyleft, so fabric.Provider will refuse any importing "
@@ -235,6 +355,48 @@ DECISIONS = {
         "execute_capability MCP model is worth comparing against fabric.py, "
         "which already provides discovery, routing and execution - so this is "
         "a comparison, not a second fabric."),
+    "openmausbot": (
+        "SKILL",
+        "Apache-2.0 at the root (relicensed from MIT per NOTICE); enterprise/ "
+        "carries its own all-rights-reserved licence and is excluded. An "
+        "Electron chat app that hosts a roster of Claude/Codex bots - a "
+        "second control layer (NON_NEGOTIABLE 1), so the app is never run. "
+        "Its two skills (phone-harness for authorised-USB Android control, "
+        "create-verification-skill for writing launch/verify recipes) are "
+        "read on demand as a SKILL pack."),
+    "medusa": (
+        "SIDECAR",
+        "MIT core; ENTERPRISE-LICENSE.md carves out enterprise materials, "
+        "which are never touched. Medusa v2 is the product-trading backend "
+        "behind the commerce family: friday/fabric_adapters/medusa_commerce.py "
+        "is an HTTP client to a store the operator runs (MEDUSA_BACKEND_URL) "
+        "over /admin/* with secret-key Basic auth. The clone excludes www/ "
+        "(docs) by sparse checkout because its paths exceed Windows MAX_PATH. "
+        "Payments and refunds are not operations."),
+    "smartstore": (
+        "SIDECAR",
+        "AGPL-3.0, so the fabric refuses any importing mode. "
+        "friday/fabric_adapters/smartstore_commerce.py is an HTTP client to "
+        "the operator's store over its OData v4 Web API with "
+        "PublicKey:SecretKey Basic auth; no upstream code is linked. It is "
+        "the commerce family's fallback behind medusa_commerce."),
+    "agents-team": (
+        "REFERENCE_ONLY",
+        "MIT. Ships a Claude Code plugin (agents/, lib/, scaffold.py, "
+        "lint.py) that generates and grades a team of agent files -- a "
+        "second control layer (NON_NEGOTIABLE 1), so the plugin itself is "
+        "never run by Friday. Its templates/rules/skills are plain "
+        "markdown, no different from agency-agents' recipes; see "
+        "UPSTREAM_LOCK.json's revision to SKILL, implemented as "
+        "friday/fabric_adapters/agents_team_pack.py (roles family)."),
+    "awesome-claude-code-subagents": (
+        "SKILL",
+        "MIT (VoltAgent). 158 Claude Code subagent briefs across ten "
+        "categories, each frontmatter-only (name, description, tools, "
+        "model) -- markdown with no code and no generator, the same shape "
+        "as role_recipes one upstream later. Implemented as "
+        "friday/fabric_adapters/claude_subagents.py (roles family): "
+        "catalogue/search/category are names, recipe reads one brief."),
 }
 
 

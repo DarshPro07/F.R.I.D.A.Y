@@ -31,6 +31,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 UPSTREAM = ROOT / "third_party" / "upstream" / "agency-agents"
+#: VoltAgent's 158 subagent briefs, ten category folders standing in for
+#: divisions.json (this upstream ships no metadata file of its own).
+VOLT_UPSTREAM = (ROOT / "third_party" / "upstream" /
+                 "awesome-claude-code-subagents" / "categories")
+_VOLT_DEFAULT_COLOR = "#888"
 
 _CACHE = {"at": 0.0, "divisions": None}
 _LOCK = threading.Lock()
@@ -49,8 +54,8 @@ def _frontmatter(text):
     return out
 
 
-def _load_divisions():
-    """Every division with its agents, from the upstream. [] if it is absent."""
+def _load_agency_divisions():
+    """Every agency-agents division with its agents. [] if it is absent."""
     meta_path = UPSTREAM / "divisions.json"
     if not meta_path.exists():
         return []
@@ -82,6 +87,49 @@ def _load_divisions():
     return out
 
 
+def _load_voltagent_divisions():
+    """VoltAgent's category folders as divisions. [] if the clone is absent.
+
+    No divisions.json here -- the category directory name is the id, the
+    same name with its numeric prefix stripped and title-cased is the label
+    (ponytail: one acronym reads oddly title-cased, e.g. "Data Ai" for
+    05-data-ai; not worth a lookup table for one folder), and every agent
+    comes from frontmatter alone (name, description -- no per-agent colour
+    in this upstream, so the division default applies to all of them).
+    """
+    if not VOLT_UPSTREAM.is_dir():
+        return []
+    out = []
+    for d in sorted(VOLT_UPSTREAM.iterdir()):
+        if not d.is_dir():
+            continue
+        agents = []
+        for f in sorted(d.glob("*.md")):
+            if f.name.upper().startswith("README"):
+                continue
+            try:
+                fm = _frontmatter(f.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            if not fm.get("name"):
+                continue
+            agents.append({"id": f.stem, "name": fm["name"],
+                           "description": (fm.get("description") or "")[:160],
+                           "color": _VOLT_DEFAULT_COLOR})
+        label = re.sub(r"^\d+-", "", d.name).replace("-", " ").title()
+        out.append({"id": d.name, "label": label, "color": _VOLT_DEFAULT_COLOR,
+                    "icon": "", "agents": agents, "size": len(agents)})
+    out.sort(key=lambda x: -x["size"])
+    return out
+
+
+def _load_divisions():
+    """Every division with its agents: agency-agents first, then VoltAgent
+    categories. Each upstream is independent -- one being absent never
+    blocks the other (a provider being unavailable is not a crash)."""
+    return _load_agency_divisions() + _load_voltagent_divisions()
+
+
 def divisions():
     import time
     with _LOCK:
@@ -110,8 +158,12 @@ def _hermes_tier():
         from friday import ui_server as U
         h = U._connections().get("hermes", {})
         st = h.get("status") or "unavailable"
-        return {"tier": "hermes", "label": "Hermes", "status":
-                "online" if st == "healthy" else ("degraded" if st == "degraded" else "offline"),
+        # "checking" means nobody has probed yet in this process, which is not
+        # the same as a failure -- treating it as one escalated work to the
+        # owner that Hermes could have taken.
+        status = {"healthy": "online", "degraded": "degraded",
+                  "checking": "degraded"}.get(st, "offline")
+        return {"tier": "hermes", "label": "Hermes", "status": status,
                 "detail": (h.get("summary") or "")[:90]}
     except Exception:  # noqa: BLE001
         return {"tier": "hermes", "label": "Hermes", "status": "offline", "detail": ""}
@@ -193,6 +245,16 @@ def assemble(goal, limit=6):
             "note": "proposal only; the objective engine spawns agents on approval"}
 
 
+def _sources():
+    """Which upstream(s) actually contributed divisions -- both, one, or none."""
+    names = []
+    if (UPSTREAM / "divisions.json").exists():
+        names.append("third_party/upstream/agency-agents")
+    if VOLT_UPSTREAM.is_dir():
+        names.append("third_party/upstream/awesome-claude-code-subagents")
+    return names
+
+
 def state():
     divs = divisions()
     return {
@@ -202,5 +264,5 @@ def state():
                        "icon": d["icon"], "size": d["size"],
                        "agents": d["agents"][:8]} for d in divs],
         "agents_total": sum(d["size"] for d in divs),
-        "source": "third_party/upstream/agency-agents" if divs else "unavailable",
+        "source": ", ".join(_sources()) or "unavailable",
     }

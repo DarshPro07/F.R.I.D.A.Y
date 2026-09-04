@@ -143,7 +143,7 @@ def free_enough():
     return not s["busy"] and not s["yield_to"]
 
 
-if __name__ == "__main__":                              # ponytail: the runnable check
+if __name__ == "__main__":                              # a runnable self-check
     import json
     s = status()
     print(json.dumps(s, indent=2))

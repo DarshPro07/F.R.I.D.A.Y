@@ -10,7 +10,7 @@ from friday.tools import (
     executor_control, fabric_control, hardware_control, hermes_control,
     window_control, product_control, file_control, identity_control,
     memory_control, music_control, power_control, process_control,
-    profile_control, objective_control, reminder_control, system,
+    profile_control, objective_control, reminder_control, screen_control, system,
     system_control, utils, vision_control, web, web_control,
     workbench_control, vnext_control, youtube_control,
 )
@@ -50,6 +50,7 @@ def register_all_tools(mcp):
     process_control.register(mcp)  # batch 2D: asking a program to close, and ending one
     power_control.register(mcp)  # batch 2D: lock, sleep, shutdown, restart
     vision_control.register(mcp)  # Phase 1E: camera and screen, on demand
+    screen_control.register(mcp)  # point at the screen, and drive it behind CONFIRM
     music_control.register(mcp)  # play any song by name, no account needed
     profile_control.register(mcp)  # Phase 1H: the user model, learned daily
     executor_control.register(mcp)  # the question channel a Claude run calls back on

@@ -302,7 +302,13 @@ class GateMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not GATE_ENABLED:
+        kind = scope["type"]
+        # A WebSocket is a task channel as much as a POST is: the speech socket
+        # streams the microphone to a paid recogniser. Until the first socket
+        # route existed this branch only ever saw "http" and "lifespan", so the
+        # gap was latent; it is closed here rather than in each handler, so a
+        # future socket cannot forget to be locked.
+        if kind not in ("http", "websocket") or not GATE_ENABLED:
             return await self.app(scope, receive, send)
         path = scope.get("path", "")
         if is_open(path) or session_ok(cookie_value(scope.get("headers", []))):
@@ -312,8 +318,15 @@ class GateMiddleware:
         for k, v in scope.get("headers", []):
             if k == b"user-agent":
                 ua = v.decode("latin-1")[:120]
-        log({"kind": "blocked", "path": path, "method": scope.get("method", ""),
+        log({"kind": "blocked", "path": path,
+             "method": scope.get("method", "") if kind == "http" else "WEBSOCKET",
              "client": client[0], "ua": ua})
+        if kind == "websocket":
+            # Deny at the handshake, before accept, so nothing upstream ever
+            # sees the connection. 1008 is "policy violation".
+            await receive()                          # the websocket.connect event
+            await send({"type": "websocket.close", "code": 1008})
+            return
         body = json.dumps({"locked": True, "error": "face verification required"}).encode()
         await send({"type": "http.response.start", "status": 423,
                     "headers": [(b"content-type", b"application/json"),

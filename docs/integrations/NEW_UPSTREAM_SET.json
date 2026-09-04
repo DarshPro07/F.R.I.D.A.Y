@@ -29,6 +29,31 @@
     "tracked_files": 669,
     "vendoring_blockers": []
   },
+  "agents-team": {
+    "commit": "7f2f83927109dfac878dc78a53f27925f083aaeb",
+    "default_branch": "main",
+    "describe": "v0.1.0-20-g7f2f839",
+    "directory": "third_party/upstream/agents-team",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-04-29T12:18:51Z",
+    "latest_tag": "v0.1.0",
+    "license": "MIT",
+    "license_file": "LICENSE",
+    "manifests": [
+      "requirements.txt"
+    ],
+    "nested_licenses": [],
+    "proposed_mode": "REFERENCE_ONLY",
+    "readme_bytes": 4184,
+    "reason": "MIT. Ships a Claude Code plugin (agents/, lib/, scaffold.py, lint.py) that generates and grades a team of agent files -- a second control layer (NON_NEGOTIABLE 1), so the plugin itself is never run by Friday. Its templates/rules/skills are plain markdown, no different from agency-agents' recipes; see UPSTREAM_LOCK.json's revision to SKILL, implemented as friday/fabric_adapters/agents_team_pack.py (roles family).",
+    "remote": "https://github.com/fadymondy/agents-team.git",
+    "repository": "https://github.com/fadymondy/agents-team",
+    "security_doc": true,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 161,
+    "vendoring_blockers": []
+  },
   "anthropic-cybersecurity-skills": {
     "commit": "1b3f6b2286981381a5cc0566551ef3bb6bc38383",
     "default_branch": "main",
@@ -254,6 +279,72 @@
     "tracked_files": 4532,
     "vendoring_blockers": []
   },
+  "auto-company": {
+    "commit": "ebfab9b4bd5f0ab5ad452a1ff85285b3c141acdd",
+    "default_branch": "main",
+    "describe": "ebfab9b",
+    "directory": "third_party/upstream/auto-company",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-05-20T23:53:05+08:00",
+    "latest_tag": "",
+    "license": "NONE",
+    "license_file": "",
+    "manifests": [
+      "package.json"
+    ],
+    "nested_licenses": [
+      {
+        "license": "MIT",
+        "path": ".claude/skills/github-explorer/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": ".claude/skills/skill-creator/LICENSE.txt"
+      }
+    ],
+    "proposed_mode": "REFERENCE_ONLY",
+    "readme_bytes": 20770,
+    "reason": "MIT (declared in package.json; no LICENSE file, so the audit reads it as UNIDENTIFIED). A fully autonomous AI 'company' of 14 agents that ideate, build, deploy and market, powered by Claude Code. It is a whole control layer, so it is reference only: Friday is the single orchestrator (NON_NEGOTIABLE 1, 11), and its value is the company workflow as a blueprint, not code to import.",
+    "remote": "https://github.com/maxmiksa/auto-company",
+    "repository": "https://github.com/maxmiksa/auto-company",
+    "security_doc": false,
+    "separately_licensed_subtrees": [
+      {
+        "license": "MIT",
+        "path": ".claude/skills/github-explorer/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": ".claude/skills/skill-creator/LICENSE.txt"
+      }
+    ],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 252,
+    "vendoring_blockers": []
+  },
+  "awesome-claude-code-subagents": {
+    "commit": "009544a05267426b3896c77230177967f99f6360",
+    "default_branch": "main",
+    "describe": "009544a",
+    "directory": "third_party/upstream/awesome-claude-code-subagents",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-09-02T14:55:39+03:00",
+    "latest_tag": "",
+    "license": "MIT",
+    "license_file": "LICENSE",
+    "manifests": [],
+    "nested_licenses": [],
+    "proposed_mode": "SKILL",
+    "readme_bytes": 34920,
+    "reason": "MIT (VoltAgent). 158 Claude Code subagent briefs across ten categories, each frontmatter-only (name, description, tools, model) -- markdown with no code and no generator, the same shape as role_recipes one upstream later. Implemented as friday/fabric_adapters/claude_subagents.py (roles family): catalogue/search/category are names, recipe reads one brief.",
+    "remote": "https://github.com/VoltAgent/awesome-claude-code-subagents.git",
+    "repository": "https://github.com/VoltAgent/awesome-claude-code-subagents",
+    "security_doc": false,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 193,
+    "vendoring_blockers": []
+  },
   "awesome-harness-engineering": {
     "commit": "6a146704c1672367d88684350a55b0eaf744ab7c",
     "default_branch": "main",
@@ -277,6 +368,32 @@
     "tracked_files": 12,
     "vendoring_blockers": []
   },
+  "bolt.diy": {
+    "commit": "2e254ac19a696394030601bc602f54945b12bfc4",
+    "default_branch": "main",
+    "describe": "2e254ac",
+    "directory": "third_party/upstream/bolt.diy",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-02-07T15:36:22+01:00",
+    "latest_tag": "",
+    "license": "MIT",
+    "license_file": "LICENSE",
+    "manifests": [
+      "package.json",
+      "pnpm-lock.yaml"
+    ],
+    "nested_licenses": [],
+    "proposed_mode": "REFERENCE_ONLY",
+    "readme_bytes": 21225,
+    "reason": "MIT, but WebContainer -- the tech it is built on -- needs a commercial licence for for-profit production use, and it is a whole standalone app (Electron/browser) with its own agent loop and UI. Building an app from a prompt is already Friday delegating to Hermes, so this is pinned as a reference for its streaming full-stack build patterns, not imported.",
+    "remote": "https://github.com/stackblitz-labs/bolt.diy",
+    "repository": "https://github.com/stackblitz-labs/bolt.diy",
+    "security_doc": false,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 538,
+    "vendoring_blockers": []
+  },
   "diagram-design": {
     "commit": "ac490fd1ac4b4014100f93e729cb4ad198700bd4",
     "default_branch": "main",
@@ -298,6 +415,252 @@
     "separately_licensed_subtrees": [],
     "status": "AUDITED_NOT_INTEGRATED",
     "tracked_files": 424,
+    "vendoring_blockers": []
+  },
+  "firstmate": {
+    "commit": "0866a770234502364c268a768cb7c66cc321c629",
+    "default_branch": "main",
+    "describe": "0866a77",
+    "directory": "third_party/upstream/firstmate",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-08-30T21:13:34-07:00",
+    "latest_tag": "",
+    "license": "MIT",
+    "license_file": "LICENSE",
+    "manifests": [],
+    "nested_licenses": [],
+    "proposed_mode": "REFERENCE_ONLY",
+    "readme_bytes": 18272,
+    "reason": "MIT. An 'agent distro' -- a portable directory of instructions, skills, policies and state conventions for running a crew of agents. It is an orchestration convention, which is Friday's own job (NON_NEGOTIABLE 1), so it is pinned as a pattern to learn from; its skills/ directory could later feed the roles family through an adapter if that proves worth it.",
+    "remote": "https://github.com/kunchenguid/firstmate",
+    "repository": "https://github.com/kunchenguid/firstmate",
+    "security_doc": false,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 482,
+    "vendoring_blockers": []
+  },
+  "graphiti": {
+    "commit": "8b61fce9f003cc3a05e246f6201f8b782dfe6546",
+    "default_branch": "main",
+    "describe": "8b61fce",
+    "directory": "third_party/upstream/graphiti",
+    "has_mcp_reference": true,
+    "last_commit_date": "2026-08-30T09:09:01Z",
+    "latest_tag": "",
+    "license": "Apache-2.0",
+    "license_file": "LICENSE",
+    "manifests": [
+      "pyproject.toml",
+      "uv.lock"
+    ],
+    "nested_licenses": [],
+    "proposed_mode": "ADAPTER",
+    "readme_bytes": 28991,
+    "reason": "Apache-2.0, permissive, so an importing mode is allowed. It is the temporal-relations tier of the owner's four-tier memory design and friday/fabric_adapters/graphiti_memory.py already targets it. The adapter reports UNAVAILABLE until graphiti-core is installed, which is the required behaviour for an absent optional upstream.",
+    "remote": "https://github.com/getzep/graphiti",
+    "repository": "https://github.com/getzep/graphiti",
+    "security_doc": true,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 359,
+    "vendoring_blockers": []
+  },
+  "medusa": {
+    "commit": "6a2fce501f3bcd459c21a67f586c7a15b905ff0f",
+    "default_branch": "develop",
+    "describe": "6a2fce50",
+    "directory": "third_party/upstream/medusa",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-09-02T16:31:13+03:00",
+    "latest_tag": "",
+    "license": "MIT",
+    "license_file": "LICENSE",
+    "manifests": [
+      "package.json"
+    ],
+    "nested_licenses": [
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/admin/dashboard/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/core/core-flows/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/core/framework/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/core/instantsearch-adapter/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/core/js-sdk/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/core/types/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/core/utils/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "packages/design-system/icons/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "packages/design-system/ui-preset/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "packages/design-system/ui/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/medusa/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/modules/link-modules/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/modules/providers/auth-oidc/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "packages/modules/rbac/LICENSE"
+      }
+    ],
+    "proposed_mode": "SIDECAR",
+    "readme_bytes": 4088,
+    "reason": "MIT core; ENTERPRISE-LICENSE.md carves out enterprise materials, which are never touched. Medusa v2 is the product-trading backend behind the commerce family: friday/fabric_adapters/medusa_commerce.py is an HTTP client to a store the operator runs (MEDUSA_BACKEND_URL) over /admin/* with secret-key Basic auth. The clone excludes www/ (docs) by sparse checkout because its paths exceed Windows MAX_PATH. Payments and refunds are not operations.",
+    "remote": "https://github.com/medusajs/medusa",
+    "repository": "https://github.com/medusajs/medusa",
+    "security_doc": true,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 23913,
+    "vendoring_blockers": []
+  },
+  "mem0": {
+    "commit": "19cb89aff472325c707f64b2f34ae6afdbf7faf7",
+    "default_branch": "main",
+    "describe": "19cb89a",
+    "directory": "third_party/upstream/mem0",
+    "has_mcp_reference": true,
+    "last_commit_date": "2026-08-28T17:44:10+05:30",
+    "latest_tag": "",
+    "license": "Apache-2.0",
+    "license_file": "LICENSE",
+    "manifests": [
+      "pyproject.toml"
+    ],
+    "nested_licenses": [
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/deepseek-plugin/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/mem0-plugin/.opencode-plugin/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/mem0-plugin/skills/mem0/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/mem0-strands/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/mem0-strands/NOTICE"
+      },
+      {
+        "license": "MIT",
+        "path": "integrations/n8n-nodes-mem0/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/openclaw/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/pi-agent-plugin/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/zapier-mem0/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-cli/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-integrate/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-oss-to-platform/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-test-integration/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-vercel-ai-sdk/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0/LICENSE"
+      }
+    ],
+    "proposed_mode": "ADAPTER",
+    "readme_bytes": 12183,
+    "reason": "Apache-2.0, permissive. Supplies the preferences tier of the same four-tier memory design, behind friday/fabric_adapters/mem0_memory.py. Reports UNAVAILABLE until mem0ai is installed. GBrain stays canonical: this is a feed into the one memory, never a second one.",
+    "remote": "https://github.com/mem0ai/mem0",
+    "repository": "https://github.com/mem0ai/mem0",
+    "security_doc": true,
+    "separately_licensed_subtrees": [
+      {
+        "license": "Apache-2.0",
+        "path": "integrations/mem0-plugin/skills/mem0/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-cli/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-integrate/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-oss-to-platform/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-test-integration/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0-vercel-ai-sdk/LICENSE"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "skills/mem0/LICENSE"
+      }
+    ],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 1764,
     "vendoring_blockers": []
   },
   "munder-difflin": {
@@ -349,6 +712,56 @@
     ],
     "status": "AUDITED_NOT_INTEGRATED",
     "tracked_files": 1883,
+    "vendoring_blockers": []
+  },
+  "nodriver": {
+    "commit": "a71cda374651d13815a42c5eeb61af04a711eaa7",
+    "default_branch": "main",
+    "describe": "a71cda3",
+    "directory": "third_party/upstream/nodriver",
+    "has_mcp_reference": true,
+    "last_commit_date": "2026-05-13T15:57:26+02:00",
+    "latest_tag": "",
+    "license": "AGPL-3.0",
+    "license_file": "LICENSE.txt",
+    "manifests": [
+      "pyproject.toml"
+    ],
+    "nested_licenses": [],
+    "proposed_mode": "REFERENCE_ONLY",
+    "readme_bytes": 12037,
+    "reason": "AGPL-3.0, so fabric.Provider refuses any importing mode outright -- it could only ever be an isolated sidecar. More to the point, its whole purpose is defeating Captcha, Cloudflare and anti-bot systems, which is detection-evasion Friday will not do; her browsing goes through the gated Playwright path inside netguard. Pinned only as a record of the direct-CDP automation technique, never wired.",
+    "remote": "https://github.com/ultrafunkamsterdam/nodriver",
+    "repository": "https://github.com/ultrafunkamsterdam/nodriver",
+    "security_doc": false,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 432,
+    "vendoring_blockers": []
+  },
+  "onlook": {
+    "commit": "423e2e924366419e418ee049093872d535eea41a",
+    "default_branch": "main",
+    "describe": "423e2e9",
+    "directory": "third_party/upstream/onlook",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-07-21T23:07:29-03:00",
+    "latest_tag": "",
+    "license": "Apache-2.0",
+    "license_file": "LICENSE.md",
+    "manifests": [
+      "package.json"
+    ],
+    "nested_licenses": [],
+    "proposed_mode": "REFERENCE_ONLY",
+    "readme_bytes": 11046,
+    "reason": "Apache-2.0. A web-based visual editor that needs Supabase, the CodeSandbox SDK and Docker to run -- a whole hosted application, not a component. Visual editing is not a backend capability Friday can host, so it is pinned as a reference for its AST-safe code-editing patterns.",
+    "remote": "https://github.com/onlook-dev/onlook",
+    "repository": "https://github.com/onlook-dev/onlook",
+    "security_doc": true,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 1696,
     "vendoring_blockers": []
   },
   "open-design": {
@@ -559,6 +972,76 @@
     "tracked_files": 13143,
     "vendoring_blockers": []
   },
+  "open-lovable": {
+    "commit": "69bd93bae7a9c97ef989eb70aabe6797fb3dac89",
+    "default_branch": "main",
+    "describe": "69bd93b",
+    "directory": "third_party/upstream/open-lovable",
+    "has_mcp_reference": false,
+    "last_commit_date": "2025-11-19T10:15:21-05:00",
+    "latest_tag": "",
+    "license": "MIT",
+    "license_file": "LICENSE",
+    "manifests": [
+      "package.json",
+      "pnpm-lock.yaml"
+    ],
+    "nested_licenses": [],
+    "proposed_mode": "REFERENCE_ONLY",
+    "readme_bytes": 2648,
+    "reason": "MIT, but it mandates paid Firecrawl scraping and a paid E2B/Vercel sandbox, and is a full Next.js app with its own UI. Its value -- read a site's UI into clean data -- Friday now does natively via its gated browser and scrapling (friday/ui_browser.study_url), inside netguard with no paid services. Pinned as reference for the clone pipeline.",
+    "remote": "https://github.com/firecrawl/open-lovable",
+    "repository": "https://github.com/firecrawl/open-lovable",
+    "security_doc": false,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 336,
+    "vendoring_blockers": []
+  },
+  "openmausbot": {
+    "commit": "a3d2870528fbe185c978bb6ffda0decc8fd8a365",
+    "default_branch": "main",
+    "describe": "a3d2870",
+    "directory": "third_party/upstream/openmausbot",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-09-02T17:13:44+05:30",
+    "latest_tag": "",
+    "license": "Apache-2.0",
+    "license_file": "LICENSE",
+    "manifests": [
+      "package.json",
+      "pnpm-lock.yaml"
+    ],
+    "nested_licenses": [
+      {
+        "license": "Apache-2.0",
+        "path": "enterprise/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "third_party/cua-driver/LICENSE.md"
+      },
+      {
+        "license": "Apache-2.0",
+        "path": "third_party/playwright-injected/LICENSE"
+      }
+    ],
+    "proposed_mode": "SKILL",
+    "readme_bytes": 20326,
+    "reason": "Apache-2.0 at the root (relicensed from MIT per NOTICE); enterprise/ carries its own all-rights-reserved licence and is excluded. An Electron chat app that hosts a roster of Claude/Codex bots - a second control layer (NON_NEGOTIABLE 1), so the app is never run. Its two skills (phone-harness for authorised-USB Android control, create-verification-skill for writing launch/verify recipes) are read on demand as a SKILL pack.",
+    "remote": "https://github.com/milind-soni/OpenMausBot",
+    "repository": "https://github.com/milind-soni/OpenMausBot",
+    "security_doc": true,
+    "separately_licensed_subtrees": [
+      {
+        "license": "Apache-2.0",
+        "path": "enterprise/LICENSE"
+      }
+    ],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 1378,
+    "vendoring_blockers": []
+  },
   "openviking": {
     "commit": "cd8580c6f8a50ec44593618b3102799ab0b553fd",
     "default_branch": "main",
@@ -658,6 +1141,31 @@
       "ee/LICENSE is SOURCE_AVAILABLE_EE"
     ]
   },
+  "openworker": {
+    "commit": "fb1bfc627201f1e159a9380ada25e954174271a5",
+    "default_branch": "main",
+    "describe": "fb1bfc6",
+    "directory": "third_party/upstream/openworker",
+    "has_mcp_reference": true,
+    "last_commit_date": "2026-08-30T12:45:18-07:00",
+    "latest_tag": "",
+    "license": "MIT",
+    "license_file": "LICENSE",
+    "manifests": [
+      "pyproject.toml"
+    ],
+    "nested_licenses": [],
+    "proposed_mode": "REFERENCE_ONLY",
+    "readme_bytes": 10781,
+    "reason": "MIT. A self-updating desktop AI coworker that runs on the machine with your own model key. It is a complete rival coworker application, not a component, so wiring it would duplicate Friday herself; pinned as reference for its task-execution and self-update patterns.",
+    "remote": "https://github.com/andrewyng/openworker",
+    "repository": "https://github.com/andrewyng/openworker",
+    "security_doc": true,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 623,
+    "vendoring_blockers": []
+  },
   "prompt-master": {
     "commit": "2bd92518e26bf659e21e3d9ab90573fcf3ddeccb",
     "default_branch": "main",
@@ -752,5 +1260,82 @@
       "skills/pptx/LICENSE.txt is Anthropic-proprietary",
       "skills/xlsx/LICENSE.txt is Anthropic-proprietary"
     ]
+  },
+  "smartstore": {
+    "commit": "3b7d986ecb6c8525b63f5243b686531511c285f9",
+    "default_branch": "main",
+    "describe": "3b7d986",
+    "directory": "third_party/upstream/smartstore",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-09-02T03:29:14+02:00",
+    "latest_tag": "",
+    "license": "AGPL-3.0",
+    "license_file": "LICENSE",
+    "manifests": [],
+    "nested_licenses": [
+      {
+        "license": "CC-BY",
+        "path": "src/Smartstore.Web/App_Data/Geo/LICENSE.txt"
+      },
+      {
+        "license": "MIT",
+        "path": "src/Smartstore.Web/wwwroot/lib/bootstrap/LICENSE"
+      },
+      {
+        "license": "UNIDENTIFIED",
+        "path": "src/Smartstore.Web/wwwroot/lib/drift/LICENSE"
+      },
+      {
+        "license": "MIT",
+        "path": "src/Smartstore.Web/wwwroot/lib/fa6/LICENSE.txt"
+      },
+      {
+        "license": "MIT",
+        "path": "src/Smartstore.Web/wwwroot/lib/fa7/LICENSE.txt"
+      },
+      {
+        "license": "MIT",
+        "path": "src/Smartstore.Web/wwwroot/lib/photoswipe/LICENSE"
+      },
+      {
+        "license": "GPL-3.0",
+        "path": "src/Smartstore.Web/wwwroot/lib/roxyfm/LICENSE.txt"
+      }
+    ],
+    "proposed_mode": "SIDECAR",
+    "readme_bytes": 13664,
+    "reason": "AGPL-3.0, so the fabric refuses any importing mode. friday/fabric_adapters/smartstore_commerce.py is an HTTP client to the operator's store over its OData v4 Web API with PublicKey:SecretKey Basic auth; no upstream code is linked. It is the commerce family's fallback behind medusa_commerce.",
+    "remote": "https://github.com/smartstore/Smartstore",
+    "repository": "https://github.com/smartstore/Smartstore",
+    "security_doc": true,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 5764,
+    "vendoring_blockers": []
+  },
+  "ultron": {
+    "commit": "a65306f5a9568655551ec27445f773f20273223a",
+    "default_branch": "main",
+    "describe": "a65306f",
+    "directory": "third_party/upstream/ultron",
+    "has_mcp_reference": false,
+    "last_commit_date": "2026-07-15T12:28:23+05:30",
+    "latest_tag": "",
+    "license": "MIT",
+    "license_file": "LICENSE",
+    "manifests": [
+      "package.json"
+    ],
+    "nested_licenses": [],
+    "proposed_mode": "REFERENCE_ONLY",
+    "readme_bytes": 1982,
+    "reason": "MIT. The control room's core is a hand-port of its orbScene and hand tracker into ui/orb.js, not a runtime import, so nothing links to the clone. It is pinned as the provenance record for that port and for the amber palette DESIGN.md commits to.",
+    "remote": "https://github.com/SAGAR-TAMANG/ultron-by-sagar-builds",
+    "repository": "https://github.com/SAGAR-TAMANG/ultron-by-sagar-builds",
+    "security_doc": false,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 14,
+    "vendoring_blockers": []
   }
 }

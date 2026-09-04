@@ -160,6 +160,71 @@ def open_url(url):
     return out
 
 
+#: Read a page's design out of the live DOM: the colours, type and layout an
+#: engineer would need to rebuild the look. This is the useful half of the
+#: "clone a website" tools (bolt.diy / Open Lovable / onlook), done through
+#: Friday's own gated browser -- so it stays inside netguard and needs no
+#: Firecrawl, no E2B, no WebContainer. It reads; it never runs the site's code.
+_DESIGN_JS = r"""
+() => {
+  const cs = (el, p) => el ? getComputedStyle(el).getPropertyValue(p) : "";
+  const body = document.body, root = document.documentElement;
+  const swatches = new Set();
+  document.querySelectorAll("body *").forEach((el, i) => {
+    if (i > 400) return;
+    const bg = cs(el, "background-color");
+    if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") swatches.add(bg);
+  });
+  const heads = [...document.querySelectorAll("h1,h2")]
+    .slice(0, 6).map(h => h.innerText.trim().slice(0, 80)).filter(Boolean);
+  const count = (sel) => document.querySelectorAll(sel).length;
+  return {
+    title: document.title,
+    background: cs(body, "background-color") || cs(root, "background-color"),
+    text_color: cs(body, "color"),
+    font_body: (cs(body, "font-family") || "").split(",")[0].replace(/["']/g, "").trim(),
+    font_heading: (cs(document.querySelector("h1,h2") || body, "font-family") || "")
+      .split(",")[0].replace(/["']/g, "").trim(),
+    palette: [...swatches].slice(0, 8),
+    headings: heads,
+    layout: { nav: count("nav"), header: count("header"), main: count("main"),
+              section: count("section"), footer: count("footer"),
+              buttons: count("button,.btn,[role=button]"),
+              forms: count("form"), images: count("img"), links: count("a") },
+  };
+}
+"""
+
+
+def study_url(url):
+    """Rebuild-ready design spec for a page: palette, type, layout. Gated like a
+    read, because it fetches -- a banking or private page is blocked before any
+    of it is captured, exactly as open_url is."""
+    def capture(page):
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        final = page.url
+        verdict = bc.classify_url(final)
+        if verdict.decision == bc.BLOCK_SENSITIVE:
+            raise bc.SensitiveRedirect(
+                "BLOCKED_SENSITIVE_DOMAIN: redirected to %s" % final)
+        # JSON, not the raw dict: observe_page redacts str(capture()), and a
+        # JSON string survives that intact (a palette has no secrets to strip).
+        import json as _json
+        return _json.dumps(page.evaluate(_DESIGN_JS))
+
+    out = bc.observe_page(url, lambda: _worker.call(lambda page: capture(page)))
+    out["url"] = url
+    if out.get("status") == "ok":
+        try:
+            out.update(_worker.call(_snap))
+        except Exception as exc:  # noqa: BLE001
+            out["screenshot_error"] = str(exc)[:120]
+    _emit("browser.action", {"action": "study", "url": url,
+                             "status": out.get("status"),
+                             "verdict": out.get("verdict", "")})
+    return out
+
+
 def request_act(kind, selector, text=""):
     """Ask to change page state. Returns a gate (confirmation) to approve."""
     kind = (kind or "").lower()

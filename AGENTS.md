@@ -82,11 +82,46 @@ live `.venv` (the live agent runs from it):
 .venv/Scripts/python.exe scripts/upstream_lock.py --check
 ```
 
-A known pre-existing failure, unrelated to current work:
+### Where the suite actually stands
+
+The deterministic gate is green as of 2026-08-31:
+
+```
+3,146 passed, 1 skipped, 0 failed, 0 errors
+```
+
+from `.venv-verify/Scripts/python.exe -m pytest tests/ -m "not live and not slow"`
+(run in two halves here because a single ~11m background run gets reclaimed;
+each half finishes in ~5-6m). Regenerate rather than trust this paragraph.
+
+The prior `27 failed / 7 errors` was cleared this cycle:
+- the 7 errors were one bug — `friday.toolsets.files.ARTIFACTS_DIR` did not
+  exist while two test modules and `scripts/golden_live_runtime.py` used it.
+  `files_delete` is now implemented in `friday/toolsets/files.py` with the
+  Friday-owned-artifact exemption (delete without a nonce) and the
+  confirmation-nonce flow for permanent deletion of anything else; it is
+  registered as an MCP tool, a `capabilities.CAPABILITIES` entry, a
+  `capability_router` group member, and a `policy.py` category.
+- `test_phase1f` (9): `spotify.*` transport was ungated (defaulted ASK →
+  every call cancelled); mapped to `MEDIA_CONTROL` / `READ_LOCAL_SAFE`.
+- `test_response_render` (2): natural TTS rate reset to 1.0
+  (`TTS_SPEED`-overridable) and a cross-chunk URL/markdown cleaner added to
+  `FridayAgent.tts_node`.
+- `test_phase1e` (2) / `test_connector_plane` (1): `mss` and `yaml` were
+  missing from `.venv-verify`; copied in from `.venv`.
+- `test_continuity_livekit` (1): `LiveKitContinuity` is now wired into the
+  live loop (`agent._continuity`, attached in the entrypoint), so a user turn
+  is recorded as a durable objective before it is learned from.
+- `test_files_recycle` / `test_upstream_lock` were already green.
+- `test_phase1b` (2) are `@live` and excluded from this gate.
+
 `test_reachability.py::test_the_number_of_unreachable_things_does_not_grow`
-(12 dead symbols) and `test_phase0.py::test_env_example_documents_only_live_variables`
-(the public `.env.example` documents Supabase/Deepgram vars `config.py` calls
-DEAD). Do not count these as regressions; do not paper over new ones.
+now passes: the wiring above revived two continuity symbols, and the standing
+dead code was triaged into `reachability.KNOWN` with an honest verdict each
+(`_tool_evidence` DEAD/orphaned; the rest FUTURE — built subsystems not yet on
+a live path: history-aware provider fallback, the voice-input mute gate, World
+Monitor destination verification, brain ledger replay, runtime narration
+arbiter). Do not paper over new ones — wire them or classify them the same way.
 
 ## Adding an external upstream
 

@@ -211,6 +211,63 @@ KNOWN: dict[str, tuple[str, str]] = {
     ),
     'get_file': (FUTURE, 'same'),
     'list_files': (FUTURE, 'same'),
+    # Standing dead code triaged 2026-08-31: each is a built subsystem not yet
+    # on a production entry path (or, for _tool_evidence, genuinely orphaned).
+    'replay_ledger': (
+        FUTURE,
+        'brain rebuild-from-ledger recovery; a maintenance op not wired to a command or tool yet',
+    ),
+    '_tool_evidence': (
+        DEAD,
+        'no caller anywhere; the owned-tool-result path records evidence inline in record_owned_tool_result',
+    ),
+    '_tool_name': (
+        FUTURE,
+        'provider-fallback request fingerprinting; the history-inspection path is built but not wired to the live fallback',
+    ),
+    'set_telemetry': (
+        FUTURE,
+        'provider-fallback telemetry hook; the fallback LLM is not yet given telemetry from the session',
+    ),
+    '_annotate_narration': (
+        FUTURE,
+        'runtime narration arbiter; result-narration annotation is not on the live turn path yet',
+    ),
+    'reserve_result_narration': (
+        FUTURE,
+        'runtime narration arbiter; result-narration reservation is not on the live turn path yet',
+    ),
+    'TcpPort': (
+        FUTURE,
+        'FABRIC-PROC-01 readiness probe for SIDECAR children; chosen by fabric_service.spec_for '
+        'through a conditional the reference walk does not follow, and no SIDECAR provider '
+        'declares a PROCESS_SPEC yet (maxun/postiz/openmontage are deferred)',
+    ),
+    'HttpOk': (FUTURE, 'same: the HTTP-health variant of the SIDECAR readiness probe'),
+    'spec_for': (
+        FUTURE,
+        'FABRIC-SVC-01 service contract; no SIDECAR provider declares a Service yet',
+    ),
+    '_hermes_python': (
+        PRODUCTION,
+        'executor_router locator, resolved by dotted name from Executor.locator at runtime',
+    ),
+    '_same_number': (
+        FUTURE,
+        'World Monitor destination verification (lat/lon/zoom match); the verifier is built but not wired to browser-open',
+    ),
+    'HistoryAwareFallbackStream': (
+        FUTURE,
+        'history-aware provider fallback stream; the default resilient LLM does not select this variant yet',
+    ),
+    'VoiceInputGate': (
+        FUTURE,
+        'detaches audio input when every mic publication is muted; built but not attached in the session entrypoint',
+    ),
+    'DestinationVerification': (
+        FUTURE,
+        'result of verify_world_monitor_destination; the verifier is built but not wired to the browser-open path',
+    ),
 }
 
 #: Never reported. Dunders and framework hooks are called by machinery, not

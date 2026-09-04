@@ -2,9 +2,7 @@
   "attribution": {
     "commit": "",
     "pr": ""
-  }
-}
-{
+  },
   "permissions": {
     "disableBypassPermissionsMode": "disable",
     "ask": [
@@ -17,5 +15,16 @@
       "Bash(git config *)",
       "Bash(rm -rf *)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "bash .claude/hooks/session-init.sh"
+      }
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"
   }
 }

@@ -10,5 +10,17 @@
     "state": "PENDING",
     "note": "today's top three -- needs the agent",
     "at": "2026-08-30T10:10:56.580794+00:00"
+  },
+  {
+    "intent": "news_brief",
+    "state": "PENDING",
+    "note": "MCP server down when requested",
+    "at": "2026-09-02T05:21:43.230321+00:00"
+  },
+  {
+    "intent": "news_brief",
+    "state": "PENDING",
+    "note": "MCP server down when requested",
+    "at": "2026-09-02T05:21:44.710830+00:00"
   }
 ]

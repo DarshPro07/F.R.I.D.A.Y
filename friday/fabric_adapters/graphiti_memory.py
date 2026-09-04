@@ -22,7 +22,9 @@ import socket
 
 from friday import fabric
 
-UPSTREAM = "https://github.com/getzep/graphiti"
+UPSTREAM = "graphiti"          # the clone directory, which is what the
+                           # lock is keyed by -- a URL here never matches
+
 
 
 def _installed():

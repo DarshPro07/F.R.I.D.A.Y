@@ -131,6 +131,15 @@ def health(handle) -> dict:
     return {"state": fabric.READY, "detail": f"{PACKAGE} {installed}, parse-only"}
 
 
+def _all_text(element) -> str:
+    import re as _re
+    try:
+        text = element.get_all_text(separator=" ", strip=True)
+    except Exception:  # noqa: BLE001
+        text = element.text or ""
+    return _re.sub(r"\s+", " ", str(text or "")).strip()
+
+
 def call(operation: str, handle, **arguments):
     html = arguments.get("html") or ""
     url = arguments.get("url") or ""
@@ -156,7 +165,10 @@ def call(operation: str, handle, **arguments):
         out: dict[str, list[str]] = {}
         for name, expression in fields.items():
             found = _query(selector, str(expression), kind, adaptive)
-            out[str(name)] = [(e.text or "").strip() for e in found[:limit]]
+            # A row's words live in its cells: the element's own text is empty
+            # for <tr>, <li> with markup, <a> around a <span>. All descendant
+            # text, whitespace-normalised, is what an extraction means.
+            out[str(name)] = [_all_text(e) for e in found[:limit]]
         return out
 
     if operation == "similar":

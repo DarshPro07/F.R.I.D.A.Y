@@ -17,8 +17,13 @@ from friday import policy as p
 from friday.toolsets import system as S
 
 
-def test_full_is_the_default():
-    assert p.PolicyEngine().autonomy == p.FULL
+def test_dangerous_is_the_default(monkeypatch, tmp_path):
+    """Was FULL until 2026-09-03 18:00; the owner then asked for full autonomy
+    by default ("get it full autonomy"). No file and no env -> DANGEROUS."""
+    monkeypatch.setattr(p, "AUTONOMY_FILE", tmp_path / "none.json")
+    monkeypatch.delenv("ADA_AUTONOMY", raising=False)
+    assert p.current_autonomy() == p.DANGEROUS
+    assert p.PolicyEngine(autonomy=p.current_autonomy()).autonomy == p.DANGEROUS
 
 
 def test_full_autonomy_never_asks_for_anything():
@@ -149,7 +154,7 @@ def test_confirm_is_not_deny():
 
     assert p.POWER_ACTION not in p.NON_APPROVABLE, "CONFIRM is not DENY"
 
-    engine = p.PolicyEngine()
+    engine = p.PolicyEngine(autonomy=p.FULL)   # the tier this test is about
     p.TOOL_CATEGORIES.setdefault("power.test_only", p.POWER_ACTION)
     try:
         assert not engine.decide("power.test_only").allowed
@@ -180,7 +185,7 @@ def test_a_session_approval_still_settles_an_ordinary_ask():
 
 
 def test_a_confirm_verdict_says_which_kind_of_no_it_is():
-    engine = p.PolicyEngine()
+    engine = p.PolicyEngine(autonomy=p.FULL)   # CONFIRM only exists below DANGEROUS
     p.TOOL_CATEGORIES.setdefault("power.test_only", p.POWER_ACTION)
     try:
         verdict = engine.decide("power.test_only")

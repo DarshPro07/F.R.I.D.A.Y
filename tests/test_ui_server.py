@@ -144,10 +144,19 @@ def test_ui_assets_are_served_from_the_ui_dir_only():
 
 def test_memory_stack_aggregates_four_tiers_under_budget(tmp_path, monkeypatch):
     """The blueprint: preferences + specs + rules + relations, one prompt block,
-    never over budget, and the sync-and-log step writes a vault page."""
+    never over budget, and the sync-and-log step writes a vault page.
+
+    Episodes and contacts joined the four on 2026-09-01: the four were all
+    *derived* memory, so a session could have every tier healthy and still not
+    know a word of the last conversation. See tests/test_conversation_memory.py.
+    Outcomes joined on 2026-09-03: what Hermes finished, written back by the
+    bridge so the next bundle and the next turn both know (S2 in
+    docs/plans/jarvis-agentic-team). See tests/test_hermes_memory_writeback.py.
+    """
     from friday import memory_stack as M
     a = M.aggregate("implement the database schema for project alpha", budget_tokens=600)
-    assert set(a["tiers"]) == {"preferences", "specs", "rules", "relations"}
+    assert set(a["tiers"]) == {"preferences", "specs", "rules", "relations",
+                               "episodes", "contacts", "outcomes"}
     assert a["tokens_used"] <= a["budget_tokens"]
     assert isinstance(a["prompt"], str)
     o = M.overview()
@@ -286,3 +295,86 @@ def test_http_surface_is_live():
         ask = client.post("/api/ask",
                           json={"text": "open https://www.icicibank.com/"})
         assert ask.status_code == 200 and ask.json()["status"] == "blocked"
+
+
+def test_metrics_are_scoped_to_the_current_objective(tmp_path, monkeypatch):
+    """The header claimed "340 tasks open . 1.71M tokens" for ONE objective;
+    both numbers were all-time sums. Current keys must name the current run."""
+    from friday.store import Store
+    db = tmp_path / "objectives.sqlite3"
+    opened = Store(db)
+    with opened._tx() as conn:
+        for i, (rid, at) in enumerate((("RUN-old", "2026-08-01T00:00:00+00:00"),
+                                       ("RUN-new", "2026-08-02T00:00:00+00:00"))):
+            conn.execute("INSERT INTO objective_runs (run_id, request, "
+                         "objective_summary, status, created_at, updated_at) "
+                         "VALUES (?,?,?,?,?,?)",
+                         (rid, "objective %d" % i, "", "RUNNING", at, at))
+            conn.execute("INSERT INTO objective_tasks (task_id, run_id, status, "
+                         "capability, arguments, created_at) VALUES (?,?,?,?,?,?)",
+                         ("T-" + rid, rid, "QUEUED", "cap", "{}", at))
+            conn.execute("INSERT INTO runs (run_id, request, state, created_at, "
+                         "updated_at) VALUES (?,?,?,?,?)", (rid, "r", "working", at, at))
+            conn.execute("INSERT INTO run_portions (portion_id, run_id, "
+                         "wake_generation, lease_token, status, model_tokens, "
+                         "started_at) VALUES (?,?,?,?,?,?,?)",
+                         ("P-" + rid, rid, 1, "tok", "checkpointed", 100 * (i + 1), at))
+    opened.close()
+    monkeypatch.setenv("ADA_DB", str(db))
+    conn = u._connect()
+    try:
+        objective = u._objective(conn)
+        m = u._metrics(conn, objective.get("run_id"))
+    finally:
+        conn.close()
+    assert objective["run_id"] == "RUN-new"
+    assert m["model_tokens"] == 200 and m["open_tasks"] == 1
+    assert m["all_time"] == {"model_tokens": 300, "open_tasks": 2}
+
+
+def test_cross_site_callers_cannot_reach_desk_or_stt(monkeypatch):
+    """A page from another origin (or a WebSocket handshake from one) is refused
+    even with the face gate off (--bypass-face). The session cookie is
+    SameSite=Strict, so these two were the doors it did not guard: desk fires a
+    synthetic Ctrl+C for ?what=selection, and the speech socket spends the
+    owner's Deepgram key. Security review finding, 2026-09-03."""
+    pytest.importorskip("httpx")
+    from starlette.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+    from friday import access
+    monkeypatch.setattr(access, "GATE_ENABLED", False)
+    calls = []
+    monkeypatch.setattr(u.desk_mod, "grab",
+                        lambda what: calls.append(what) or {"ok": True, "chars": 0})
+    with TestClient(u.create_app()) as client:
+        r = client.get("/api/desk?what=selection", headers={"Origin": "http://evil.example"})
+        assert r.status_code == 403 and calls == []
+        r = client.get("/api/desk?what=clipboard",
+                       headers={"Referer": "http://evil.example/page"})
+        assert r.status_code == 403 and calls == []
+        r = client.get("/api/desk?what=clipboard", headers={"Origin": "http://testserver"})
+        assert r.status_code == 200 and calls == ["clipboard"]
+        # Header-less is cross-site for desk: a no-referrer image sends nothing.
+        assert client.get("/api/desk?what=clipboard").status_code == 403
+        assert client.get("/api/desk?what=nope", headers={"Origin": "http://evil.example"}).status_code == 400
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/api/stt", headers={"Origin": "http://evil.example"}):
+                pass
+
+
+def test_api_helpers_returns_providers_families_and_processes():
+    """/api/helpers is fabric's diagnostic surface, verbatim: every connected
+    upstream helper, its family rollup and process ownership, for the control
+    room's Organisation view and the helpers/list voice capability."""
+    pytest.importorskip("httpx")
+    from starlette.testclient import TestClient
+    from friday import fabric
+    with TestClient(u.create_app()) as client:
+        r = client.get("/api/helpers")
+        assert r.status_code == 200
+        body = r.json()
+        assert set(body.keys()) == {"providers", "families", "processes"}
+        assert len(body["providers"]) == len(fabric.report())
+        for key in ("provider", "family", "state", "integration_mode", "license_mode"):
+            assert key in body["providers"][0]
+        assert {"family", "state", "providers"} <= set(body["families"][0].keys())
