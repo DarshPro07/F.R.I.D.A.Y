@@ -14,6 +14,10 @@ paths = [
   '''tests/test_execution\.py''',
   '''tests/test_sandbox\.py''',
   '''tests/test_shared_brain\.py''',
+  # the browser observation fixture carries a fake `sk-` token so
+  # test_observation_is_structured_first_and_secrets_are_redacted can prove
+  # it never reaches the model; gitleaks 8.24.x flags it as generic-api-key
+  '''tests/test_browser_primitives\.py''',
   # Chrome MV3 manifest "key" is the extension's PUBLIC key (id derivation)
   '''friday/companion/extension/manifest\.json''',
   # upstream notices quote git commit SHAs, not tokens

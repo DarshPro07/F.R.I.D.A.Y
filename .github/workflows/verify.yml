@@ -37,6 +37,10 @@ jobs:
         os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The secret scan below is a HISTORY scan; a depth-1 checkout has
+          # one commit and would report "no leaks" about nothing.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -90,11 +94,21 @@ jobs:
 
       - name: Secret scan (history)
         if: matrix.os == 'ubuntu-latest'
-        uses: gitleaks/gitleaks-action@v2
+        # The gitleaks ACTION scans only the pushed range, on a depth-1
+        # checkout, with whatever version it defaults to (8.24.3 flagged a
+        # redaction-test fixture that 8.30.1 does not). None of that is a
+        # history scan, and none of it is what runs locally. This is: the
+        # pinned binary, the repo config, .gitleaksignore, every commit -
+        # the exact command from AGENTS.md, so a local green means a CI green.
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_CONFIG: .gitleaks.toml
-          GITLEAKS_ENABLE_SUMMARY: 'true'
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          /tmp/gitleaks version
+          /tmp/gitleaks git . --config .gitleaks.toml --redact=100 --exit-code 2 --no-banner
 
   e2e:
     name: Playwright (control room)
