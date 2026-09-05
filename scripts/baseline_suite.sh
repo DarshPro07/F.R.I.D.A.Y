@@ -1,22 +1,10 @@
 #!/usr/bin/env bash
-# Phase 0 baseline: run the deterministic suite in 4 chunks against the exact
-# tree, writing one log per chunk plus a summary. Usage: bash scripts/baseline_suite.sh [outdir]
+# Thin wrapper: the canonical runner is scripts/baseline_suite.py (audit A-029).
+# Usage: bash scripts/baseline_suite.sh [outdir] [extra args...]
 set -u
 OUT="${1:-data/baseline}"
-mkdir -p "$OUT"
+shift || true
 PY=".venv-verify/Scripts/python.exe"
-mapfile -t FILES < <(ls tests/test_*.py | sort)
-TOTAL=${#FILES[@]}
-CHUNK=$(( (TOTAL + 3) / 4 ))
-echo "commit=$(git rev-parse --short HEAD) files=$TOTAL chunk=$CHUNK date=$(date -Iseconds)" > "$OUT/summary.txt"
-i=0
-while [ $i -lt 4 ]; do
-  START=$(( i * CHUNK ))
-  SLICE=("${FILES[@]:$START:$CHUNK}")
-  if [ ${#SLICE[@]} -gt 0 ]; then
-    "$PY" -m pytest "${SLICE[@]}" -m "not live and not slow" -q -p no:cacheprovider > "$OUT/chunk$i.log" 2>&1
-    echo "chunk$i exit=$? $(tail -n 1 "$OUT/chunk$i.log")" >> "$OUT/summary.txt"
-  fi
-  i=$(( i + 1 ))
-done
-cat "$OUT/summary.txt"
+[ -x "$PY" ] || PY=".venv-verify/bin/python"
+[ -x "$PY" ] || PY="python"
+exec "$PY" scripts/baseline_suite.py --out "$OUT" "$@"
