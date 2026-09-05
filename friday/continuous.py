@@ -36,6 +36,7 @@ from datetime import datetime, timedelta
 from typing import Awaitable, Callable
 
 from friday import contracts as c
+from friday import objective_budget as budget_module
 
 from friday.contracts import now_iso
 from friday import objectives as O
@@ -614,6 +615,24 @@ class ContinuousTaskExecutor:
             await self._reconcile_worker(run_id, task, worker_id)
             return
 
+        # Audit A-022: the budget is checked against RECORDED spend before
+        # every call - gateway usage rows, worker usage, attempts, strategy
+        # changes, wall time - never against an estimate. It runs before
+        # this attempt is written, so a parked task is charged nothing. An
+        # exhausted budget parks the run (PAUSED with a blocker naming the
+        # dimension and numbers) rather than trimming work silently; the
+        # person resumes it, which is a decision, or raises the budget.
+        verdict = self._budget_verdict(run_id, task["capability"], task_id)
+        if not verdict.allowed:
+            self.store.touch_objective_run(
+                run_id, status=O.RunStatus.PAUSED, next_wake=None,
+                blocker=f"budget exhausted ({verdict.dimension}): {verdict.reason}")
+            self.store.append_objective_event(
+                run_id, budget_module.EVENT_BUDGET_EXHAUSTED, task_id=task_id,
+                detail={"dimension": verdict.dimension, "reason": verdict.reason,
+                        "limit": verdict.limit, "spend": vars(verdict.spend)})
+            return
+
         attempt = int(task.get("attempts") or 0) + 1
         self.store.update_objective_task(
             task_id, status=O.TaskStatus.RUNNING,
@@ -961,6 +980,27 @@ class ContinuousTaskExecutor:
                               None, passed=False, reason=f"{kind}: {reason}")
         self._cascade_skips(run_id)
         self._check_invariant(run_id)
+
+    def _budget_verdict(self, run_id: str, capability: str,
+                        task_id: str | None = None) -> "budget_module.Verdict":
+        """Recorded spend vs the run's budget (audit A-022). The gateway
+        ledger and the Hermes work log are opened lazily and are optional:
+        a missing ledger contributes zero tokens and says so in
+        `spend.sources`, it never blocks a run by itself."""
+        telemetry = work_log = None
+        try:
+            from friday.model_gateway import GatewayTelemetry
+            telemetry = GatewayTelemetry()
+        except Exception:  # noqa: BLE001 - recorded in spend.sources by measure()
+            logger.debug("objective budget: gateway telemetry unavailable", exc_info=True)
+        try:
+            from friday.hermes_bridge import WorkRunLog
+            work_log = WorkRunLog()
+        except Exception:  # noqa: BLE001
+            logger.debug("objective budget: hermes work log unavailable", exc_info=True)
+        return budget_module.check(self.store, run_id, next_capability=capability,
+                                   next_task_id=task_id,
+                                   telemetry=telemetry, work_log=work_log)
 
     def _max_attempts_for(self, task: dict) -> int:
         """`iteration_budget` (from a Hermes TaskBundle, carried through the

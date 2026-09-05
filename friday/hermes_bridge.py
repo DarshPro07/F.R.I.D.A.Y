@@ -853,6 +853,15 @@ class WorkRunLog:
                 " LIMIT ?", (int(limit),)).fetchall()
         return [dict(r) for r in rows]
 
+    def for_friday_run(self, friday_run_id: str) -> list[dict]:
+        """Every worker run delegated by one objective - the objective
+        budget (audit A-022) charges their usage to the objective."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM hermes_work_runs WHERE friday_run_id = ?"
+                " ORDER BY started_at", (friday_run_id,)).fetchall()
+        return [dict(r) for r in rows]
+
     def sweep_orphans(self) -> list[str]:
         """Close every non-terminal run whose owning process is gone.
 
