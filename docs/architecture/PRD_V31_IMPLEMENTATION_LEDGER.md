@@ -153,18 +153,44 @@ TEST=TESTING, VER=VERIFIED. "Where" names the module that owns it.
 
 ## Current requirement
 
-All 20 final-gate items are produced and evidenced
-(`docs/architecture/PRD_V31_COMPLIANCE_MATRIX.md`); the final full
-deterministic suite on this exact tree is green (below). The readiness
-verdict is no longer conditional.
+The PRD gate closed on `3bcf6d4` (matrix + unconditional verdict). The
+same day an external audit (`docs/architecture/AUDIT_2026-09-05_TRIAGE.md`)
+found what the gate did not: the public repo carried the live SQLite DB,
+runtime logs, a committed private key + pairing token, a 16 MB binary, and
+`verify.yml` had **failed** on the pushed HEAD. Every P0 item is resolved
+in the triage doc's resolution log (commits `d1751bb` .. this one); the
+remaining P0 action is owner-side (GitHub push protection toggle).
 
-What remains is listed in the matrix's "Known limitations": NFR-P01..P05
-need a live voice room; FR-011/029/046 are PARTIAL for want of a second
-live worker / OAuth scopes / accounts; FR-068 is P2; the deterministic
-planner has 10 known confident misroutes (`data/perf/latest.json`
-misses_sample).
+Next: the audit's P1 "verify against reality" list - opt-in live provider
+suite (A-008/A-024), browser prompt-injection pages (A-036), runtime
+invariants (A-048), soak harness (A-051), provider transport model
+(A-010/A-018/A-019) - and the standing matrix limitations (NFR-P01..P05
+live room; FR-011/029/046; FR-068; 10 planner misroutes).
 
 ## Verified log
+
+### 2026-09-05 - External audit P0 -> RESOLVED (repo hygiene, CI truth, four hardening items)
+
+- Repo: 88 runtime/artifact/binary paths untracked, `.gitattributes`,
+  companion pairing rotated, gitleaks full history 0 findings with the
+  allowlisted test fakes (`d1751bb`).
+- CI: the run on `3bcf6d4` was red (14 Windows-only test modules
+  ImportError on ubuntu). Now `windows-latest` required + `ubuntu-latest`
+  compat, `collect_ignore` with the reason, pytest-timeout per test.
+- A-043 kernel guard covers trust roots + verifier + golden corpus +
+  security tests + workflows (`7af2c96`, 76 tests).
+- A-038 WAL/busy_timeout; `tests/test_store_durability.py` kills a real
+  writer mid-transaction (`7af2c96`, 4 tests).
+- A-022 objective budget enforced from recorded spend before every call
+  (`8becc2d`, 6 tests + 184 regression).
+- A-042 remote nonce/timestamp replay protection (`09898f5`, 9 tests).
+- A-029/A-047 canonical Python runner with kill-tree chunk timeouts
+  (`9231ba7`, proven exit 124 / 0 survivors).
+- A-028 nine rules restored with path scopes.
+
+Deliberately not done: history rewrite (rotated material; force-push on a
+public `main` costs more than it removes - command recorded in the triage
+doc for the owner).
 
 ### 2026-09-05 - Final full deterministic gate `data/post_final` -> 3,737 passed, 1 skipped, 0 failed
 

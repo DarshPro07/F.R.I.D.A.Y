@@ -1,9 +1,11 @@
 ---
 description: "Match the style of the service you are touching. Don't drag your favorite conventions into someone else's codebase."
-globs: "*"
-alwaysApply: true
+paths:
+  - "friday/**"
+  - "ui/**"
+  - "tests/**"
+alwaysApply: false
 ---
-
 # Rule 10: Style Per Service
 
 **When this applies:** any team with 2+ languages or 2+ services in `voice-brain, mcp-tools, fabric, objective-engine`. Skip for monorepo-of-one.

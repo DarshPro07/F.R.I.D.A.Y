@@ -1,9 +1,13 @@
 ---
 description: "Enforces plan-first development. Never start implementation before saving a plan to .plans/."
-globs: "*"
-alwaysApply: true
+paths:
+  - "friday/**"
+  - "server.py"
+  - "agent_friday.py"
+  - "ui/**"
+  - "scripts/**"
+alwaysApply: false
 ---
-
 # Rule 1: Plan-First Development
 
 **When this applies:** every team. Skip only for single-file bug fixes, typos, and trivial config changes.

@@ -1,9 +1,13 @@
 ---
 description: "Treat user input, secrets, and dependencies with security in mind. No new OWASP top-10 holes."
-globs: "*"
-alwaysApply: true
+paths:
+  - "friday/**"
+  - "server.py"
+  - "agent_friday.py"
+  - "ui/**"
+  - ".github/**"
+alwaysApply: false
 ---
-
 # Rule 12: Security & VAPT
 
 **When this applies:** any team that handles user data, authentication, payments, or external traffic. Optional for purely internal scripts.

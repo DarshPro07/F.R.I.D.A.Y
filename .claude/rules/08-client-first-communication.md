@@ -3,7 +3,6 @@ description: "Verify before reporting. Surface blockers honestly. Don't claim so
 globs: "*"
 alwaysApply: true
 ---
-
 # Rule 8: Client-First Communication
 
 **When this applies:** every team.

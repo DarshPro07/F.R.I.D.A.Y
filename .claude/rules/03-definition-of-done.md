@@ -1,9 +1,12 @@
 ---
 description: "A task is not done until tests pass, the feature works end-to-end, the build succeeds, and the code is formatted."
-globs: "*"
-alwaysApply: true
+paths:
+  - "friday/**"
+  - "tests/**"
+  - "ui/**"
+  - "e2e/**"
+alwaysApply: false
 ---
-
 # Rule 3: Definition of Done
 
 **When this applies:** every team.

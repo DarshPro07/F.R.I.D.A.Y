@@ -1,5 +1,5 @@
 ---
-description: "Friday team rules, compact. Replaces the generated rules 01-13 (2026-09-04)."
+description: "Friday team rules, compact index. Rules 01-13 hold the detail and load by path scope (restored 2026-09-05, audit A-028)."
 globs: "*"
 alwaysApply: true
 ---
@@ -13,3 +13,6 @@ alwaysApply: true
 - Match the service's existing style, layout, error handling and test layout.
 - Security: all input untrusted; secrets only in env or the broker; outbound HTTP has timeouts and netguard; every endpoint enforces the gate; escape on output; log auth failures. Report a vulnerability the moment you see it.
 - Models: Haiku for lookups/monitors, Sonnet for code, Opus only for architecture/review; say why when non-default.
+
+## Detail
+Each bullet above is the summary of a numbered rule in this directory (01 plan-first, 02 service-boundaries, 03 definition-of-done, 04 clarify-unknowns, 08 client-first-communication, 09 no-quick-fixes, 10 style-per-service, 12 security-vapt, 13 model-selection). The numbered files are scoped by `paths:` so they load when a matching file is being worked on; when a bullet here and a numbered rule disagree, the numbered rule wins.

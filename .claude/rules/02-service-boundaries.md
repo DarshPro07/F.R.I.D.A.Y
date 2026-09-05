@@ -1,9 +1,11 @@
 ---
 description: "Logic lives in exactly one service. Cross-boundary work must go through a documented interface."
-globs: "*"
-alwaysApply: true
+paths:
+  - "friday/**"
+  - "server.py"
+  - "agent_friday.py"
+alwaysApply: false
 ---
-
 # Rule 2: Service Boundaries
 
 **When this applies:** any team with 2+ services in `voice-brain, mcp-tools, fabric, objective-engine`. Skip for single-service projects.

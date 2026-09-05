@@ -1,9 +1,11 @@
 ---
 description: "Right model for right job — Opus for hard reasoning, Sonnet for code, Haiku for lookups."
-globs: "*"
-alwaysApply: true
+paths:
+  - ".claude/**"
+  - "friday/model_gateway.py"
+  - "friday/hermes_*.py"
+alwaysApply: false
 ---
-
 # Rule 13: Model Selection
 
 **When this applies:** every team. Especially load-bearing for orchestrators that pick which specialist (and which model) handles a request.

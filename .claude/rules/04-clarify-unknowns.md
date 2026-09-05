@@ -3,7 +3,6 @@ description: "When you don't have the information to make a decision, ask. Do no
 globs: "*"
 alwaysApply: true
 ---
-
 # Rule 4: Clarify Unknowns
 
 **When this applies:** every team.

@@ -1,9 +1,12 @@
 ---
 description: "Every fix is the correct, complete solution. No band-aids."
-globs: "*"
-alwaysApply: true
+paths:
+  - "friday/**"
+  - "tests/**"
+  - "ui/**"
+  - "scripts/**"
+alwaysApply: false
 ---
-
 # Rule 9: No Quick Fixes
 
 **When this applies:** every team. Especially load-bearing for QA, security, and platform teams.
