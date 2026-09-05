@@ -1,0 +1,47 @@
+# Line-ending discipline (audit A-015 / A-030). Text is normalised to LF in
+# the repository; Windows-native script types check out as CRLF; binaries
+# are left alone. Applied once with `git add --renormalize .`.
+* text=auto
+
+*.py      text eol=lf
+*.pyi     text eol=lf
+*.sh      text eol=lf
+*.bash    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.json    text eol=lf
+*.jsonl   text eol=lf
+*.toml    text eol=lf
+*.md      text eol=lf
+*.txt     text eol=lf
+*.html    text eol=lf
+*.css     text eol=lf
+*.js      text eol=lf
+*.mjs     text eol=lf
+*.ts      text eol=lf
+*.svg     text eol=lf
+*.csv     text eol=lf
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+*.ps1     text eol=crlf
+
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.mp3     binary
+*.wav     binary
+*.pdf     binary
+*.xlsx    binary
+*.docx    binary
+*.bin     binary
+*.sqlite3 binary
+*.exe     binary
+*.dll     binary
+# NOT *.pem: a key file is text, and marking it binary makes `git log -p`
+# print "Binary files differ" - which blinds diff-based secret scanners
+# (gitleaks went from 15 findings to 0 the moment it was added).

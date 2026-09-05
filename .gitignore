@@ -67,3 +67,37 @@ data/workspace/
 # git worktrees checked out by coding agents (a registered worktree is
 # tracked by .git/worktrees, never by the index; 70 MB of checkout here)
 .claude/worktrees/
+
+# ---------------------------------------------------------------------------
+# Audit 2026-09-05 (A-001..A-006, A-055, A-056): nothing the running system
+# writes, nothing built, nothing personal, nothing local-only is tracked.
+# Fixtures the tests read stay: data/corpus/, data/gate/.
+# ---------------------------------------------------------------------------
+# databases anywhere (live, gate, scratch)
+*.sqlite3
+# runtime provider/objective state
+data/provider_cooldowns.json
+# benchmark / evaluation / verification outputs (CI artifacts, not source)
+data/golden/
+data/perf/
+data/hermes/
+data/post_*/
+data/baseline/
+data/artifacts/
+data/prd_requirements.json
+# captures and generated media
+data/vision/
+# biometric model (LBPH faces) and the companion pairing secrets
+trainingData.yml
+data/companion/
+# built binaries and their backups
+Friday.exe*
+*.exe
+!third_party/**/*.exe.sha256
+# local tool state
+.serena/project.local.yml
+.aicodepro/checkpoints.git/
+# the PRD is canonical as docs/PRD_V3.1.md; office/pdf renders are artifacts
+*.docx
+*.pdf
+!data/gate/*.pdf

@@ -1,1 +1,0 @@
-Friday audit fixture. This file exists only so a capability can be exercised against something this run owns.

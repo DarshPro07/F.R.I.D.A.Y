@@ -1,0 +1,26 @@
+# gitleaks configuration (audit A-007 / A-017). Extends the default rules;
+# the allowlist below names the deliberate fake credentials the redaction
+# tests use and the Chrome extension's public key. A real secret must
+# never be allow-listed here - rotate it and untrack it instead.
+title = "friday"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "deliberate fakes and public material"
+paths = [
+  # redaction tests feed literal fake tokens to prove they are scrubbed
+  '''tests/test_execution\.py''',
+  '''tests/test_sandbox\.py''',
+  '''tests/test_shared_brain\.py''',
+  # Chrome MV3 manifest "key" is the extension's PUBLIC key (id derivation)
+  '''friday/companion/extension/manifest\.json''',
+  # upstream notices quote git commit SHAs, not tokens
+  '''third_party/bin/cbm/THIRD_PARTY_NOTICES\.md''',
+]
+regexes = [
+  '''abc123xyz789''',
+  '''sk-abc\.\.\.6789''',
+  '''sk-123\.\.\.5678''',
+]
