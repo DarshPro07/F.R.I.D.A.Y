@@ -6,6 +6,11 @@ Behaviour is scripted through env vars:
 
     FAKE_GW_FAIL_PROVIDERS="anthropic:QUOTA_EXCEEDED,opencode-free:MODEL_UNAVAILABLE"
         infer on these providers answers with that error code
+    FAKE_GW_EMPTY_PROVIDERS="anthropic:length,openai-codex:stop"
+        infer on these providers answers ok with NO content and that
+        finish_reason - `length` only while max_output_tokens is below
+        FAKE_GW_EMPTY_BELOW (default 300), the way a thinking model spends a
+        small output budget on reasoning; `stop` is empty every time
     FAKE_GW_HANG=1        never answer infer (watchdog tests)
     FAKE_GW_DIE=1         exit abruptly on the first infer (crash tests)
     FAKE_GW_ECHO=1        response is the last user message reversed
@@ -21,15 +26,18 @@ def write(obj):
     sys.stdout.flush()
 
 
+#: `default_model` mirrors what the real worker now reports per provider
+#: (Requirement 10): the provider's OWN catalog default, "" when Hermes
+#: knows none - which the gateway must treat as "not a route".
 PROVIDERS = [
     {"id": "anthropic", "label": "Anthropic", "aliases": [], "authenticated": True,
-     "route_kind": "api"},
+     "route_kind": "api", "default_model": "fake-haiku"},
     {"id": "openai-codex", "label": "ChatGPT or Codex Subscription", "aliases": [],
-     "authenticated": True, "route_kind": "subscription"},
+     "authenticated": True, "route_kind": "subscription", "default_model": "fake-codex-default"},
     {"id": "opencode-free", "label": "OpenCode Free", "aliases": [],
-     "authenticated": True, "route_kind": "free_tier"},
+     "authenticated": True, "route_kind": "free_tier", "default_model": ""},
     {"id": "lmstudio", "label": "LM Studio", "aliases": [], "authenticated": False,
-     "route_kind": "local"},
+     "route_kind": "local", "default_model": "fake-local"},
 ]
 
 
@@ -38,6 +46,11 @@ def main():
     for item in filter(None, os.getenv("FAKE_GW_FAIL_PROVIDERS", "").split(",")):
         prov, _, code = item.partition(":")
         failures[prov.strip()] = code.strip() or "PROVIDER_ERROR"
+    empties = {}
+    for item in filter(None, os.getenv("FAKE_GW_EMPTY_PROVIDERS", "").split(",")):
+        prov, _, finish = item.partition(":")
+        empties[prov.strip()] = finish.strip() or "stop"
+    empty_below = int(os.getenv("FAKE_GW_EMPTY_BELOW", "300"))
     hang = os.getenv("FAKE_GW_HANG") == "1"
     die = os.getenv("FAKE_GW_DIE") == "1"
     echo = os.getenv("FAKE_GW_ECHO") == "1"
@@ -71,15 +84,25 @@ def main():
             msgs = params.get("messages") or []
             last = str(msgs[-1].get("content", "")) if msgs else ""
             text = last[::-1] if echo else "PONG"
-            prompt_tokens = sum((len(str(m.get("content", ""))) + 3) // 4 for m in msgs)
+            prompt_tokens = sum((len(str(m.get("content", "")) ) + 3) // 4 for m in msgs)
+            finish = "stop"
+            reasoning_tokens = 0
+            output_tokens = 2
+            if provider in empties:
+                wanted = empties[provider]
+                budget = int(params.get("max_output_tokens") or 0)
+                if wanted == "stop" or budget < empty_below:
+                    text, finish, output_tokens = "", wanted, 0
+                    # the budget went on thinking, as gemini-3.6-flash's did
+                    reasoning_tokens = budget if wanted == "length" else 0
             write({"id": rid, "ok": True, "result": {
                 "status": "ok", "provider": provider,
                 "model": params.get("model") or "fake-main",
                 "requested_model": params.get("model") or "",
-                "response": text, "finish_reason": "stop", "latency_ms": 7,
+                "response": text, "finish_reason": finish, "latency_ms": 7,
                 "provider_latency": {}, "entitlement_state": "OK",
-                "usage": {"input_tokens": prompt_tokens, "output_tokens": 2,
-                          "cached_tokens": 0, "reasoning_tokens": 0}}})
+                "usage": {"input_tokens": prompt_tokens, "output_tokens": output_tokens,
+                          "cached_tokens": 0, "reasoning_tokens": reasoning_tokens}}})
         elif method == "shutdown":
             write({"id": rid, "ok": True, "result": {}})
             return

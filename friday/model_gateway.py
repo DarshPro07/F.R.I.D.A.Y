@@ -51,6 +51,8 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from friday import provider_health
+
 logger = logging.getLogger("friday.model_gateway")
 
 # ---------------------------------------------------------------------------
@@ -541,6 +543,10 @@ class ModelGatewayWorker:
 #: seconds. Short by design: an entitlement failure is durable (it is also
 #: written to provider_cooldowns), a transient one is not.
 ROUTE_UNHEALTHY_S = 120.0
+#: Floor for the one widened retry after a thinking model spends the whole
+#: output budget on reasoning. gemini-3.6-flash needed >16 and answered at
+#: 256; four times a TRIVIAL budget (256) is 1024, well under any class cap.
+EMPTY_RETRY_MIN_OUTPUT_TOKENS = 1024
 
 #: Failure codes after which trying ANOTHER route is pointless.
 _NO_FAILOVER = frozenset({"BAD_REQUEST", "UNKNOWN_METHOD"})
@@ -640,9 +646,17 @@ class ModelGateway:
         now = time.time()
         seen: set[tuple[str, str]] = set()
         out: list[tuple[str, str, str]] = []
+        #: Providers the tier table named, usable or not. A provider whose
+        #: table route just failed is not re-offered as a "beyond the table"
+        #: fallback of itself at a different model name - unhealthiness is
+        #: keyed (provider, model), and that loophole retried the same dead
+        #: provider under its catalog default (test_provider_health found it).
+        tabled: set[str] = set()
         for t in order:
             provider, model = table.get(t, ("", ""))
             key = (provider, model)
+            if provider:
+                tabled.add(provider)
             if key in seen:
                 continue
             seen.add(key)
@@ -658,7 +672,76 @@ class ModelGateway:
             if until > now:
                 continue
             out.append((t, provider, model))
+
+        # Routes beyond the tier table: every provider Hermes reports as
+        # authenticated, at ITS OWN default model. They are reached when the
+        # caller pins one (`provider_allowlist`) or when failover is allowed
+        # and the tier table gave nothing usable - a second authenticated
+        # provider is a real fallback, an unauthenticated one is not (the
+        # live suite found the allowlist path returned NO_ROUTE for every
+        # provider but the main one, 2026-09-05).
+        #
+        # Requirement 10: the model is resolved HERE, from the provider's
+        # catalog, never left blank. A blank model reaches Hermes's
+        # `resolve_provider_client`, which pre-fills the profile's MAIN model
+        # - and that is how openai-api was asked for `claude-opus-5`. A
+        # provider with no default of its own is not a route.
+        wants_more = bool(request.provider_allowlist) or (request.allow_failover and not out)
+        if wants_more:
+            verdicts = self.provider_health(self._authenticated_providers())
+            for provider in self._authenticated_providers():
+                if provider in tabled and not request.provider_allowlist:
+                    continue
+                model = self.default_model(provider)
+                if not model:
+                    logger.info("no catalog default model for %s; not a route", provider)
+                    continue
+                # Requirement 9: a route whose last evidence is a durable
+                # failure (auth, credits, unsupported model) is not tried
+                # again until a probe says otherwise. Degraded and stale
+                # routes ARE tried - that is how they get fresh evidence.
+                verdict = verdicts.get(provider)
+                if verdict is not None and verdict.state == provider_health.UNAVAILABLE \
+                        and not request.provider_allowlist:
+                    logger.info("skipping %s: %s", provider, verdict.reason)
+                    continue
+                key = (provider, model)
+                if key in seen or any(p == provider for _, p, _ in out):
+                    continue
+                seen.add(key)
+                if request.provider_allowlist and provider not in request.provider_allowlist:
+                    continue
+                if provider in request.provider_denylist:
+                    continue
+                if request.privacy_policy == "local_only" and self.route_kind(provider) != "local":
+                    continue
+                if key in cooling or self._unhealthy.get(key, 0.0) > now:
+                    continue
+                out.append((tier, provider, model))
         return out
+
+    def _authenticated_providers(self) -> list[str]:
+        try:
+            return list(self.providers().get("usable") or [])
+        except GatewayUnavailable:
+            return []
+
+    def default_model(self, provider: str) -> str:
+        """The provider's own catalog default as Hermes reports it, or "".
+
+        Never the profile main model: `main.default` belongs to
+        `main.provider` alone. The main provider's own tier-table entry uses
+        "" deliberately (Hermes resolves that to the configured main model,
+        which IS that provider's).
+        """
+        try:
+            inventory = self.providers()
+        except GatewayUnavailable:
+            return ""
+        for p in inventory.get("providers", []):
+            if p.get("id") == provider:
+                return str(p.get("default_model") or "").strip()
+        return ""
 
     # -- the call (FR-070 / FR-076 / FR-077 / FR-078 / FR-080 / FR-081) ----
 
@@ -691,7 +774,8 @@ class ModelGateway:
         routes = self.candidates(request)
         if not routes:
             self._record(request, status="failed", error="no eligible route",
-                         input_tokens=input_tokens, fingerprint=fingerprint)
+                         input_tokens=input_tokens, fingerprint=fingerprint,
+                         entitlement_state="NO_ROUTE")
             return ModelGatewayResult(status="failed", entitlement_state="NO_ROUTE",
                                       warnings=["no eligible provider route"],
                                       input_tokens=input_tokens)
@@ -733,9 +817,73 @@ class ModelGateway:
                 res = reply["result"]
                 usage = res.get("usage") or {}
                 kind = self.route_kind(res.get("provider") or provider)
+                text = res.get("response", "") or ""
+                finish = str(res.get("finish_reason") or "")
+                if not text.strip():
+                    # Transport success is not an answer. A structurally
+                    # valid reply with no visible content is a FAILED
+                    # attempt, classified by why (Requirement 9/11):
+                    #   OUTPUT_TRUNCATED  finish_reason=length - a thinking
+                    #                     model spent max_output_tokens on
+                    #                     reasoning (gemini-3.6-flash: 9 in,
+                    #                     0 out, 22 total at max_tokens=16,
+                    #                     2026-09-05); retry once, larger.
+                    #   EMPTY_RESPONSE    anything else - the route is not
+                    #                     healthy, say so, fail over.
+                    hidden = int(usage.get("reasoning_tokens") or 0)
+                    if finish in ("length", "max_tokens") and not params.get("_retried"):
+                        widened = max(int(max_out) * 4, EMPTY_RETRY_MIN_OUTPUT_TOKENS)
+                        code = "OUTPUT_TRUNCATED"
+                        message = (f"{finish}: no visible content within {max_out} output tokens"
+                                   f" ({hidden} spent on reasoning); retrying once at {widened}")
+                        attempts.append({"tier": tier, "provider": provider, "model": model,
+                                         "status": "failed", "code": code, "error": message,
+                                         "latency_ms": elapsed})
+                        self._record(request, status="failed", provider=provider, model=model,
+                                     tier=tier, error=f"{code}: {message}", latency_ms=elapsed,
+                                     input_tokens=input_tokens, failover_count=index,
+                                     fingerprint=fingerprint, entitlement_state=code)
+                        params = {**params, "max_output_tokens": widened, "_retried": True}
+                        started = time.monotonic()
+                        try:
+                            reply = self.worker.call("infer", params, timeout=request.timeout_s)
+                        except GatewayUnavailable as exc:
+                            last_error, last_state = str(exc), "GATEWAY_UNAVAILABLE"
+                            continue
+                        elapsed = int((time.monotonic() - started) * 1000)
+                        if not reply.get("ok"):
+                            err = reply.get("error") or {}
+                            last_error = str(err.get("message") or "")[:500]
+                            last_state = str(err.get("code") or "PROVIDER_ERROR")
+                            attempts.append({"tier": tier, "provider": provider, "model": model,
+                                             "status": "failed", "code": last_state,
+                                             "error": last_error, "latency_ms": elapsed})
+                            self._mark_unhealthy(provider, model, last_state)
+                            continue
+                        res = reply["result"]
+                        usage = res.get("usage") or {}
+                        text = res.get("response", "") or ""
+                        finish = str(res.get("finish_reason") or "")
+                        hidden = int(usage.get("reasoning_tokens") or 0)
+                    if not text.strip():
+                        code = "OUTPUT_TRUNCATED" if finish in ("length", "max_tokens") else "EMPTY_RESPONSE"
+                        message = (f"{provider} {res.get('model') or model} returned no visible content"
+                                   f" (finish_reason={finish or 'unknown'},"
+                                   f" output_tokens={int(usage.get('output_tokens') or 0)},"
+                                   f" reasoning_tokens={hidden})")
+                        attempts.append({"tier": tier, "provider": provider, "model": model,
+                                         "status": "failed", "code": code, "error": message,
+                                         "latency_ms": elapsed})
+                        last_error, last_state = message, code
+                        self._record(request, status="failed", provider=provider, model=model,
+                                     tier=tier, error=f"{code}: {message}", latency_ms=elapsed,
+                                     input_tokens=input_tokens, failover_count=index,
+                                     fingerprint=fingerprint, entitlement_state=code)
+                        self._mark_unhealthy(provider, model, code)
+                        continue
                 result = ModelGatewayResult(
                     status="ok", provider=res.get("provider") or provider,
-                    model=res.get("model") or model, response=res.get("response", ""),
+                    model=res.get("model") or model, response=text,
                     input_tokens=int(usage.get("input_tokens") or 0),
                     output_tokens=int(usage.get("output_tokens") or 0),
                     cached_tokens=int(usage.get("cached_tokens") or 0),
@@ -817,19 +965,45 @@ class ModelGateway:
             return 0
 
     def health(self) -> dict:
-        """FR-026-style state for the gateway as a capability."""
+        """FR-026-style state for the gateway as a capability.
+
+        Two lists, deliberately distinct (Requirement 9): `usable` is what
+        Hermes reports as authenticated - a credential exists - and
+        `providers` carries each one's EVIDENCE-based state from the call
+        ledger (`friday.provider_health`). `healthy` is the subset that has
+        answered with content recently; `unavailable` the subset whose last
+        evidence is a durable failure with the reason attached. Nothing is
+        called healthy for having a key.
+        """
         try:
             inventory = self.providers()
         except GatewayUnavailable as exc:
-            return {"state": "UNAVAILABLE", "detail": str(exc), "usable": []}
-        usable = inventory.get("usable", [])
+            return {"state": "UNAVAILABLE", "detail": str(exc), "usable": [],
+                    "healthy": [], "unavailable": [], "providers": {}}
+        usable = list(inventory.get("usable", []))
         state = "READY" if usable else "AUTH_REQUIRED"
+        verdicts = self.provider_health(usable)
         return {"state": state, "usable": usable, "main": inventory.get("main"),
+                "healthy": [p for p, v in verdicts.items() if v.state == provider_health.HEALTHY],
+                "unavailable": [p for p, v in verdicts.items() if v.state == provider_health.UNAVAILABLE],
+                "providers": {p: v.to_dict() for p, v in verdicts.items()},
                 "hermes_home": self.worker.hermes_home,
                 "worker_alive": self.worker.alive(),
                 "boundary_note": "upstream providers see the compiled context; "
                                  "Hermes brokers credentials, it does not make "
                                  "cloud inference local."}
+
+    def provider_health(self, providers: list[str] | None = None,
+                        *, max_age_s: float = provider_health.DEFAULT_MAX_AGE_S) -> dict:
+        """provider -> `provider_health.Verdict`, from the ledger only."""
+        if providers is None:
+            providers = self._authenticated_providers()
+        return provider_health.assess(self.telemetry, list(providers), max_age_s=max_age_s)
+
+    def probe(self, provider: str, **kw) -> "provider_health.Verdict":
+        """Refresh one provider's evidence with one tiny paid call. Explicit
+        by design; see `provider_health.probe`."""
+        return provider_health.probe(self, provider, **kw)
 
     def close(self) -> None:
         self.worker.stop()

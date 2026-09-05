@@ -12,26 +12,39 @@ from __future__ import annotations
 
 from friday import contracts as c
 from friday import model_gateway as mg
+from friday import provider_health as PH
 from friday.policy import PolicyEngine, default_engine
 
 
 def model_providers(run: c.Run, *, engine: PolicyEngine = default_engine) -> c.ActionResult:
-    """The provider inventory Hermes can broker right now (FR-071/072)."""
+    """The provider inventory Hermes can broker right now (FR-071/072),
+    with each route's EVIDENCE-based health beside its credential state
+    (Requirement 9): `usable` means a key exists; `health[provider]` is
+    what the call ledger last saw that route do."""
     started = c.started(run.run_id, "model.providers")
     try:
-        inv = mg.gateway().providers(max_age_s=0.0)
+        gw = mg.gateway()
+        inv = gw.providers(max_age_s=0.0)
     except mg.GatewayUnavailable as exc:
         return run.record(c.failed(started, f"model gateway unavailable: {exc}"))
     usable = inv.get("usable", [])
+    verdicts = gw.provider_health(list(usable))
+    healthy = [p for p, v in verdicts.items() if v.state == PH.HEALTHY]
+    unavailable = [p for p, v in verdicts.items() if v.state == PH.UNAVAILABLE]
     return run.record(c.succeeded(
         started,
         output={"usable": usable, "main": inv.get("main"),
+                "healthy": healthy, "unavailable": unavailable,
+                "health": {p: v.to_dict() for p, v in verdicts.items()},
                 "providers": [{"id": p["id"], "route_kind": p.get("route_kind", ""),
-                               "authenticated": bool(p.get("authenticated"))}
+                               "authenticated": bool(p.get("authenticated")),
+                               "default_model": p.get("default_model", "")}
                               for p in inv.get("providers", [])]},
         verification=c.Verification(
-            method="hermes_provider_inventory",
-            evidence=f"{len(usable)} authenticated route(s): {', '.join(usable[:6])}")))
+            method="hermes_provider_inventory_with_ledger_evidence",
+            evidence=(f"{len(usable)} authenticated route(s); "
+                      f"{len(healthy)} seen answering: {', '.join(healthy[:6]) or 'none'}; "
+                      f"{len(unavailable)} unavailable: {', '.join(unavailable[:6]) or 'none'}"))))
 
 
 def model_infer(run: c.Run, prompt: str, *, task_class: str = mg.STANDARD,

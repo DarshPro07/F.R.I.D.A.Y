@@ -84,17 +84,28 @@ live `.venv` (the live agent runs from it):
 
 ### Where the suite actually stands
 
-The deterministic gate is green as of 2026-08-31:
+The last full local run is 2026-09-05 (`data/baseline_fix1`, canonical
+`scripts/baseline_suite.py`, four chunks, Windows):
 
 ```
-3,146 passed, 1 skipped, 0 failed, 0 errors
+3,788 passed, 1 skipped, 4 failed  (chunks 0/1/3 exit 0; chunk 2 exit 1)
 ```
 
-from `.venv-verify/Scripts/python.exe -m pytest tests/ -m "not live and not slow"`
-(run in two halves here because a single ~11m background run gets reclaimed;
-each half finishes in ~5-6m). Regenerate rather than trust this paragraph.
+The four failures are the machine entering Modern Standby mid-run
+(Kernel-Power 506/507 in the System log during the chunk; `git rev-parse`
+"timed out after -668 s"), not the code; they pass in isolation and have
+since been made resolver-independent. Regenerate rather than trust this
+paragraph, and read the runner's exit codes, not the tail of a pipe.
 
-The prior `27 failed / 7 errors` was cleared this cycle:
+Remote truth is the GitHub run on the commit you are looking at, never an
+older one. The run on `70176b1` (id 33949024905) was RED on both jobs; the
+buckets and their root causes are in
+`docs/architecture/AUDIT_2026-09-05_TRIAGE.md` (A-016 again). A Linux
+compatibility run can be reproduced locally in WSL against a `git archive`
+checkout (empty gitlink dirs, like actions/checkout): `D:/wsl/linux_gate.sh`
+on this machine.
+
+The prior `27 failed / 7 errors` (2026-08-31) was cleared as follows:
 - the 7 errors were one bug — `friday.toolsets.files.ARTIFACTS_DIR` did not
   exist while two test modules and `scripts/golden_live_runtime.py` used it.
   `files_delete` is now implemented in `friday/toolsets/files.py` with the

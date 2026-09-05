@@ -115,7 +115,43 @@ def _usage_dict(response) -> dict:
                       "output_tokens_details")
     if details_out is not None:
         out["reasoning_tokens"] = int(get(details_out, "reasoning_tokens") or 0)
+    if not out["reasoning_tokens"]:
+        # Thinking models that report no breakdown still bill the thinking
+        # in `total_tokens`: gemini-3.6-flash answered a 9-token prompt with
+        # 0 completion tokens and total 22 - the missing 13 were reasoning
+        # spent inside max_tokens (2026-09-05). Derive it so the caller can
+        # see WHERE an empty answer's budget went.
+        total = int(get(usage, "total_tokens") or 0)
+        hidden = total - out["input_tokens"] - out["output_tokens"]
+        if total and hidden > 0:
+            out["reasoning_tokens"] = hidden
     return out
+
+
+def _default_model_for(provider_id: str) -> str:
+    """The provider's OWN default model, or "" when Hermes knows none.
+
+    Two Hermes sources, in order: the curated auxiliary default (what Hermes
+    itself would use for a cheap call on this provider) and the provider's
+    static catalog default. Never the profile's main model: that belongs to
+    the main provider, and sending it to another is how OpenAI was asked
+    for `claude-opus-5` (live suite, 2026-09-05).
+    """
+    pid = (provider_id or "").strip()
+    if not pid:
+        return ""
+    try:
+        from agent.auxiliary_client import _get_aux_model_for_provider
+        picked = _get_aux_model_for_provider(pid) or ""
+    except Exception:  # noqa: BLE001 - a private helper; absence is not an error
+        picked = ""
+    if not picked:
+        try:
+            from hermes_cli.models import get_default_model_for_provider
+            picked = get_default_model_for_provider(pid) or ""
+        except Exception:  # noqa: BLE001
+            picked = ""
+    return str(picked).strip()
 
 
 def _providers() -> dict:
@@ -141,6 +177,10 @@ def _providers() -> dict:
             p["route_kind"] = "free_tier"
         else:
             p["route_kind"] = "api"
+        # Requirement 10: every provider carries its own default so Friday
+        # never has to guess - and an empty one is a fact Friday can refuse
+        # on (NO_ROUTE) rather than a blank Hermes fills with the main model.
+        p["default_model"] = _default_model_for(pid)
     return {"providers": providers, "main": main,
             "fallback_providers": list(fallbacks or [])}
 

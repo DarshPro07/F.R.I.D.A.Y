@@ -282,6 +282,96 @@ def test_denylist_and_allowlist_filter_routes(tmp_path, clean_env):
         gw.close()
 
 
+# -- Requirement 10: provider-specific default model ----------------------
+
+
+def test_a_pinned_provider_outside_the_tier_table_gets_its_own_default(tmp_path, clean_env):
+    """The tier table names anthropic only; pinning openai-codex must route
+    to it at ITS catalog default - never at "" (which Hermes would fill with
+    the profile's main model: openai-api was asked for claude-opus-5 that
+    way, 2026-09-05) and never at the main model by name."""
+    gw = make(tmp_path, tiers={
+        mg.TIER_FAST: ("anthropic", "fake-fast"),
+        mg.TIER_STANDARD: ("anthropic", "fake-standard"),
+        mg.TIER_DEEP: ("anthropic", "fake-deep")})
+    try:
+        routes = gw.candidates(request(provider_allowlist=("openai-codex",)))
+        assert routes == [(mg.TIER_FAST, "openai-codex", "fake-codex-default")], routes
+        res = gw.infer(request(provider_allowlist=("openai-codex",), allow_failover=False))
+        assert res.status == "ok"
+        assert (res.provider, res.model) == ("openai-codex", "fake-codex-default")
+        assert res.model != "fake-main", "the main provider's model leaked to another provider"
+        assert gw.default_model("openai-codex") == "fake-codex-default"
+    finally:
+        gw.close()
+
+
+def test_a_provider_with_no_catalog_default_is_no_route(tmp_path, clean_env):
+    """opencode-free is authenticated but Hermes knows no default model for
+    it. Guessing is exactly the failure Requirement 10 forbids: NO_ROUTE."""
+    gw = make(tmp_path)
+    try:
+        assert gw.default_model("opencode-free") == ""
+        assert gw.candidates(request(provider_allowlist=("opencode-free",))) == []
+        res = gw.infer(request(provider_allowlist=("opencode-free",)))
+        assert res.status == "failed" and res.entitlement_state == "NO_ROUTE"
+        assert res.attempts == [], "nothing was sent to a provider with no model"
+    finally:
+        gw.close()
+
+
+# -- Requirement 9/11: empty content is never "ok" ------------------------
+
+
+def test_a_reply_truncated_before_any_content_is_retried_wider_then_ok(tmp_path, clean_env):
+    """gemini-3.6-flash at max_tokens=16: finish_reason=length, 0 completion
+    tokens, 13 reasoning tokens, empty content - and the gateway said ok.
+    Now: one widened retry, the first attempt recorded as OUTPUT_TRUNCATED."""
+    clean_env.setenv("FAKE_GW_EMPTY_PROVIDERS", "anthropic:length")
+    clean_env.setenv("FAKE_GW_EMPTY_BELOW", "300")      # TRIVIAL's 256 is below it
+    gw = make(tmp_path)
+    try:
+        res = gw.infer(request(objective="obj-trunc", task_class=mg.TRIVIAL, allow_failover=False))
+        assert res.status == "ok" and res.response == "PONG", res
+        assert res.provider == "anthropic"
+        assert [a["code"] for a in res.attempts] == ["OUTPUT_TRUNCATED"], res.attempts
+        assert "reasoning" in res.attempts[0]["error"]
+        rows = gw.telemetry.for_objective("obj-trunc")
+        assert [r["status"] for r in rows] == ["failed", "ok"]
+        assert rows[0]["entitlement_state"] == "OUTPUT_TRUNCATED"
+    finally:
+        gw.close()
+
+
+def test_an_empty_reply_with_finish_stop_fails_the_route_and_fails_over(tmp_path, clean_env):
+    clean_env.setenv("FAKE_GW_EMPTY_PROVIDERS", "anthropic:stop")
+    gw = make(tmp_path)
+    try:
+        res = gw.infer(request(objective="obj-empty"))
+        assert res.status == "ok"
+        assert res.provider == "openai-codex", "the empty route must be failed over"
+        assert res.attempts[0]["code"] == "EMPTY_RESPONSE", res.attempts
+        assert res.failover_count >= 1
+        # the route is remembered as unhealthy, like any other failure
+        res2 = gw.infer(request(objective="obj-empty"))
+        assert res2.provider == "openai-codex" and res2.failover_count == 0
+    finally:
+        gw.close()
+
+
+def test_an_empty_reply_without_failover_is_a_failed_result(tmp_path, clean_env):
+    clean_env.setenv("FAKE_GW_EMPTY_PROVIDERS", "anthropic:stop")
+    gw = make(tmp_path)
+    try:
+        res = gw.infer(request(allow_failover=False))
+        assert res.status == "failed"
+        assert res.entitlement_state == "EMPTY_RESPONSE"
+        assert res.response == ""
+        assert "no visible content" in res.warnings[0]
+    finally:
+        gw.close()
+
+
 def test_local_only_privacy_policy_refuses_cloud_routes(tmp_path, clean_env):
     """FR-074: no cloud route is ever relabelled local."""
     gw = make(tmp_path)
