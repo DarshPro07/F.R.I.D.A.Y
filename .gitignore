@@ -103,3 +103,7 @@ Friday.exe*
 *.docx
 *.pdf
 !data/gate/*.pdf
+
+# soak runs: the report and samples are release evidence (committed under
+# docs/evidence/soak via scripts/soak.py --evidence); the DBs/logs are not
+data/soak/

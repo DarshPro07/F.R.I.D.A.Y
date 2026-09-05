@@ -722,10 +722,9 @@ class WorkRunLog:
                     db.execute(f"ALTER TABLE hermes_work_runs"
                                f" ADD COLUMN {column} {decl}")
 
-    def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self._path, timeout=10)
-        db.row_factory = sqlite3.Row
-        return db
+    def _connect(self):
+        from friday.dbconn import ledger_connection
+        return ledger_connection(self._path)
 
     def create(self, *, task: str, friday_run_id: str = "",
                bundle_chars: int = 0, token_budget: str = "NORMAL") -> str:
@@ -1128,6 +1127,9 @@ class HermesSupervisor:
         self.hermes_version = ""
         #: session_id -> work_run_id, so events land on the right record.
         self._session_runs: dict[str, str] = {}
+        #: Sessions whose turn finished, oldest first; bounded by
+        #: FINISHED_KEEP (see `_forget_session`).
+        self._finished_sessions: list[str] = []
         #: The most recent completion text per session, set by
         #: message.complete - the structured end-of-turn signal.
         self._results: dict[str, dict] = {}
@@ -1295,6 +1297,29 @@ class HermesSupervisor:
                     proc.kill()
         except OSError:
             pass
+        # The process is gone; its pipes and the two reader threads are
+        # not. Close the pipes (three handles each restart) and join the
+        # readers, which end on EOF once the pipes are closed. A crash /
+        # restart cycle without this leaked four handles per cycle in the
+        # A-051 soak.
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            try:
+                if stream is not None:
+                    stream.close()
+            except OSError:
+                pass
+        for th in (self._reader, self._stderr_reader):
+            if th is not None and th.is_alive() and th is not threading.current_thread():
+                th.join(timeout=5)
+        self._reader = self._stderr_reader = None
+        # In-flight RPC waiters would block until their own timeout on a
+        # gateway that no longer exists: wake them with the truth.
+        with self._lock:
+            pending = list(self._pending.values())
+            self._pending.clear()
+        for slot in pending:
+            slot["response"] = {"error": {"message": "gateway stopped"}}
+            slot["event"].set()
 
     def restart(self) -> None:
         """Crash recovery: stop, start, and mark affected runs truthfully."""
@@ -1308,6 +1333,13 @@ class HermesSupervisor:
             record = self.log.get(work_run_id)
             if record and record["status"] not in (COMPLETE, PARTIAL, FAILED):
                 self.log.update(work_run_id, status=STARTING)
+            # Its turn will never settle on this process: release the
+            # waiter's Event and the cached payload now (a crash that left
+            # them behind leaked a handle per crash in the A-051 soak).
+            done = self._turn_done.get(sid)
+            if done is not None:
+                done.set()
+            self._forget_session(sid)
 
     # -- wire ---------------------------------------------------------------
 
@@ -1486,12 +1518,44 @@ class HermesSupervisor:
                             message=render_completion(fresh))
             if settle is not None:
                 settle.set()
+                # The session is finished: drop what was held for it. The
+                # durable record lives in the log; `_results` keeps the last
+                # payload for `wait_for`, released by `_forget_session` once
+                # a waiter has read it (or on restart). Without this every
+                # delegate left an Event (a kernel handle on Windows) and
+                # two dict entries behind for the life of the process -
+                # the A-051 soak measured +1 handle per delegate.
+                self._finished_sessions.append(sid)
+                while len(self._finished_sessions) > self.FINISHED_KEEP:
+                    self._forget_session(self._finished_sessions.pop(0))
 
         if self.on_event is not None:
             try:
                 self.on_event(friday_event, sid, payload)
             except Exception:                                # noqa: BLE001
                 logger.exception("hermes event handler failed")
+
+    #: How many finished-but-UNREAD sessions keep their result payload in
+    #: memory for a late `wait_for` (fire-and-forget delegates that nobody
+    #: waits on). Bounded, so a long-lived control plane does not grow with
+    #: every task it ever delegated; a waited-on session is forgotten the
+    #: moment its waiter reads the result.
+    FINISHED_KEEP = 16
+
+    def _forget_session(self, sid: str) -> None:
+        work_run_id = self._session_runs.pop(sid, None)
+        self._turn_done.pop(sid, None)
+        self._results.pop(sid, None)
+        self._activity.pop(sid, None)
+        if work_run_id:
+            # Progress is read by `progress()` for the UI's spoken updates
+            # while a run is live; a finished run's record is in the log.
+            self._progress.pop(work_run_id, None)
+            self._interrupted.discard(work_run_id)
+        try:
+            self._finished_sessions.remove(sid)
+        except ValueError:
+            pass
 
     def _capped_update(self, work_run_id: str, text: str) -> dict:
         """
@@ -1670,10 +1734,15 @@ class HermesSupervisor:
             raise LookupError(f"no work run {work_run_id!r}")
         sid = record["hermes_session_id"]
         done = self._turn_done.get(sid)
+        finished = True
         if done is not None:
-            done.wait(timeout)
+            finished = done.wait(timeout)
         final = self.log.get(work_run_id) or {}
         final["result_payload"] = self._results.get(sid, {})
+        if finished:
+            # The waiter has read the result: nothing in memory is owed to
+            # this session any more (the record is durable in the log).
+            self._forget_session(sid)
         return final
 
     def progress(self, work_run_id: str) -> dict:

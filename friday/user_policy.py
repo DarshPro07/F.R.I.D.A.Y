@@ -108,10 +108,9 @@ class UserPolicy:
             db.execute(_TABLE)
             db.execute(_ENVELOPE_TABLE)
 
-    def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self._path, timeout=10)
-        db.row_factory = sqlite3.Row
-        return db
+    def _connect(self):
+        from friday.dbconn import ledger_connection
+        return ledger_connection(self._path)
 
     # -- changes (all audited) ---------------------------------------------
 

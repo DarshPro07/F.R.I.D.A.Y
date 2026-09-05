@@ -56,10 +56,9 @@ class SkillLadder:
         with self._connect() as db:
             db.execute(_TABLE)
 
-    def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self._path, timeout=10)
-        db.row_factory = sqlite3.Row
-        return db
+    def _connect(self):
+        from friday.dbconn import ledger_connection
+        return ledger_connection(self._path)
 
     def capture(self, name: str, procedure: str, *,
                 criteria: list[str], evidence: str) -> dict:

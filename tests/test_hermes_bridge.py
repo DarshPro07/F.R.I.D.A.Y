@@ -297,3 +297,73 @@ def test_recover_interrupts_a_stalled_tool(tmp_path, monkeypatch):
         assert supervisor.log.get(out['work_run_id'])['status'] in (hb.PARTIAL, hb.STARTING, hb.FAILED)
     finally:
         supervisor.stop()
+
+def _held(supervisor) -> int:
+    return (len(supervisor._turn_done) + len(supervisor._results) + len(supervisor._session_runs)
+            + len(supervisor._activity) + len(supervisor._progress))
+
+
+def test_a_waited_delegate_leaves_nothing_behind(tmp_path, monkeypatch):
+    """A-051 finding: every delegate left an Event (a kernel handle on
+    Windows) and four dict entries behind for the life of the process.
+    A session whose result has been read is forgotten; the record is in
+    the log."""
+    supervisor = make(tmp_path, monkeypatch)
+    try:
+        for _ in range(5):
+            out = supervisor.delegate(hb.TaskBundle(goal='x'), wait=True, turn_timeout=30)
+            assert out['result']['status'] == hb.COMPLETE
+        assert _held(supervisor) == 0
+        assert supervisor.log.get(out['work_run_id'])['status'] == hb.COMPLETE
+    finally:
+        supervisor.stop()
+
+
+def test_unread_finished_sessions_are_bounded(tmp_path, monkeypatch):
+    """Fire-and-forget delegates keep their payload for a late wait_for,
+    but only FINISHED_KEEP of them - not one per task ever run."""
+    supervisor = make(tmp_path, monkeypatch)
+    supervisor.FINISHED_KEEP = 3
+    try:
+        ids = [supervisor.delegate(hb.TaskBundle(goal='x'))['work_run_id'] for _ in range(8)]
+        deadline = time.time() + 30
+        # Wait until no session is still WORKING in memory (the log's
+        # status lands a moment before the in-memory settle).
+        while time.time() < deadline and (
+                len(supervisor._turn_done) > 3
+                or any(not e.is_set() for e in supervisor._turn_done.values())):
+            time.sleep(0.1)
+        assert len(supervisor._turn_done) <= 3
+        assert len(supervisor._results) <= 3
+        # The durable record is complete for every one of them regardless.
+        assert all(supervisor.log.get(i)['status'] == hb.COMPLETE for i in ids)
+    finally:
+        supervisor.stop()
+
+
+def test_a_crash_releases_the_dead_sessions_memory(tmp_path, monkeypatch):
+    supervisor = make(tmp_path, monkeypatch, flags={'FAKE_HERMES_DIE': '1'})
+    try:
+        out = supervisor.delegate(hb.TaskBundle(goal='doomed'))
+        deadline = time.time() + 10
+        while time.time() < deadline and supervisor.alive():
+            time.sleep(0.1)
+        assert not supervisor.alive()
+        assert len(supervisor._turn_done) == 1
+        monkeypatch.delenv('FAKE_HERMES_DIE')
+        supervisor.restart()
+        assert _held(supervisor) == 0
+        assert supervisor.log.get(out['work_run_id'])['status'] == hb.STARTING
+    finally:
+        supervisor.stop()
+
+
+def test_stop_closes_the_pipes_and_joins_the_readers(tmp_path, monkeypatch):
+    supervisor = make(tmp_path, monkeypatch)
+    supervisor.start()
+    proc = supervisor._proc
+    reader, err = supervisor._reader, supervisor._stderr_reader
+    supervisor.stop()
+    assert proc.stdout.closed and proc.stdin.closed and proc.stderr.closed
+    assert not reader.is_alive() and not err.is_alive()
+    assert supervisor._reader is None and supervisor._stderr_reader is None

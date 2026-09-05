@@ -213,10 +213,16 @@ class GrowthGuard:
     """
 
     def __init__(self, *, growth_factor: float = 1.5, growth_streak: int = 3,
-                 max_repeats: int = 3) -> None:
+                 max_repeats: int = 3, max_objectives: int = 512) -> None:
         self.growth_factor = growth_factor
         self.growth_streak = growth_streak
         self.max_repeats = max_repeats
+        #: Objectives tracked at once. The guard's memory is per objective
+        #: and a control plane creates objectives for as long as it runs;
+        #: unbounded, this grew with every objective ever seen (A-051
+        #: soak: RSS creep). Oldest objective forgotten first - its budget
+        #: truth lives in the durable ledger, not here.
+        self.max_objectives = max_objectives
         self._lock = threading.Lock()
         self._spent: dict[str, int] = {}
         self._sizes: dict[str, list[int]] = {}
@@ -258,9 +264,17 @@ class GrowthGuard:
         with self._lock:
             self._spent[objective_id] = (self._spent.get(objective_id, 0)
                                          + input_tokens + output_tokens)
-            self._sizes.setdefault(objective_id, []).append(input_tokens)
+            sizes = self._sizes.setdefault(objective_id, [])
+            sizes.append(input_tokens)
+            # Only the last `growth_streak` sizes take part in the verdict.
+            del sizes[:-max(self.growth_streak, 1)]
             fps = self._fingerprints.setdefault(objective_id, {})
             fps[fingerprint] = fps.get(fingerprint, 0) + 1
+            while len(self._spent) > self.max_objectives:
+                oldest = next(iter(self._spent))
+                self._spent.pop(oldest, None)
+                self._sizes.pop(oldest, None)
+                self._fingerprints.pop(oldest, None)
 
     def spent(self, objective_id: str) -> int:
         with self._lock:
@@ -319,10 +333,8 @@ class GatewayTelemetry:
             conn.executescript(GATEWAY_CALLS_SCHEMA)
 
     def _connect(self):
-        import sqlite3
-        conn = sqlite3.connect(str(self.path), timeout=10)
-        conn.row_factory = sqlite3.Row
-        return conn
+        from friday.dbconn import ledger_connection
+        return ledger_connection(self.path)
 
     def record(self, **row) -> int:
         from datetime import datetime, timezone

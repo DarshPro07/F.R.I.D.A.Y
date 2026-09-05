@@ -454,3 +454,19 @@ def test_live_hermes_gateway_answers_without_an_agent_loop():
         assert res.boundary == "upstream_cloud"
     finally:
         gw.close()
+
+
+def test_growth_guard_memory_is_bounded_per_objective_and_across_objectives():
+    """A-051 finding: the guard kept every input size of every objective
+    ever seen. A control plane runs for weeks; RSS crept with it."""
+    guard = mg.GrowthGuard(growth_streak=3, max_objectives=10)
+    for i in range(50):
+        oid = f"RUN-{i}"
+        for n in range(20):
+            guard.record(oid, input_tokens=100 + n, output_tokens=10, fingerprint=f"fp{n}")
+    assert len(guard._spent) <= 10 and len(guard._sizes) <= 10 and len(guard._fingerprints) <= 10
+    assert all(len(v) <= 3 for v in guard._sizes.values())
+    # The newest objective is still fully tracked and the verdicts still work.
+    assert guard.spent("RUN-49") == 20 * 10 + sum(100 + n for n in range(20))
+    v = guard.check("RUN-49", input_tokens=10 ** 9, ceiling=5000, fingerprint="new")
+    assert not v.allowed and "ceiling" in v.reason

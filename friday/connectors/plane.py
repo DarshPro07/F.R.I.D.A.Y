@@ -200,9 +200,8 @@ class ConnectorState:
             db.execute(_STATE_SCHEMA)
 
     def _connect(self):
-        db = self._sqlite3.connect(self._path, timeout=10)
-        db.row_factory = self._sqlite3.Row
-        return db
+        from friday.dbconn import ledger_connection
+        return ledger_connection(self._path, row_factory=self._sqlite3.Row)
 
     def upsert(self, connector_id: str, **fields) -> None:
         allowed = {"kind", "status", "auth_type", "default_model",

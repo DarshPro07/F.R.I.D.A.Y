@@ -38,6 +38,95 @@ class CompletionRefused(RuntimeError):
     """A run was asked to become COMPLETED without the evidence that word
     requires. Raised by `Store.finish_objective_run`, the last writer."""
 
+
+class _Rows:
+    """A statement's result, fully materialised under the store lock.
+
+    Looks like the cursor callers already use: `fetchone`, `fetchall`,
+    `fetchmany`, iteration, `lastrowid`, `rowcount`, `description`."""
+
+    __slots__ = ("_rows", "_i", "lastrowid", "rowcount", "description")
+
+    def __init__(self, cur) -> None:
+        self._rows = cur.fetchall() if cur.description is not None else []
+        self._i = 0
+        self.lastrowid = cur.lastrowid
+        self.rowcount = cur.rowcount
+        self.description = cur.description
+
+    def fetchone(self):
+        if self._i >= len(self._rows):
+            return None
+        row = self._rows[self._i]
+        self._i += 1
+        return row
+
+    def fetchmany(self, size: int = 1):
+        out = self._rows[self._i:self._i + size]
+        self._i += len(out)
+        return out
+
+    def fetchall(self):
+        out = self._rows[self._i:]
+        self._i = len(self._rows)
+        return out
+
+    def __iter__(self):
+        while self._i < len(self._rows):
+            yield self.fetchone()
+
+    def close(self) -> None:
+        self._i = len(self._rows)
+
+
+class _SerializedConnection:
+    """The one shared connection, every statement under the store lock.
+
+    A-051 soak finding. `Store` shares ONE sqlite3 connection across
+    threads (check_same_thread=False) and serialised only its writes
+    (`_tx`); 43 read sites in `store.py` and the continuity engine's
+    thread pool ran `self._conn.execute(...)` bare. Two threads on one
+    connection share one SQL transaction: a read in thread A opens the
+    snapshot, another process commits, and thread B's write inside `_tx`
+    then fails at once with "database is locked" (SQLITE_BUSY_SNAPSHOT,
+    which the busy timeout never waits out). Every statement is now
+    executed AND materialised while the lock is held, so no read
+    transaction outlives the lock and no two threads interleave inside
+    one transaction. The lock is re-entrant, so `_tx` nests cleanly."""
+
+    __slots__ = ("_conn", "_lock")
+
+    def __init__(self, conn: sqlite3.Connection, lock) -> None:
+        self._conn = conn
+        self._lock = lock
+
+    def execute(self, sql: str, params=()) -> _Rows:
+        with self._lock:
+            return _Rows(self._conn.execute(sql, params))
+
+    def executemany(self, sql: str, seq) -> _Rows:
+        with self._lock:
+            return _Rows(self._conn.executemany(sql, seq))
+
+    def executescript(self, script: str):
+        with self._lock:
+            return self._conn.executescript(script)
+
+    def commit(self) -> None:
+        with self._lock:
+            self._conn.commit()
+
+    def rollback(self) -> None:
+        with self._lock:
+            self._conn.rollback()
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+    def __getattr__(self, name: str):
+        return getattr(self._conn, name)
+
 # Restored from the .pyc oracle: proven by a LOAD_CONST/STORE_NAME
 # pair in the running system's bytecode, present in no source candidate.
 OBJECTIVE_DELIVERY_TTL_S = 21600
@@ -842,9 +931,14 @@ class Store:
         self.path = Path(path)
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.path), check_same_thread=False,
-                                     timeout=BUSY_TIMEOUT_S)
-        self._conn.row_factory = sqlite3.Row
+        raw = sqlite3.connect(str(self.path), check_same_thread=False,
+                              timeout=BUSY_TIMEOUT_S)
+        raw.row_factory = sqlite3.Row
+        # Every statement on the shared connection runs under this lock
+        # (see _SerializedConnection); RLock so _tx nests without
+        # self-deadlock. Created before the wrapper that needs it.
+        self._lock = threading.RLock()
+        self._conn = _SerializedConnection(raw, self._lock)
         # Concurrency contract (audit A-038). Several processes open this
         # file at once - the voice agent, the MCP server, the UI server,
         # schedule firings, the objective CLI - so the durability settings
@@ -872,7 +966,6 @@ class Store:
         # "cannot commit - no transaction is active". _tx holds this lock for
         # the whole transaction so a commit only ever ends the transaction it
         # opened. RLock so a future nested _tx does not self-deadlock.
-        self._lock = threading.RLock()
         self._conn.executescript(SCHEMA)
         self._migrate()
         self._conn.commit()
