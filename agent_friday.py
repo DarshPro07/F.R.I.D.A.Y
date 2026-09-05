@@ -35,7 +35,7 @@ try:
 except Exception:  # noqa: BLE001
     _turn_detector_plugin = None
 
-from friday import autolearn, capabilities, capability_router, objective_cli, ownership, providers, resilience, turn_timing
+from friday import autolearn, capabilities, capability_router, objective_cli, ownership, providers, resilience, turn_timing, write_licence
 from friday.continuous import ContinuousTaskExecutor
 
 
@@ -739,6 +739,10 @@ class FridayAgent(Agent):
         # Set when a reply actually went out on the current turn, so the
         # guard can tell a silent turn from a spoken one.
         self._spoke_this_turn = False
+        # What the owner said this turn; set in read_before_answering. A
+        # write is licensed against it (write_licence), never against what
+        # the model read after he spoke.
+        self._owner_words = ""
         # True when MCP handed back no tools at all. Distinguishes "this
         # capability does not exist" from "the tool server is down", which
         # the model otherwise explains away as a missing feature.
@@ -963,6 +967,21 @@ class FridayAgent(Agent):
                 "error": f"no capability called {capability!r}",
                 "did_you_mean": [h["capability"] for h in hint],
             })
+        # Owner-words licence, ENFORCED (A-036 / PRD Req. 26). A Friday-own
+        # write - the workspace, the engineering engine, the desktop, memory
+        # - is dispatched only when the words HE spoke this turn ask for that
+        # kind of action. The policy table says whether the category is
+        # allowed at all; this says whether he asked. Under DANGEROUS
+        # autonomy the table answers AUTO for all of these, so without this
+        # check a page the model read was enough to create a WorkRun
+        # (probe, 2026-09-05). The refusal is the same text the UI brain
+        # reads, so both paths explain themselves the same way.
+        refused = write_licence.capability_licensed(
+            capability, getattr(self, "_owner_words", ""))
+        if refused:
+            logger.info("write.unlicensed capability=%s", capability)
+            return json.dumps({"status": "refused", "error": refused,
+                               "may_claim_completion": False})
         # Acknowledge-then-act, ENFORCED. The master prompt says "before
         # calling any tool, say something natural" - and the model skips
         # it under exactly the conditions a gate tests (measured: F3 ran
@@ -1372,6 +1391,10 @@ class FridayAgent(Agent):
         """
         self._already_read = ()
         self._spoke_this_turn = False
+        # The owner's words for THIS turn. `use_capability` licenses a
+        # Friday-own write against these and nothing else (A-036): a page
+        # the model reads mid-turn cannot become his instruction.
+        self._owner_words = text or ""
         project = remember_the_project(text)
         note_the_requirements(turn_ctx, text, project)
         read = await research_first(turn_ctx, text)
