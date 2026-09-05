@@ -64,6 +64,12 @@ FAKE_HERMES = str(ROOT / "tests" / "fake_hermes_gateway.py")
 HARD_SERIES = ("rss_mb", "handles", "threads", "children", "sqlite_conns")
 #: Below this many seconds growth is reported but not judged (SMOKE).
 MIN_JUDGED_S = 1800.0
+#: A sample interval this many times the configured one means the process
+#: was not running: Windows Modern Standby has already destroyed one
+#: overnight baseline on this machine (Kernel-Power 506/507, a subprocess
+#: reporting "timed out after -668 s"). A soak that sleeps through part of
+#: its window measured less than it claims, so it is INCONCLUSIVE.
+MAX_SAMPLE_GAP_FACTOR = 3.0
 #: Series reported as rates; growth is information, not failure.
 RATE_SERIES = ("tokens", "provider_calls", "log_lines", "queue_depth", "cpu_pct",
                "host_ram_pct", "host_cpu_pct")
@@ -74,7 +80,8 @@ RATE_SERIES = ("tokens", "provider_calls", "log_lines", "queue_depth", "cpu_pct"
 # ---------------------------------------------------------------------------
 
 
-def sample(proc: psutil.Process, store, telemetry, log_path: Path, t0: float) -> dict:
+def sample(proc: psutil.Process, store, telemetry, log_path: Path, t0: float,
+           attribution: dict | None = None) -> dict:
     with proc.oneshot():
         mem = proc.memory_info()
         try:
@@ -119,7 +126,8 @@ def sample(proc: psutil.Process, store, telemetry, log_path: Path, t0: float) ->
             "host_ram_pct": vm.percent, "host_cpu_pct": psutil.cpu_percent(interval=None),
             "cpu_pct": cpu, "handles": handles, "threads": threads, "children": children,
             "sqlite_conns": sqlite_conns, "tokens": tokens, "provider_calls": provider_calls,
-            "log_lines": log_lines, "queue_depth": queue_depth}
+            "log_lines": log_lines, "queue_depth": queue_depth,
+            "rss_by_move": dict(attribution or {})}
 
 
 # ---------------------------------------------------------------------------
@@ -181,12 +189,32 @@ class Workload:
         self.supervisor = hb.HermesSupervisor(log=self.worklog, command=[sys.executable, FAKE_HERMES], profile="")
         self.supervisor.READY_TIMEOUT = 30
         self.log_path = out / "soak.log"
+        self.proc = psutil.Process()
+        #: move -> {calls, rss_delta_kb}; the in-run RSS attribution.
+        self.attribution: dict[str, dict] = {}
         self.counts: dict[str, int] = {}
         self.violations: list[str] = []
         self.manifest = [{"id": c, "description": c} for c in ("a", "b", "c")]
 
     def count(self, key: str, n: int = 1) -> None:
         self.counts[key] = self.counts.get(key, 0) + n
+
+    def timed(self, move: str, fn):
+        """Run one workload move and attribute the RSS it left behind to it.
+
+        Sampled DURING the run, not in a post-hoc probe: the 35-minute run
+        grew 108 -> 163 MB with every handle series flat, and a probe that
+        reproduces the growth in isolation cannot prove which move owns it
+        under real interleaving. `rss_delta_kb` per move, summed across the
+        run, is the evidence that names the owner."""
+        before = self.proc.memory_info().rss
+        try:
+            return fn()
+        finally:
+            delta = (self.proc.memory_info().rss - before) / 1024.0
+            slot = self.attribution.setdefault(move, {"calls": 0, "rss_delta_kb": 0.0})
+            slot["calls"] += 1
+            slot["rss_delta_kb"] = round(slot["rss_delta_kb"] + delta, 1)
 
     def log(self, line: str) -> None:
         with self.log_path.open("a", encoding="utf-8") as fh:
@@ -486,7 +514,8 @@ def run(duration_s: float, out: Path, sample_every_s: float = 5.0,
     def sampler():
         while not stop.is_set():
             try:
-                samples.append(sample(proc, wl.store, wl.telemetry, wl.log_path, t0))
+                samples.append(sample(proc, wl.store, wl.telemetry, wl.log_path, t0,
+                                      wl.attribution))
             except Exception as exc:  # noqa: BLE001
                 wl.log(f"sampler error {type(exc).__name__}: {exc}")
             stop.wait(sample_every_s)
@@ -500,21 +529,23 @@ def run(duration_s: float, out: Path, sample_every_s: float = 5.0,
         while time.time() - t0 < duration_s:
             cycle += 1
             try:
-                asyncio.run(wl.objective_cycle())
-                wl.provider_cycle()
-                wl.db_cycle()
-                wl.nonce_cycle()
-                wl.scheduler_cycle()
-                wl.handoff_cycle()
+                wl.timed("objective", lambda: asyncio.run(wl.objective_cycle()))
+                wl.timed("provider", wl.provider_cycle)
+                wl.timed("db", wl.db_cycle)
+                wl.timed("nonce", wl.nonce_cycle)
+                wl.timed("scheduler", wl.scheduler_cycle)
+                wl.timed("handoff", wl.handoff_cycle)
                 if cycle % cadence["budget"] == 0:
-                    wl.budget_cycle()
+                    wl.timed("budget", wl.budget_cycle)
                 if cycle % cadence["cancel"] == 0:
-                    wl.cancel_cycle()
-                wl.hermes_cycle(crash=(cycle % cadence["hermes_crash"] == 0))
+                    wl.timed("cancel", wl.cancel_cycle)
+                crash = cycle % cadence["hermes_crash"] == 0
+                wl.timed("hermes_crash" if crash else "hermes",
+                         lambda: wl.hermes_cycle(crash=crash))
                 if cycle % cadence["hermes_stop_start"] == 0:
-                    wl.hermes_stop_start()
+                    wl.timed("hermes_stop_start", wl.hermes_stop_start)
                 if cycle % cadence["worker_crash"] == 0:
-                    wl.worker_crash_cycle()
+                    wl.timed("worker_crash", wl.worker_crash_cycle)
             except Exception as exc:  # noqa: BLE001 - recorded, the soak continues
                 msg = f"cycle {cycle}: {type(exc).__name__}: {exc}"
                 errors.append(msg)
@@ -523,12 +554,14 @@ def run(duration_s: float, out: Path, sample_every_s: float = 5.0,
     finally:
         stop.set(); th.join(timeout=10)
         try:
-            samples.append(sample(proc, wl.store, wl.telemetry, wl.log_path, t0))
+            samples.append(sample(proc, wl.store, wl.telemetry, wl.log_path, t0,
+                                  wl.attribution))
         except Exception:  # noqa: BLE001
             pass
         wl.close()
 
-    report = analyse(samples, duration_s, wl.counts, wl.violations, errors, cycle)
+    report = analyse(samples, duration_s, wl.counts, wl.violations, errors, cycle,
+                     sample_every_s=sample_every_s, attribution=wl.attribution)
     report["governor_mode"] = governor_mode
     report["cadence"] = cadence
     (out / "samples.json").write_text(json.dumps(samples), encoding="utf-8")
@@ -542,12 +575,21 @@ def _window(samples: list[dict], key: str, lo: float, hi: float) -> list[float]:
 
 
 def analyse(samples: list[dict], duration_s: float, counts: dict, violations: list[str],
-            errors: list[str], cycles: int) -> dict:
+            errors: list[str], cycles: int, sample_every_s: float = 0.0,
+            attribution: dict | None = None) -> dict:
     """Hour-1 vs final-hour (or first vs last quarter for short runs)."""
     if len(samples) < 4:
         return {"verdict": "INCONCLUSIVE", "reason": f"only {len(samples)} samples", "counts": counts,
                 "violations": violations, "errors": errors, "cycles": cycles}
     span = samples[-1]["t"]
+    # Gaps: the host slept, or the process was starved. Either way the run
+    # did not measure the window it claims.
+    gaps = []
+    for a, b in zip(samples, samples[1:]):
+        step = b["t"] - a["t"]
+        if sample_every_s and step > sample_every_s * MAX_SAMPLE_GAP_FACTOR:
+            gaps.append({"from_s": round(a["t"], 1), "to_s": round(b["t"], 1),
+                         "gap_s": round(step, 1)})
     win = min(3600.0, span / 4)
     # Warm-up is not growth: lazy imports on the first terminal event
     # (~25 MB once), SQLite page caches filling to their 2 MB cap per
@@ -601,8 +643,21 @@ def analyse(samples: list[dict], duration_s: float, counts: dict, violations: li
     # invariants held) - never PASS, which is the 8-hour gate's word.
     if span < MIN_JUDGED_S and verdict == "PASS":
         verdict = "SMOKE"
+    # A run with a hole in it measured less than its duration says. Never
+    # PASS on a partial window - the machine sleeping mid-soak is exactly
+    # how a clean-looking report gets written over three hours of an
+    # eight-hour claim.
+    if gaps:
+        verdict = "INCONCLUSIVE"
+    # What slope this run could have resolved: sampling noise over the
+    # judged window. A PASS never implies more precision than this.
+    tail_rss = [float(s["rss_mb"]) for s in samples if s["t"] >= span - win]
+    noise = (statistics.pstdev(tail_rss) if len(tail_rss) > 2 else 0.0)
+    floor_mb_per_h = round(noise * 3600.0 / win, 2) if win else 0.0
     return {"verdict": verdict, "duration_s": round(span, 1), "planned_s": duration_s,
             "window_s": win, "warmup_s": warmup, "judged": span >= MIN_JUDGED_S,
+            "gaps": gaps, "detection_floor_mb_per_hour": floor_mb_per_h,
+            "rss_by_move": attribution or (samples[-1].get("rss_by_move") if samples else {}),
             "samples": len(samples), "cycles": cycles,
             "growing": growing, "series": series, "counts": counts, "per_hour": rates,
             "missing_moves": missing,
@@ -618,6 +673,13 @@ def render(r: dict) -> str:
              f"{r.get('warmup_s', 0):.0f} s warm-up", ""]
     if r.get("reason"):
         lines.append(f"INCONCLUSIVE: {r['reason']}")
+    if r.get("gaps"):
+        lines += ["", f"INCONCLUSIVE: {len(r['gaps'])} sampling gap(s) - the host slept or the "
+                      f"process was starved, so part of the window was never measured: "
+                      + ", ".join(f"{g['gap_s']:.0f}s at t={g['from_s']:.0f}" for g in r["gaps"][:6])]
+    if r.get("detection_floor_mb_per_hour"):
+        lines += ["", f"detection floor: this run could resolve growth down to about "
+                      f"{r['detection_floor_mb_per_hour']} MB/hour; anything smaller is noise."]
     if r.get("judged") is False:
         lines.append(f"SMOKE: {r.get('duration_s', 0)} s is under {MIN_JUDGED_S:.0f} s - growth is reported, not judged. "
                      "The PRD gate is `--hours 8`.")
@@ -635,6 +697,13 @@ def render(r: dict) -> str:
                       f"governor thresholds: {r.get('governor_mode', 'product')}"
                       + (" (RAM/CPU critical lines raised for this run - shedding NOT under test)"
                          if r.get('governor_mode') == 'relaxed' else "")]
+    if r.get("rss_by_move"):
+        lines += ["", "## RSS attributed per move (in-run, not a probe)", "",
+                  "| move | calls | total KB | KB/call |", "|---|---|---|---|"]
+        for move, v in sorted(r["rss_by_move"].items(),
+                              key=lambda kv: -kv[1]["rss_delta_kb"]):
+            per = v["rss_delta_kb"] / v["calls"] if v["calls"] else 0.0
+            lines.append(f"| {move} | {v['calls']} | {v['rss_delta_kb']:.0f} | {per:+.1f} |")
     lines += ["", "## workload per hour", ""]
     for k, v in r.get("per_hour", {}).items():
         lines.append(f"- {k}: {v}")
@@ -643,7 +712,10 @@ def render(r: dict) -> str:
     lines += ["", f"## errors ({r.get('error_count', 0)})", ""]
     lines += [f"- {e}" for e in r.get("errors", [])] or ["- none"]
     if r.get("growing"):
-        lines += ["", f"FAIL: monotonic growth on {', '.join(r['growing'])}"]
+        lines += ["", f"FAIL: monotonic growth on {', '.join(r['growing'])}"
+                      + (f" (above the {r['detection_floor_mb_per_hour']} MB/h detection floor)"
+                         if "rss_mb" in r.get("growing", []) and r.get("detection_floor_mb_per_hour")
+                         else "")]
     if r.get("missing_moves"):
         lines += ["", f"INCOMPLETE: these workload moves never ran - {', '.join(r['missing_moves'])}. "
                       "If the governor shed workers (see host pressure above), rerun on a quieter machine; "

@@ -192,3 +192,37 @@ def test_context_compiler_reports_budget_and_never_dumps_the_store(store, monkey
     # the store. (The rules tier reads AGENTS.md and may add a line or two.)
     assert out["injected"]["preferences"] <= 12
     assert sum(out["injected"].values()) < 30
+
+
+def test_the_graph_is_rebuilt_only_when_memory_changes(tmp_path, monkeypatch):
+    """A-051: `memory_graph.build()` reads EVERY memory row and allocates a
+    node dict per subject (10,480 at 10k memories), and `relations()` called
+    it on every Hermes delegation. Cached against a validity token so a
+    read-only caller (the UI polling, a delegation that writes nothing) pays
+    once - and so that a write is still seen immediately."""
+    import sqlite3
+    from friday import memory_graph as G
+    from friday.store import Store
+
+    db = tmp_path / "graph.sqlite3"
+    monkeypatch.setenv("ADA_DB", str(db))
+    store = Store(db)
+    store.remember("user.name", "Darsh", kind="FACT", source="test")
+    G.invalidate()
+
+    first = G.build()
+    assert G.build() is first, "a graph with no memory change was rebuilt"
+
+    store.remember("user.city", "Pune", kind="FACT", source="test")
+    second = G.build()
+    assert second is not first, "a new memory did not invalidate the graph"
+    assert second["stats"]["nodes"] > first["stats"]["nodes"]
+
+    # `forget` flips `superseded` and inserts NOTHING: row count and max id
+    # are unchanged, so a token built only from those would serve a graph
+    # still showing a fact the owner asked Friday to drop.
+    assert store.forget("user.city") == 1
+    third = G.build()
+    assert third is not second, "a forgotten fact was still served from cache"
+    assert not any(n.get("value") == "Pune" for n in third["nodes"])
+    store.close()

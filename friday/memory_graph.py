@@ -25,12 +25,52 @@ needs clustering before rendering; we cap well under it).
 from __future__ import annotations
 
 import json
+import threading
 from collections import defaultdict
 from pathlib import Path
 
 MAX_DEPTH = 3           # user.goals.exam.chapter -> user.goals.exam (+1 fact)
 MAX_NODES = 480         # hard ceiling for the 3D view
 NODE_TYPES = ("hub", "topic", "fact", "brain", "entity", "conflict")
+
+#: The last built graph, with the token that says what it was built from.
+#: `build()` reads EVERY memory row and allocates a node dict per subject -
+#: 10,480 dicts at 10k memories - and `memory_stack.relations()` calls it on
+#: every Hermes delegation just to keep the few edges near the task's tokens.
+#: Measured (A-051): ~97 KB of retained arena per delegate and O(all
+#: memories) of work, for a graph that only changes when a memory does.
+#: The token is (row count, max id, max created_at) over memories and
+#: contradictions: cheap to compute, and it changes on insert, update and
+#: supersede - the only ways the graph can move.
+_CACHE: dict = {"token": None, "graph": None}
+_CACHE_LOCK = threading.Lock()
+
+
+def _validity_token(conn, rows) -> tuple:
+    counts = rows(conn, "SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS mx, "
+                        "COALESCE(MAX(created_at), '') AS at, "
+                        "COALESCE(SUM(superseded), 0) AS sup FROM memories")
+    cons = rows(conn, "SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS mx FROM contradictions")
+    ledger = 0
+    try:
+        from friday.brain import SharedBrainAdapter
+        p = Path(SharedBrainAdapter()._ledger_path())
+        ledger = p.stat().st_mtime_ns if p.exists() else 0
+    except Exception:  # noqa: BLE001
+        pass
+    a = counts[0] if counts else {}
+    b = cons[0] if cons else {}
+    return (a.get("n"), a.get("mx"), a.get("at"), a.get("sup"),
+            b.get("n"), b.get("mx"), ledger)
+
+
+def invalidate() -> None:
+    """Drop the cached graph. Callers that write memories outside this
+    process do not need this - the token notices - but a test that wants a
+    cold build can say so."""
+    with _CACHE_LOCK:
+        _CACHE["token"] = None
+        _CACHE["graph"] = None
 
 
 def _conn():
@@ -60,6 +100,10 @@ def _ledger():
 def build():
     conn, rows = _conn()
     try:
+        token = _validity_token(conn, rows)
+        with _CACHE_LOCK:
+            if _CACHE["token"] == token and _CACHE["graph"] is not None:
+                return _CACHE["graph"]
         facts = rows(conn, "SELECT id, subject, value, kind, scope, source, "
                            "confidence, created_at, superseded FROM memories "
                            "ORDER BY id")
@@ -166,7 +210,7 @@ def build():
     by_type = defaultdict(int)
     for v in nodes.values():
         by_type[v["type"]] += 1
-    return {
+    graph = {
         "nodes": list(nodes.values()),
         "links": links,
         "stats": {
@@ -179,6 +223,9 @@ def build():
             "groups": sorted({v.get("group") for v in nodes.values() if v.get("group")}),
         },
     }
+    with _CACHE_LOCK:
+        _CACHE["token"], _CACHE["graph"] = token, graph
+    return graph
 
 
 def adjacency(limit=400):

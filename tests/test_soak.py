@@ -148,3 +148,65 @@ def test_a_long_run_keeps_the_rare_moves_rare():
     for move, n in loose.items():
         fires = hourly_cycles // n
         assert 100 < fires < 400, f"{move} fires {fires}x/hour"
+
+
+def _gapped(values, step=10.0, gap_at=None, gap=400.0):
+    """Samples at `step` seconds, optionally with one long hole - what a
+    host entering Modern Standby mid-run actually leaves behind."""
+    out, t = [], 0.0
+    for i, v in enumerate(values):
+        row = {"t": t, "rss_mb": v, "handles": 100, "threads": 5, "children": 2,
+               "sqlite_conns": 3, "tokens": 0, "provider_calls": 0, "log_lines": 0,
+               "queue_depth": 0, "cpu_pct": 1.0, "host_ram_pct": 50.0, "host_cpu_pct": 10.0,
+               "rss_by_move": {}}
+        out.append(row)
+        t += gap if (gap_at is not None and i == gap_at) else step
+    return out
+
+
+def test_a_sleeping_host_is_inconclusive_never_pass():
+    """This machine's Modern Standby destroyed an overnight baseline once
+    (Kernel-Power 506/507, a subprocess reporting a NEGATIVE timeout). A
+    soak that sleeps through part of its window measured less than it
+    claims, and a clean report over the surviving hours is the lie."""
+    s = _gapped([50.0] * 720, step=10.0, gap_at=300, gap=1800.0)
+    r = soak.analyse(s, 7200.0, COUNTS_ALL, [], [], 100, sample_every_s=10.0)
+    assert r["verdict"] == "INCONCLUSIVE"
+    assert len(r["gaps"]) == 1 and r["gaps"][0]["gap_s"] == 1800.0
+    assert "INCONCLUSIVE" in soak.render(r) and "slept" in soak.render(r)
+
+
+def test_an_ordinary_run_reports_no_gaps():
+    s = _gapped([50.0] * 720, step=10.0)
+    r = soak.analyse(s, 7200.0, COUNTS_ALL, [], [], 100, sample_every_s=10.0)
+    assert r["gaps"] == []
+    assert r["verdict"] == "PASS"
+
+
+def test_jitter_under_the_factor_is_not_a_gap():
+    s = _gapped([50.0] * 720, step=10.0, gap_at=100, gap=25.0)   # 2.5x, under 3x
+    r = soak.analyse(s, 7200.0, COUNTS_ALL, [], [], 100, sample_every_s=10.0)
+    assert r["gaps"] == []
+
+
+def test_the_report_states_the_smallest_slope_it_could_detect():
+    """A PASS must not imply more precision than the run had."""
+    import random
+    random.seed(7)
+    s = _gapped([50.0 + random.uniform(-2, 2) for _ in range(720)], step=10.0)
+    r = soak.analyse(s, 7200.0, COUNTS_ALL, [], [], 100, sample_every_s=10.0)
+    assert r["detection_floor_mb_per_hour"] > 0
+    assert "detection floor" in soak.render(r)
+
+
+def test_rss_is_attributed_to_the_move_that_caused_it():
+    attribution = {"hermes": {"calls": 100, "rss_delta_kb": 5000.0},
+                   "db": {"calls": 100, "rss_delta_kb": 100.0}}
+    s = _gapped([50.0] * 720, step=10.0)
+    r = soak.analyse(s, 7200.0, COUNTS_ALL, [], [], 100, sample_every_s=10.0,
+                     attribution=attribution)
+    assert r["rss_by_move"]["hermes"]["rss_delta_kb"] == 5000.0
+    out = soak.render(r)
+    assert "RSS attributed per move" in out
+    # ordered worst-first, so the owner of the growth is the first row
+    assert out.index("| hermes |") < out.index("| db |")
