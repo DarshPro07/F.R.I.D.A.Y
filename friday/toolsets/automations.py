@@ -423,13 +423,23 @@ async def _call(tool: str, run: c.Run, args: dict,
 
 async def execute(name: str, *, variables: dict | None = None,
                   fired_by: str = "manual",
-                  engine: PolicyEngine = default_engine) -> dict:
+                  engine: PolicyEngine = default_engine,
+                  execution_key: str = "") -> dict:
     """
     Run one automation to completion and persist every step's outcome.
 
     Returns the run record. Never raises for a step failure - a failed step is
     a recorded outcome, not an exception, because the point of the table is
     that the morning after is answerable.
+
+    `execution_key` (invariant A-048 "scheduler/idempotency"): one scheduled
+    execution may produce its external side effects at most once, across a
+    crash and a re-fire. The key is CLAIMED in the store before the first
+    step runs; a second call with the same key - the OS re-running a missed
+    trigger, a watchdog restarting the fire, a duplicate scheduler entry -
+    gets the recorded outcome (or a `duplicate` record if the first is
+    still running) and executes nothing. Manual runs pass no key and are
+    never deduplicated: the person asked twice.
     """
     definition = store().get_automation(name)
     if definition is None:
@@ -441,6 +451,16 @@ async def execute(name: str, *, variables: dict | None = None,
     run_id = c.new_run_id()
     runtime = config.runtime_paths()
     runtime["task_name"] = definition.get("task_name") or ""
+    if execution_key:
+        runtime["execution_key"] = execution_key
+        prior = store().claim_automation_execution(execution_key, run_id)
+        if prior is not None:
+            logger.info("automation %r: execution %r already %s as %s - not re-run",
+                        name, execution_key, prior["status"], prior["run_id"])
+            return {"run_id": prior["run_id"], "name": name,
+                    "status": prior["status"], "fired_by": fired_by,
+                    "steps": prior.get("steps") or [], "duplicate_of": prior["run_id"],
+                    "execution_key": execution_key}
     store().start_automation_run(run_id, name, fired_by, runtime)
 
     context = {"vars": dict(variables or {}), "steps": {}}
@@ -709,8 +729,14 @@ def _fire(name: str) -> int:
     except OSError:
         logging.basicConfig(level=logging.INFO)
     logger.info("fired: %r (cwd=%s)", name, Path.cwd())
+    # The execution key for a scheduled fire is the trigger minute: Task
+    # Scheduler re-runs a missed trigger and a watchdog may re-launch the
+    # fire, and both must land on the SAME key so the side effects happen
+    # once. Two distinct trigger times are two executions, as they should be.
+    from datetime import datetime, timezone
+    key = f"{name}@{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M')}"
     try:
-        record = asyncio.run(execute(name, fired_by="schedule"))
+        record = asyncio.run(execute(name, fired_by="schedule", execution_key=key))
     except Exception:
         logger.exception("automation %r could not run", name)
         return 1

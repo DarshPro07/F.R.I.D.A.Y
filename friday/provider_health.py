@@ -125,8 +125,17 @@ def verdict_for(provider: str, row: dict | None, *, now: float | None = None,
                        reason=f"last evidence {age / 3600:.1f}h old ({row.get('status')} {code}); revalidate",
                        **base)
     if row.get("status") == "ok":
+        produced = int(row.get("output_tokens") or 0)
+        if produced <= 0:
+            # Transport success is not semantic success (A-048 "health"):
+            # a 200 with nothing visible is the Gemini empty-content shape,
+            # and a route that answers with nothing is not one to rely on.
+            return Verdict(provider, DEGRADED,
+                           reason="transport ok but no visible output; a semantic probe "
+                                  "(nonempty answer) is what HEALTHY requires",
+                           **base)
         return Verdict(provider, HEALTHY,
-                       reason=f"answered with content ({int(row.get('output_tokens') or 0)} output tokens)",
+                       reason=f"answered with content ({produced} output tokens)",
                        **base)
     error = str(row.get("error") or "")[:200]
     if code in DURABLE_FAILURES:

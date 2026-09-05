@@ -70,6 +70,29 @@ class AdmissionRefused(ValueError):
     """The fact was refused BEFORE ingestion. Not an error to hide."""
 
 
+#: Provenance classes that name something READ, not something verified
+#: (invariant A-048 "memory"). The brain ledger is tier-3 of Friday's memory
+#: - its facts come back to her as RULES on the next turn - so a fact whose
+#: only source is a page, a message, a tool result or a worker's word is an
+#: instruction laundered through memory. Such a fact may enter only through
+#: `memory_promotion.promote()` (evidence, confidence, contradiction check),
+#: never through this adapter's direct write.
+UNTRUSTED_PROVENANCE = re.compile(
+    r"^\s*(page|web|url|http|https|browser|scrape|search|email|mail|message|"
+    r"chat|dm|sms|telegram|slack|discord|handoff|worker|hermes|subagent|"
+    r"tool[_ -]?result|tool[_ -]?output|model|llm|assistant|untrusted|external)"
+    r"(\s*[:\-/(\s]|\s*$)", re.I)
+
+
+def _untrusted_provenance(provenance: str) -> str | None:
+    """Why this provenance cannot write directly, or None if it may."""
+    if UNTRUSTED_PROVENANCE.match(provenance or ""):
+        return (f"provenance {provenance[:60]!r} names read material; a fact "
+                "from a page, a message or a worker goes through the promotion "
+                "gate (memory_promotion.promote), not straight into the ledger")
+    return None
+
+
 def _sensitive(text: str) -> str | None:
     """Why this text must not be remembered, or None if admissible."""
     if _SECRET_SHAPES.search(text):
@@ -225,6 +248,9 @@ class SharedBrainAdapter:
         if not provenance.strip():
             raise ValueError("provenance is required - a fact without a "
                              "source is a rumor")
+        untrusted = _untrusted_provenance(provenance)
+        if untrusted:
+            raise AdmissionRefused(f"refused before ingestion: {untrusted}")
         arguments = {"fact": fact, "provenance": provenance[:500]}
         if entity:
             arguments["entity"] = entity

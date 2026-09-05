@@ -559,7 +559,8 @@ class ModelGateway:
                  telemetry: GatewayTelemetry | None = None,
                  guard: GrowthGuard | None = None,
                  tier_table: dict[str, tuple[str, str]] | None = None,
-                 max_failover: int = 2) -> None:
+                 max_failover: int = 2,
+                 objective_store=None) -> None:
         self.worker = worker or ModelGatewayWorker()
         self.telemetry = telemetry or GatewayTelemetry()
         self.guard = guard or GrowthGuard()
@@ -568,6 +569,17 @@ class ModelGateway:
         self._unhealthy: dict[tuple[str, str], float] = {}
         self._providers_cache: tuple[float, dict] | None = None
         self._lock = threading.Lock()
+        #: Where an objective's DURABLE token ceiling is read from before any
+        #: provider is touched (invariant A-048 "budget"). The GrowthGuard
+        #: above is per-process memory against the CLASS ceiling; it forgets
+        #: on restart and knows nothing of the objective's own
+        #: `cost_budget_tokens`. This does: the same `objective_budget.check`
+        #: the driver uses, over the same ledger rows, so a call that does
+        #: not go through the driver - a tool, the deliberation panel, a
+        #: probe with the objective's id - cannot spend past a budget the
+        #: driver would have parked the run on. None = no objective store
+        #: (unit tests of the gateway alone); the ledger rows still count.
+        self._objective_store = objective_store
 
     # -- discovery (FR-071 / FR-072) ---------------------------------------
 
@@ -726,6 +738,35 @@ class ModelGateway:
         except GatewayUnavailable:
             return []
 
+    def _durable_budget_verdict(self, objective_id: str):
+        """`objective_budget.check` for this objective over the durable
+        ledgers, or None when there is no objective store to read the
+        budget from / the id names no run. The store is opened lazily and
+        an unreadable one is a debug line, never a refusal: a budget that
+        cannot be read is not exhausted, it is unknown, and the class
+        ceiling above still applies."""
+        if not objective_id:
+            return None
+        store = self._objective_store
+        if store is None:
+            try:
+                # The process's one store handle - the same one the driver
+                # and every tool use, so the budget read here is the budget
+                # they see (ADA_DB honoured; never a second connection).
+                from friday.toolsets.memory import store as _store
+                store = self._objective_store = _store()
+            except Exception:  # noqa: BLE001 - see docstring
+                logger.debug("gateway: objective store unavailable for budget", exc_info=True)
+                return None
+        try:
+            if store.objective_run(objective_id) is None:
+                return None
+            from friday import objective_budget
+            return objective_budget.check(store, objective_id, telemetry=self.telemetry)
+        except Exception:  # noqa: BLE001
+            logger.debug("gateway: objective budget check failed", exc_info=True)
+            return None
+
     def default_model(self, provider: str) -> str:
         """The provider's own catalog default as Hermes reports it, or "".
 
@@ -770,6 +811,21 @@ class ModelGateway:
             raise GrowthStopped(
                 f"token growth guard stopped objective {request.objective_id}: "
                 f"{verdict.reason} (spent {verdict.spent} of {verdict.ceiling})")
+
+        # A-048 budget invariant: the objective's OWN durable ceiling, from
+        # recorded spend, before any provider is touched - on every path,
+        # not only the driver's. Exhausted means refused here, with the
+        # dimension and the numbers, until the budget itself changes.
+        durable = self._durable_budget_verdict(request.objective_id)
+        if durable is not None and not durable.allowed:
+            self._record(request, status="refused",
+                         error=f"budget:{durable.dimension}:{durable.reason}",
+                         input_tokens=input_tokens, fingerprint=fingerprint,
+                         entitlement_state="BUDGET_EXHAUSTED")
+            raise BudgetExceeded(
+                f"objective {request.objective_id} budget exhausted "
+                f"({durable.dimension}): {durable.reason}. Raise the budget "
+                "or resume the run deliberately; no provider was called.")
 
         routes = self.candidates(request)
         if not routes:

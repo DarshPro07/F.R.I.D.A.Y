@@ -39,6 +39,8 @@ tmp*.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
 data/access_log.jsonl
+data/consumed_nonces.json
+data/consumed_nonces.json.tmp
 data/deck_queue.json
 data/response_style.json
 data/evaluation/

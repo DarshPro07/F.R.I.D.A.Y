@@ -216,11 +216,21 @@ class Provider:
 ADAPTER_PACKAGE = "friday.fabric_adapters"
 
 _REGISTRY: dict[str, Provider] | None = None
+#: Adapter modules that raised at IMPORT, by module name -> the error text.
+#: Kept beside the registry so `health()`/the UI can name them; they are
+#: never in the registry (a provider that cannot import cannot be called)
+#: and they never stop the others from loading (invariant A-048 "kernel";
+#: NON_NEGOTIABLE 15: an optional integration cannot take the control
+#: plane down). A DESCRIPTOR that is present but WRONG (not a Provider, a
+#: duplicate id) is still a hard error: that is a bug in this tree, not an
+#: absent upstream.
+_BROKEN: dict[str, str] = {}
 
 
 def _discover() -> dict[str, Provider]:
     """Every adapter module's DESCRIPTOR, keyed by id."""
     found: dict[str, Provider] = {}
+    _BROKEN.clear()
     try:
         package = importlib.import_module(ADAPTER_PACKAGE)
     except ModuleNotFoundError:
@@ -230,7 +240,13 @@ def _discover() -> dict[str, Provider]:
         if info.name.startswith("_"):
             continue
         name = f"{ADAPTER_PACKAGE}.{info.name}"
-        module = importlib.import_module(name)
+        try:
+            module = importlib.import_module(name)
+        except Exception as exc:  # noqa: BLE001 - recorded, never fatal
+            _BROKEN[name] = f"{type(exc).__name__}: {exc}"
+            logger.error("fabric adapter %s failed to import and is excluded: %s",
+                         name, _BROKEN[name])
+            continue
         descriptor = getattr(module, "DESCRIPTOR", None)
         if descriptor is None:
             continue
@@ -494,8 +510,11 @@ def health(provider_id: str, *, _activation: Activation | None = None) -> dict:
 
 
 def report() -> list[dict]:
-    """Every provider's family, state and pin. The diagnostic surface."""
-    return [{
+    """Every provider's family, state and pin. The diagnostic surface.
+    Adapter modules that failed to import are listed too, as UNAVAILABLE
+    with the import error - excluded from the registry, not from the
+    truth."""
+    rows = [{
         "provider": provider.id,
         "family": provider.family,
         "upstream": provider.upstream,
@@ -506,6 +525,11 @@ def report() -> list[dict]:
         "owns_process": provider.owns_process,
     } for provider in sorted(registry().values(),
                              key=lambda p: (p.family, p.id))]
+    for module, error in sorted(_BROKEN.items()):
+        rows.append({"provider": module.rsplit(".", 1)[-1], "family": "", "upstream": "",
+                     "state": UNAVAILABLE, "integration_mode": "", "license_mode": "",
+                     "commit": "", "owns_process": False, "import_error": error})
+    return rows
 
 
 def family_report() -> list[dict]:

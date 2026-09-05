@@ -57,33 +57,76 @@ KERNEL_PATHS = (
     "friday/netguard.py", "friday/fsjail.py", "friday/sandbox.py",
     "friday/privacy.py", "friday/access.py", "friday/secret_broker.py",
     "friday/vault.py",
+    # the owner's words are the licence for a write; provider truth
+    "friday/write_licence.py", "friday/provider_health.py",
     ".specify/memory/constitution.md",
+    # protected agent instructions (read at runtime as tier-3 rules)
+    "AGENTS.md",
     # the judge
     "friday/self_upgrade.py", "friday/selfdev.py", "friday/selfdev_benchmark.py",
     "friday/toolsets/selfdev.py", "friday/promotion.py", "friday/evaluation.py",
     "friday/honesty.py", "friday/adversarial.py", "friday/golden.py",
     "friday/reachability.py",
     "docs/golden/", "scripts/golden_corpus.py", "scripts/perf_profile.py",
-    ".github/workflows/",
+    # CI security gates
+    ".github/workflows/", ".gitleaks.toml", ".gitleaksignore",
     "tests/conftest.py", "tests/test_trust.py", "tests/test_user_policy.py",
     "tests/test_privacy.py", "tests/test_selfdev.py", "tests/test_self_upgrade.py",
     "tests/test_promotion.py", "tests/test_adversarial.py", "tests/test_golden_suite.py",
     "tests/test_silent_excepts.py", "tests/test_reachability.py",
     "tests/test_tool_isolation.py", "tests/test_secret_broker.py",
     "tests/test_sensitive_domains.py", "tests/test_netguard.py", "tests/test_fsjail.py",
+    "tests/test_injection_pages.py", "tests/test_write_licence_agent.py",
+    "tests/test_repo_hygiene.py", "tests/test_invariants.py",
 )
 
 
+def _normalize_path(path: str) -> str:
+    """One shape for every spelling of the same file, so an alias cannot
+    walk past the kernel list (invariant A-048 "trust"):
+
+      separators   `\\` -> `/`, runs collapsed (`friday//policy.py`)
+      dot segments `./` and `x/../` resolved lexically, never via the
+                   filesystem (a symlink is resolved by the caller with
+                   the real tree; this is the name check)
+      case         folded - Windows and macOS mount case-insensitively,
+                   so `FRIDAY/POLICY.PY` IS policy.py there
+      whitespace   stripped at both ends; a trailing `/` dropped
+    """
+    text = (path or "").strip().replace("\\", "/")
+    parts: list[str] = []
+    for seg in text.split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(seg)
+    return "/".join(parts).casefold()
+
+
+#: KERNEL_PATHS, normalized once, compared against normalized input.
+_KERNEL_NORMALIZED = tuple(
+    (_normalize_path(k) + ("/" if k.endswith("/") else ""), k) for k in KERNEL_PATHS)
+
+
 def is_kernel_path(path: str) -> str | None:
-    """The kernel entry a path falls under, or None."""
-    normalized = path.replace("\\", "/")
-    while normalized.startswith("./"):
-        normalized = normalized[2:]
-    for kernel in KERNEL_PATHS:
-        if kernel.endswith("/"):
-            if normalized.startswith(kernel) or f"/{kernel}" in normalized:
+    """The kernel entry a path falls under, or None.
+
+    Matches by the normalized name (see `_normalize_path`); a repo-relative
+    or absolute path whose tail is a kernel entry matches, so sandbox
+    worktrees and absolute Windows paths are covered. The caller that owns
+    a real checkout resolves symlinks first (`selfdev` passes the diff's
+    paths, which git reports link-free)."""
+    normalized = _normalize_path(path)
+    if not normalized:
+        return None
+    for kernel_norm, kernel in _KERNEL_NORMALIZED:
+        if kernel_norm.endswith("/"):
+            if normalized.startswith(kernel_norm) or f"/{kernel_norm}" in normalized + "/":
                 return kernel
-        elif normalized == kernel or normalized.endswith("/" + kernel):
+        elif normalized == kernel_norm or normalized.endswith("/" + kernel_norm):
             return kernel
     return None
 

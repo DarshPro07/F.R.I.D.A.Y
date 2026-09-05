@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import math
 import os
 import secrets
@@ -279,12 +280,46 @@ def lock(token):
 # not subject to this - the browser session is on the same machine.
 
 REPLAY_WINDOW_S = float(os.getenv("FRIDAY_REPLAY_WINDOW_S", "300"))
+#: Consumed nonces are DURABLE (invariant A-048 "replay"): an in-memory set
+#: forgets on restart, and a restart inside the window - a crash, a deploy,
+#: `Friday.exe --stop` - would let a recorded remote command be accepted a
+#: second time. The file is tiny (only unexpired nonces), rewritten under
+#: the lock on every accept, and loaded once at import so the first check
+#: after a restart already knows what the previous process consumed.
+NONCES_PATH = Path(os.getenv("FRIDAY_REPLAY_NONCES", str(ROOT / "data" / "consumed_nonces.json")))
 _seen_nonces: dict[str, float] = {}          # nonce -> expiry
+
+
+def _load_nonces() -> dict[str, float]:
+    try:
+        raw = json.loads(NONCES_PATH.read_text(encoding="utf-8"))
+        now = time.time()
+        return {str(n): float(e) for n, e in dict(raw).items() if float(e) > now}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
+
+
+def _persist_nonces() -> None:
+    """Write the live set atomically (tmp + replace) so a crash mid-write
+    leaves the previous file, never a torn one. Best effort: a disk that
+    refuses the write does not refuse the command - the in-memory set
+    still holds for this process and the failure is logged."""
+    try:
+        NONCES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = NONCES_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(_seen_nonces), encoding="utf-8")
+        os.replace(tmp, NONCES_PATH)
+    except OSError:
+        logging.getLogger("friday.access").warning(
+            "could not persist consumed nonces to %s", NONCES_PATH, exc_info=True)
+
+
+_seen_nonces.update(_load_nonces())
 
 
 def check_replay(nonce: str, timestamp, *, now: float | None = None) -> tuple[bool, str]:
     """(accepted, reason). Accepts a (nonce, timestamp) pair exactly once
-    inside the replay window. Never raises."""
+    inside the replay window - across process restarts. Never raises."""
     now = time.time() if now is None else now
     nonce = str(nonce or "").strip()
     if not nonce or len(nonce) < 8 or len(nonce) > 128:
@@ -302,6 +337,7 @@ def check_replay(nonce: str, timestamp, *, now: float | None = None) -> tuple[bo
         if nonce in _seen_nonces:
             return False, "nonce already used (replay)"
         _seen_nonces[nonce] = now + REPLAY_WINDOW_S
+        _persist_nonces()
     return True, ""
 
 

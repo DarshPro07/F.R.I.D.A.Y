@@ -33,6 +33,11 @@ from pathlib import Path
 
 from friday.contracts import ActionResult, Artifact, Run, Verification, now_iso
 
+
+class CompletionRefused(RuntimeError):
+    """A run was asked to become COMPLETED without the evidence that word
+    requires. Raised by `Store.finish_objective_run`, the last writer."""
+
 # Restored from the .pyc oracle: proven by a LOAD_CONST/STORE_NAME
 # pair in the running system's bytecode, present in no source candidate.
 OBJECTIVE_DELIVERY_TTL_S = 21600
@@ -537,6 +542,14 @@ CREATE TABLE IF NOT EXISTS automation_runs (
 
 CREATE INDEX IF NOT EXISTS idx_automation_runs_name
     ON automation_runs(name, started_at DESC);
+
+-- One row per scheduled execution key (invariant A-048): the primary key
+-- is the whole at-most-once guarantee across crash, restart and re-fire.
+CREATE TABLE IF NOT EXISTS automation_executions (
+    execution_key TEXT PRIMARY KEY,
+    run_id        TEXT NOT NULL,
+    claimed_at    TEXT NOT NULL
+);
 
 -- PRD v3.1 FR-041 / FR-042: scheduled OBJECTIVES (one-time or recurring)
 -- with budgets, permissions, delivery channel and an optional condition,
@@ -1914,6 +1927,39 @@ class Store:
                 (status, json.dumps(steps), error, now_iso(), run_id),
             )
 
+    def claim_automation_execution(self, execution_key: str, run_id: str) -> dict | None:
+        """Claim one scheduled execution for `run_id`. Returns None when the
+        claim is new (the caller may run), or the PRIOR run's record when
+        this key was already claimed - by a run that finished, or by one
+        still running in another process. One INSERT with a primary key is
+        the whole mechanism: two processes racing the same key cannot both
+        win, and the claim is on disk before any step executes, so a crash
+        after the claim leaves a `running` row a re-fire will find rather
+        than a second execution (invariant A-048 "scheduler/idempotency")."""
+        with self._tx() as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO automation_executions (execution_key, run_id, claimed_at) "
+                    "VALUES (?,?,?)", (execution_key, run_id, now_iso()))
+                return None
+            except sqlite3.IntegrityError:
+                row = conn.execute(
+                    "SELECT r.run_id, r.status, r.steps FROM automation_executions e "
+                    "JOIN automation_runs r ON r.run_id = e.run_id "
+                    "WHERE e.execution_key=?", (execution_key,)).fetchone()
+                if row is None:
+                    # Claimed, but the run row was never written (died between
+                    # the two INSERTs). Still a claim: report it as running.
+                    prior = conn.execute(
+                        "SELECT run_id FROM automation_executions WHERE execution_key=?",
+                        (execution_key,)).fetchone()
+                    return {"run_id": prior["run_id"], "status": "running", "steps": []}
+                try:
+                    steps = json.loads(row["steps"] or "[]")
+                except ValueError:
+                    steps = []
+                return {"run_id": row["run_id"], "status": row["status"], "steps": steps}
+
     # -- schedules (PRD v3.1 FR-041/042) ------------------------------------
 
     def save_schedule(self, name: str, *, objective: str, tasks: list, trigger: dict,
@@ -2439,6 +2485,23 @@ class Store:
 
     def finish_objective_run(self, run_id: str, *, status: str,
                              summary: dict, finished_at: str | None = None) -> None:
+        """The one writer of a run's terminal status.
+
+        COMPLETED is a verdict over the evidence ledger, never a caller's
+        word (FR-053; invariant suite A-048). `_finish` in the executor
+        checks it, but the executor is one caller: anything that reaches
+        this method - a tool, a repair script, a worker handing back "done"
+        - is held to the same rule HERE, where the row is written. A
+        COMPLETED with a succeeded top-level task that has no passing
+        evidence entry is refused with the gap named; the caller decides
+        what to do (PARTIAL with the gap, or record the evidence first).
+        """
+        if status == "COMPLETED":
+            missing = self.completion_evidence_gap(run_id)
+            if missing:
+                raise CompletionRefused(
+                    f"run {run_id} cannot be COMPLETED: succeeded task(s) "
+                    f"{', '.join(missing[:3])} have no passing evidence entry")
         with self._tx() as conn:
             conn.execute(
                 "UPDATE objective_runs SET status=?, summary=?, finished_at=?, "
@@ -2446,6 +2509,18 @@ class Store:
                 (status, json.dumps(summary, default=str),
                  finished_at or now_iso(), now_iso(), run_id),
             )
+
+    def completion_evidence_gap(self, run_id: str) -> list[str]:
+        """Succeeded top-level tasks with no passing evidence row - the
+        list `finish_objective_run` refuses COMPLETED over. Composite
+        leaves are covered by their group and are not counted."""
+        tasks = [t for t in self.objective_tasks(run_id) if not t.get("parent_id")]
+        succeeded = [t["task_id"] for t in tasks if t["status"] == "SUCCEEDED"]
+        if not succeeded:
+            return []
+        ledger = self.objective_ledger(run_id) or {}
+        backed = {e.get("task_id") for e in ledger.get("evidence", []) if e.get("passed")}
+        return [t for t in succeeded if t not in backed]
 
     def save_objective_task(self, *, task_id: str, run_id: str,
                             capability: str, arguments: str,
