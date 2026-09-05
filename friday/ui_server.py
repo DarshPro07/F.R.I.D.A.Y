@@ -950,6 +950,16 @@ async def api_objective(request):
         return JSONResponse({"ok": False, "error": "objective is required"}, status_code=400)
     channel = _remote_channel(request)
 
+    # Audit A-042: a remote command (any channel other than the local
+    # Control Room) must carry a one-time nonce and a fresh timestamp, so a
+    # captured request cannot be replayed inside the session window.
+    if channel != "web" or data.get("nonce") is not None:
+        accepted, why = access.check_replay(data.get("nonce"), data.get("timestamp"))
+        if not accepted:
+            access.log({"kind": "remote_objective_refused", "channel": channel, "reason": why})
+            return JSONResponse({"ok": False, "error": f"replay protection: {why}",
+                                 "channel": channel}, status_code=409)
+
     def start():
         run = c.Run.create(f"remote objective ({channel})", capability="objectives")
         result = OT.objective_start(run, text, tasks=data.get("tasks") or "",

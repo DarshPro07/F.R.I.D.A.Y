@@ -268,6 +268,43 @@ def lock(token):
     return {"ok": True}
 
 
+# -- replay protection for remote commands (audit A-042) ---------------------
+#
+# A session cookie proves WHO is talking for up to SESSION_HOURS; it does not
+# stop a recorded request from being sent again inside that window. A remote
+# command therefore also carries a per-message nonce and a timestamp: the
+# nonce is accepted once and remembered for REPLAY_WINDOW_S, and a timestamp
+# outside the window is refused even with an unseen nonce (so the remembered
+# set stays bounded). Local (Control Room) requests carry no nonce and are
+# not subject to this - the browser session is on the same machine.
+
+REPLAY_WINDOW_S = float(os.getenv("FRIDAY_REPLAY_WINDOW_S", "300"))
+_seen_nonces: dict[str, float] = {}          # nonce -> expiry
+
+
+def check_replay(nonce: str, timestamp, *, now: float | None = None) -> tuple[bool, str]:
+    """(accepted, reason). Accepts a (nonce, timestamp) pair exactly once
+    inside the replay window. Never raises."""
+    now = time.time() if now is None else now
+    nonce = str(nonce or "").strip()
+    if not nonce or len(nonce) < 8 or len(nonce) > 128:
+        return False, "nonce missing or malformed"
+    try:
+        ts = float(timestamp)
+    except (TypeError, ValueError):
+        return False, "timestamp missing or malformed"
+    if abs(now - ts) > REPLAY_WINDOW_S:
+        return False, f"timestamp outside the {REPLAY_WINDOW_S:.0f}s window"
+    with _lock:
+        # Forget expired nonces first so the set stays bounded.
+        for old, exp in [(n, e) for n, e in _seen_nonces.items() if e <= now]:
+            _seen_nonces.pop(old, None)
+        if nonce in _seen_nonces:
+            return False, "nonce already used (replay)"
+        _seen_nonces[nonce] = now + REPLAY_WINDOW_S
+    return True, ""
+
+
 def status(token=None):
     allowed, reason = pin_allowed()
     return {"gate": GATE_ENABLED, "enrolled": enrolled(),

@@ -42,11 +42,18 @@ def test_unauthenticated_remote_request_is_refused_before_any_handler(server):
     assert store.objective_runs(limit=5) == []               # nothing entered the ledger
 
 
+def _fresh():
+    """A remote message's replay-protection pair (audit A-042)."""
+    import secrets, time
+    return {"nonce": secrets.token_urlsafe(16), "timestamp": time.time()}
+
+
 def test_authenticated_remote_objective_enters_the_same_ledger(server):
     client, store, token = server
     r = client.post("/api/objective",
                     json={"objective": "list my workspace roots",
-                          "tasks": json.dumps([{"capability": "files_roots", "arguments": {}}])},
+                          "tasks": json.dumps([{"capability": "files_roots", "arguments": {}}]),
+                          **_fresh()},
                     headers={"Cookie": f"friday_session={token}", "X-Friday-Channel": "telegram"})
     assert r.status_code == 200, r.text
     body = r.json()
@@ -92,7 +99,7 @@ def test_remote_policy_is_the_local_policy(server, tmp_path, monkeypatch):
     from friday import golden as G
     client, store, token = server
     r = client.post("/api/objective",
-                    json={"objective": "create a file",
+                    json={"objective": "create a file", **_fresh(),
                           "tasks": json.dumps([{"capability": "files_create",
                                                 "arguments": {"path": str(tmp_path / "remote.txt"),
                                                               "content": "hi"}}])},
@@ -111,3 +118,47 @@ def test_remote_policy_is_the_local_policy(server, tmp_path, monkeypatch):
         asyncio.run(drive())
     assert store.objective_run(run_id)["status"] == "WAITING_PERMISSION"
     assert not (tmp_path / "remote.txt").exists()
+
+
+# -- A-042: a recorded remote command cannot be replayed ------------------------
+
+
+def _remote(client, token, channel="telegram", **extra):
+    body = {"objective": "list my workspace roots",
+            "tasks": json.dumps([{"capability": "files_roots", "arguments": {}}]), **extra}
+    return client.post("/api/objective", json=body,
+                       headers={"Cookie": f"friday_session={token}", "X-Friday-Channel": channel})
+
+
+def test_a_remote_command_without_a_nonce_is_refused(server):
+    client, _, token = server
+    r = _remote(client, token)
+    assert r.status_code == 409 and "nonce" in r.json()["error"]
+
+
+def test_the_same_remote_message_sent_twice_is_refused_the_second_time(server):
+    client, store, token = server
+    pair = _fresh()
+    first = _remote(client, token, **pair)
+    assert first.status_code == 200, first.text
+    replay = _remote(client, token, **pair)
+    assert replay.status_code == 409 and "replay" in replay.json()["error"]
+    # exactly one run entered the ledger
+    runs = [r for r in store.objective_runs(limit=50) if r.get("source_channel") == "remote:telegram"]
+    assert len(runs) == 1
+
+
+def test_a_stale_timestamp_is_refused_even_with_a_fresh_nonce(server):
+    import secrets, time
+    client, _, token = server
+    r = _remote(client, token, nonce=secrets.token_urlsafe(16), timestamp=time.time() - 3600)
+    assert r.status_code == 409 and "window" in r.json()["error"]
+
+
+def test_the_local_control_room_is_not_subject_to_replay_protection(server):
+    client, _, token = server
+    r = client.post("/api/objective",
+                    json={"objective": "list my workspace roots",
+                          "tasks": json.dumps([{"capability": "files_roots", "arguments": {}}])},
+                    headers={"Cookie": f"friday_session={token}"})
+    assert r.status_code == 200 and r.json()["channel"] == "web"
