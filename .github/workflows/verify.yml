@@ -59,8 +59,34 @@ jobs:
           # Never the live database.
           ADA_DB: ${{ runner.temp }}/ci-ada.sqlite3
         # Per-test timeout (audit A-047): a hung subprocess fails one test,
-        # not the whole job.
-        run: uv run pytest tests/ -m "not live and not slow" -q -p no:cacheprovider --timeout=600
+        # not the whole job. `-rfE` prints the FAILED/ERROR lines in the
+        # short summary, and the step below turns them into check-run
+        # annotations - readable through the API with plain `repo` scope,
+        # where the job log itself needs repo admin (2026-09-05: a red
+        # ubuntu job could not be read from the owner's machine).
+        run: uv run pytest tests/ -m "not live and not slow" -q -p no:cacheprovider --timeout=600 -rfE --junitxml=${{ runner.temp }}/pytest.xml
+
+      - name: Name every failed test in the annotations
+        if: failure()
+        shell: python
+        run: |
+          import os, xml.etree.ElementTree as ET
+          path = os.path.join(os.environ["RUNNER_TEMP"], "pytest.xml")
+          if not os.path.exists(path):
+              print("::error::pytest produced no junit file - the run died before collection finished")
+              raise SystemExit(0)
+          n = 0
+          for case in ET.parse(path).getroot().iter("testcase"):
+              for kind in ("failure", "error"):
+                  node = case.find(kind)
+                  if node is None:
+                      continue
+                  n += 1
+                  where = f"{case.get('classname', '')}::{case.get('name', '')}"
+                  text = (node.text or "").strip().splitlines()
+                  msg = (node.get("message") or (text[-1] if text else "")).replace("\n", " ")[:400]
+                  print(f"::error title={kind.upper()} {where}::{msg}")
+          print(f"{n} failed/errored test(s) annotated")
 
       - name: Secret scan (history)
         if: matrix.os == 'ubuntu-latest'
