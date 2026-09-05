@@ -30,13 +30,14 @@ the caller's, and ultimately a person's.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from friday import (codegraph, evaluation, execution, executor_router,
-                    product, promotion, roles)
+                    hermes_team, product, promotion, roles)
 
 logger = logging.getLogger("friday-agent")
 
@@ -68,6 +69,9 @@ class DevelopmentRun:
     root: str
     stage: str = ""
     run_id: str = ""
+    #: Set by the objective loop after an identical failure: the worker must
+    #: change approach ("replan" / "different_role" / "reduce"), not retry.
+    strategy_hint: str = ""
     #: The commit the work started from, so promotion can refuse a patch
     #: verified against one base and applied to another.
     base_commit: str = ""
@@ -81,6 +85,9 @@ class DevelopmentRun:
     choice: executor_router.Choice | None = None
     attempt: evaluation.Attempt | None = None
     decision: promotion.Decision | None = None
+    #: FR-012: the second authority's evidence, from a reviewer that is not
+    #: the implementing worker. None until `review()` has run.
+    review_evidence: "object | None" = None
     boundary: dict = field(default_factory=dict)
     changed: tuple[str, ...] = ()
     error: str = ""
@@ -190,6 +197,8 @@ class DevelopmentRun:
 
     async def execute(self, executor, *, allowed_paths: tuple[str, ...] = (),
                       network: bool = True, timeout: float = 1800.0,
+                      verifier: evaluation.Verifier | None = None,
+                      iteration_budget: int = 3,
                       **kwargs):
         """
         Run the coding agent inside the boundary.
@@ -202,20 +211,54 @@ class DevelopmentRun:
         agent spawns. The executor may build its own boundary too when its
         backend says SANDBOX; both are the same object and closing either
         is safe, because `terminate` is idempotent.
+
+        `verifier`, when given, is both what `verify()` will run afterwards
+        and what "done" means here - the agent gets told the same bar it
+        will be held to. Without one, a single derived acceptance line
+        stands in, marked so nobody mistakes it for a real criterion.
         """
         from friday.executors.claude_code import TaskBundle
 
         started = time.monotonic()
         self.stage = PREPARED
+        if verifier is not None:
+            acceptance = (verifier.proves or verifier.describe(),)
+            verification = (verifier.describe(),)
+        else:
+            acceptance = (f"[derived from goal] {self.goal.strip()} is "
+                          "complete and demonstrably true",)
+            verification = ()
+        role = ", ".join(r.title for r in self.team.roles) if self.team else ""
         bundle = TaskBundle(
             goal=self.goal, workspace=self.root, project=self.project,
             context=self.context_for() + (
                 (self.team.instructions(),) if self.team else ())
             + self._assumptions(),
-            constraints=tuple(f"stay inside {p}" for p in allowed_paths))
+            constraints=tuple(f"stay inside {p}" for p in allowed_paths) + ((
+                f"STRATEGY CHANGE: {self.strategy_hint} - the previous attempt "
+                "failed with the same fingerprint; do not repeat it",)
+                if self.strategy_hint else ()),
+            acceptance=acceptance,
+            allowed_paths=allowed_paths,
+            verification=verification,
+            role=role,
+            iteration_budget=iteration_budget,
+            known_facts=self.context_for(),
+            assumptions=self._assumptions())
         self.run_id = bundle.run_id
 
         try:
+            team_profiles = hermes_team.plan_team(
+                self.goal, files=len(self.graph.fingerprints) if self.graph else 0)
+            if team_profiles:
+                result = await asyncio.to_thread(
+                    self._execute_via_team, bundle, team_profiles)
+                if result is not None:
+                    self.stage = EXECUTED
+                    return result
+                # kanban unavailable or refused: fall back to the single-
+                # profile path below, same as `execution_economics` route
+                # HERMES_SINGLE.
             result = await executor.execute(bundle, timeout=timeout, **kwargs)
             self.stage = EXECUTED
             return result
@@ -226,6 +269,55 @@ class DevelopmentRun:
             return None
         finally:
             self.seconds = time.monotonic() - started
+
+    def _execute_via_team(self, bundle, team_profiles: tuple[str, ...]):
+        """
+        Staff `team_profiles` as linked kanban tasks and poll to a terminal
+        result, or None on any kanban failure - the caller falls back to
+        `delegate()` on the `friday` profile, it does not retry blindly.
+        """
+        from friday.contracts import ActionResult, now_iso
+
+        bundle_text = "\n".join((
+            f"GOAL: {bundle.goal}",
+            *(f"ACCEPTANCE: {a}" for a in bundle.acceptance),
+            *(f"CONSTRAINT: {c}" for c in bundle.constraints),
+            *(f"KNOWN FACT: {f}" for f in bundle.known_facts)))
+        board_ref = hermes_team.submit(
+            objective_task_id=bundle.run_id, goal=self.goal,
+            bundle_text=bundle_text, team=team_profiles,
+            model_by_profile={})
+        if "error" in board_ref:
+            logger.warning("development.team_submit_failed run=%s error=%s",
+                           bundle.run_id, board_ref["error"])
+            return None
+
+        for profile in team_profiles:
+            hermes_team.gateway_for(profile)
+
+        started = time.monotonic()
+        poll_timeout = 1800.0
+        statuses: dict = {}
+        while time.monotonic() - started < poll_timeout:
+            statuses = hermes_team.poll(board_ref)
+            if all(s.get("status") in ("done", "error", "blocked")
+                  for s in statuses.values()):
+                break
+            time.sleep(5)
+
+        failed = [p for p, s in statuses.items() if s.get("status") != "done"]
+        # ADR-001: worker "done" on the kanban is not verification, so this
+        # never claims SUCCEEDED (ActionResult.__post_init__ forbids that
+        # without a real Verification anyway) - "partial" until the caller
+        # runs `verify()` against `evaluation.Verifier`, same as the
+        # single-worker path below.
+        return ActionResult(
+            run_id=bundle.run_id, tool_id="hermes_team",
+            status="failed" if failed else "partial",
+            started_at=now_iso(), completed_at=now_iso(),
+            output=statuses,
+            error=f"profiles not done: {failed}" if failed else None,
+            verification=None)
 
     def _assumptions(self) -> tuple[str, ...]:
         """
@@ -291,6 +383,44 @@ class DevelopmentRun:
         self.stage = VERIFIED
         return self
 
+    # -- 5b. independent review (FR-012) -----------------------------------
+
+    def review(self, changed, *, workspace: str | Path | None = None,
+               claim: str = "", infer=None) -> "DevelopmentRun":
+        """
+        Ask a reviewer that is NOT the implementing worker to read the diff
+        against the base commit, the worker's claim and the verifier's
+        result. The evidence lands on `self.review` and `gate()` consults
+        it: past `promotion.CONSEQUENTIAL_FILES` files a missing or disputed
+        review refuses promotion.
+
+        The diff is read with git from `workspace` (the worktree the agent
+        worked in, or the root). Its size is bounded by the reviewer.
+        """
+        from friday import adversarial as A
+
+        self.changed = tuple(changed or ())
+        where = str(workspace or self.root)
+        diff = _diff_against(where, self.base_commit, self.changed)
+        verifier = ("no verifier ran" if self.attempt is None else
+                    f"{self.attempt.verdict} exit={getattr(self.attempt, 'exit_code', '')} "
+                    f"{(self.attempt.detail or '')[-300:]}")
+        implemented_by = (self.choice.executor if self.choice and self.choice.executor
+                          else "worker")
+        change = A.ChangeUnderReview(
+            goal=self.goal, claim=claim or f"{self.goal} is complete",
+            diff=diff, verifier_result=verifier, implemented_by=implemented_by,
+            changed_files=self.changed)
+        kwargs = {"objective_id": self.run_id or self.project,
+                  "reviewer": f"reviewer:model_gateway"}
+        if infer is not None:
+            kwargs["infer"] = infer
+        self.review_evidence = A.independent_review(change, **kwargs)
+        logger.info("development.review run=%s verdict=%s findings=%d",
+                    self.run_id or "-", self.review_evidence.verdict,
+                    len(self.review_evidence.findings))
+        return self
+
     # -- 6. gate -----------------------------------------------------------
 
     def gate(self, changed, *, allowed_paths: tuple[str, ...] = (),
@@ -305,7 +435,7 @@ class DevelopmentRun:
         self.decision = promotion.decide(
             self.root, self.changed, attempt=self.attempt,
             allowed_paths=allowed_paths, base_commit=self.base_commit,
-            approved=approved)
+            approved=approved, review=self.review_evidence)
         self.stage = DECIDED
         return self.decision
 
@@ -341,6 +471,7 @@ class DevelopmentRun:
             "environment": self.boundary or None,
             "artifacts": list(self.artifacts),
             "verdict": self.attempt.verdict if self.attempt else None,
+            "review": self.review_evidence.to_dict() if self.review_evidence else None,
             "changed": list(self.changed),
             "gate": self.decision.as_dict() if self.decision else None,
         }
@@ -356,8 +487,30 @@ class DevelopmentRun:
         return (f"{self.goal}: not promoted - {self.decision.detail}")
 
 
-def for_goal(goal: str, root: str | Path, *, project: str = "") -> DevelopmentRun:
+def _diff_against(workspace: str, base_commit: str, changed: tuple[str, ...]) -> str:
+    """The unified diff the reviewer reads: against `base_commit` when the
+    run recorded one, else the working tree against HEAD. Never raises -
+    an unreadable diff is an empty diff, which the reviewer reports as
+    INCONCLUSIVE rather than as a pass."""
+    import subprocess
+    args = ["git", "-C", workspace, "diff", "--no-color"]
+    if base_commit:
+        args.append(base_commit)
+    if changed:
+        args += ["--", *changed]
+    try:
+        out = subprocess.run(args, capture_output=True, text=True, timeout=60,
+                             encoding="utf-8", errors="replace")
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("development.diff unreadable: %s", exc)
+        return ""
+    return out.stdout if out.returncode == 0 else ""
+
+
+def for_goal(goal: str, root: str | Path, *, project: str = "",
+             strategy_hint: str = "") -> DevelopmentRun:
     """A run that has already understood the repository and chosen a team."""
     run = DevelopmentRun(goal=goal, project=project or Path(root).name,
-                         root=str(Path(root).resolve()))
+                         root=str(Path(root).resolve()),
+                         strategy_hint=strategy_hint or "")
     return run.understand().staff()

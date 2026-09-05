@@ -251,3 +251,69 @@ def test_listing_areas_reports_real_inventory_when_tools_are_present():
         "vision must appear in the capability inventory - reporting it as "
         "unavailable while vision_inspect_screen works is the original bug"
     )
+
+
+# ---------------------------------------------------------------------------
+# Room-path progress narration: milestones + a cadence digest, S3
+# ---------------------------------------------------------------------------
+
+
+class _FakeWorkLog:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def active(self):
+        return list(self._rows)
+
+    def recent(self, limit=12):
+        return list(self._rows)
+
+
+class _FakeSupervisor:
+    def __init__(self, rows, progress_by_id):
+        self.log = _FakeWorkLog(rows)
+        self._progress = progress_by_id
+
+    def progress(self, work_run_id):
+        return self._progress[work_run_id]
+
+
+class _FakeSession:
+    def __init__(self):
+        self.said = []
+        self.output = None
+        self.user_state = "listening"
+        self.current_speech = None
+
+    async def say(self, text, allow_interruptions=True, add_to_chat_ctx=None):
+        self.said.append(text)
+
+
+def test_room_path_speaks_a_milestone_and_a_timed_digest():
+    """A fake run's events must produce one milestone (spoken at once) and,
+    once cadence elapses, one digest - the narration LiveKit never had
+    before S3 (only completions were delivered, never progress)."""
+    row = {"work_run_id": "wr-1", "status": "WORKING", "model": "claude",
+           "route_reason": "capacity", "last_event_at": 0}
+    prog = {"work_run_id": "wr-1", "status": "WORKING", "seq": 1, "tools": 2,
+            "line": "read policy.py", "current": "editing x.py"}
+    sup = _FakeSupervisor([row], {"wr-1": prog})
+    session = _FakeSession()
+
+    result = asyncio.run(af.speak_progress_digests(session, sup=sup))
+    assert result["digest"] is False   # first pass: cadence has not elapsed
+    assert session.said == []          # nothing terminal yet, no milestone
+
+    # Advance the fake clock past the cadence by back-dating last_digest_at
+    # through the state dict the caller owns across polls.
+    state = {"last_digest_at": 0.0, "spoken": set()}
+    prog["seq"] = 2
+    import time as _time
+    real_time = _time.time
+    try:
+        _time.time = lambda: real_time() + 200
+        result = asyncio.run(af.speak_progress_digests(session, sup=sup, state=state))
+    finally:
+        _time.time = real_time
+    assert result["digest"] is True
+    assert any("claude" in s and "capacity" in s for s in session.said)

@@ -28,6 +28,7 @@ import asyncio
 import html
 
 import os
+from pathlib import Path
 
 import re
 
@@ -489,6 +490,99 @@ class BrowserSession:
         return was_running
 
 session = BrowserSession()
+
+
+# --- PRD FR-031/036: the primitive loop over the same session --------------
+
+_LOOP = None
+
+
+async def _loop_browser(*, headless: bool | None = None):
+    """The FR-036 observe/plan/policy/act/observe/verify loop over the
+    shared session's context, created once per session lifetime."""
+    global _LOOP
+    from friday import browser as B
+    page = await session.page(headless=headless)
+    if _LOOP is None or _LOOP.driver.page is not page and _LOOP.driver.context is not page.context:
+        _LOOP = B.Browser(
+            B.PlaywrightDriver(page.context, page),
+            profile=B.choose_profile(worker="friday", authorized_by_approval=False),
+            shots_dir=str(Path(os.getenv("FRIDAY_BROWSER_SHOTS",
+                                         str(Path(__file__).resolve().parents[2] / "data" / "browser_shots")))),
+            approvals={})
+    return _LOOP
+
+
+async def browser_act(
+    run: c.Run, primitive: str, target: str = "", args: dict | None = None, *,
+    engine: PolicyEngine = default_engine, timeout_ms: int = 30000,
+) -> c.ActionResult:
+    """
+    One PRD browser primitive (open, inspect, navigate, click, type, scroll,
+    select, upload, download, tabs, screenshot, wait, verify) through the
+    observe -> plan -> policy -> act -> observe -> verify loop.
+
+    Policy: read primitives are `browser.<primitive>` (BROWSER_CONTROL);
+    state-changing ones are BROWSER_AUTOMATION and ask. An external write
+    (purchase / publish / destructive / security settings) detected on the
+    page needs an exact-action confirmation nonce in `args["nonce"]`, and a
+    human-verification page is a handoff: the result is PARTIAL with the
+    reason and nothing is clicked.
+    """
+    from friday import browser as B
+    from friday import policy as P
+
+    primitive = (primitive or "").strip().lower()
+    if primitive not in B.PRIMITIVES:
+        started = c.started(run.run_id, "browser.act")
+        return run.record(c.failed(started, f"unknown browser primitive {primitive!r}; "
+                                            f"one of {sorted(B.PRIMITIVES)}"))
+    category, changes_state = B.PRIMITIVES[primitive]
+    tool_id = f"browser.{primitive}" if f"browser.{primitive}" in P.TOOL_CATEGORIES \
+        else ("browser.automate" if changes_state else "browser.inspect")
+    blocked = _gate(run, tool_id, engine)
+    if blocked:
+        return blocked
+    started = c.started(run.run_id, tool_id)
+    args = dict(args or {})
+
+    try:
+        loop = await _loop_browser()
+    except Exception as exc:  # noqa: BLE001
+        return run.record(c.failed(started, f"browser could not start: {exc}"))
+    # The policy engine has already said AUTO/approved for this call, so the
+    # loop's own session approval for this primitive is satisfied. An
+    # external write (FR-034) is different: it returns APPROVAL_REQUIRED with
+    # the exact action, and the control room's approve path re-issues this
+    # same call with `confirmed=True` after the person's yes
+    # (`friday.control.approve` -> `call_approved`, one nonce, one use).
+    loop.approvals[primitive] = True
+    try:
+        step = await loop.run(primitive, target, args, timeout_ms=timeout_ms)
+    except B.Handoff as exc:
+        state = loop.last
+        return run.record(c.partial(
+            started, f"HUMAN_VERIFICATION: {exc}",
+            output=_scoped({"url": state.url if state else "", "handoff": str(exc),
+                            "step": exc.step.to_dict()}, BROWSER_SCOPE)))
+    except B.Refused as exc:
+        if exc.step.external_write:
+            return run.record(c.partial(
+                started, f"{APPROVAL_PREFIX}: {exc}",
+                output=_scoped({"external_write": exc.step.external_write,
+                                "action": f"browser.{primitive}", "target": target,
+                                "step": exc.step.to_dict()}, BROWSER_SCOPE)))
+        return run.record(c.failed(started, str(exc)))
+
+    payload = {"step": step.to_dict(), "page": loop.last.to_dict() if loop.last else None}
+    if not step.ok:
+        return run.record(c.partial(started, step.detail or step.evidence,
+                                    output=_scoped(payload, BROWSER_SCOPE)))
+    side = (f"browser {primitive}",) if changes_state else ()
+    return run.record(c.succeeded(
+        started, output=_scoped(payload, BROWSER_SCOPE), side_effects=side,
+        verification=c.Verification(method=f"browser_{primitive}_observed",
+                                    evidence=step.evidence)))
 
 
 async def _page_state(page) -> dict:

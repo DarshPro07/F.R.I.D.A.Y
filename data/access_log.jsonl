@@ -622,3 +622,172 @@
 {"at": "2026-09-03T13:37:02+00:00", "kind": "unlock", "distance": 0.449}
 {"at": "2026-09-03T13:37:03+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
 {"at": "2026-09-03T13:37:20+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 9553}
+{"at": "2026-09-04T06:34:56+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T06:34:56+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T06:34:56+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T06:34:56+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T06:51:12+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T06:51:12+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T06:51:12+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T06:51:12+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T08:54:14+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-04T08:54:14+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-04T08:54:14+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-04T08:54:14+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-04T08:54:14+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-04T08:54:14+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-04T09:12:30+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-04T09:23:18+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-04T09:23:18+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-04T09:23:18+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-04T09:23:18+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-04T09:23:18+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-04T09:23:18+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-04T09:29:51+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T09:29:51+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T09:29:51+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T09:29:51+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T09:39:31+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T09:39:31+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T09:39:31+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T09:39:31+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T10:03:08+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-04T10:03:08+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-04T10:03:08+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-04T10:03:08+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-04T10:03:08+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-04T10:03:08+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-04T10:19:45+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-04T10:27:08+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T10:27:08+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T10:27:08+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T10:27:08+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T10:33:02+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-04T10:34:18+00:00", "kind": "blocked", "path": "/api/work", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
+{"at": "2026-09-04T10:38:10+00:00", "kind": "unlock", "distance": 0.4483}
+{"at": "2026-09-04T10:50:14+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T10:50:14+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T10:50:14+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T10:50:14+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T10:53:08+00:00", "kind": "blocked", "path": "/api/work", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-04T10:53:08+00:00", "kind": "blocked", "path": "/api/gate", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-04T10:53:12+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-04T10:53:15+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-04T10:53:52+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-04T10:53:56+00:00", "kind": "client:click", "detail": "Use this window instead", "client": "127.0.0.1"}
+{"at": "2026-09-04T10:53:56+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-04T10:54:22+00:00", "kind": "unlock", "distance": 0.4317}
+{"at": "2026-09-04T10:54:23+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:24:23+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T12:24:23+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T12:24:23+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T12:24:23+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T12:25:35+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-04T12:26:14+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-04T12:27:09+00:00", "kind": "unlock", "distance": 0.4082}
+{"at": "2026-09-04T12:27:10+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:27:18+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-04T12:27:36+00:00", "kind": "blocked", "path": "/api/work", "method": "GET", "client": "127.0.0.1", "ua": "curl/8.11.0"}
+{"at": "2026-09-04T12:39:43+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-04T12:39:58+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:40:01+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:40:04+00:00", "kind": "client:key", "detail": "0", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:40:06+00:00", "kind": "client:click", "detail": "Set PIN", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:40:06+00:00", "kind": "pin_set"}
+{"at": "2026-09-04T12:40:09+00:00", "kind": "client:click", "detail": "", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:40:10+00:00", "kind": "client:key", "detail": "0", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:40:11+00:00", "kind": "client:click", "detail": "Unlock", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:40:11+00:00", "kind": "pin_refused", "reason": "a Friday window has the camera -- your face is the way in, there"}
+{"at": "2026-09-04T12:40:13+00:00", "kind": "client:click", "detail": "", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:40:19+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:40:23+00:00", "kind": "client:key", "detail": "0", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:40:25+00:00", "kind": "client:click", "detail": "Unlock", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:40:25+00:00", "kind": "pin_refused", "reason": "a Friday window has the camera -- your face is the way in, there"}
+{"at": "2026-09-04T12:40:26+00:00", "kind": "pin_refused", "reason": "a Friday window has the camera -- your face is the way in, there"}
+{"at": "2026-09-04T12:40:26+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-04T12:40:36+00:00", "kind": "blocked", "path": "/favicon.ico", "method": "GET", "client": "127.0.0.1", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"}
+{"at": "2026-09-04T12:40:40+00:00", "kind": "unlock", "distance": 0.4775}
+{"at": "2026-09-04T15:58:52+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T15:58:52+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T15:58:52+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T15:58:52+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T16:11:18+00:00", "kind": "client:key", "detail": "Alt", "client": "127.0.0.1"}
+{"at": "2026-09-04T17:32:47+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-04T17:32:47+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-04T17:32:47+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-04T17:32:47+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-04T17:32:47+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-04T17:32:47+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-04T17:39:55+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-04T17:48:28+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T17:48:28+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T17:48:28+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T17:48:28+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T18:47:34+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-04T18:47:34+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-04T18:47:34+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-04T18:47:34+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-04T18:47:34+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-04T18:47:34+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-04T18:55:12+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-04T19:05:26+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T19:05:26+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T19:05:26+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T19:05:26+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T21:06:03+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-04T21:12:36+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-04T21:12:36+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-04T21:12:36+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-04T21:12:36+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-04T21:12:36+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-04T21:12:36+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-04T21:14:00+00:00", "kind": "blocked", "path": "/api/interrupted", "method": "POST", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-04T21:15:57+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T21:15:57+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T21:15:57+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T21:15:57+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T21:22:35+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-04T21:32:26+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T21:32:26+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T21:32:26+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T21:32:26+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T22:10:40+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-04T22:10:40+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-04T22:10:40+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-04T22:10:40+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-04T22:10:40+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-04T22:10:40+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-04T22:19:39+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-04T22:29:00+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T22:29:00+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T22:29:00+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T22:29:00+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T23:25:09+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-04T23:25:09+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-04T23:25:09+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-04T23:25:09+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-04T23:25:09+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-04T23:25:09+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-04T23:37:30+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-04T23:47:47+00:00", "kind": "remote_objective", "channel": "web", "run_id": "RUN-bdb3ea568a38", "accepted": true}
+{"at": "2026-09-04T23:47:49+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T23:47:49+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T23:47:49+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T23:47:49+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T23:54:03+00:00", "kind": "remote_objective", "channel": "web", "run_id": "RUN-b78ce8a01be0", "accepted": true}
+{"at": "2026-09-04T23:54:04+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-04T23:54:04+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-04T23:54:04+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-04T23:54:04+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-05T00:10:27+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "full autonomy on"}
+{"at": "2026-09-05T00:10:27+00:00", "kind": "autonomy", "mode": "full", "spoken": "skip permissions off"}
+{"at": "2026-09-05T00:10:27+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "Full autonomy"}
+{"at": "2026-09-05T00:10:27+00:00", "kind": "autonomy", "mode": "dangerous", "spoken": "get it full autonomy, like Jarvis"}
+{"at": "2026-09-05T00:10:27+00:00", "kind": "autonomy", "mode": "full", "spoken": "go back to asking, full autonomy off"}
+{"at": "2026-09-05T00:10:27+00:00", "kind": "autonomy", "mode": "guarded", "spoken": "full autonomy guarded"}
+{"at": "2026-09-05T00:19:33+00:00", "kind": "blocked", "path": "/api/stt", "method": "WEBSOCKET", "client": "testclient", "ua": "testclient"}
+{"at": "2026-09-05T03:05:52+00:00", "kind": "remote_objective", "channel": "web", "run_id": "RUN-e2bfd6e83f6b", "accepted": true}
+{"at": "2026-09-05T03:05:53+00:00", "kind": "desk", "what": "selection", "blocked": "cross-origin"}
+{"at": "2026-09-05T03:05:53+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}
+{"at": "2026-09-05T03:05:53+00:00", "kind": "desk", "what": "clipboard", "ok": true, "chars": 0}
+{"at": "2026-09-05T03:05:53+00:00", "kind": "desk", "what": "clipboard", "blocked": "cross-origin"}

@@ -395,4 +395,7 @@ def test_the_run_can_explain_itself_end_to_end(store, project):
     assert report['environment']['egress'] == 'DENY_ALL'
     assert report['verdict'] == E.PASSED
     assert report['gate']['allowed'] is True
-    assert [check['check'] for check in report['gate']['checks']] == ['changes', 'verified', 'scope', 'reviewable', 'base', 'secrets', 'approved']
+    # FR-012: the independent-review check sits between verification and
+    # scope - a small change is "not required at this size", but the check
+    # is recorded either way so the report says review was considered.
+    assert [check['check'] for check in report['gate']['checks']] == ['changes', 'verified', 'independent_review', 'scope', 'reviewable', 'base', 'secrets', 'approved']

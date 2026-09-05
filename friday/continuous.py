@@ -27,6 +27,7 @@ The forbidden state is RUNNING with no owner and no scheduled continuation.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -105,6 +106,40 @@ CapabilityPort = Callable[[str, dict], Awaitable[dict]]
 #: model asked again immediately is asked again for nothing, and the attempt
 #: budget is spent inside a few seconds of an outage that lasts minutes.
 PROVIDER_BACKOFF_SECONDS = float(os.getenv("ADA_PROVIDER_BACKOFF", "20"))
+
+#: How many times a task may change strategy (re-plan, different role,
+#: reduce scope) before a recurring failure gives up and goes BLOCKED
+#: instead of retrying the same thing forever.
+MAX_STRATEGY_CHANGES = 3
+STRATEGY_HINTS = ("replan", "different_role", "reduce")
+
+_FP_PATH_RE = re.compile(r"(?:[A-Za-z]:)?[\\/][\w.\-\\/]+")
+_FP_ID_RE = re.compile(r"\b[0-9a-fA-F]{8,}\b")
+_FP_NUM_RE = re.compile(r"\d+")
+
+
+def _normalize_failure_text(text: str) -> str:
+    """Strip the parts of an error message that change every run (paths,
+    generated ids, line numbers) so the same failure fingerprints the same."""
+    text = _FP_PATH_RE.sub("<path>", text)
+    text = _FP_ID_RE.sub("<id>", text)
+    text = _FP_NUM_RE.sub("<n>", text)
+    return text.strip()
+
+
+def failure_fingerprint(kind: str, error: str, verifier: str = "",
+                        task_id: str = "") -> str:
+    """
+    A stable identity for "the same failure happened again". Two attempts
+    that differ only by a temp path, a generated id or a line number are the
+    same failure - the strategy-change guard below treats them that way
+    instead of burning the attempt budget on a blind retry.
+    """
+    error_class = str(error).split(":", 1)[0].strip()
+    normalized = _normalize_failure_text(str(error))
+    payload = "|".join([kind or "", error_class, normalized,
+                        verifier or "", task_id or ""])
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
 def _in_seconds(seconds: float) -> str:
@@ -197,6 +232,21 @@ def _is_auth(reason: str) -> bool:
     return any(sign in lowered for sign in _AUTH_SIGNS)
 
 
+#: The policy engine's refusal prefix (toolsets/system.APPROVAL_PREFIX and
+#: capability_runtime): the capability was NOT run because a person has to
+#: say yes to this exact action first (PRD FR-060). It is a boundary, not a
+#: failure - the objective parks at WAITING_PERMISSION with the action it
+#: needs approved recorded on the run, and resumes when that approval is
+#: granted (`resume_after_approval`).
+_APPROVAL_SIGNS = ("approval_required", "approval required", "needs approval",
+                   "requires confirmation", "confirm_required")
+
+
+def _is_approval(reason: str) -> bool:
+    lowered = reason.lower()
+    return any(sign in lowered for sign in _APPROVAL_SIGNS)
+
+
 def _working_worker(result) -> bool:
     """Whether a capability submitted durable work that is not done yet."""
     return (isinstance(result, dict)
@@ -259,6 +309,8 @@ class FailureClassifier:
             from friday import provider_diagnostics as PD
 
             found = PD.diagnose(exc)
+            if found.kind == PD.CAPPED:
+                return O.FailureKind.CAPPED
             if found.worth_retrying:
                 return O.FailureKind.PROVIDER_DOWN
             return O.FailureKind.STRUCTURAL
@@ -581,13 +633,19 @@ class ContinuousTaskExecutor:
                             f"unresolvable reference {exc}")
             return
 
+        hint = (task.get("detail") or {}).get("strategy_hint")
+        if hint:
+            # The strategy change must reach the worker, not just the log: a
+            # hint nobody reads is a blind retry with better bookkeeping.
+            arguments = {**arguments, "strategy_hint": hint}
         try:
             result = await self.call_capability(task["capability"], arguments)
         except Exception as exc:
             kind = FailureClassifier.classify(exc)
-            max_attempts = int(task.get("max_attempts") or self.max_attempts)
+            max_attempts = self._max_attempts_for(task)
 
-            if kind == O.FailureKind.PROVIDER_DOWN:
+            found = None
+            if kind in (O.FailureKind.PROVIDER_DOWN, O.FailureKind.CAPPED):
                 # Said out loud, and in the terms that decide what to do next.
                 # "all LLMs are unavailable" in a log is a symptom; which
                 # provider, which code, and whether it is worth asking again
@@ -602,23 +660,36 @@ class ContinuousTaskExecutor:
                     found.finish_reason or "-", found.worth_retrying,
                     attempt, max_attempts)
 
-            if kind in O.RETRYABLE_KINDS and attempt < max_attempts:
+            if kind in O.RETRYABLE_KINDS:
                 # A provider that cannot answer is left alone for a while; an
                 # ordinary transient failure is picked up on the next round.
                 # Asking an overloaded model again immediately spends the
                 # attempt budget inside the first few seconds of an outage.
-                delay = (PROVIDER_BACKOFF_SECONDS
-                         if kind == O.FailureKind.PROVIDER_DOWN else 0.0)
-                self.store.update_objective_task(
-                    task_id, status=O.TaskStatus.WAITING,
-                    failure_kind=kind,
-                    evidence=f"{type(exc).__name__}: {exc}",
-                    next_wake=_in_seconds(delay),
-                )
+                if kind == O.FailureKind.CAPPED:
+                    # A cap is a known reset time, not an outage - wait until
+                    # it, not 0s (which would hammer the capped provider on
+                    # every poll for the rest of its window) and not the
+                    # generic PROVIDER_DOWN backoff (which is usually too
+                    # short to clear a quota reset).
+                    from datetime import datetime
+                    delay = 0.0
+                    if found is not None and found.reset_at:
+                        try:
+                            delay = max(0.0, (datetime.fromisoformat(
+                                found.reset_at) - datetime.now()
+                                ).total_seconds())
+                        except ValueError:
+                            pass
+                else:
+                    delay = (PROVIDER_BACKOFF_SECONDS
+                             if kind == O.FailureKind.PROVIDER_DOWN else 0.0)
                 # The run keeps a future, which is the invariant that matters:
                 # a provider outage may end this attempt and must never end
                 # the objective.
-                self._schedule_wake(run_id, seconds=max(delay, WAKE_SECONDS))
+                self._requeue_or_block(
+                    run_id, task_id, task, kind=kind,
+                    reason=f"{type(exc).__name__}: {exc}",
+                    attempt=attempt, max_attempts=max_attempts, delay=delay)
                 return
             self._fail_task(run_id, task_id, kind,
                             f"{type(exc).__name__}: {exc}")
@@ -647,22 +718,23 @@ class ContinuousTaskExecutor:
         refusal = _refused(result)
         if refusal is not None:
             kind, reason = refusal
-            max_attempts = int(task.get("max_attempts") or self.max_attempts)
-            if kind in O.RETRYABLE_KINDS and attempt < max_attempts:
+            max_attempts = self._max_attempts_for(task)
+            if kind in O.RETRYABLE_KINDS:
                 if kind == O.FailureKind.CONNECTIVITY:
                     reason = await self._diagnose_and_recover(
                         run_id, task_id, reason)
-                self.store.update_objective_task(
-                    task_id, status=O.TaskStatus.WAITING,
-                    failure_kind=kind, evidence=reason,
-                    next_wake=_in_seconds(0.0))
-                self._schedule_wake(run_id, seconds=WAKE_SECONDS)
+                self._requeue_or_block(
+                    run_id, task_id, task, kind=kind, reason=reason,
+                    attempt=attempt, max_attempts=max_attempts, delay=0.0)
                 return
             if kind == O.FailureKind.CONNECTIVITY:
                 reason = await self._diagnose_and_recover(
                     run_id, task_id, reason)
             if kind == O.FailureKind.USER_REQUIRED and _is_auth(reason):
                 self._park_for_auth(run_id, task_id, kind, reason)
+                return
+            if kind == O.FailureKind.USER_REQUIRED and _is_approval(reason):
+                self._park_for_approval(run_id, task_id, task, reason)
                 return
             self._fail_task(run_id, task_id, kind, reason)
             return
@@ -675,8 +747,62 @@ class ContinuousTaskExecutor:
         self.store.append_objective_event(
             run_id, O.EVENT_TASK_SUCCEEDED, task_id=task_id,
             detail={"attempts": attempt})
+        self._ledger_evidence(run_id, task_id, task, result, passed=True)
         self._cascade_skips(run_id)
         self._check_invariant(run_id)
+
+    def _ledger_evidence(self, run_id: str, task_id: str, task: dict,
+                         result, *, passed: bool, reason: str = "") -> None:
+        """FR-052: one evidence-ledger entry per consequential step -
+        expected (the capability + arguments the plan asked for), actual
+        (what came back), the verification method the capability
+        reported, and pass/fail. Never raises: the ledger is evidence
+        about the run, not a step of it."""
+        try:
+            verification = ""
+            if isinstance(result, dict):
+                v = result.get("verification") or {}
+                verification = str(v.get("method") or "") if isinstance(v, dict) else str(v)
+            expected = f"{task.get('capability', '?')}({json.dumps(task.get('arguments') or {}, default=str)[:300]})"
+            actual = (reason if reason else json.dumps(result, default=str))[:800]
+            self.store.append_objective_evidence(
+                run_id, task_id=task_id, expected=expected, actual=actual,
+                method=verification or ("capability_result" if passed else "failure"),
+                passed=passed)
+        except Exception:  # noqa: BLE001
+            logger.debug("evidence ledger write failed", exc_info=True)
+
+    def _park_for_approval(self, run_id: str, task_id: str, task: dict,
+                           reason: str) -> None:
+        """Permission boundary (FR-060): the exact action - operation,
+        target, parameters - is recorded as a PENDING approval on the run,
+        the task WAITS, the run parks at WAITING_PERMISSION and the boss is
+        told once. Nothing is retried: the same call without a yes is the
+        same refusal."""
+        arguments = dict(task.get("arguments") or {})
+        target = str(arguments.get("path") or arguments.get("url")
+                     or arguments.get("target") or arguments.get("name") or "")
+        self.store.update_objective_task(
+            task_id, status=O.TaskStatus.WAITING,
+            failure_kind=O.FailureKind.USER_REQUIRED,
+            evidence=reason, next_wake=None)
+        self.store.append_objective_approval(
+            run_id, operation=str(task.get("capability") or ""), target=target,
+            parameters=arguments, decision="PENDING", decided_by="")
+        self.store.touch_objective_run(
+            run_id, status=O.RunStatus.WAITING_PERMISSION, next_wake=None,
+            blocker=f"approval needed: {task.get('capability')} {target}".strip())
+        self.store.append_objective_event(
+            run_id, "approval.boundary", task_id=task_id,
+            detail={"capability": task.get("capability"), "target": target,
+                    "reason": reason[:300]})
+        self.store.create_objective_delivery(
+            run_id,
+            f"Boss, I need your go-ahead before I {_describe(task.get('capability'), target)}. "
+            "Say yes to that exact step and I'll continue from where I stopped.")
+        logger.info("objective.approval_boundary run_id=%s task=%s",
+                    run_id, task_id)
+        self.release(run_id)
 
     def _park_for_auth(self, run_id: str, task_id: str, kind: str,
                        reason: str) -> None:
@@ -811,6 +937,7 @@ class ContinuousTaskExecutor:
             self.store.append_objective_event(
                 run_id, O.EVENT_TASK_SUCCEEDED, task_id=task_id,
                 detail={"attempts": int(task.get("attempts") or 0)})
+            self._ledger_evidence(run_id, task_id, task, result, passed=True)
             self._cascade_skips(run_id)
             return
 
@@ -820,16 +947,96 @@ class ContinuousTaskExecutor:
             f"{json.dumps(result, default=str)[:500]}")
 
     def _fail_task(self, run_id: str, task_id: str, kind: str,
-                   reason: str) -> None:
-        self.store.update_objective_task(
-            task_id, status=O.TaskStatus.FAILED, failure_kind=kind,
-            evidence=reason, finished_at=now_iso(),
-        )
+                   reason: str, *, detail: dict | None = None) -> None:
+        fields = {"status": O.TaskStatus.FAILED, "failure_kind": kind,
+                  "evidence": reason, "finished_at": now_iso()}
+        if detail is not None:
+            fields["detail"] = detail
+        self.store.update_objective_task(task_id, **fields)
         self.store.append_objective_event(
             run_id, O.EVENT_TASK_FAILED, task_id=task_id,
             detail={"kind": kind, "reason": reason})
+        self._ledger_evidence(run_id, task_id,
+                              self.store.objective_task(task_id) or {},
+                              None, passed=False, reason=f"{kind}: {reason}")
         self._cascade_skips(run_id)
         self._check_invariant(run_id)
+
+    def _max_attempts_for(self, task: dict) -> int:
+        """`iteration_budget` (from a Hermes TaskBundle, carried through the
+        task's arguments) caps the task's attempt budget when set."""
+        max_attempts = int(task.get("max_attempts") or self.max_attempts)
+        budget = int((task.get("arguments") or {}).get("iteration_budget") or 0)
+        if budget > 0:
+            max_attempts = min(max_attempts, budget)
+        return max_attempts
+
+    def _requeue_or_block(self, run_id: str, task_id: str, task: dict, *,
+                          kind: str, reason: str, attempt: int,
+                          max_attempts: int, delay: float = 0.0,
+                          verifier: str = "") -> None:
+        """
+        A retryable failure only earns another attempt if it looks like a
+        new situation. The same fingerprint with no new hypothesis means the
+        next attempt would repeat the last one verbatim - instead of
+        spending the budget on that, the task changes strategy (re-plan,
+        different role, reduce scope), and after MAX_STRATEGY_CHANGES it
+        stops asking and goes BLOCKED with the evidence attached.
+        """
+        fingerprint = failure_fingerprint(kind, reason, verifier=verifier,
+                                          task_id=task_id)
+        detail = dict(task.get("detail") or {})
+        history = list(detail.get("fingerprint_history") or [])
+        prev_fingerprint = detail.get("last_fingerprint")
+        prev_hypothesis = detail.get("hypothesis")
+        hypothesis = ((task.get("arguments") or {}).get("hypothesis")
+                     or reason.split(":", 1)[0].strip())
+        strategy_changes = int(detail.get("strategy_changes") or 0)
+        same_failure = (fingerprint == prev_fingerprint
+                        and hypothesis == prev_hypothesis)
+
+        history.append(fingerprint)
+        detail["fingerprint_history"] = history
+        detail["last_fingerprint"] = fingerprint
+        detail["hypothesis"] = hypothesis
+
+        if same_failure:
+            strategy_changes += 1
+            detail["strategy_changes"] = strategy_changes
+            if strategy_changes > MAX_STRATEGY_CHANGES:
+                detail["strategy_hint"] = None
+                self.store.update_objective_task(
+                    task_id, status=O.TaskStatus.BLOCKED, failure_kind=kind,
+                    evidence=reason, finished_at=now_iso(), detail=detail)
+                self.store.append_objective_event(
+                    run_id, O.EVENT_TASK_BLOCKED, task_id=task_id,
+                    detail={"fingerprint": fingerprint, "reason": reason,
+                            "strategy_changes": strategy_changes})
+                self._cascade_skips(run_id)
+                self._check_invariant(run_id)
+                return
+            detail["strategy_hint"] = STRATEGY_HINTS[
+                min(strategy_changes - 1, len(STRATEGY_HINTS) - 1)]
+        else:
+            detail["strategy_changes"] = strategy_changes
+            detail["strategy_hint"] = None
+
+        if attempt >= max_attempts:
+            self._fail_task(run_id, task_id, kind, reason, detail=detail)
+            return
+
+        self.store.update_objective_task(
+            task_id, status=O.TaskStatus.WAITING, failure_kind=kind,
+            evidence=reason, next_wake=_in_seconds(delay), detail=detail)
+        # FR-054: a retried attempt is a recorded event, not something to
+        # infer from the attempt counter. The trace must show the failure,
+        # its kind, and that the engine chose to retry (or change strategy).
+        self.store.append_objective_event(
+            run_id, O.EVENT_TASK_RETRY, task_id=task_id,
+            detail={"kind": kind, "reason": reason, "attempt": attempt,
+                    "max_attempts": max_attempts, "delay_s": delay,
+                    "strategy_hint": detail.get("strategy_hint")})
+        self._schedule_wake(run_id, seconds=max(delay, WAKE_SECONDS))
 
     def _cascade_skips(self, run_id: str) -> None:
         """
@@ -848,7 +1055,8 @@ class ContinuousTaskExecutor:
                 dead = [
                     dep for dep in (task.get("dependencies") or [])
                     if by_id.get(dep, {}).get("status")
-                    in (O.TaskStatus.FAILED, O.TaskStatus.SKIPPED)
+                    in (O.TaskStatus.FAILED, O.TaskStatus.SKIPPED,
+                        O.TaskStatus.BLOCKED)
                 ]
                 if not dead:
                     continue
@@ -926,6 +1134,11 @@ class ContinuousTaskExecutor:
             self.store.append_objective_event(
                 run_id, event, task_id=group["task_id"],
                 detail={"composite": True, "tally": tally})
+            self._ledger_evidence(
+                run_id, group["task_id"], group, result,
+                passed=(status == O.TaskStatus.SUCCEEDED),
+                reason="" if status == O.TaskStatus.SUCCEEDED
+                else f"composite {status}: {json.dumps(tally, sort_keys=True)}")
             settled = True
         return settled
 
@@ -996,15 +1209,38 @@ class ContinuousTaskExecutor:
         skipped = [t for t in tasks if t["status"] == O.TaskStatus.SKIPPED]
         interrupted = [t for t in tasks
                        if t["status"] == O.TaskStatus.INTERRUPTED]
+        blocked = [t for t in tasks if t["status"] == O.TaskStatus.BLOCKED]
+        outcome = None
         if not tasks:
             status, event = O.RunStatus.COMPLETED, O.EVENT_RUN_COMPLETED
-        elif failed or skipped or interrupted:
+        elif failed or skipped or interrupted or blocked:
             if succeeded:
                 status, event = O.RunStatus.PARTIAL, O.EVENT_RUN_PARTIAL
             else:
                 status, event = O.RunStatus.FAILED, O.EVENT_RUN_FAILED
+            if blocked and not failed and not skipped and not interrupted:
+                # Every remaining task hit its strategy-change budget on the
+                # same fingerprint - the outcome names it instead of just
+                # reporting a generic PARTIAL/FAILED.
+                fp = (blocked[0].get("detail") or {}).get("last_fingerprint")
+                outcome = f"blocked:{fp}"
         else:
             status, event = O.RunStatus.COMPLETED, O.EVENT_RUN_COMPLETED
+
+        # FR-053 completion gate: COMPLETED is a verdict of the control
+        # plane over the evidence ledger, never a worker's word. Every
+        # succeeded top-level task must have a passing evidence entry;
+        # one without is a task somebody SAID finished, and the run is
+        # PARTIAL with the gap named. (Composite leaves are checked by
+        # their group.)
+        if status == O.RunStatus.COMPLETED and succeeded:
+            gate = self._completion_gate(run_id, succeeded)
+            if not gate["passed"]:
+                status, event = O.RunStatus.PARTIAL, O.EVENT_RUN_PARTIAL
+                outcome = f"evidence_gap:{','.join(gate['missing'][:3])}"
+                self.store.append_objective_event(
+                    run_id, "completion.gate_refused",
+                    detail={"missing_evidence": gate["missing"]})
 
         started = self.store.objective_run(run_id)
         duration = 0.0
@@ -1019,6 +1255,8 @@ class ContinuousTaskExecutor:
             "failed": len(failed),
             "skipped": len(skipped),
             "interrupted": len(interrupted),
+            "blocked": len(blocked),
+            "outcome": outcome,
             "attempts": sum(int(t.get("attempts") or 0) for t in tasks),
             "manual_continue_count": int(
                 (started or {}).get("manual_continue_count") or 0),
@@ -1047,12 +1285,30 @@ class ContinuousTaskExecutor:
         # Terminal state is not user delivery. Persist an exactly-once message
         # at the moment of truth; the live AgentSession drain owns rendering
         # it to the user without another model call.
-        self.store.create_objective_delivery(run_id, speak(self.store, run_id))
+        #
+        # PRD FR-042: a run fired by a SCHEDULE does not announce itself -
+        # the schedule evaluates its condition over this run's tasks and
+        # decides whether anything is said (the no-noise rule). The ledger
+        # still has everything; only the unconditional announcement is
+        # withheld.
+        run_row = self.store.objective_run(run_id) or {}
+        if not str(run_row.get("source_channel") or "").startswith("schedule:"):
+            self.store.create_objective_delivery(run_id, speak(self.store, run_id))
         logger.info("objective %s %s (%d/%d tasks)",
                     run_id, status, len(succeeded), len(tasks))
         self.release(run_id)
 
     # -- invariant & status -------------------------------------------------
+
+    def _completion_gate(self, run_id: str, succeeded: list[dict]) -> dict:
+        """FR-053: which succeeded tasks have passing evidence in the
+        objective's ledger. `missing` names the ones that do not."""
+        ledger = self.store.objective_ledger(run_id) or {}
+        backed = {e.get("task_id") for e in ledger.get("evidence", [])
+                  if e.get("passed")}
+        missing = [t["task_id"] for t in succeeded if t["task_id"] not in backed]
+        return {"passed": not missing, "missing": missing,
+                "evidence_entries": len(ledger.get("evidence", []))}
 
     def _check_invariant(self, run_id: str) -> None:
         run = self.store.objective_run(run_id)
@@ -1129,6 +1385,57 @@ class ContinuousTaskExecutor:
     def speak_summary(self, run_id: str) -> str:
         """Prose summary for speech: counts, failures, never raw JSON."""
         return speak(self.store, run_id)
+
+
+def _describe(capability, target: str) -> str:
+    verb = str(capability or "do that").replace("_", " ")
+    return f"{verb} {target}".strip()
+
+
+def resume_after_approval(store: Store, run_id: str, *, decided_by: str,
+                          operation: str = "", target: str = "") -> bool:
+    """A person approved the pending action on this run (FR-060: the
+    approval names the exact operation/target it is for). The WAITING
+    task goes READY with the approval marked on the run, the run goes
+    RUNNING, and the driver picks it up. Refuses when nothing is pending or
+    the named action does not match what was asked."""
+    run = store.objective_run(run_id)
+    if run is None or run["status"] != O.RunStatus.WAITING_PERMISSION:
+        return False
+    parked = [t for t in store.objective_tasks(run_id)
+              if t["status"] == O.TaskStatus.WAITING
+              and t.get("failure_kind") == O.FailureKind.USER_REQUIRED
+              and _is_approval(str(t.get("evidence") or ""))]
+    if not parked:
+        return False
+    task = parked[0]
+    arguments = dict(task.get("arguments") or {})
+    actual_target = str(arguments.get("path") or arguments.get("url")
+                        or arguments.get("target") or arguments.get("name") or "")
+    if operation and operation != task.get("capability"):
+        return False
+    if target and target != actual_target:
+        return False
+    store.append_objective_approval(
+        run_id, operation=str(task.get("capability") or ""), target=actual_target,
+        parameters=arguments, decision="APPROVED", decided_by=decided_by)
+    # The approval travels with the call: the capability runtime honours
+    # `confirmed=True` for one action bound to these exact arguments.
+    if not store.update_objective_task_if(
+            task["task_id"], expect=(O.TaskStatus.WAITING,),
+            status=O.TaskStatus.READY, failure_kind="",
+            arguments={**arguments, "approved_by": decided_by},
+            next_wake=_in_seconds(0.0)):
+        return False
+    store.touch_objective_run(run_id, status=O.RunStatus.RUNNING,
+                              next_wake=_in_seconds(0.0), blocker="")
+    store.append_objective_event(
+        run_id, "approval.granted", task_id=task["task_id"],
+        detail={"capability": task.get("capability"), "target": actual_target,
+                "decided_by": decided_by})
+    logger.info("objective.approval_granted run_id=%s task=%s by=%s",
+                run_id, task["task_id"], decided_by)
+    return True
 
 
 def resume_after_auth(store: Store, *, reason: str = "") -> list[str]:
@@ -1275,11 +1582,21 @@ class RunWatchdog:
             return False
         if run["status"] in O.RUN_WAITING_STATUSES:
             return False
-        if run.get("next_wake"):
+        lease_live = bool(run.get("lease_executor_id") and run.get("lease_expiry")
+                          and _fresh(run["lease_expiry"]))
+        if lease_live:
             return False
-        if run.get("lease_executor_id") and run.get("lease_expiry") \
-                and _fresh(run["lease_expiry"]):
+        if run.get("next_wake") and not _due(run["next_wake"]):
+            # A future wake belongs to the driver loop; not yet anyone's
+            # problem.
             return False
+        # No live lease and no future wake. A DUE wake with a dead lease is
+        # the crash case exactly (PRD FR-005/FR-014, measured by
+        # tests/test_chaos_restart.py): the process that scheduled the wake
+        # died before taking it, and in this process the driver loop only
+        # fires for runs it can lease - which it can, so either path
+        # recovers; but the watchdog must not defer to a wake nobody will
+        # take when the driver loop is not running.
         return True
 
     async def _reconcile(self, run_id: str) -> None:

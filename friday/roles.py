@@ -158,6 +158,32 @@ CATALOGUE: tuple[Role, ...] = (
 
 BY_ID = {role.id: role for role in CATALOGUE}
 
+#: Which project subagent (`.claude/agents/*.md`) executes each role. Roles
+#: without a dedicated domain agent fall back to the generic implementer.
+CLAUDE_AGENT_FOR_ROLE: dict[str, str] = {
+    "architect": "friday-tech-lead",
+    "minimal": "friday-tools-engineer",
+    "implementer": "friday-tools-engineer",
+    "reviewer": "friday-final-reviewer",
+    "security": "friday-security-engineer",
+    "tests": "friday-qa-engineer",
+    "tooling": "friday-tools-engineer",
+    "prompt": "friday-tools-engineer",
+    "voice": "friday-voice-engineer",
+    "ux": "friday-tools-engineer",
+    "data": "friday-fabric-engineer",
+}
+
+#: Used when a role has no explicit mapping above (defensive; every id in
+#: CATALOGUE is mapped today).
+_DEFAULT_CLAUDE_AGENT = "friday-tools-engineer"
+
+
+def claude_agent_for(role: "Role | str") -> str:
+    """Which `.claude/agents` subagent should execute this role."""
+    role_id = role.id if isinstance(role, Role) else role
+    return CLAUDE_AGENT_FOR_ROLE.get(role_id, _DEFAULT_CLAUDE_AGENT)
+
 #: Signals that a change is bigger than it sounds. Any of these lifts the
 #: estimate, because the expensive mistakes are the ones that looked small.
 _LARGE = re.compile(

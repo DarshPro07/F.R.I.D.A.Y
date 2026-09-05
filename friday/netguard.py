@@ -160,6 +160,36 @@ def resolve(host: str) -> list:
 # Validation
 # ---------------------------------------------------------------------------
 
+#: The one loopback origin the Golden Objective runner may register
+#: (host, port) while a case runs. Set through `evaluation_fixture()`
+#: only - a process-local context, not an environment variable - so a
+#: deployed Friday can never be talked into fetching its own control plane
+#: by anything short of code running inside it.
+_EVALUATION_FIXTURE: tuple[str, int] | None = None
+
+
+class evaluation_fixture:
+    """`with netguard.evaluation_fixture(port):` allows http://127.0.0.1:<port>
+    for the block's duration. Nested/other ports stay refused."""
+
+    def __init__(self, port: int, host: str = "127.0.0.1") -> None:
+        self.origin = (host.lower(), int(port))
+        self._prev: tuple[str, int] | None = None
+
+    def __enter__(self):
+        global _EVALUATION_FIXTURE
+        self._prev = _EVALUATION_FIXTURE
+        _EVALUATION_FIXTURE = self.origin
+        return self
+
+    def __exit__(self, *exc):
+        global _EVALUATION_FIXTURE
+        _EVALUATION_FIXTURE = self._prev
+
+
+def _is_evaluation_fixture(host: str, port) -> bool:
+    return _EVALUATION_FIXTURE is not None and (host, int(port or 0)) == _EVALUATION_FIXTURE
+
 
 def check(raw: str, *, allow_private: bool = False,
           require_resolution: bool = False) -> dict:
@@ -184,6 +214,15 @@ def check(raw: str, *, allow_private: bool = False,
     host = (parts.hostname or "").lower()
     if not host:
         raise UrlRefused("url has no host")
+    if _is_evaluation_fixture(host, parts.port):
+        # Exactly one loopback origin, registered in-process by the Golden
+        # Objective runner for the duration of one case (never from the
+        # environment, never a wildcard): the suite's pages are served
+        # locally so nothing leaves the machine. Everything else on
+        # loopback is still refused below.
+        return {"url": text, "host": host, "scheme": parts.scheme.lower(),
+                "addresses": ["127.0.0.1"], "verdict": PUBLIC,
+                "evaluation_fixture": True}
     if host in LOCAL_NAMES:
         raise UrlRefused(f"{host!r} is this machine")
     if parts.username or parts.password:

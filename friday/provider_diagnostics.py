@@ -28,6 +28,10 @@ into the four kinds that want different responses:
                   problems.
     SAFETY        blocked or recited. Not a hiccup, and not to be retried
                   into.
+    CAPPED        a usage limit, not an outage - 429/quota wording that
+                  names WHEN it clears. Worth retrying, but not on this
+                  provider until the reset, and not with a backoff timer
+                  guessed at when the message already said when.
 
 Nothing here logs a prompt, a key, or the bytes of a signature. Signature
 *presence* is a diagnostic; signature contents are not.
@@ -37,11 +41,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 TRANSIENT = "TRANSIENT_PROVIDER"
 STRUCTURAL = "STRUCTURAL_PROVIDER"
 NO_CONTENT = "NO_CONTENT_PROVIDER"
 SAFETY = "SAFETY_PROVIDER"
+CAPPED = "CAPPED_PROVIDER"
 UNKNOWN = "UNKNOWN_PROVIDER"
 
 #: Substrings that identify a request which cannot succeed as it is built.
@@ -62,8 +68,59 @@ _TRANSIENT_MARKERS = (
     "gateway", "connection", "temporarily",
 )
 
+#: A cap names itself - "rate limit", "quota" - which a plain 429/5xx does
+#: not. Checked before the generic transient markers so a capped message
+#: is not swallowed as an ordinary retry-immediately outage.
+_CAP_MARKERS = (
+    "rate limit", "quota", "usage limit", "limit reached",
+    "weekly", "daily", "5-hour", "too many requests",
+)
+
 _FINISH = re.compile(r"finish reason:\s*(?:FinishReason\.)?([A-Z_]+)",
                      re.IGNORECASE)
+
+_RESETS_AT = re.compile(r"resets? at\s*([0-9]{1,2}:[0-9]{2}\s*(?:am|pm)?)",
+                        re.IGNORECASE)
+_RETRY_AFTER = re.compile(r"retry after\s*(\d+)", re.IGNORECASE)
+
+
+def _cap_reset_at(haystack: str, *, now: datetime | None = None) -> str:
+    """
+    When a cap clears, as an ISO timestamp - the message's own wording when
+    it has one, else the ceiling the wording implies.
+
+    "5-hour" and "weekly" limits do not actually reset in one hour / one
+    day; those are floors that unblock the NEXT candidate quickly rather
+    than claims about the true reset. A provider that keeps saying CAPPED
+    just gets re-marked with a fresh floor each time - it never becomes a
+    silent permanent ban.
+    """
+    now = now or datetime.now()
+    match = _RETRY_AFTER.search(haystack)
+    if match:
+        return (now + timedelta(seconds=int(match.group(1)))).isoformat()
+    match = _RESETS_AT.search(haystack)
+    if match:
+        try:
+            clock = match.group(1).strip().lower()
+            fmt = "%I:%M%p" if clock.endswith(("am", "pm")) else "%H:%M"
+            parsed = datetime.strptime(clock.replace(" ", ""), fmt)
+            candidate = now.replace(hour=parsed.hour, minute=parsed.minute,
+                                    second=0, microsecond=0)
+            if candidate <= now:
+                candidate += timedelta(days=1)
+            return candidate.isoformat()
+        except ValueError:
+            pass
+    if "5-hour" in haystack:
+        return (now + timedelta(hours=1)).isoformat()
+    if "weekly" in haystack:
+        return (now + timedelta(hours=24)).isoformat()
+    if "daily" in haystack:
+        midnight = (now + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        return midnight.isoformat()
+    return (now + timedelta(minutes=30)).isoformat()
 
 
 @dataclass(frozen=True)
@@ -74,6 +131,7 @@ class Diagnosis:
     finish_reason: str = ""
     status_code: int | None = None
     detail: str = ""
+    reset_at: str = ""
 
     @property
     def worth_retrying(self) -> bool:
@@ -82,9 +140,10 @@ class Diagnosis:
 
         STRUCTURAL is the important False. A request missing a thought
         signature is missing it on the second attempt too, and the retry costs
-        a round trip, tokens, and a second of silence.
+        a round trip, tokens, and a second of silence. CAPPED is worth
+        retrying too - just not against this provider before `reset_at`.
         """
-        return self.kind in (TRANSIENT, NO_CONTENT)
+        return self.kind in (TRANSIENT, NO_CONTENT, CAPPED)
 
     def __str__(self) -> str:
         bits = [self.kind]
@@ -92,6 +151,8 @@ class Diagnosis:
             bits.append(f"finish_reason={self.finish_reason}")
         if self.status_code:
             bits.append(f"status={self.status_code}")
+        if self.reset_at:
+            bits.append(f"reset_at={self.reset_at}")
         if self.detail:
             bits.append(self.detail)
         return " ".join(bits)
@@ -123,6 +184,10 @@ def diagnose(error: object) -> Diagnosis:
                      "function call is missing" in haystack
                   else "the request is not valid as built")
         return Diagnosis(STRUCTURAL, finish, status, detail)
+
+    if any(marker in haystack for marker in _CAP_MARKERS):
+        return Diagnosis(CAPPED, finish, status, "a usage limit was reached",
+                         reset_at=_cap_reset_at(haystack))
 
     if isinstance(status, int) and (status == 429 or 500 <= status < 600):
         return Diagnosis(TRANSIENT, finish, status, "the service was unavailable")

@@ -102,6 +102,10 @@ def _row_view(row: dict) -> dict:
         "subject": row["subject"], "value": row["value"], "kind": row["kind"],
         "source": row["source"], "confidence": row["confidence"],
         "scope": row["scope"], "recorded_at": row["created_at"],
+        "memory_type": row.get("memory_type", "semantic"),
+        "project_scope": row.get("project_scope", ""),
+        "source_ref": row.get("source_ref", ""),
+        "supersedes_id": row.get("supersedes_id"),
         "spoken_form": spoken_form(row),
     }
 
@@ -109,9 +113,13 @@ def _row_view(row: dict) -> dict:
 def memory_remember(
     run: c.Run, subject: str, value: str, *, kind: str = FACT,
     source: str = "user stated it", confidence: float = 1.0,
-    scope: str = "user", engine: PolicyEngine = default_engine,
+    scope: str = "user", memory_type: str = "semantic", project: str = "",
+    source_ref: str = "", engine: PolicyEngine = default_engine,
 ) -> c.ActionResult:
-    """Store a durable memory, then read it back to prove it persisted."""
+    """Store a durable memory, then read it back to prove it persisted.
+    `memory_type` is the PRD class (working/session/project/user/semantic/
+    episodic/procedural/codebase/tool_state); `project` scopes the record
+    to one project; `source_ref` names where it came from."""
     tool_id = "memory.remember"
     blocked = _gate(run, tool_id, engine)
     if blocked:
@@ -129,12 +137,16 @@ def memory_remember(
         row_id = store().remember(
             subject.strip(), value.strip(), kind=kind, source=source,
             confidence=confidence, scope=scope, run_id=run.run_id,
+            memory_type=memory_type or "semantic",
+            project_scope=(project or "").strip(),
+            source_ref=(source_ref or "").strip(),
         )
     except ValueError as exc:
         return run.record(c.failed(started, str(exc)))
 
     # A write that did not raise is not evidence the row is durable.
     persisted = store().recall(subject.strip())
+    persisted = [r for r in persisted if r.get("id") == row_id] or persisted
     if not persisted or persisted[0]["value"] != value.strip():
         return run.record(c.partial(
             started, "stored but could not read the memory back",
@@ -148,10 +160,53 @@ def memory_remember(
         verification=c.Verification(
             method="memory_readback",
             evidence=f"row {row_id}: {subject!r} = {value!r} "
-                     f"[{kind}, source={source!r}, confidence={confidence}] "
+                     f"[{kind}, {memory_type}, project={project!r}, "
+                     f"source={source!r}, confidence={confidence}] "
                      f"read back from {store().path}",
         ),
     ))
+
+
+def memory_provenance(run: c.Run, memory_id: int, *,
+                      engine: PolicyEngine = default_engine) -> c.ActionResult:
+    """FR-018: where a remembered fact came from and whether it is current -
+    source, source reference, confidence, what it replaced, what replaced
+    it, and any open contradiction on its subject."""
+    tool_id = "memory.provenance"
+    blocked = _gate(run, tool_id, engine)
+    if blocked:
+        return blocked
+    started = c.started(run.run_id, tool_id)
+    try:
+        found = store().memory_provenance(int(memory_id))
+    except (TypeError, ValueError):
+        return run.record(c.failed(started, f"memory_id must be an integer, got {memory_id!r}"))
+    if found is None:
+        return run.record(c.failed(started, f"no memory with id {memory_id}"))
+    return run.record(started.finish(status=c.OBSERVED, output=_scoped(found)))
+
+
+def memory_export(run: c.Run, project: str = "", *, include_superseded: bool = False,
+                  engine: PolicyEngine = default_engine) -> c.ActionResult:
+    """FR-019/FR-066: the owner's durable memory as plain records. Scoped to
+    a project when one is named; superseded history on request."""
+    tool_id = "memory.export"
+    blocked = _gate(run, tool_id, engine)
+    if blocked:
+        return blocked
+    started = c.started(run.run_id, tool_id)
+    rows = store().export_memories(
+        project_scope=(project or "").strip() or None,
+        include_superseded=bool(include_superseded))
+    return run.record(started.finish(status=c.OBSERVED, output=_scoped({
+        "count": len(rows), "project": project or "",
+        "include_superseded": bool(include_superseded),
+        "memories": [{k: r.get(k) for k in (
+            "id", "subject", "value", "kind", "memory_type", "scope", "project_scope",
+            "source", "source_ref", "confidence", "importance", "created_at",
+            "last_confirmed", "superseded", "supersedes_id", "retention_policy")}
+            for r in rows],
+    })))
 
 
 def memory_recall(

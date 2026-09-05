@@ -260,10 +260,6 @@ KNOWN: dict[str, tuple[str, str]] = {
         FUTURE,
         'history-aware provider fallback stream; the default resilient LLM does not select this variant yet',
     ),
-    'VoiceInputGate': (
-        FUTURE,
-        'detaches audio input when every mic publication is muted; built but not attached in the session entrypoint',
-    ),
     'DestinationVerification': (
         FUTURE,
         'result of verify_world_monitor_destination; the verifier is built but not wired to the browser-open path',

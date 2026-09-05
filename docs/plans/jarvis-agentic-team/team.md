@@ -18,6 +18,10 @@ subagents installed globally from `third_party/upstream/awesome-claude-code-suba
 | `friday-qa-engineer` | sonnet | qa-engineer, isolation: worktree | `tests/` (e2e/integration) | 30 | medium | feature ready for end-to-end verification; MUST BE USED before "done" |
 | `friday-security-engineer` | sonnet | security-engineer | read-mostly, edits only to apply fixes | 20 | high | auth, secrets, credentials, screen/PC-control change |
 | `friday-monitor` | haiku | monitor, background | watches `.claude/agent-activity.log` + pytest gate | 5 | low | background pass over the 4-chunk pytest gate |
+| `friday-codebase-researcher` | sonnet | researcher, read-only | reviews, doesn't own files | 15 | medium | "where/how does X work" before a design or dispatch decision (S6) |
+| `friday-debugger` | sonnet | debugger | edits only `tests/` or a named scratch | 20 | high | root-cause a failing test or crash before handing off a fix (S6) |
+| `friday-performance-reviewer` | sonnet | reviewer, read-only | reviews, doesn't own files | 15 | medium | latency/memory read on a hot-path diff before it ships (S6) |
+| `friday-final-reviewer` | opus | reviewer, read-only | reviews, doesn't own files; never self-approves | 15 | high | independent verification gate before any multi-file change is done (S6) |
 
 Every `friday-*` agent carries `disallowedTools: mcp__*`; the 6 builder roles
 (voice/tools/fabric/objective engineers, qa, security) also carry

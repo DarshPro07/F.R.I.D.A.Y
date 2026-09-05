@@ -92,6 +92,20 @@ class TaskBundle:
     context: tuple[str, ...] = ()
     acceptance: tuple[str, ...] = ()
     constraints: tuple[str, ...] = ()
+    #: Paths the agent may touch. Also becomes the bridge's ALLOWED SCOPE.
+    allowed_paths: tuple[str, ...] = ()
+    #: Commands/description of how "done" gets checked afterwards.
+    verification: tuple[str, ...] = ()
+    #: Who is doing this (from the compiled team), for the worker prompt.
+    role: str = ""
+    #: How many attempts this task gets before it escalates. 0 = unset.
+    iteration_budget: int = 0
+    #: The repo-map summary, distinct from `context` (which also carries
+    #: team instructions and assumptions for the local prompt).
+    known_facts: tuple[str, ...] = ()
+    #: What the brief proceeds on without confirmation, kept separate from
+    #: `context` so the bridge can render its own ASSUMPTIONS section.
+    assumptions: tuple[str, ...] = ()
     isolate: bool = True          # a git worktree, not the live checkout
 
     def worktree_name(self) -> str:
@@ -119,9 +133,16 @@ class TaskBundle:
         if self.context:
             parts.append("\n# What ADA already knows\n"
                          + "\n".join(f"- {line}" for line in self.context))
-        if self.constraints:
+        if self.role:
+            from friday.roles import claude_agent_for
+            parts.append(f"\n# Role\nUse the `{claude_agent_for(self.role)}` "
+                         f"subagent for this work.")
+        constraints = list(self.constraints)
+        if self.iteration_budget > 0:
+            constraints.append(f"ITERATION BUDGET: {self.iteration_budget} attempts")
+        if constraints:
             parts.append("\n# Constraints\n"
-                         + "\n".join(f"- {line}" for line in self.constraints))
+                         + "\n".join(f"- {line}" for line in constraints))
         if self.acceptance:
             parts.append("\n# Done means\n"
                          + "\n".join(f"- {line}" for line in self.acceptance))
@@ -231,10 +252,25 @@ class ClaudeCodeExecutor:
             return run_ctx.record(c.failed(
                 started, "the claude CLI is not on PATH; nothing was run"))
 
+        # FR-013 / FR-056: same admission gate as the Hermes worker. A
+        # secondary worker under pressure is refused with the measured
+        # reason, recorded as a failed action - never silently started.
+        from friday import governor as G
+        decision = G.governor().admit(G.WORKER, label=f"claude:{bundle.goal[:40]}",
+                                      objective_id=bundle.run_id)
+        if not decision.admitted:
+            return run_ctx.record(c.failed(
+                started, f"governor {decision.decision}: {decision.reason}; "
+                         f"nothing was run"))
+        lease = decision.lease
         # Recorded before anything starts, so a run that dies during startup
         # still leaves something to recover. DuplicateRun is deliberately not
         # caught: one run means at most one process, and the caller decides.
-        self.runs.open(bundle)
+        try:
+            self.runs.open(bundle)
+        except BaseException:
+            G.governor().release(lease)
+            raise
 
         launch = self.launch_for(bundle, profile=profile, resume=resume)
         self.sandbox = self._sandbox_for(bundle)
@@ -263,17 +299,20 @@ class ClaudeCodeExecutor:
             result = run_ctx.record(c.failed(started, f"{exc}; the run was killed"))
             self.runs.close(bundle.run_id, result)
             self._close_sandbox()
+            G.governor().release(lease)
             return result
         except Exception as exc:
             result = run_ctx.record(c.failed(
                 started, f"the executor failed: {type(exc).__name__}: {exc}"))
             self.runs.close(bundle.run_id, result)
             self._close_sandbox()
+            G.governor().release(lease)
             return result
 
         result = run_ctx.record(self.finish(bundle, started, final))
         self.runs.close(bundle.run_id, result)
         self._close_sandbox()
+        G.governor().release(lease)
         return result
 
     def _sandbox_for(self, bundle: TaskBundle):

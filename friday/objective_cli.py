@@ -52,7 +52,7 @@ def _db() -> Store:
 # The capability port: capability id -> (run, **arguments) -> ActionResult
 # ---------------------------------------------------------------------------
 
-def build_dispatch():
+def build_dispatch(*, engine: PolicyEngine | None = None):
     """The same dispatch an engine uses: capability ids to implementations.
 
     Synchronous and async toolset functions are both handled; the executor
@@ -69,7 +69,7 @@ def build_dispatch():
     """
     from friday import capability_runtime
 
-    runtime = capability_runtime.CapabilityRuntime()
+    runtime = capability_runtime.CapabilityRuntime(engine=engine)
     control = OT.capability_port()
 
     async def dispatch(capability_id: str, arguments: dict) -> dict:

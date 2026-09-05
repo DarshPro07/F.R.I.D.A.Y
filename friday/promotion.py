@@ -56,6 +56,17 @@ NOT_APPROVED = "NOT_APPROVED"
 
 NOTHING_TO_PROMOTE = "NOTHING_TO_PROMOTE"
 
+#: FR-012: the worker that implemented a consequential change is not the
+#: sole authority certifying it. A review by a different attribution is
+#: required past this many changed files; a DISPUTED review refuses.
+REVIEW_DISPUTED = "REVIEW_DISPUTED"
+
+NOT_INDEPENDENTLY_REVIEWED = "NOT_INDEPENDENTLY_REVIEWED"
+
+#: Changes touching more files than this are consequential enough to need
+#: the second authority. Below it the objective verifier alone suffices.
+CONSEQUENTIAL_FILES = 3
+
 #: Files a development run may never bring back, whatever it was asked to do.
 #: A run that edited its own permissions is not a run whose result can be
 #: trusted to say whether it should have been allowed to.
@@ -284,13 +295,20 @@ def secrets_in(workspace: str | Path, changed, *,
 
 def decide(workspace: str | Path, changed, *, attempt=None,
            allowed_paths: tuple[str, ...] = (), base_commit: str = "",
-           approved: bool = False) -> Decision:
+           approved: bool = False, review=None,
+           consequential: bool | None = None) -> Decision:
     """
     The gate. Default no.
 
     `attempt` is a `friday.evaluation.Attempt` - the objective verdict on
     whether the work works. It is checked first because everything after it
     is wasted if the tests failed.
+
+    `review` is a `friday.adversarial.ReviewEvidence` from a reviewer that
+    is not the implementing worker (FR-012). A consequential change - more
+    than `CONSEQUENTIAL_FILES` files, or `consequential=True` - is refused
+    without one, and refused outright when the review is DISPUTED. A
+    review by the implementer itself does not count.
     """
     changed = tuple(changed or ())
     decision = Decision(allowed=True, changed=changed)
@@ -316,6 +334,38 @@ def decide(workspace: str | Path, changed, *, attempt=None,
         return decision.note("verified", False, attempt.detail[:200]).refuse(
             NOT_VERIFIED, f"the verifier failed with exit {attempt.exit_code}")
     decision.note("verified", True, attempt.detail[-200:] if attempt.detail else "")
+
+    # 1b. FR-012: a second, independent authority for consequential changes.
+    needs_review = (consequential if consequential is not None
+                    else len(changed) > CONSEQUENTIAL_FILES)
+    if review is not None and not getattr(review, "independent", True):
+        decision.note("independent_review", False,
+                      f"reviewed by the implementer ({review.reviewed_by})")
+        review = None
+    if review is not None:
+        from friday import adversarial as A
+        if review.verdict == A.DISPUTED:
+            return decision.note("independent_review", False,
+                                 "; ".join(review.findings)[:300]).refuse(
+                REVIEW_DISPUTED,
+                f"the independent reviewer disputed the change: "
+                f"{'; '.join(review.findings[:3]) or 'no findings listed'}")
+        if review.verdict == A.INCONCLUSIVE and needs_review:
+            return decision.note("independent_review", False,
+                                 review.error or "inconclusive").refuse(
+                NOT_INDEPENDENTLY_REVIEWED,
+                "the independent review was inconclusive and the change is "
+                "consequential")
+        decision.note("independent_review", review.verdict == A.CONFIRMED,
+                      f"{review.verdict} by {review.reviewed_by}")
+    elif needs_review:
+        return decision.note("independent_review", False).refuse(
+            NOT_INDEPENDENTLY_REVIEWED,
+            f"{len(changed)} file(s) changed and no reviewer other than the "
+            f"implementer has looked; the implementing worker is not the sole "
+            f"authority")
+    else:
+        decision.note("independent_review", True, "not required at this size")
 
     # 2. Did it stay where it was told?
     forbidden = touches_forbidden(changed)

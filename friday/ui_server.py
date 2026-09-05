@@ -52,6 +52,14 @@ MCP_PORT = int(os.getenv("ADA_MCP_PORT", "8000"))
 _CONN_CACHE = {"at": 0.0, "value": None}
 _CONN_TTL = 10.0
 _HELPERS_CACHE = {"at": 0.0, "value": None}
+_WORK_CACHE = {"at": 0.0, "value": None}
+_WORK_TTL = 5.0
+#: The browser path's digest clock - the same cadence the room keeps in
+#: `speak_progress_digests`. 2026-09-04 21:18: with last_digest_at=0.0 the
+#: digest re-composed every poll and the elapsed seconds inside it made a
+#: "new" line every five seconds, so the transcript read the same step
+#: twenty times. One digest at delegation, then one every three minutes.
+_WORK_DIGEST = {"last_at": 0.0}
 _HELPERS_TTL = 10.0
 _GBRAIN_TTL = 60.0          # available() spawns bun; once a minute is plenty
 _GBRAIN_CACHE = {"at": 0.0, "value": None}
@@ -914,19 +922,80 @@ async def api_harness(request):
                          "selection": {h: H.select(h) for h in hints}})
 
 
+def _remote_channel(request) -> str:
+    """Which authenticated channel a request came through. The session
+    gate (face / PIN) already refused anything without a valid session;
+    this only names the channel for the ledger."""
+    header = (request.headers.get("x-friday-channel") or "").strip().lower()
+    if header and header.replace("-", "").replace("_", "").isalnum():
+        return header[:32]
+    return "web"
+
+
 async def api_objective(request):
-    # Honest capture: the read-only UI never dispatches side-effectful work.
-    # Live objective -> plan -> execute is the gates + harness workstream.
+    """FR-040 (PRD v3.1): a remote objective. It goes through the SAME
+    door as a spoken one - the session gate is the identity, the
+    objective toolset compiles it into the same ledger with the same
+    policy engine, and the running control plane's driver tick picks it
+    up. The only difference is `source_channel=remote:<channel>` on the
+    run, so continuity/trace say where it came from."""
+    from friday import contracts as c
+    from friday.toolsets import objectives as OT
     try:
         data = await request.json()
     except Exception:  # noqa: BLE001
         data = {}
     text = (data.get("objective") or "").strip()
-    return JSONResponse({
-        "captured": bool(text), "objective": text, "status": "captured",
-        "note": "Jarvis will plan and dispatch this once the gate cards and the "
-                "browser/PC harness are wired. This UI is read-only by design; "
-                "it does not run side-effectful work yet."})
+    if not text:
+        return JSONResponse({"ok": False, "error": "objective is required"}, status_code=400)
+    channel = _remote_channel(request)
+
+    def start():
+        run = c.Run.create(f"remote objective ({channel})", capability="objectives")
+        result = OT.objective_start(run, text, tasks=data.get("tasks") or "",
+                                    replace=bool(data.get("replace")))
+        payload = result.to_dict()
+        run_id = (result.output or {}).get("run_id") if result.status == c.SUCCEEDED else None
+        if run_id:
+            OT.store().touch_objective_run(run_id, source_channel=f"remote:{channel}")
+            OT.store().append_objective_event(run_id, "remote.accepted",
+                                              detail={"channel": channel})
+        return payload, run_id
+
+    payload, run_id = await run_in_threadpool(start)
+    access.log({"kind": "remote_objective", "channel": channel,
+                "run_id": run_id, "accepted": bool(run_id)})
+    return JSONResponse({"ok": bool(run_id), "run_id": run_id, "channel": channel,
+                         "status": payload.get("status"), "error": payload.get("error"),
+                         "output": payload.get("output")},
+                        status_code=200 if run_id else 409)
+
+
+async def api_objective_status(request):
+    """FR-040: the remote side reads the same ledger back."""
+    from friday import contracts as c
+    from friday.toolsets import objectives as OT
+    run_id = (request.query_params.get("run_id") or "").strip()
+
+    def read():
+        run = c.Run.create("remote objective status", capability="objectives")
+        return OT.objective_status(run, run_id).to_dict()
+    return JSONResponse(await run_in_threadpool(read))
+
+
+async def api_interrupted(request):
+    """FR-039: the page tells us how much of a reply it actually played
+    before the boss cut it off; the stored turn becomes exactly that."""
+    from friday import voice_brain as V
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        data = {}
+    message_id = data.get("message_id")
+    if message_id is None:
+        return JSONResponse({"ok": False, "reason": "message_id required"}, status_code=400)
+    ok = await run_in_threadpool(V.mark_interrupted, message_id, data.get("heard") or "")
+    return JSONResponse({"ok": bool(ok)})
 
 
 async def api_ask(request):
@@ -965,6 +1034,40 @@ async def api_hermes_progress(request):
                             "line": "", "seq": 0, "error": str(exc)[:120]})
         return out
     return JSONResponse({"runs": await run_in_threadpool(_read)})
+
+
+def _probe_work():
+    from friday import progress_digest as pd
+    from friday.tools.hermes_control import supervisor
+    sup = supervisor()
+    runs = pd.gather(sup)
+    digest = pd.compose(runs, now=time.time(),
+                        last_digest_at=_WORK_DIGEST["last_at"])
+    if digest.digest:
+        # Advance only when a digest fired (next_at on a quiet poll is a
+        # due time, not a firing time - the room-path lesson, S9).
+        _WORK_DIGEST["last_at"] = digest.next_at
+    return {
+        "runs": [{
+            "id": r.get("work_run_id"), "model": r.get("model"),
+            "status": r.get("status"), "latest": r.get("line") or "",
+            "route_reason": r.get("route_reason"),
+        } for r in runs],
+        # ponytail: no persisted objective store yet -- api_objective is
+        # capture-only, so there is nothing durable to list here.
+        "objectives": [],
+        "digest": digest.digest or "",
+    }
+
+
+async def api_work(request):
+    now = time.time()
+    if _WORK_CACHE["value"] is not None and \
+            now - _WORK_CACHE["at"] < _WORK_TTL:
+        return JSONResponse(_WORK_CACHE["value"])
+    value = await run_in_threadpool(_probe_work)
+    _WORK_CACHE.update(at=now, value=value)
+    return JSONResponse(value)
 
 
 async def api_browser_open(request):
@@ -1353,7 +1456,8 @@ async def api_stt(ws):
             async for raw in dg:
                 try:
                     data = json.loads(raw)
-                except Exception:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("stt: dropped a non-JSON frame: %s", exc)
                     continue
                 alts = (data.get("channel") or {}).get("alternatives") or []
                 text = (alts[0].get("transcript") if alts else "") or ""
@@ -1420,8 +1524,11 @@ def create_app():
         Route("/api/deck/run", api_deck_run, methods=["POST"]),
         Route("/api/harness", api_harness),
         Route("/api/objective", api_objective, methods=["POST"]),
+        Route("/api/objective/status", api_objective_status),
         Route("/api/ask", api_ask, methods=["POST"]),
+        Route("/api/interrupted", api_interrupted, methods=["POST"]),
         Route("/api/hermes/progress", api_hermes_progress),
+        Route("/api/work", api_work),
         WebSocketRoute("/api/stt", api_stt),
         Route("/api/browser/open", api_browser_open, methods=["POST"]),
         Route("/api/browser/act", api_browser_act, methods=["POST"]),

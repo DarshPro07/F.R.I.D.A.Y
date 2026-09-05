@@ -32,10 +32,14 @@ TASK_SUCCEEDED = "SUCCEEDED"
 TASK_FAILED = "FAILED"
 TASK_SKIPPED = "SKIPPED"
 TASK_INTERRUPTED = "INTERRUPTED"
+#: Same failure fingerprint kept recurring past MAX_STRATEGY_CHANGES with no
+#: new evidence - retrying further is a loop, not progress.
+TASK_BLOCKED = "BLOCKED"
 
 TASK_STATUSES = (TASK_QUEUED, TASK_READY, TASK_RUNNING, TASK_WAITING,
-                 TASK_SUCCEEDED, TASK_FAILED, TASK_SKIPPED, TASK_INTERRUPTED)
-TASK_TERMINAL = (TASK_SUCCEEDED, TASK_FAILED, TASK_SKIPPED)
+                 TASK_SUCCEEDED, TASK_FAILED, TASK_SKIPPED, TASK_INTERRUPTED,
+                 TASK_BLOCKED)
+TASK_TERMINAL = (TASK_SUCCEEDED, TASK_FAILED, TASK_SKIPPED, TASK_BLOCKED)
 
 
 class TaskStatus:
@@ -47,6 +51,7 @@ class TaskStatus:
     FAILED = TASK_FAILED
     SKIPPED = TASK_SKIPPED
     INTERRUPTED = TASK_INTERRUPTED
+    BLOCKED = TASK_BLOCKED
 
 
 RUN_RUNNING = "RUNNING"
@@ -92,14 +97,19 @@ FAILURE_INVALID_ARGUMENT = "INVALID_ARGUMENT"
 FAILURE_NOT_CONFIGURED = "NOT_CONFIGURED"
 FAILURE_USER_REQUIRED = "USER_REQUIRED"
 FAILURE_CONNECTIVITY = "CONNECTIVITY"
+#: A usage cap, not an outage - the provider named WHEN it clears, so a
+#: retry belongs on the next candidate immediately, not behind
+#: PROVIDER_BACKOFF_SECONDS on the same provider.
+FAILURE_CAPPED = "CAPPED"
 
 FAILURE_KINDS = (FAILURE_TRANSIENT, FAILURE_PROVIDER_DOWN, FAILURE_STRUCTURAL,
                  FAILURE_CAPABILITY_MISSING, FAILURE_POLICY_BLOCK,
                  FAILURE_INVALID_ARGUMENT, FAILURE_NOT_CONFIGURED,
-                 FAILURE_USER_REQUIRED, FAILURE_CONNECTIVITY)
+                 FAILURE_USER_REQUIRED, FAILURE_CONNECTIVITY, FAILURE_CAPPED)
 
 #: The only kinds that may be retried, and only a bounded number of times.
-RETRYABLE_KINDS = (FAILURE_TRANSIENT, FAILURE_PROVIDER_DOWN, FAILURE_CONNECTIVITY)
+RETRYABLE_KINDS = (FAILURE_TRANSIENT, FAILURE_PROVIDER_DOWN,
+                   FAILURE_CONNECTIVITY, FAILURE_CAPPED)
 
 
 class FailureKind:
@@ -112,6 +122,7 @@ class FailureKind:
     NOT_CONFIGURED = FAILURE_NOT_CONFIGURED
     USER_REQUIRED = FAILURE_USER_REQUIRED
     CONNECTIVITY = FAILURE_CONNECTIVITY
+    CAPPED = FAILURE_CAPPED
 
 
 #: Events the engine appends to the continuation trace.
@@ -120,6 +131,8 @@ EVENT_RUN_STARTED = "run.started"
 EVENT_TASK_STARTED = "task.started"
 EVENT_TASK_SUCCEEDED = "task.succeeded"
 EVENT_TASK_FAILED = "task.failed"
+EVENT_TASK_RETRY = "task.retry"          # FR-054: a retried attempt is recorded
+EVENT_TASK_BLOCKED = "task.blocked"
 EVENT_TASK_SKIPPED = "task.skipped"
 EVENT_TASK_INTERRUPTED = "task.interrupted"
 EVENT_WORKER_WAITING = "worker.waiting"
@@ -434,8 +447,30 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
         run_id, request=request, objective_summary=objective_summary,
         status=RUN_RUNNING, next_wake=stamp,
     )
+    # PRD FR-001/FR-002: the objective is classified once, at admission,
+    # and the class, risk tier, budgets and required capabilities are
+    # durable columns - inspectable, resumable, traceable (FR-001
+    # acceptance). Deterministic: no model call decides this.
+    try:
+        from friday import task_class as TC
+        from friday.model_gateway import budget_for
+        klass = TC.classify(request, acceptance=len(tasks))
+        budget = budget_for(klass.task_class)
+        store.touch_objective_run(
+            run_id, task_class=klass.task_class,
+            risk_tier=TC.risk_tier_for(klass.task_class),
+            required_capabilities=[t.capability for t in compiled],
+            retry_budget=max(int(t.max_attempts) for t in compiled) if compiled else 3,
+            cost_budget_tokens=budget.objective_ceiling,
+            time_budget_s={"TRIVIAL": 60, "SIMPLE": 300, "STANDARD": 1800,
+                           "COMPLEX": 7200, "LONG_RUNNING": 0,
+                           "CRITICAL": 3600}[klass.task_class])
+        classification = klass.to_dict()
+    except Exception as exc:  # noqa: BLE001 - classification must never block admission
+        classification = {"error": str(exc)}
     store.append_objective_event(run_id, EVENT_RUN_CREATED,
-                                 detail={"task_count": len(compiled)})
+                                 detail={"task_count": len(compiled),
+                                         "classification": classification})
     for task_id, task in zip(stored_ids, compiled):
         dependencies = [translate[dep] for dep in task.dependencies]
         arguments = _retarget(task.arguments, translate)

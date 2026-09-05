@@ -134,6 +134,16 @@ def bridge_list_files(path: str = ".") -> str:
     return "\n".join(shown) + suffix
 
 
+#: Dependency and build trees are never what a task is about, and the
+#: listing is recursive: from "." a search read every file under .venv,
+#: node_modules and third_party (2026-09-04 21:18: one search ran past
+#: three minutes with the machine at 98% memory). Skipped, and capped.
+_SEARCH_SKIP = frozenset({".git", ".venv", ".venv-verify", "node_modules",
+                          "third_party", "__pycache__", "site-packages",
+                          "dist", ".playwright", ".pytest_cache"})
+_SEARCH_MAX_FILES = 4000
+
+
 @mcp.tool()
 def bridge_search_files(pattern: str, path: str = ".",
                         limit: int = 50) -> str:
@@ -150,8 +160,16 @@ def bridge_search_files(pattern: str, path: str = ".",
     except execution.ExecutionError as exc:
         return f"{REFUSED}: {exc}"
     hits: list[str] = []
+    scanned = 0
     for name in names:
         if len(hits) >= limit:
+            break
+        if set(name.replace("\\", "/").split("/")[:-1]) & _SEARCH_SKIP:
+            continue
+        scanned += 1
+        if scanned > _SEARCH_MAX_FILES:
+            hits.append(f"... stopped after {_SEARCH_MAX_FILES} files; "
+                        f"narrow `path` to search further")
             break
         try:
             text = env.read(name, limit=2_000_000)

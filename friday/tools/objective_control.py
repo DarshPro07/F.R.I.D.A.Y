@@ -103,3 +103,13 @@ def register(mcp):
         """The event ledger of a run: every transition, task and reason."""
         return _execute("objective history", O.objective_history, run_id,
                         limit=limit)
+
+    @mcp.tool()
+    def objective_trace(run_id: str = "", as_text: bool = False) -> dict:
+        """One trace that reconstructs what happened to an objective (FR-054):
+        state transitions, tool calls, workers, model calls, policy
+        decisions, latency, retries, errors and verification outcomes -
+        from durable state, never from model thoughts."""
+        from friday.toolsets import model_gateway as MG
+        return _execute("objective trace", MG.objective_trace, run_id,
+                        as_text=as_text)

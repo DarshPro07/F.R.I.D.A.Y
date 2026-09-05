@@ -41,6 +41,7 @@ import ast
 import functools
 import importlib
 import inspect
+import json
 import pathlib
 import pkgutil
 from dataclasses import dataclass
@@ -359,6 +360,19 @@ class CapabilityRuntime:
 
         # Same policy, same table, same decisions as conversation. A durable
         # run is not a licence.
+        #
+        # One exception, bound to one action (PRD FR-060): when the
+        # objective parked at a permission boundary and a person approved
+        # THIS capability with THESE arguments (`continuous.resume_after_
+        # approval` writes an APPROVED record on the run and marks the
+        # arguments), the ASK is answered for this call only. CONFIRM /
+        # DENY tiers are untouched - they are not ASKs.
+        approved_by = str(arguments.pop("approved_by", "") or "")
+        approved_run = ""
+        approved = False
+        if approved_by:
+            approved_run = self._approval_on_record(capability_id, arguments, approved_by)
+            approved = bool(approved_run)
         for tool_id in capability.policy_tool_ids():
             refusal = policy_module.provenance_verdict(tool_id, run.provenance)
             if refusal is not None:
@@ -366,11 +380,19 @@ class CapabilityRuntime:
                     status=c.FAILED, error=f"BLOCKED: {refusal.reason}"))
             if tool_id in policy_module.TOOL_CATEGORIES:
                 verdict = self.engine.decide(tool_id)
-                if not verdict.allowed:
+                if not verdict.allowed and not (
+                        approved and verdict.decision == policy_module.ASK):
                     return run.record(started.finish(
                         status=c.CANCELLED,
                         error=f"APPROVAL_REQUIRED: {verdict.reason} "
                               f"[{verdict.decision}]"))
+                if not verdict.allowed and approved:
+                    from friday import trust as T
+                    T.audit().record(
+                        actor=approved_by, action=tool_id, tier=T.tier_of_tool(tool_id),
+                        decision="APPROVED_ONCE", target=capability_id,
+                        objective_id=approved_run,
+                        detail={"arguments": arguments})
                 break
 
         function = resolution.load()
@@ -395,6 +417,32 @@ class CapabilityRuntime:
 
             return awaited()
         return self._bind(result, run, started, capability_id)
+
+    def _approval_on_record(self, capability_id: str, arguments: dict,
+                            approved_by: str) -> str:
+        """The objective run id holding an APPROVED record for exactly this
+        capability + parameters (minus the marker) by this person, else "".
+        Anything a model could write into arguments on its own is not an
+        approval; the record is."""
+        try:
+            from friday.toolsets.objectives import store as objective_store
+            db = objective_store()
+        except Exception:  # noqa: BLE001
+            return ""
+        wanted = json.dumps(arguments, sort_keys=True, default=str)
+        for run in db.objective_runs(limit=50):
+            try:
+                approvals = json.loads(run.get("approvals") or "[]")
+            except (TypeError, ValueError):
+                continue
+            for record in approvals:
+                if (record.get("decision") == "APPROVED"
+                        and record.get("operation") == capability_id
+                        and record.get("decided_by") == approved_by
+                        and json.dumps(record.get("parameters") or {}, sort_keys=True,
+                                       default=str) == wanted):
+                    return str(run["run_id"])
+        return ""
 
     def _bind(self, result, run: c.Run, started: c.ActionResult,
               capability_id: str) -> c.ActionResult:

@@ -339,3 +339,36 @@ def test_the_router_is_reached_from_the_orchestrator():
     """The wiring test again. A router nothing calls routes nothing."""
     import inspect
     assert 'executor_router.' in inspect.getsource(D)
+
+
+def test_team_done_on_the_kanban_is_not_verification(project, monkeypatch):
+    """
+    ADR-001: a profile reporting status=done is not proof the work works.
+    Before this fix `_execute_via_team` fabricated a Verification from that
+    self-report; now it must return verification=None so the caller runs
+    `verify()`/`evaluation.Verifier`, same as the single-worker path.
+    """
+    from friday import hermes_team
+    from friday.executors.claude_code import TaskBundle
+
+    run = D.for_goal('add a shrink method', project)
+    bundle = TaskBundle(goal=run.goal, workspace=str(project))
+    board_ref = {"objective_task_id": bundle.run_id}
+    monkeypatch.setattr(hermes_team, "submit", lambda **kw: board_ref)
+    monkeypatch.setattr(hermes_team, "gateway_for", lambda profile: None)
+    monkeypatch.setattr(hermes_team, "poll",
+                        lambda ref: {"dev": {"status": "done"}})
+
+    result = run._execute_via_team(bundle, ("dev",))
+    assert result.status == "partial"  # not "succeeded" - not verified yet
+    assert result.verification is None
+
+
+def test_team_poll_does_not_block_the_event_loop(project, monkeypatch):
+    """
+    The poll loop used `time.sleep(5)` inside `async def execute`, which
+    blocks the whole voice event loop for up to 30 minutes. It must run
+    off-thread via `asyncio.to_thread`.
+    """
+    import inspect
+    assert 'asyncio.to_thread' in inspect.getsource(D.DevelopmentRun.execute)

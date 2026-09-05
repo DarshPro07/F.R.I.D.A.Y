@@ -172,6 +172,32 @@ class AutoLearner:
             logger.info("learned %d, reinforced %d: %s", len(stored), len(reinforced),
                         [item.get("subject") for item in stored + reinforced])
             await self._refresh()
+        self._gate(stored, user_text)
+
+    def _gate(self, stored: list[dict], user_text: str) -> None:
+        """
+        A second, cheap pass over what `profile_learn_from_turn` already
+        wrote - never a second write path (ADR-001; the profile system owns
+        that write), just the same admission gate everything else durable
+        goes through, so nothing secret-shaped or unsourced slips past
+        unnoticed. Accepted candidates change nothing here; rejections are
+        logged for visibility.
+        """
+        from friday.memory_promotion import Candidate, promote
+
+        for item in stored:
+            subject = str(item.get("subject", "")).strip()
+            value = str(item.get("value", "")).strip()
+            if not subject or not value:
+                continue
+            candidate = Candidate(
+                statement=f"{subject}: {value}", kind="project_fact",
+                source="autolearn", owner="friday", scope="user",
+                confidence=0.9, evidence=[user_text],
+            )
+            decision = promote(candidate)
+            if not decision.accepted:
+                logger.info("autolearn gate: %s -> %s", subject, decision.reason)
 
     async def _refresh(self) -> None:
         """Re-read the briefing so the next turn starts from the new one."""

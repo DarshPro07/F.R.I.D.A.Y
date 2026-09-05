@@ -306,13 +306,84 @@ def resolve_effort(tier: str) -> str:
     return EFFORT_BY_TIER.get(tier, "")
 
 
+def _fallback_candidates() -> list[tuple[str, str]]:
+    """The profile's `fallback_providers:` list, as (provider, model) pairs.
+
+    Empty when unconfigured (the friday profile ships `fallback_providers:
+    []`) - candidates() then falls back to the profile default only.
+    """
+    from friday.hermes_bridge import ENV_PROFILE, ENV_PROFILE_HOME, \
+        profile_home
+    home = os.environ.get(ENV_PROFILE_HOME) or profile_home(
+        os.environ.get(ENV_PROFILE, "friday"))
+    if not home:
+        return []
+    try:
+        import yaml
+        config = yaml.safe_load(
+            (Path(home) / "config.yaml").read_text(encoding="utf-8"))
+        entries = (config or {}).get("fallback_providers") or []
+    except Exception:                                        # noqa: BLE001
+        return []
+    out: list[tuple[str, str]] = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            provider, model = str(entry.get("provider", "")), \
+                str(entry.get("model", "") or entry.get("name", ""))
+        elif isinstance(entry, str):
+            provider, model = entry, ""
+        else:
+            continue
+        if provider:
+            out.append((provider, model))
+    return out
+
+
+def candidates(tier: str) -> list[tuple[str, str]]:
+    """
+    Ordered (provider, model) pairs to try for a tier: the tier's own
+    model first (under the profile's default provider - a tier names a
+    model, not a provider), then the profile's configured fallback
+    providers, then the bare profile default. Never invents a provider
+    Hermes was not told about.
+    """
+    from friday.hermes_bridge import _profile_model_default
+    default_provider, default_model = _profile_model_default()
+    tier_model = resolve_model(tier) or default_model
+    out: list[tuple[str, str]] = [(default_provider, tier_model)]
+    for provider, model in _fallback_candidates():
+        pair = (provider, model or tier_model)
+        if pair not in out:
+            out.append(pair)
+    default_pair = (default_provider, default_model)
+    if default_pair not in out:
+        out.append(default_pair)
+    return out
+
+
+def _fmt_hhmm(iso: str) -> str:
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(iso).strftime("%H:%M")
+    except ValueError:
+        return "unknown"
+
+
 def plan_delegation(text: str, *, code_refs: int = 0, acceptance: int = 0,
                     model: str = "", effort: str = "") -> dict:
     """
     One deterministic pass from a task description to the Hermes route:
-    level, tier, model, reasoning effort and the reason - zero model calls
-    spent deciding which model to call. Explicit `model`/`effort` from the
-    caller win untouched and are recorded as such.
+    level, tier, model, provider, reasoning effort and the reason - zero
+    model calls spent deciding which model to call. Explicit `model`/
+    `effort` from the caller win untouched and are recorded as such.
+
+    When the caller did not pin a model, candidates() is walked in order
+    and any candidate under an active cooldown (see
+    `friday/provider_cooldowns.py`) is skipped - `switched_from` and the
+    reason then say which provider was avoided and why. If every
+    candidate is cooled, the tier's own model is returned anyway (Hermes
+    still has to be told something) with a "waiting for" reason naming
+    the soonest reset.
     """
     econ = classify_task(text, code_refs=code_refs, acceptance=acceptance)
     route = choose_route(econ)
@@ -323,16 +394,53 @@ def plan_delegation(text: str, *, code_refs: int = 0, acceptance: int = 0,
         # not turn a core-touching change into an unverified one.
         route = Route(route.level, asked,
                       f"tier {asked} requested in the goal; {route.reason}")
-    chosen_model = model or resolve_model(route.tier)
     chosen_effort = effort or resolve_effort(route.tier)
-    reason = (f"{route.level}/{route.tier}: {route.reason} "
-              f"[class={econ.kind}, consequence={econ.consequence}, "
-              f"effort={chosen_effort or 'profile'}]")
+    base_reason = (f"{route.level}/{route.tier}: {route.reason} "
+                   f"[class={econ.kind}, consequence={econ.consequence}, "
+                   f"effort={chosen_effort or 'profile'}]")
+
+    provider = ""
+    switched_from = ""
+    wait_until = ""
     if model:
-        reason = f"model pinned by caller ({model}); " + reason
+        chosen_model = model
+        reason = f"model pinned by caller ({model}); " + base_reason
+    else:
+        from friday.provider_cooldowns import active
+        cooled = active()
+        cands = candidates(route.tier)
+        first_provider, first_model = cands[0]
+        chosen = None
+        earliest = ""
+        for cand_provider, cand_model in cands:
+            until = cooled.get((cand_provider, cand_model))
+            if until is None:
+                chosen = (cand_provider, cand_model)
+                break
+            if not earliest or until < earliest:
+                earliest = until
+        if chosen is None:
+            # Every candidate is cooled - do NOT hand back a capped
+            # candidate as "chosen" (that hammers it inside its own
+            # cooldown window). model/provider stay empty; the caller gets
+            # wait_until so it can requeue instead of dispatching.
+            chosen_model = ""
+            wait_until = earliest
+            reason = (f"waiting for {first_provider or 'the profile default'} "
+                      f"until {_fmt_hhmm(earliest)}")
+        else:
+            provider, chosen_model = chosen
+            if chosen != (first_provider, first_model):
+                switched_from = first_provider or first_model
+                when = _fmt_hhmm(cooled.get((first_provider, first_model), ""))
+                reason = (f"{switched_from} capped until {when} → "
+                          f"{provider or chosen_model}; " + base_reason)
+            else:
+                reason = base_reason
     return {"level": route.level, "tier": route.tier, "model": chosen_model,
-            "effort": chosen_effort, "reason": reason, "kind": econ.kind,
-            "consequence": econ.consequence}
+            "provider": provider, "effort": chosen_effort, "reason": reason,
+            "kind": econ.kind, "consequence": econ.consequence,
+            "switched_from": switched_from, "wait_until": wait_until}
 
 
 # ---------------------------------------------------------------------------

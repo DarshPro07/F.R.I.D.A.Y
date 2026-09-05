@@ -148,11 +148,15 @@ def build_pack() -> set[str]:
     to name them, and the audit would silently become a no-op. The build pack
     is a fixed historical set, so it is the stable half of the subtraction.
     """
-    template = ROOT / "Friday Stark Demo Main" / "06_schemas" / \
+    template = ROOT / "docs" / "integrations" / "build_pack" / \
         "UPSTREAM_LOCK_TEMPLATE.json"
     keys = set(json.loads(template.read_text(encoding="utf-8")))
-    briefs = {p.stem.lower() for p in
-              (ROOT / "Friday Stark Demo Main" / "02_upstreams").glob("*.md")}
+    # The build pack's per-upstream briefs (02_upstreams/*.md) were removed
+    # with the governance directory in 99dd904; their stems are preserved
+    # as a fixed list beside the template.
+    briefs_file = ROOT / "docs" / "integrations" / "build_pack" / "BRIEFS.txt"
+    briefs = {s.strip().lower() for s in
+              briefs_file.read_text(encoding="utf-8").split() if s.strip()}
     return {k.lower() for k in keys} | briefs
 
 

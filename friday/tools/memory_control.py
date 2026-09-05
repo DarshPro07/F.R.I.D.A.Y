@@ -48,7 +48,8 @@ def register(mcp):
     @mcp.tool()
     def memory_remember(subject: str, value: str, kind: str = FACT,
                         source: str = "user stated it",
-                        confidence: float = 1.0) -> dict:
+                        confidence: float = 1.0, memory_type: str = "semantic",
+                        project: str = "", source_ref: str = "") -> dict:
         """
         Store something durably so it survives a restart.
 
@@ -58,10 +59,31 @@ def register(mcp):
         kind must be one of FACT (the user stated it), PREFERENCE (how they
         like things), PATTERN (repeated behaviour), INFERENCE (you worked it
         out). Use INFERENCE with a confidence below 1.0 when you are guessing
-        — never record a guess as a FACT.
+        — never record a guess as a FACT. memory_type classifies the record
+        (semantic default; project / user / procedural / codebase / episodic /
+        working / session / tool_state); project scopes it to one project so
+        other projects never see it; source_ref names where it came from.
         """
         return _execute(f"remember {subject}", M.memory_remember, subject, value,
-                        kind=kind, source=source, confidence=confidence)
+                        kind=kind, source=source, confidence=confidence,
+                        memory_type=memory_type, project=project,
+                        source_ref=source_ref)
+
+    @mcp.tool()
+    def memory_provenance(memory_id: int) -> dict:
+        """Where a remembered fact came from and whether it is still current:
+        source, source reference, confidence, what it replaced, what replaced
+        it, and any open contradiction. Use when the user asks "why do you
+        think that" or "where did you get that from"."""
+        return _execute(f"provenance of memory {memory_id}", M.memory_provenance,
+                        memory_id)
+
+    @mcp.tool()
+    def memory_export(project: str = "", include_superseded: bool = False) -> dict:
+        """Export the user's durable memory as plain records - all of it, or
+        one project's slice; superseded history only when asked."""
+        return _execute("export memory", M.memory_export, project,
+                        include_superseded=include_superseded)
 
     @mcp.tool()
     def memory_recall(subject: str) -> dict:

@@ -777,7 +777,7 @@ function setView(v){if(LOCKED&&v!=="hud"){auditClient("tab",v);toast("Locked. Le
   try{localStorage.setItem("fridayView",v);history.replaceState(null,"","?view="+v);}catch(e){}
   if(orbApi){v==="hud"?orbApi.resume():orbApi.pause();}
   if(v==="mem"){ensureGraph();pollVault();pollTiers();}
-  if(v==="room"){renderRoom();if(!window._DECK)pollDeck();}
+  if(v==="room"){renderRoom();if(!window._DECK)pollDeck();if(!window._WORK)pollWork();}
   if(v==="os"){renderOS();if(!ORG)pollOrg();if(!window._MAP)pollMap();if(!window._HELPERS)pollHelpers();}
   if(G3){(v==="mem"&&MOTION)?G3.resumeAnimation():G3.pauseAnimation();}}
 
@@ -902,6 +902,7 @@ function _markSpeaking(on){
   if(on){const l=document.querySelectorAll("#logbox .log-line.friday");if(l.length)l[l.length-1].classList.add("speaking");}
 }
 function shutUp(){
+  if(SPEAKING)_reportInterruption();              // FR-039: record what was heard before the cut
   speakSeq++;                                     // anything generating for an older turn is now stale
   if(speakAbort){try{speakAbort.abort();}catch(e){}speakAbort=null;}
   if(curAudio){try{curAudio.pause();}catch(e){}curAudio=null;}
@@ -1088,10 +1089,24 @@ function _play(blob,mySeq){
     a.play().catch(()=>resolve());
   });
 }
-async function speak(text){
+/* FR-039: history keeps only what was actually heard. Each reply is spoken
+   sentence by sentence; HEARD tracks the sentences that finished playing for
+   the utterance in flight, and an interruption reports that prefix so the
+   stored turn is truncated to it (POST /api/interrupted). */
+let HEARD={id:null,parts:[],done:0,reported:false};
+function _reportInterruption(){
+  if(HEARD.id==null||HEARD.reported)return;
+  HEARD.reported=true;
+  const heard=HEARD.parts.slice(0,HEARD.done).join(" ");
+  const body=JSON.stringify({message_id:HEARD.id,heard});
+  try{fetch("/api/interrupted",{method:"POST",headers:{"Content-Type":"application/json"},body,keepalive:true});}catch(e){}
+  logAction("interrupted after "+HEARD.done+" of "+HEARD.parts.length+" sentence"+(HEARD.parts.length===1?"":"s"));
+}
+async function speak(text,messageId){
   if(!SOUND||!text)return;
   shutUp();
   const mySeq=++speakSeq, parts=_sentences(text);
+  HEARD={id:(messageId==null?null:messageId),parts,done:0,reported:false};
   for(let i=0;i<parts.length;i++){
     if(mySeq!==speakSeq)return;                    // a newer turn took over
     const ac=new AbortController();speakAbort=ac;
@@ -1106,8 +1121,9 @@ async function speak(text){
         u.onstart=()=>{SPEAKING=true;_markSpeaking(true);setIsland("speaking","");};u.onend=res;u.onerror=res;
         speechSynthesis.speak(u);});
     }
+    if(mySeq===speakSeq)HEARD.done=i+1;            // this sentence was heard in full
   }
-  if(mySeq===speakSeq){SPEAKING=false;_markSpeaking(false);if(!LOCKED)idleIsland();}
+  if(mySeq===speakSeq){SPEAKING=false;_markSpeaking(false);HEARD.id=null;if(!LOCKED)idleIsland();}
 }
 
 /* ---------------- what she does with what she hears ---------------- */
@@ -1127,7 +1143,12 @@ function convAdd(who,text){
 }
 function sendAsk(){const i=$("asktext");if(!i)return;const t=i.value.trim();if(!t)return;i.value="";handleUtterance(t);}
 async function handleUtterance(text){const low=text.toLowerCase();LAST_EXCHANGE=Date.now();
-  if(/\bfriday\b/.test(low)){const rest=low.replace(/.*\bfriday\b[,.!]?\s*/,"").trim();if(!rest){convAdd("you",text);convAdd("Friday","Yes, sir.");speak("Yes, sir.");return;}text=rest;}
+  // Only a LEADING wake word is stripped, and the original casing survives.
+  // 2026-09-04 21:17: the old greedy stripper cut at the LAST "friday", so
+  // "... in friday/desk.py, cheapest model" reached her as "/desk.py, cheapest
+  // model" (lowercased) and Hermes was sent to edit a file that does not exist.
+  const wake=text.match(/^[ \t]*(?:hey|ok|okay|hi|yo)?[ \t,]*friday(?:[,.!:]+[ \t]*|[ \t]+|$)/i);
+  if(wake){const rest=text.slice(wake[0].length).trim();if(!rest){convAdd("you",text);convAdd("Friday","Yes, sir.");speak("Yes, sir.");return;}text=rest;}
   if(/^\s*(lock|lock (it|up|yourself)|go to sleep)\s*[.!]?$/.test(low)){convAdd("you",text);convAdd("Friday","Locking.");speak("Locking.");setTimeout(lockNow,900);return;}
   if(CLIP.test(low)||SEL.test(low)){
     convAdd("you",text);
@@ -1145,7 +1166,7 @@ async function askJarvis(text){text=(text||"").trim();if(!text||LOCKED)return;LA
     if(d.action)logAction(d.action.replace(/[._]/g," ")+(d.status?" · "+d.status:""));
     if(d.used_capabilities&&d.used_capabilities.length)logAction("used "+[...new Set(d.used_capabilities)].join(", "));
     if(d.latency_note)logAction("slow · "+d.latency_note);
-    convAdd("Friday",rep);HIST.push({role:"jarvis",text:rep});speak(rep);if(d.action==="browser.open")toast("Opened in the gated browser: "+(d.status||""));
+    convAdd("Friday",rep);HIST.push({role:"jarvis",text:rep});speak(rep,d.message_id);if(d.action==="browser.open")toast("Opened in the gated browser: "+(d.status||""));
     if(d.work_run_id)followHermes(d.work_run_id);}
   catch(e){if(e.message!=="locked"){convAdd("Friday","I could not reach my brain: "+e.message);}idleIsland();}}
 
@@ -1208,6 +1229,8 @@ function renderRoom(){const s=STATE;if(!s.system){$("cr").innerHTML='<div class=
   const biz=(s.business||[]).slice(0,8).map(r=>row(r.scope||"",`${esc(r.subject)} <span class="muted">${esc((r.value||"").slice(0,70))}</span>`)).join("");R+=sec("Business","",biz||'<div class="empty">No business facts recorded yet.</div>');
   const todos=(s.todos||[]).slice(0,10).map(t=>row(t.kind==="open_question"?"question":"task",esc((t.text||"").slice(0,90)))).join("");R+=sec("Open items",(s.todos||[]).length||"",todos||'<div class="empty">Nothing open.</div>');
   const runs=(s.agents||[]).map(r=>row(r.capability||"run",esc((r.request||"").slice(0,70)),r.state)).join("");R+=sec("Recent runs","",runs||'<div class="empty">No runs yet.</div>');
+  const wk=window._WORK||{};const wr=(wk.runs||[]).map(w=>row(esc((w.id||"run")+(w.model?" · "+w.model:"")),esc((w.latest||"").slice(0,90)),w.status||"")).join("");
+  R+=sec("Work",(wk.runs||[]).length?(wk.runs||[]).length+" running":"",`<div id="work-list">${wr||'<div class="empty">Nothing running.</div>'}</div>`);
   $("cr").innerHTML=`<div class="col">${L}</div><div class="col">${R}</div>`;}
 async function runIntent(id){const b=$("di-"+id),o=$("deckout");if(b)b.classList.add("busy");if(o)o.textContent="running "+id;
   try{const r=await jpost("/api/deck/run",{id});if(o)o.textContent=(r.label?r.label.toLowerCase()+": ":"")+(r.result||r.error||"");if(r.mode==="gated")toast("Approve it under Waiting on you");if(r.text)convAdd("Friday",String(r.text).slice(0,300));if(id==="os_map")setView("os");await pollDeck();await pollGates();}
@@ -1292,6 +1315,10 @@ async function poll(){if(LOCKED)return;try{STATE=await jget("/api/state");render
 async function pollOrg(){if(LOCKED)return;try{ORG=await jget("/api/org");renderOrgHud();if(VIEW==="os")renderOS();}catch(e){}}
 async function pollMem(){if(LOCKED)return;try{window._MEM=await jget("/api/memory_snapshot");renderMemSummary();if(VIEW==="room")renderRoom();}catch(e){}}
 async function pollDeck(){if(LOCKED)return;try{window._DECK=await jget("/api/deck");if(VIEW==="room")renderRoom();}catch(e){}}
+let _WORK_LAST_DIGEST="";
+async function pollWork(){if(LOCKED)return;try{window._WORK=await jget("/api/work");
+  const d=window._WORK.digest||"";if(d&&d!==_WORK_LAST_DIGEST){_WORK_LAST_DIGEST=d;convAdd("Friday",d);}
+  if(VIEW==="room")renderRoom();}catch(e){}}
 async function pollGates(){if(LOCKED)return;try{window._GATES=await jget("/api/gate");renderToolGates();if(VIEW==="room")renderRoom();}catch(e){}}
 async function pollControl(){if(LOCKED)return;try{window._AGENT=await jget("/api/control");if(STATE.connections)renderChips(STATE);}catch(e){window._AGENT={reachable:false};}}
 async function pollMap(){if(LOCKED)return;try{window._MAP=await jget("/api/os_map");if(VIEW==="os")renderOS();}catch(e){}}
@@ -1299,9 +1326,9 @@ async function pollHelpers(){if(LOCKED)return;try{window._HELPERS=await jget("/a
 async function pollGraphStats(){if(LOCKED)return;try{const g=await jget("/api/graph");if(G3&&g.stats.nodes!==(GRAPH&&GRAPH.stats.nodes)){GRAPH=g;G3.graphData(g);renderLegend();}else if(!GRAPH)GRAPH=g;renderMemSummary();}catch(e){}}
 async function pollDoctor(force){if(LOCKED)return;try{window._DOCTOR=await jget("/api/doctor");if(VIEW==="room"||force)renderRoom();}catch(e){}}
 async function pollAccess(){if(LOCKED)return;try{window._ACCESS=(await jget("/api/auth/recent")).events||[];}catch(e){}}
-function startAll(){if(timers.length)return;poll();pollOrg();pollMem();pollDeck();pollGates();pollControl();pollMap();pollHelpers();pollGraphStats();pollAccess();
+function startAll(){if(timers.length)return;poll();pollOrg();pollMem();pollDeck();pollGates();pollControl();pollMap();pollHelpers();pollGraphStats();pollAccess();pollWork();
   pollDoctor();
-  timers=[setInterval(pollDoctor,120000),setInterval(poll,6000),setInterval(pollMem,20000),setInterval(pollDeck,15000),setInterval(pollGates,4000),setInterval(pollControl,30000),setInterval(pollOrg,90000),setInterval(pollGraphStats,60000),setInterval(pollAccess,30000),setInterval(pollHermes,5000)];}
+  timers=[setInterval(pollDoctor,120000),setInterval(poll,6000),setInterval(pollMem,20000),setInterval(pollDeck,15000),setInterval(pollGates,4000),setInterval(pollControl,30000),setInterval(pollOrg,90000),setInterval(pollGraphStats,60000),setInterval(pollAccess,30000),setInterval(pollHermes,5000),setInterval(pollWork,5000)];}
 
 /* ---------------- boot ---------------- */
 (function boot(){let v=new URLSearchParams(location.search).get("view");try{v=v||localStorage.getItem("fridayView");}catch(e){}if(v==="vault")v="mem";

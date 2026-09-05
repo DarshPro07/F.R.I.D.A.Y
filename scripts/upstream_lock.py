@@ -40,7 +40,10 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 UPSTREAM = ROOT / "third_party" / "upstream"
 LOCK = ROOT / "third_party" / "UPSTREAM_LOCK.json"
-TEMPLATE = (ROOT / "Friday Stark Demo Main" / "06_schemas"
+#: The build pack's lock template. The `Friday Stark Demo Main/` governance
+#: directory was removed from the tree in 99dd904; the template is a fixed
+#: historical set, so it lives on under docs/integrations/build_pack/.
+TEMPLATE = (ROOT / "docs" / "integrations" / "build_pack"
             / "UPSTREAM_LOCK_TEMPLATE.json")
 
 #: Filenames that carry license text, in the order we prefer them.

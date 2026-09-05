@@ -10,6 +10,8 @@ Behaviour is scripted through env vars so one binary covers every test:
     FAKE_HERMES_HANG=1      never answer prompt.submit (for interrupt tests)
     FAKE_HERMES_DIE=1       exit abruptly after the first prompt.submit
                             (for crash-recovery tests)
+    FAKE_HERMES_CAPPED=1    message.complete arrives with status "error"
+                            and a rate-limit sentence (quota routing tests)
 """
 import json
 import os
@@ -38,6 +40,7 @@ def main():
     clarify = os.getenv("FAKE_HERMES_CLARIFY") == "1"
     hang = os.getenv("FAKE_HERMES_HANG") == "1"
     die = os.getenv("FAKE_HERMES_DIE") == "1"
+    capped = os.getenv("FAKE_HERMES_CAPPED") == "1"
 
     event("gateway.ready", "", {"skin": {}})
     sessions = {}
@@ -70,6 +73,11 @@ def main():
                 event("tool.start", sid, {"name": "read_file",
                                           "args": {"path": "x"}})
                 event("tool.complete", sid, {"name": "read_file"})
+                if capped:
+                    event("message.complete", sid, {
+                        "text": "rate limit reached, resets at 23:59",
+                        "status": "error"})
+                    return
                 if clarify:
                     event("clarify.request", sid, {
                         "request_id": "q1",

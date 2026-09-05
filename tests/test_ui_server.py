@@ -142,6 +142,27 @@ def test_ui_assets_are_served_from_the_ui_dir_only():
         assert client.get("/ui/../friday/ui_server.py").status_code in (404, 400)
 
 
+def test_api_work_returns_runs_objectives_and_digest_shape(monkeypatch):
+    """S3b: /api/work is the browser's read of the same digest the room
+    speaks from -- one shape, cached like /api/helpers."""
+    httpx = pytest.importorskip("httpx")
+    from starlette.testclient import TestClient
+
+    monkeypatch.setattr(u, "_probe_work", lambda: {
+        "runs": [{"id": "wr1", "model": "sonnet", "status": "WORKING",
+                  "latest": "editing policy.py", "route_reason": "default route"}],
+        "objectives": [], "digest": "did 2 tools, last: editing policy.py"})
+    u._WORK_CACHE.update(at=0.0, value=None)
+    with TestClient(u.create_app()) as client:
+        r = client.get("/api/work")
+        assert r.status_code == 200
+        body = r.json()
+        assert {"runs", "objectives", "digest"} <= body.keys()
+        assert body["runs"][0]["id"] == "wr1"
+        assert body["runs"][0]["latest"] == "editing policy.py"
+        assert isinstance(body["digest"], str)
+
+
 def test_memory_stack_aggregates_four_tiers_under_budget(tmp_path, monkeypatch):
     """The blueprint: preferences + specs + rules + relations, one prompt block,
     never over budget, and the sync-and-log step writes a vault page.
@@ -280,8 +301,17 @@ def test_http_surface_is_live():
         assert client.get("/api/memory?q=test").status_code == 200
         assert client.get("/api/memory_flow").status_code == 200
         assert client.get("/api/harness").status_code == 200
+        # FR-040 (2026-09-05): /api/objective is no longer a capture stub
+        # that answered {"captured": true}; it enters the objective ledger
+        # (or says why not) with the request's channel identity. Either a
+        # run id or a stated reason - never a silent success.
         cap = client.post("/api/objective", json={"objective": "demo task"})
-        assert cap.status_code == 200 and cap.json()["captured"] is True
+        assert cap.status_code in (200, 409)
+        body = cap.json()
+        assert body["channel"] and ("run_id" in body)
+        assert body["ok"] == bool(body["run_id"])
+        if not body["ok"]:
+            assert body["error"]
         assert client.get("/api/gate").status_code == 200
         # a banking URL is blocked before any browser launches
         bo = client.post("/api/browser/open",

@@ -63,3 +63,7 @@ data/workspace/
 
 # junction into the pinned agents-team clone (plugin marketplace shim)
 .claude/marketplace/friday-local/agents-team/
+
+# git worktrees checked out by coding agents (a registered worktree is
+# tracked by .git/worktrees, never by the index; 70 MB of checkout here)
+.claude/worktrees/

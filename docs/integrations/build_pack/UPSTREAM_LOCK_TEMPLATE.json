@@ -1,0 +1,212 @@
+{
+  "openhands": {
+    "url": "https://github.com/OpenHands/OpenHands",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT core; enterprise/ PolyForm Free Trial",
+    "integration_mode": "ADAPTER_BACKEND",
+    "role": "Sandboxed/specialist coding",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "maxun": {
+    "url": "https://github.com/getmaxun/maxun",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "AGPL-3.0",
+    "integration_mode": "ISOLATED_SIDECAR",
+    "role": "Persistent scraping robots",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "browser-use": {
+    "url": "https://github.com/browser-use/browser-use",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT",
+    "integration_mode": "ADAPTER",
+    "role": "Interactive browser",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "agent-reach": {
+    "url": "https://github.com/Panniantong/agent-reach",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT",
+    "integration_mode": "ADAPTER_MCP",
+    "role": "Platform-specific research",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "graft": {
+    "url": "https://github.com/trailhq/Graft",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT",
+    "integration_mode": "CORE_CODE_INTELLIGENCE",
+    "role": "Concept/code context",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "agency-agents": {
+    "url": "https://github.com/msitarzewski/agency-agents",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT",
+    "integration_mode": "SKILL_PACK",
+    "role": "Role recipes",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "codebase-memory-mcp": {
+    "url": "https://github.com/DeusData/codebase-memory-mcp",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT",
+    "integration_mode": "CORE_MCP",
+    "role": "Structural code graph",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "openmontage": {
+    "url": "https://github.com/calesthio/OpenMontage",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "AGPL-3.0",
+    "integration_mode": "ISOLATED_SIDECAR_SKILLS",
+    "role": "Video production",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "open-notebook": {
+    "url": "https://github.com/lfnovo/open-notebook",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT",
+    "integration_mode": "SIDECAR_MCP",
+    "role": "Research notebook",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "no-ai-slop": {
+    "url": "https://github.com/petergyang/no-ai-slop",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT",
+    "integration_mode": "SKILL",
+    "role": "Writing quality",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "i-have-adhd": {
+    "url": "https://github.com/ayghri/i-have-adhd",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT",
+    "integration_mode": "OPTIONAL_PRESENTATION_SKILL",
+    "role": "Action-first output",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "strix": {
+    "url": "https://github.com/usestrix/strix",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "Apache-2.0",
+    "integration_mode": "RESTRICTED_SECURITY_ADAPTER",
+    "role": "Authorized app security",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "vane": {
+    "url": "https://github.com/ItzCrazyKns/Vane",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT",
+    "integration_mode": "SEARCH_ADAPTER",
+    "role": "Private metasearch",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "agenticseek": {
+    "url": "https://github.com/Fosowl/agenticSeek",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "GPL-3.0",
+    "integration_mode": "REFERENCE_OR_ISOLATED_ADAPTER",
+    "role": "Local assistant patterns",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "scrapling": {
+    "url": "https://github.com/D4Vinci/Scrapling",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "BSD-3-Clause",
+    "integration_mode": "CORE_WEB_ADAPTER",
+    "role": "Adaptive scraping",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "gstack": {
+    "url": "https://github.com/garrytan/gstack",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT",
+    "integration_mode": "HIGH_VALUE_SKILL_PACK",
+    "role": "Engineering/QA/CEO skills",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "anythingllm": {
+    "url": "https://github.com/Mintplex-Labs/anything-llm",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT",
+    "integration_mode": "OPTIONAL_SIDECAR",
+    "role": "Document/RAG workspace",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "pipecat": {
+    "url": "https://github.com/pipecat-ai/pipecat",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "BSD-2-Clause",
+    "integration_mode": "VOICE_PROVIDER_EXPERIMENTAL",
+    "role": "Realtime voice/multimodal",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "postiz": {
+    "url": "https://github.com/gitroomhq/postiz-app",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "AGPL-3.0",
+    "integration_mode": "ISOLATED_SIDECAR",
+    "role": "Social scheduling",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "crewai": {
+    "url": "https://github.com/crewAIInc/crewAI",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "MIT",
+    "integration_mode": "REFERENCE_OR_BOUNDED_FLOW",
+    "role": "Crew/flow patterns",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  },
+  "cline": {
+    "url": "https://github.com/cline/cline",
+    "commit": "FILL_AFTER_CLONE",
+    "version": "DISCOVER",
+    "license": "Apache-2.0",
+    "integration_mode": "ADAPTER_BACKEND",
+    "role": "Coding SDK/headless CLI",
+    "upstream_tests": "NOT_RUN",
+    "patches": []
+  }
+}

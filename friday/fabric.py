@@ -98,8 +98,14 @@ DEGRADED = "DEGRADED"            # answering, but not fully - say so, use it
 AUTH_REQUIRED = "AUTH_REQUIRED"  # a person must supply a credential
 UNAVAILABLE = "UNAVAILABLE"      # tried, could not reach it
 DISABLED = "DISABLED"            # deliberately switched off
+FAILED = "FAILED"                # reachable, but its last call raised (FR-026)
 STATES = (REGISTERED, READY, DEGRADED, AUTH_REQUIRED, UNAVAILABLE, DISABLED,
-          REFERENCE_ONLY)
+          FAILED, REFERENCE_ONLY)
+
+#: How many consecutive call-time exceptions before a READY provider is
+#: reported FAILED. One raise is a bad argument as often as a broken
+#: provider; three in a row is the provider.
+FAILED_AFTER = 3
 
 RISK_LEVELS = ("low", "medium", "high", "restricted")
 
@@ -333,6 +339,8 @@ class Activation:
     #: Whatever the adapter's `start()` handed back - a process, a client, a
     #: session. The fabric never inspects it.
     handle: object = None
+    #: Consecutive call-time exceptions since the last success (FR-026).
+    consecutive_failures: int = 0
 
 
 _ACTIVE: dict[str, Activation] = {}
@@ -681,6 +689,31 @@ def call(provider_id: str, operation: str, *, run_id: str = "",
             result,
             f"{provider_id}.{operation} needs {sorted(missing)}; not granted")
 
+    # FR-061/062: the AUTHORIZED_SECURITY namespace needs more than a
+    # permission grant - a SecurityAuthorization contract naming the
+    # target scope, actions, intensity and expiry, checked deterministically
+    # against what THIS call is about to touch. An out-of-scope host or
+    # action is refused here whatever the caller or the tool asked for.
+    from friday import trust as T
+    if T.is_security_capability(provider_id) and operation not in getattr(
+            provider, "open_operations", ()):
+        auth = arguments.pop("security_authorization", None)
+        if isinstance(auth, dict):
+            try:
+                auth = T.SecurityAuthorization(**auth)
+            except (TypeError, ValueError) as exc:
+                return c.failed(result, f"invalid SecurityAuthorization: {exc}")
+        host = str(arguments.get("target") or arguments.get("host")
+                   or arguments.get("domain") or arguments.get("url") or "")
+        guard = T.target_guard(auth, host=host, action=operation,
+                               intensity=str(arguments.get("intensity") or T.LOW_ACTIVE))
+        T.audit().record(actor=run_id or "friday", action=tool_id, target=host,
+                         tier=T.R3, decision="ALLOW" if guard["allowed"] else "DENY",
+                         result=guard["reason"], objective_id=run_id or "",
+                         detail={"approval_id": getattr(auth, "approval_id", "")})
+        if not guard["allowed"]:
+            return c.failed(result, f"security scope: {guard['reason']}")
+
     secrets, missing_secret = _resolve_secrets(provider)
     if missing_secret:
         # The alias, never the value, and never a partial value.
@@ -705,7 +738,16 @@ def call(provider_id: str, operation: str, *, run_id: str = "",
         value = invoke(operation, activation.handle, **arguments)
     except Exception as exc:                       # noqa: BLE001 - reported
         _remember(provider_id, operation, False)
+        # FR-026: a provider that keeps raising is FAILED, not READY. The
+        # state is visible in report()/family_report() and the next call
+        # re-activates (health probe decides whether it is back).
+        activation.consecutive_failures += 1
+        if activation.consecutive_failures >= FAILED_AFTER:
+            activation.state = FAILED
+            activation.detail = (f"{activation.consecutive_failures} consecutive "
+                                 f"call failures; last: {exc}")
         return c.failed(result, f"{provider_id}.{operation} raised: {exc}")
+    activation.consecutive_failures = 0
 
     # An adapter may return a finished ActionResult when it has real evidence.
     # That is the preferred shape and is passed through untouched.

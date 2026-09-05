@@ -684,6 +684,25 @@ _ALL = (
         requires_auth=True,
     ),
     Capability(
+        id='browser_act',
+        description='One browser primitive (open, inspect, navigate, click, type, scroll, select, upload, download, tabs, screenshot, wait, verify) through the observe-plan-policy-act-observe-verify loop; external writes need exact-action approval, human verification pages hand off.',
+        execution_scope='user_device',
+        side_effect='external_action',
+        requires_edge=True,
+        requires_auth=True,
+        intent_examples=(
+            'click the sign in button on the open page and verify it worked',
+            'type widgets into the search box and press enter',
+            'upload this file through the form on the page',
+        ),
+        negative_examples=(
+            'open this url in the browser',
+            'read the currently open page',
+            'drive the browser by clicking and typing until it is done',
+            'close the browser',
+        ),
+    ),
+    Capability(
         id='files_read',
         description='Read a text file inside the workspace roots.',
         execution_scope='user_device',
@@ -713,6 +732,15 @@ _ALL = (
     ),
     Capability(
         id='files_roots',
+        intent_examples=(
+            'which folders can you see',
+            'list my workspace roots',
+            'what are your workspace roots',
+        ),
+        negative_examples=(
+            'list the files in that folder',
+            'search the workspace for a file',
+        ),
         description='Which directories are readable and what stays protected.',
         execution_scope='user_device',
         side_effect='read',
@@ -814,6 +842,30 @@ _ALL = (
         execution_scope='agent_runtime',
         side_effect='write',
         requires_auth=True,
+    ),
+    Capability(
+        id='memory_provenance',
+        intent_examples=(
+            'where did you get that memory from',
+            'why do you believe our backend is strapi',
+            'is that remembered fact still current',
+        ),
+        negative_examples=('what do you remember about this', 'forget that'),
+        description='Where a remembered fact came from and whether it is current: source, source reference, confidence, what it replaced, what replaced it, and any open contradiction on the subject.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+    ),
+    Capability(
+        id='memory_export',
+        intent_examples=(
+            'export everything you remember about me',
+            'give me a dump of my durable memory',
+            'export the memory for this project',
+        ),
+        negative_examples=('what do you remember about this', 'search my project for a word'),
+        description="Export the user's durable memory as plain records, all of it or one project's slice, with superseded history on request.",
+        execution_scope='agent_runtime',
+        side_effect='read',
     ),
     Capability(
         id='memory_record_decision',
@@ -2230,6 +2282,301 @@ _ALL = (
         description='Re-scan friday/fabric_adapters for providers and drop the cached registry, so a newly added capability becomes reachable without a process restart. Reports what appeared or disappeared, by id.',
         execution_scope='agent_runtime',
         side_effect='read',
+    ),
+    # PRD v3.1 §4.9 - Hermes MODEL_GATEWAY. Operating-layer capabilities:
+    # appended at the tail so they never crowd a daily driver's shortlist.
+    Capability(
+        id='model_providers',
+        intent_examples=(
+            'which model providers can hermes broker right now',
+            'list the model providers hermes is authenticated with',
+            'is the model gateway ready',
+        ),
+        negative_examples=(
+            'what is hermes doing right now',
+            'rescan for new capability providers',
+            'connect a new ai provider',
+        ),
+        description='Which model providers the Hermes model gateway can broker for Friday right now, with route kind (api / subscription / free tier / local) and authentication state. Inference only; no Hermes agent is started.',
+        execution_scope='network',
+        side_effect='read',
+    ),
+    Capability(
+        id='model_infer',
+        intent_examples=(
+            'think about this on the deep model through the gateway',
+            'send this question to the hermes model gateway, inference only',
+            'ask a stronger model to reason about this, inference only',
+        ),
+        negative_examples=(
+            'have hermes look at this project',
+            'hand this coding task to the agent team',
+            'answer a quick question about python',
+        ),
+        description='One inference-only request through the Hermes model gateway: a bounded compiled context in, text plus token usage and route out. No tools, no subagents, no session; a stronger reasoning tier without delegating any work.',
+        execution_scope='network',
+        side_effect='read',
+    ),
+    Capability(
+        id='model_usage',
+        intent_examples=(
+            'how many tokens has the model gateway used',
+            'show gateway token usage for this objective',
+            'which calls caused the token spike',
+        ),
+        negative_examples=(
+            'how is that delegated task going',
+            'check my computer',
+        ),
+        description="Model gateway telemetry from Friday's own ledger: calls, tokens, providers and latency per objective and worker, and the calls behind the largest spend.",
+        execution_scope='agent_runtime',
+        side_effect='read',
+    ),
+    Capability(
+        id='system_pressure',
+        intent_examples=(
+            'why are you running fewer workers right now',
+            'what is the resource pressure level',
+            'is the governor throttling anything',
+        ),
+        negative_examples=(
+            'check my computer',
+            'how much memory is free',
+            'what is hermes doing right now',
+        ),
+        description="The resource governor's view of the machine: pressure level with measured reasons, active workers and browsers, queue depth and caps, and the banner explaining any reduced concurrency.",
+        execution_scope='agent_runtime',
+        side_effect='read',
+    ),
+    # PRD v3.1 §9.6 / FR-023..025 - the capability manifest. Appended at the
+    # tail: it is an operating-layer diagnostic, not a daily driver.
+    Capability(
+        id='capability_manifest',
+        intent_examples=(
+            'show the capability manifest with types and trust levels',
+            'which registered capabilities are guidance only, not executable',
+            'describe the manifest entry for that capability id',
+        ),
+        negative_examples=(
+            'which capability families are available',
+            'which capability provider is behind that',
+            'use the capability that fits',
+            'rescan for new capability providers',
+        ),
+        description='The capability manifest (PRD 9.6): every capability with its type (NATIVE/MCP/CLI/SDK/HTTP/SIDECAR/SKILL/REFERENCE/SPECIALIST_RUNTIME), source, license, trust level, permissions, dangerous actions, health, cost and latency profile and state. Summary first; one full entry by id.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+    ),
+    # PRD v3.1 FR-008 / FR-012 - adversarial reasoning. Tail: rare, expensive.
+    Capability(
+        id='decision_deliberate',
+        intent_examples=(
+            'deliberate this decision with a contrarian and a judge',
+            'run the proposer contrarian failure analyst panel on this choice',
+            'argue both sides of this strategy decision and keep the disagreements',
+        ),
+        negative_examples=(
+            'send this question to the hermes model gateway, inference only',
+            'what time is it',
+            'search the web for that',
+        ),
+        description='Contrarian decision mode for a high-impact choice: proposer, contrarian, failure analyst, evidence checker and judge each take a position; the record keeps disagreements, supported and missing evidence, and the judge\'s uncertainty.',
+        execution_scope='network',
+        side_effect='read',
+        operation_kind='START',
+    ),
+    Capability(
+        id='change_review',
+        intent_examples=(
+            'have an independent reviewer check this diff against its claim',
+            'second opinion on the change the worker just made',
+            'review the diff independently before it is promoted',
+        ),
+        negative_examples=(
+            'delegate this to hermes',
+            'check on the hermes run',
+            'deliberate this decision with a contrarian and a judge',
+        ),
+        description='Independent review of a change by a reviewer that is not the implementing worker: reads the diff, the claim and the verifier result, returns CONFIRMED, DISPUTED or INCONCLUSIVE with concrete findings.',
+        execution_scope='network',
+        side_effect='read',
+    ),
+    # PRD v3.1 FR-047..051 - controlled self-development. Tail: rare, gated.
+    Capability(
+        id='selfdev_run',
+        intent_examples=(
+            'take this self-improvement candidate through the sandbox and test gates',
+            'stage a change to your own code in a worktree and run its gates',
+            'try improving yourself with this patch, sandboxed, and tell me if it passes',
+        ),
+        negative_examples=(
+            'delegate this to hermes',
+            'run the automation',
+            'run the first time setup',
+            'promote the self-change',
+        ),
+        description='Take one self-improvement candidate (measured evidence, proposal, files, unified diff, tests) through observe, sandbox worktree, implement, subsystem tests, independent review, regression baseline and benchmark. Stops at BENCHMARKED; the live checkout is untouched.',
+        execution_scope='agent_runtime',
+        side_effect='write',
+        operation_kind='START',
+    ),
+    Capability(
+        id='selfdev_promote',
+        intent_examples=(
+            'promote the self-change that passed its gates',
+            'merge the benchmarked self-development candidate into the live branch',
+            'approve and land the sandboxed self-improvement',
+        ),
+        negative_examples=(
+            'stage a change to your own code in a worktree and run its gates',
+            'roll back the self-change',
+            'delegate this to hermes',
+        ),
+        description='Merge a BENCHMARKED self-change into the live branch on explicit approval, then run a post-promotion health probe that rolls back automatically if it fails.',
+        execution_scope='agent_runtime',
+        side_effect='write',
+        operation_kind='MUTATE',
+    ),
+    Capability(
+        id='selfdev_rollback',
+        intent_examples=(
+            'roll back the self-change you promoted',
+            'undo the self-development promotion and restore the previous version',
+            'revert your last self-improvement merge',
+        ),
+        negative_examples=(
+            'promote the self-change that passed its gates',
+            'cancel the objective',
+            'restart friday',
+        ),
+        description='Deterministically undo a promoted self-change with a git revert of the merge; the prior known-good version is restored and the history kept.',
+        execution_scope='agent_runtime',
+        side_effect='write',
+        operation_kind='RECOVERY',
+    ),
+    Capability(
+        id='selfdev_status',
+        intent_examples=(
+            'where do your self-development candidates stand',
+            'status of the self-improvement candidate',
+            'why was the self-change rejected',
+        ),
+        negative_examples=(
+            'what is hermes doing right now',
+            'objective status',
+            'check my computer',
+        ),
+        description='Where each self-development candidate stands - state, weakness addressed, rejection reason - or one candidate\'s full record.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+        operation_kind='FOLLOW_UP',
+    ),
+    # PRD v3.1 12.3 / FR-054 - operating-layer diagnostics and the objective
+    # trace, appended at the tail: not daily drivers.
+    Capability(
+        id='system_diagnostics',
+        intent_examples=(
+            'give me the operational diagnostics report',
+            'diagnostics report: is every subsystem healthy',
+            'show the system diagnostics view',
+        ),
+        negative_examples=(
+            'check my computer',
+            'how much memory is free',
+            'what is the resource pressure level',
+        ),
+        description='The one operational view: build identity, objective and memory store health, provider status, Hermes/worker health, browser connection, voice gateway, MCP/capability health, queue depth, resource pressure and recent critical failures; secrets redacted.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+    ),
+    Capability(
+        id='objective_trace',
+        intent_examples=(
+            'trace what happened to that objective',
+            'reconstruct the full trace of the last objective',
+            'show the objective trace with tool calls and workers',
+        ),
+        negative_examples=(
+            'what is the status of the objective',
+            'show the objective history',
+            'check my computer',
+        ),
+        description='One trace that reconstructs what happened to an objective from durable state: state transitions, tool calls, workers, model calls, policy decisions, latency, retries, errors and verification outcomes.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+        operation_kind='FOLLOW_UP',
+    ),
+    # PRD v3.1 FR-041 / FR-042 - scheduled objectives and conditional
+    # monitoring. Tail: the daily phrasings ("every morning") stay with
+    # automations_create; these take the objective/monitor wording.
+    Capability(
+        id='schedules_create',
+        intent_examples=(
+            'schedule an objective to run tomorrow at eight',
+            'set up a monitor that only tells me when the price drops',
+            'schedule this objective every thirty minutes with a budget',
+        ),
+        negative_examples=(
+            'do this every morning without asking me',
+            'remind me at seven',
+            'run that automation now',
+        ),
+        description='Schedule a whole objective - once, daily or every N minutes - with budgets, pre-approved permissions, a delivery channel and an optional condition so it only notifies when the condition is met.',
+        execution_scope='user_device',
+        side_effect='external_action',
+        requires_edge=True,
+        operation_kind='START',
+        creates_run=True,
+    ),
+    Capability(
+        id='schedules_list',
+        intent_examples=(
+            'which objectives are scheduled',
+            'list my scheduled objectives and monitors',
+        ),
+        negative_examples=('list my automations', 'what reminders do I have'),
+        description='Every scheduled objective and monitor, with whether its OS task is really registered.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+        operation_kind='READ',
+    ),
+    Capability(
+        id='schedules_run',
+        intent_examples=(
+            'fire the scheduled objective now',
+            'run the price monitor schedule right now',
+        ),
+        negative_examples=('run that automation now', 'start an objective'),
+        description='Fire a schedule now through the real objective engine; the condition is evaluated and delivery suppressed when it is not met.',
+        execution_scope='agent_runtime',
+        side_effect='write',
+        operation_kind='START',
+        creates_run=True,
+    ),
+    Capability(
+        id='schedules_history',
+        intent_examples=(
+            'did the scheduled objective fire last night',
+            'show the firing history of the monitor',
+        ),
+        negative_examples=('what happened this morning', 'show the objective history'),
+        description='Every firing of a schedule: objective run id, outcome, whether the condition was met, and whether anything was delivered or suppressed.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+        operation_kind='FOLLOW_UP',
+    ),
+    Capability(
+        id='schedules_delete',
+        intent_examples=(
+            'delete the scheduled objective',
+            'remove that monitor schedule',
+        ),
+        negative_examples=('turn that automation off', 'cancel the reminder'),
+        description='Remove a scheduled objective and its OS task, verified by querying the OS afterwards.',
+        execution_scope='user_device',
+        side_effect='external_action',
+        requires_edge=True,
+        operation_kind='CANCEL',
     ),
 )
 

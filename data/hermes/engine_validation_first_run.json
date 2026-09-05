@@ -1,0 +1,28 @@
+{
+ "note": "first probe 2026-09-05 ~04:55 IST; JSON overwritten by the governor-refused re-run, values copied from the run log printed at the time",
+ "verdict": "VERIFIED",
+ "gateway_ready_s": 2.6,
+ "delegate_s": 29.71,
+ "work_run_id": "hermes-ed5b2b4c6d",
+ "session_id": "a002b7e1",
+ "record_status": "COMPLETE",
+ "outcome": {
+  "answer_exists": true,
+  "answer_content": "friday-hermes-ok",
+  "git_changes": [
+   "answer.txt"
+  ],
+  "commits": "1"
+ },
+ "usage_live": {
+  "model": "claude-opus-5",
+  "calls": 3,
+  "prompt": 116151,
+  "completion": 496,
+  "total": 116647,
+  "context_used": 38996,
+  "context_max": 1000000,
+  "active_subagents": 0
+ },
+ "defect_found": "HermesSupervisor.health() reported alive=False on a healthy gateway because commands.catalog cold-imports the CLI registry (>15s under load); fixed: cheap session.list probe first, catalog with 45s budget and non-fatal warning"
+}

@@ -55,7 +55,12 @@ def to_bridge_bundle(bundle) -> hb.TaskBundle:
         goal=bundle.goal,
         acceptance=tuple(bundle.acceptance),
         constraints=tuple(bundle.constraints),
-        known_facts=tuple(bundle.context),
+        known_facts=tuple(bundle.known_facts or bundle.context),
+        assumptions=tuple(bundle.assumptions),
+        allowed_paths=tuple(bundle.allowed_paths),
+        role=bundle.role,
+        verification=tuple(bundle.verification),
+        iteration_budget=int(bundle.iteration_budget),
     )
 
 

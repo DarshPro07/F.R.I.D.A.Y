@@ -30,7 +30,11 @@ def test_dangerous_answers_confirm_but_never_the_non_approvable():
     assert danger[policy.DESKTOP_CONTROL] == policy.AUTO
     for category in policy.NON_APPROVABLE:
         assert danger[category] == full[category] != policy.AUTO
-    assert not any(v == policy.CONFIRM for v in danger.values())
+    # The machine itself still gets a question: shutdown/restart/sleep/lock and
+    # a forced kill cannot be undone from the chair (test_action_chain rule).
+    left = {c for c, v in danger.items() if v == policy.CONFIRM}
+    assert left and left <= policy.IRREVERSIBLE_KEEP_CONFIRM
+    assert danger[policy.SHUTDOWN] == policy.CONFIRM
 
 
 def test_set_autonomy_persists_and_switches_the_live_engine(isolated_policy):

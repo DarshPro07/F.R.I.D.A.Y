@@ -161,7 +161,10 @@ def test_a_binary_or_missing_file_does_not_break_the_scan(workspace):
 def test_every_check_that_ran_is_recorded(workspace):
     decision = P.decide(workspace, ['src/app.py'], attempt=_passed(), allowed_paths=('src/',), approved=True)
     names = [c['check'] for c in decision.checks]
-    assert names == ['changes', 'verified', 'scope', 'reviewable', 'secrets', 'approved']
+    # FR-012 added 'independent_review' between verified and scope: a one-file
+    # change records it as not required, and it still shows in the trail.
+    assert names == ['changes', 'verified', 'independent_review', 'scope',
+                     'reviewable', 'secrets', 'approved']
     assert all((c['ok'] for c in decision.checks))
 
 

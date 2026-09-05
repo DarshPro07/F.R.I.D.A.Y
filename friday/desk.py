@@ -38,6 +38,7 @@ _BUSY = ("requested clipboard operation did not succeed", "openclipboard",
 
 
 def _busy(exc) -> bool:
+    """Check if an exception indicates the clipboard is busy."""
     return any(sig in str(exc).lower() for sig in _BUSY)
 
 
@@ -52,7 +53,7 @@ def _write(text):
 
 
 def clipboard():
-    """{"ok", "text", "chars", "truncated"} -- the clipboard, untouched.
+    """{\"ok\", \"text\", \"chars\", \"truncated\"} -- the clipboard, untouched.
 
     Retries briefly, because a clipboard held open is usually held for under a
     second. A persistent holder gets a clean message the UI can speak, never
@@ -90,7 +91,7 @@ def selection(timeout=0.8):
     """
     The text highlighted in whatever window has focus.
 
-    Returns {"ok", "text", ...} or {"ok": False, "reason": "nothing selected"}.
+    Returns {\"ok\", \"text\", ...} or {\"ok\": False, \"reason\": \"nothing selected\"}.
     The clipboard is always restored to what it held before the call.
     """
     if not sys.platform.startswith("win"):
@@ -140,10 +141,10 @@ def selection(timeout=0.8):
 
 def grab(what="auto"):
     """
-    what = "clipboard" | "selection" | "auto".
+    what = \"clipboard\" | \"selection\" | \"auto\".
 
-    "auto" tries the selection first and falls back to the clipboard, which is
-    what "read this for me" usually means: something is highlighted, and if it
+    \"auto\" tries the selection first and falls back to the clipboard, which is
+    what \"read this for me\" usually means: something is highlighted, and if it
     is not, the last thing copied is the next best guess.
     """
     if what == "clipboard":

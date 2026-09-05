@@ -59,6 +59,19 @@ PATTERN = "PATTERN"
 INFERENCE = "INFERENCE"
 MEMORY_KINDS = (FACT, PREFERENCE, PATTERN, INFERENCE)
 
+# PRD v3.1 FR-016 memory classes. `kind` above says how much to trust a
+# record (fact vs inference); `memory_type` says what KIND OF THING it is
+# and therefore its lifecycle: working memory dies with the objective,
+# session memory with the session, the rest are durable until superseded.
+MEMORY_TYPES = ("working", "session", "project", "user", "semantic",
+                "episodic", "procedural", "codebase", "tool_state")
+#: Lifecycle per type: the retention policy a record gets by default.
+MEMORY_RETENTION = {
+    "working": "objective", "session": "session", "project": "durable",
+    "user": "durable", "semantic": "durable", "episodic": "rolling",
+    "procedural": "durable", "codebase": "durable", "tool_state": "session",
+}
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     run_id      TEXT PRIMARY KEY,
@@ -519,6 +532,40 @@ CREATE TABLE IF NOT EXISTS automation_runs (
 CREATE INDEX IF NOT EXISTS idx_automation_runs_name
     ON automation_runs(name, started_at DESC);
 
+-- PRD v3.1 FR-041 / FR-042: scheduled OBJECTIVES (one-time or recurring)
+-- with budgets, permissions, delivery channel and an optional condition,
+-- and one row per firing so "did it run last night" is a lookup.
+CREATE TABLE IF NOT EXISTS schedules (
+    name        TEXT PRIMARY KEY,
+    description TEXT NOT NULL DEFAULT '',
+    objective   TEXT NOT NULL,
+    tasks       TEXT NOT NULL DEFAULT '[]',
+    trigger     TEXT NOT NULL,
+    budgets     TEXT NOT NULL DEFAULT '{}',
+    permissions TEXT NOT NULL DEFAULT '[]',
+    delivery    TEXT NOT NULL DEFAULT 'session',
+    condition   TEXT NOT NULL DEFAULT '{"kind": "always"}',
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    task_name   TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schedule_runs (
+    firing_id        TEXT PRIMARY KEY,
+    name             TEXT NOT NULL,
+    fired_by         TEXT NOT NULL,
+    run_id           TEXT,
+    status           TEXT NOT NULL,
+    condition_met    INTEGER,
+    condition_detail TEXT,
+    delivered_via    TEXT NOT NULL DEFAULT '',
+    started_at       TEXT NOT NULL,
+    finished_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_runs_name
+    ON schedule_runs(name, started_at DESC);
+
 -- Product processing runs, and one row per record.
 --
 -- Records are written as they finish rather than at the end, which is what
@@ -818,6 +865,10 @@ class Store:
         # and would reprocess an empty record, quarantining a healthy one.
         ("product_records", "source_row", "TEXT NOT NULL DEFAULT '{}'"),
         ("objective_tasks", "parent_id", "TEXT"),
+        # Fingerprint/strategy state for the failure-loop guard: last
+        # fingerprint, its history, the stated hypothesis and how many
+        # times the strategy has changed for this task. JSON, additive.
+        ("objective_tasks", "detail", "TEXT NOT NULL DEFAULT '{}'"),
         ("open_questions", "blocking", "INTEGER NOT NULL DEFAULT 1"),
         ("open_questions", "impact", "TEXT"),
         ("open_questions", "assumption", "TEXT"),
@@ -835,6 +886,35 @@ class Store:
         # already exist, so the live DB is untouched.
         ("runs", "attended", "INTEGER NOT NULL DEFAULT 1"),
         ("runs", "provenance", "TEXT NOT NULL DEFAULT 'PERSON'"),
+        # PRD v3.1 FR-001 objective schema (9.2): the durable objective
+        # carries its class, risk tier, budgets, constraints, approvals and
+        # evidence as first-class columns, not as prose in the summary.
+        ("objective_runs", "task_class", "TEXT NOT NULL DEFAULT ''"),
+        ("objective_runs", "risk_tier", "TEXT NOT NULL DEFAULT ''"),
+        ("objective_runs", "owner_id", "TEXT NOT NULL DEFAULT 'owner'"),
+        ("objective_runs", "project_scope", "TEXT NOT NULL DEFAULT ''"),
+        ("objective_runs", "memory_scope", "TEXT NOT NULL DEFAULT 'user'"),
+        ("objective_runs", "constraints", "TEXT NOT NULL DEFAULT '[]'"),
+        ("objective_runs", "required_capabilities", "TEXT NOT NULL DEFAULT '[]'"),
+        ("objective_runs", "retry_budget", "INTEGER NOT NULL DEFAULT 3"),
+        ("objective_runs", "cost_budget_tokens", "INTEGER NOT NULL DEFAULT 0"),
+        ("objective_runs", "time_budget_s", "INTEGER NOT NULL DEFAULT 0"),
+        ("objective_runs", "approvals", "TEXT NOT NULL DEFAULT '[]'"),
+        ("objective_runs", "evidence", "TEXT NOT NULL DEFAULT '[]'"),
+        ("objective_runs", "blocker", "TEXT NOT NULL DEFAULT ''"),
+        ("objective_runs", "source_channel", "TEXT NOT NULL DEFAULT 'local'"),
+        # PRD v3.1 FR-016/017/018 memory record contract (9.5): type,
+        # project scope, source reference, supersession/contradiction links,
+        # retention and last retrieval. Additive; existing rows read as
+        # SEMANTIC/'' which is what they were.
+        ("memories", "memory_type", "TEXT NOT NULL DEFAULT 'semantic'"),
+        ("memories", "project_scope", "TEXT NOT NULL DEFAULT ''"),
+        ("memories", "source_ref", "TEXT NOT NULL DEFAULT ''"),
+        ("memories", "supersedes_id", "INTEGER"),
+        ("memories", "contradicts_id", "INTEGER"),
+        ("memories", "retention_policy", "TEXT NOT NULL DEFAULT 'durable'"),
+        ("memories", "last_retrieved_at", "TEXT"),
+        ("memories", "importance", "REAL NOT NULL DEFAULT 0.5"),
     )
 
     def _migrate(self) -> None:
@@ -998,6 +1078,9 @@ class Store:
         scope: str = "user", confidence: float = 1.0, run_id: str | None = None,
         supersede: bool = True, evidence_count: int = 1,
         observation_id: int | None = None,
+        memory_type: str = "semantic", project_scope: str = "",
+        source_ref: str = "", importance: float = 0.5,
+        retention_policy: str = "",
     ) -> int:
         """
         Store a memory. `kind` and `source` are required - an unattributed
@@ -1007,32 +1090,145 @@ class Store:
         `evidence_count` is how many separate times this has been observed and
         `observation_id` is the episode it came from. Together they answer the
         two questions confidence alone cannot: how often, and from where.
+
+        PRD 9.5 fields: `memory_type` (FR-016 class, sets the lifecycle),
+        `project_scope` (FR-017: '' = every project, else only that one),
+        `source_ref` (FR-018: the run/message/file the fact came from). When
+        this record supersedes an active one on the same subject+kind, the
+        old row is marked superseded AND the new row carries `supersedes_id`
+        pointing at it - the link the UI needs to explain "this replaced
+        that" rather than just "that is gone".
         """
         if kind not in MEMORY_KINDS:
             raise ValueError(f"unknown memory kind {kind!r}; known: {list(MEMORY_KINDS)}")
+        if memory_type not in MEMORY_TYPES:
+            raise ValueError(f"unknown memory type {memory_type!r}; known: {list(MEMORY_TYPES)}")
         if not source.strip():
             raise ValueError("memory requires a source")
         if not 0.0 <= confidence <= 1.0:
             raise ValueError(f"confidence must be 0..1, got {confidence}")
         if evidence_count < 1:
             raise ValueError(f"evidence_count must be at least 1, got {evidence_count}")
+        retention = retention_policy or MEMORY_RETENTION[memory_type]
 
         stamp = now_iso()
         with self._tx() as conn:
+            superseded_id: int | None = None
             if supersede:
+                prior = conn.execute(
+                    "SELECT id FROM memories WHERE subject=? AND kind=? AND superseded=0 "
+                    "AND project_scope=? ORDER BY id DESC LIMIT 1",
+                    (subject, kind, project_scope)).fetchone()
+                superseded_id = int(prior[0]) if prior else None
                 # Older rows are marked, never deleted - history stays auditable.
                 conn.execute(
-                    "UPDATE memories SET superseded=1 WHERE subject=? AND kind=? AND superseded=0",
-                    (subject, kind),
+                    "UPDATE memories SET superseded=1 WHERE subject=? AND kind=? "
+                    "AND superseded=0 AND project_scope=?",
+                    (subject, kind, project_scope),
                 )
             cur = conn.execute(
                 "INSERT INTO memories (subject, value, kind, scope, source, confidence, "
-                "run_id, created_at, evidence_count, last_confirmed, observation_id) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "run_id, created_at, evidence_count, last_confirmed, observation_id, "
+                "memory_type, project_scope, source_ref, supersedes_id, "
+                "retention_policy, importance) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (subject, value, kind, scope, source, confidence, run_id, stamp,
-                 evidence_count, stamp, observation_id),
+                 evidence_count, stamp, observation_id, memory_type, project_scope,
+                 source_ref, superseded_id, retention, importance),
             )
             return int(cur.lastrowid)
+
+    def recall_scoped(self, subject: str = "", *, project_scope: str = "",
+                      needle: str = "", memory_types: tuple[str, ...] = (),
+                      limit: int = 20, touch: bool = True) -> list[dict]:
+        """FR-017 scoped retrieval. A record is visible when it is global
+        (project_scope '') or belongs to the requested project. Another
+        project's records are never returned, whatever the query matches.
+        `touch` stamps `last_retrieved_at` on what was returned (9.5)."""
+        sql = "SELECT * FROM memories WHERE superseded=0 AND (project_scope='' OR project_scope=?)"
+        params: list = [project_scope]
+        if subject:
+            sql += " AND subject=?"
+            params.append(subject)
+        if needle:
+            sql += " AND (subject LIKE ? OR value LIKE ?)"
+            params += [f"%{needle}%", f"%{needle}%"]
+        if memory_types:
+            sql += " AND memory_type IN (%s)" % ",".join("?" for _ in memory_types)
+            params += list(memory_types)
+        sql += " ORDER BY importance DESC, created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = [dict(r) for r in self._conn.execute(sql, params)]
+        if touch and rows:
+            with self._tx() as conn:
+                conn.execute(
+                    "UPDATE memories SET last_retrieved_at=? WHERE id IN (%s)"
+                    % ",".join("?" for _ in rows),
+                    [now_iso()] + [r["id"] for r in rows])
+        return rows
+
+    def memory_provenance(self, memory_id: int) -> dict | None:
+        """FR-018: where a remembered fact came from and whether it is
+        current - the record, what it superseded, what superseded it, and
+        any open contradiction on its subject."""
+        row = self._conn.execute("SELECT * FROM memories WHERE id=?",
+                                 (memory_id,)).fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        successor = self._conn.execute(
+            "SELECT id, value, source, created_at FROM memories WHERE supersedes_id=? "
+            "ORDER BY id DESC LIMIT 1", (memory_id,)).fetchone()
+        predecessor = None
+        if record.get("supersedes_id"):
+            predecessor = self._conn.execute(
+                "SELECT id, value, source, created_at FROM memories WHERE id=?",
+                (record["supersedes_id"],)).fetchone()
+        contradictions = [dict(r) for r in self._conn.execute(
+            "SELECT * FROM contradictions WHERE subject=? AND resolution='pending'",
+            (record["subject"],))]
+        return {
+            "id": record["id"], "subject": record["subject"], "value": record["value"],
+            "kind": record["kind"], "memory_type": record.get("memory_type"),
+            "scope": record["scope"], "project_scope": record.get("project_scope", ""),
+            "source": record["source"], "source_ref": record.get("source_ref", ""),
+            "confidence": record["confidence"], "importance": record.get("importance"),
+            "created_at": record["created_at"], "last_confirmed": record.get("last_confirmed"),
+            "last_retrieved_at": record.get("last_retrieved_at"),
+            "retention_policy": record.get("retention_policy"),
+            "current": not record["superseded"],
+            "superseded_by": dict(successor) if successor else None,
+            "supersedes": dict(predecessor) if predecessor else None,
+            "open_contradictions": contradictions,
+        }
+
+    def export_memories(self, *, project_scope: str | None = None,
+                        include_superseded: bool = False) -> list[dict]:
+        """FR-019/FR-066: the owner's durable memory as plain records, for
+        export or inspection. Scoped when a project is named."""
+        sql = "SELECT * FROM memories"
+        clauses, params = [], []
+        if not include_superseded:
+            clauses.append("superseded=0")
+        if project_scope is not None:
+            clauses.append("(project_scope='' OR project_scope=?)")
+            params.append(project_scope)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY id"
+        return [dict(r) for r in self._conn.execute(sql, params)]
+
+    def expire_memories(self, *, retention_policy: str, run_id: str | None = None) -> int:
+        """Lifecycle (FR-016): retire working/session-scoped records when
+        their objective or session ends. Marked superseded, never deleted -
+        the audit trail stays."""
+        sql = "UPDATE memories SET superseded=1 WHERE superseded=0 AND retention_policy=?"
+        params: list = [retention_policy]
+        if run_id is not None:
+            sql += " AND run_id=?"
+            params.append(run_id)
+        with self._tx() as conn:
+            return conn.execute(sql, params).rowcount
 
     def recall(self, subject: str, *, include_superseded: bool = False) -> list[dict]:
         sql = "SELECT * FROM memories WHERE subject=?"
@@ -1368,6 +1564,32 @@ class Store:
         )
         return [dict(r) for r in rows][::-1]
 
+    def truncate_message(self, message_id: int, heard: str) -> bool:
+        """
+        FR-039 (PRD v3.1): when the boss interrupts, history keeps only what
+        he actually heard. `heard` is the delivered prefix; the row is
+        rewritten to it with an interruption marker so the model sees a
+        turn that stopped, not a turn that finished. Returns False when the
+        id is unknown or `heard` is not a prefix of what was stored (a
+        client cannot rewrite a reply into something else).
+        """
+        heard = (heard or "").strip()
+        with self._tx() as conn:
+            row = conn.execute("SELECT content FROM messages WHERE id=?",
+                               (int(message_id),)).fetchone()
+            if row is None:
+                return False
+            full = (row["content"] if hasattr(row, "keys") else row[0]) or ""
+            if heard and not full.startswith(heard):
+                return False
+            marker = " [interrupted]"
+            content = (heard + marker) if heard else "[interrupted before anything was heard]"
+            if full.endswith(marker) and full == content:
+                return True
+            conn.execute("UPDATE messages SET content=? WHERE id=?",
+                         (content, int(message_id)))
+            return True
+
     def recent_messages(self, limit: int = 30) -> list[dict]:
         """
         The last N turns Friday had with anyone, oldest first.
@@ -1664,6 +1886,78 @@ class Store:
                 "  finished_at=? WHERE run_id=?",
                 (status, json.dumps(steps), error, now_iso(), run_id),
             )
+
+    # -- schedules (PRD v3.1 FR-041/042) ------------------------------------
+
+    def save_schedule(self, name: str, *, objective: str, tasks: list, trigger: dict,
+                      budgets: dict, permissions: list, delivery: str, condition: dict,
+                      description: str = "", task_name: str | None = None,
+                      enabled: bool = True) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO schedules (name, description, objective, tasks, trigger, budgets, "
+                "  permissions, delivery, condition, enabled, task_name, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(name) DO UPDATE SET description=excluded.description, "
+                "  objective=excluded.objective, tasks=excluded.tasks, trigger=excluded.trigger, "
+                "  budgets=excluded.budgets, permissions=excluded.permissions, "
+                "  delivery=excluded.delivery, condition=excluded.condition, "
+                "  enabled=excluded.enabled, task_name=excluded.task_name, "
+                "  updated_at=excluded.updated_at",
+                (name, description, objective, json.dumps(tasks), json.dumps(trigger),
+                 json.dumps(budgets), json.dumps(permissions), delivery, json.dumps(condition),
+                 1 if enabled else 0, task_name, now_iso(), now_iso()))
+
+    @staticmethod
+    def _schedule(row) -> dict:
+        got = dict(row)
+        for key in ("tasks", "trigger", "budgets", "permissions", "condition"):
+            try:
+                got[key] = json.loads(got[key]) if isinstance(got[key], str) else got[key]
+            except ValueError:
+                pass
+        got["enabled"] = bool(got["enabled"])
+        return got
+
+    def get_schedule(self, name: str) -> dict | None:
+        row = self._conn.execute("SELECT * FROM schedules WHERE name=?", (name,)).fetchone()
+        return self._schedule(row) if row else None
+
+    def schedules(self) -> list[dict]:
+        return [self._schedule(r) for r in
+                self._conn.execute("SELECT * FROM schedules ORDER BY name")]
+
+    def delete_schedule(self, name: str) -> bool:
+        with self._tx() as conn:
+            return conn.execute("DELETE FROM schedules WHERE name=?", (name,)).rowcount > 0
+
+    def start_schedule_run(self, firing_id: str, name: str, fired_by: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO schedule_runs (firing_id, name, fired_by, status, started_at) "
+                "VALUES (?,?,?,?,?)", (firing_id, name, fired_by, "running", now_iso()))
+
+    def finish_schedule_run(self, firing_id: str, *, run_id: str | None, status: str,
+                            condition_met: bool, condition_detail: str,
+                            delivered_via: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "UPDATE schedule_runs SET run_id=?, status=?, condition_met=?, "
+                "  condition_detail=?, delivered_via=?, finished_at=? WHERE firing_id=?",
+                (run_id, status, 1 if condition_met else 0, condition_detail,
+                 delivered_via, now_iso(), firing_id))
+
+    def schedule_history(self, name: str | None = None, limit: int = 20) -> list[dict]:
+        sql = "SELECT * FROM schedule_runs"
+        args: tuple = ()
+        if name:
+            sql += " WHERE name=?"
+            args = (name,)
+        sql += " ORDER BY started_at DESC LIMIT ?"
+        rows = [dict(r) for r in self._conn.execute(sql, args + (limit,))]
+        for r in rows:
+            r["condition_met"] = None if r["condition_met"] is None else bool(r["condition_met"])
+        return rows
 
     def automation_history(self, name: str | None = None,
                            limit: int = 20) -> list[dict]:
@@ -1987,7 +2281,12 @@ class Store:
         """Heartbeat plus whatever changed. Silent if the run is unknown."""
         allowed = {"status", "lease_executor_id", "lease_generation",
                    "lease_expiry", "next_wake", "manual_continue_count",
-                   "finished_at", "summary"}
+                   "finished_at", "summary",
+                   # PRD FR-001 objective schema columns
+                   "task_class", "risk_tier", "owner_id", "project_scope",
+                   "memory_scope", "constraints", "required_capabilities",
+                   "retry_budget", "cost_budget_tokens", "time_budget_s",
+                   "blocker", "source_channel", "approvals", "evidence"}
         sets = ["updated_at=?"]
         values: list[object] = [now_iso()]
         for key, value in fields.items():
@@ -1996,6 +2295,9 @@ class Store:
                     f"objective_runs has no updatable column {key!r}")
             if key == "summary" and isinstance(value, dict):
                 value = json.dumps(value, default=str)
+            if key in ("constraints", "required_capabilities") and \
+                    isinstance(value, (list, tuple)):
+                value = json.dumps(list(value), default=str)
             sets.append(f"{key}=?")
             values.append(value)
         values.append(run_id)
@@ -2003,6 +2305,110 @@ class Store:
             conn.execute(
                 f"UPDATE objective_runs SET {', '.join(sets)} WHERE run_id=?",
                 values)
+
+    def _append_objective_json(self, run_id: str, column: str, item: dict) -> int:
+        """Append one record to an append-only JSON list column, atomically.
+        Returns the new length. Neither approvals nor evidence may be edited
+        in place: a correction is a new record that references the old."""
+        if column not in ("approvals", "evidence"):
+            raise ValueError(f"not an append-only objective column: {column!r}")
+        record = dict(item)
+        record.setdefault("at", now_iso())
+        with self._tx() as conn:
+            row = conn.execute(
+                f"SELECT {column} FROM objective_runs WHERE run_id=?",
+                (run_id,)).fetchone()
+            if row is None:
+                raise LookupError(f"no objective run {run_id!r}")
+            try:
+                items = json.loads(row[0] or "[]")
+            except ValueError:
+                items = []
+            record.setdefault("seq", len(items) + 1)
+            items.append(record)
+            conn.execute(
+                f"UPDATE objective_runs SET {column}=?, updated_at=? WHERE run_id=?",
+                (json.dumps(items, default=str), now_iso(), run_id))
+            return len(items)
+
+    def append_objective_evidence(self, run_id: str, *, expected: str,
+                                  actual: str, method: str, passed: bool,
+                                  task_id: str = "", ref: str = "") -> int:
+        """FR-052 evidence ledger entry: expected -> actual -> method ->
+        pass/fail, timestamped, appended to the objective."""
+        return self._append_objective_json(run_id, "evidence", {
+            "task_id": task_id, "expected": expected, "actual": actual,
+            "method": method, "passed": bool(passed), "ref": ref})
+
+    def append_objective_approval(self, run_id: str, *, operation: str,
+                                  target: str, parameters: dict | None,
+                                  decision: str, decided_by: str,
+                                  nonce: str = "", expires_at: str = "") -> int:
+        """FR-060 exact-action approval record bound to operation, target,
+        parameters, objective and expiry."""
+        return self._append_objective_json(run_id, "approvals", {
+            "operation": operation, "target": target,
+            "parameters": dict(parameters or {}), "decision": decision,
+            "decided_by": decided_by, "nonce": nonce, "expires_at": expires_at})
+
+    def objective_ledger(self, run_id: str) -> dict | None:
+        """The PRD 9.2 Objective shape, assembled from the durable rows:
+        header, plan steps, workers, approvals, checkpoints (events),
+        evidence, budgets, current state, blocker, final result."""
+        run = self.objective_run(run_id)
+        if run is None:
+            return None
+
+        def loads(raw, fallback):
+            if isinstance(raw, (list, dict)):
+                return raw                      # already decoded by the reader
+            try:
+                return json.loads(raw) if isinstance(raw, str) and raw else fallback
+            except ValueError:
+                return fallback
+
+        tasks = self.objective_tasks(run_id)
+        events = self.objective_events(run_id)
+        workers = sorted({
+            str((loads(t.get("result"), {}) or {}).get("worker") or "")
+            for t in tasks} - {""})
+        return {
+            "id": run_id,
+            "owner_id": run.get("owner_id") or "owner",
+            "created_at": run.get("created_at"),
+            "intent": run.get("request"),
+            "goal": run.get("objective_summary"),
+            "desired_outcome": run.get("objective_summary"),
+            "task_class": run.get("task_class") or "",
+            "risk_tier": run.get("risk_tier") or "",
+            "constraints": loads(run.get("constraints"), []),
+            "project_scope": run.get("project_scope") or "",
+            "memory_scope": run.get("memory_scope") or "user",
+            "required_capabilities": loads(run.get("required_capabilities"), []),
+            "plan_steps": [{
+                "task_id": t["task_id"], "capability": t["capability"],
+                "status": t["status"], "dependencies": loads(t.get("dependencies"), []),
+                "attempts": t.get("attempts") or 0,
+                "failure_kind": t.get("failure_kind"),
+                "evidence": t.get("evidence") or "",
+            } for t in tasks],
+            "workers": workers,
+            "approvals": loads(run.get("approvals"), []),
+            "checkpoints": [e for e in events
+                            if e.get("event") in ("run.created", "task.succeeded",
+                                                  "task.failed", "run.paused",
+                                                  "run.resumed", "lease.acquired",
+                                                  "continuation.scheduled")],
+            "evidence": loads(run.get("evidence"), []),
+            "retry_budget": run.get("retry_budget") or 3,
+            "cost_budget_tokens": run.get("cost_budget_tokens") or 0,
+            "time_budget_s": run.get("time_budget_s") or 0,
+            "current_state": run.get("status"),
+            "blocker": run.get("blocker") or "",
+            "final_result": loads(run.get("summary"), run.get("summary")),
+            "source_channel": run.get("source_channel") or "local",
+            "event_count": len(events),
+        }
 
     def finish_objective_run(self, run_id: str, *, status: str,
                              summary: dict, finished_at: str | None = None) -> None:
@@ -2033,14 +2439,18 @@ class Store:
 
     def update_objective_task(self, task_id: str, **fields) -> None:
         allowed = {"status", "attempts", "failure_kind", "result", "evidence",
-                   "blocked_by", "next_wake", "started_at", "finished_at"}
+                   "blocked_by", "next_wake", "started_at", "finished_at",
+                   "detail"}
         sets: list[str] = []
         values: list[object] = []
+        detail_at = -1
         for key, value in fields.items():
             if key not in allowed:
                 raise ValueError(
                     f"objective_tasks has no updatable column {key!r}")
-            if key in ("result",) and isinstance(value, dict):
+            if key == "detail" and isinstance(value, dict):
+                detail_at = len(values)          # merged inside the transaction
+            elif key == "result" and isinstance(value, dict):
                 value = json.dumps(value, default=str)
             sets.append(f"{key}=?")
             values.append(value)
@@ -2048,6 +2458,25 @@ class Store:
             return
         values.append(task_id)
         with self._tx() as conn:
+            if detail_at >= 0:
+                # Merge, never replace. The loop's fingerprint bookkeeping
+                # (last_fingerprint, strategy_changes, hypothesis, strategy_hint)
+                # is written after a failure and read by the NEXT attempt - and
+                # by the next process after a restart. Every other site writes
+                # its own keys ({"attempt": ..}, {"attempts": ..}) and a replacing
+                # write from the success path erased the history (golden
+                # journey, 2026-09-04).
+                row = conn.execute(
+                    "SELECT detail FROM objective_tasks WHERE task_id=?",
+                    (task_id,)).fetchone()
+                try:
+                    existing = json.loads(row[0]) if row and row[0] else {}
+                except (TypeError, ValueError):
+                    existing = {}
+                if not isinstance(existing, dict):
+                    existing = {}
+                values[detail_at] = json.dumps({**existing, **values[detail_at]},
+                                               default=str)
             conn.execute(
                 f"UPDATE objective_tasks SET {', '.join(sets)} WHERE task_id=?",
                 values)
@@ -2106,6 +2535,10 @@ class Store:
                     got["result"] = json.loads(got["result"])
                 except json.JSONDecodeError:
                     pass
+            try:
+                got["detail"] = json.loads(got.get("detail") or "{}")
+            except json.JSONDecodeError:
+                got["detail"] = {}
             rows.append(got)
         return rows
 
@@ -2123,6 +2556,10 @@ class Store:
                 got["result"] = json.loads(got["result"])
             except json.JSONDecodeError:
                 pass
+        try:
+            got["detail"] = json.loads(got.get("detail") or "{}")
+        except json.JSONDecodeError:
+            got["detail"] = {}
         return got
 
     def append_objective_event(self, run_id: str, event: str, *,

@@ -12,8 +12,11 @@ that the language brain is offline. It never claims to have done what it did not
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
+
+logger = logging.getLogger("friday.voice")
 
 PERSONA = (
     "You are Friday -- Darsh built you, you run on his machine, and you answer to him. "
@@ -141,8 +144,8 @@ def _surface() -> dict[str, set[str]]:
                 continue
             if safe:
                 out.setdefault(fam, set()).update(safe)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("capability surface fell back to the built-ins: %s", exc)
     # Contacts are Friday's own, not an upstream provider's, and they are the
     # one place a spoken turn legitimately writes: "her number is ..." has to
     # stick or the next session asks again.
@@ -160,6 +163,9 @@ def _surface() -> dict[str, set[str]]:
     out["clock"] = {"now"}
     out["files"] = set(_FILE_OPS)
     out["hermes"] = set(_HERMES_OPS)
+    # "What's running" needs the same digest the room speaks on a timer,
+    # read on demand instead of waiting for the cadence.
+    out["work"] = {"status"}
     # She can check herself: the automatable half of the master prompt.
     out["selfcheck"] = {"run"}
     # Which upstream helpers exist and whether they are up - the same data
@@ -294,6 +300,25 @@ def _run_files(operation, arguments):
     return {"result": _json.dumps(payload, default=str)[:2500]}
 
 
+_PATH_TOKEN = re.compile(r"(?<![\w/\\])((?:[\w.\-]+[\\/])+[\w.\-]+\.\w{1,6})")
+
+
+def _keep_literal_paths(goal: str, spoken: str) -> str:
+    """The boss's paths reach Hermes exactly as typed. 2026-09-04 21:17:
+    'friday/desk.py' became '/desk.py' in the goal the model wrote, and
+    Hermes spent minutes searching the whole tree for it. For every path in
+    the turn whose basename survived but whose directory did not, the
+    mangled mention is replaced by the literal path."""
+    out = goal or ""
+    for literal in _PATH_TOKEN.findall(spoken or ""):
+        if literal in out:
+            continue
+        base = literal.replace("\\", "/").split("/")[-1]
+        out = re.sub(r"(?<![\w.\-/\\])/?" + re.escape(base) + r"(?![\w.\-])",
+                     literal.replace("\\", "\\\\"), out)
+    return out
+
+
 def _run_hermes(operation, arguments):
     """Hand real engineering work to Hermes from the browser path.
 
@@ -318,6 +343,7 @@ def _run_hermes(operation, arguments):
                                              "route_reason", "task", "bundle_chars")}
             return {"result": _json.dumps(keep, default=str)[:2500]}
         goal = (args.get("goal") or args.get("task") or args.get("query") or "").strip()
+        goal = _keep_literal_paths(goal, _CURRENT_TURN["text"])
         if not goal:
             return {"error": "hermes/delegate needs arguments={'goal': <the task, self-contained>}"}
         bundle = hb.TaskBundle(goal=goal,
@@ -340,6 +366,30 @@ def _run_hermes(operation, arguments):
         return {"error": "hermes bridge lacks %s" % exc}
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)[:200]}
+
+
+def _run_work(operation, arguments):
+    """What's running right now, as a spoken digest - the same composition
+    `speak_progress_digests` uses on the room path's timer, read on demand
+    instead of waiting for the cadence."""
+    import time as _time
+    from friday import progress_digest as pd
+
+    if operation != "status":
+        return {"error": "there is no %r operation on 'work'. Retry with 'status'." % operation}
+    try:
+        from friday.tools.hermes_control import supervisor
+        runs = pd.gather(supervisor())
+    except Exception as exc:  # noqa: BLE001
+        return {"error": "could not read the work log: %s" % str(exc)[:120]}
+    result = pd.compose(runs, now=_time.time(), last_digest_at=0.0)
+    if result.digest:
+        text = result.digest
+    elif result.milestones:
+        text = "; ".join(result.milestones)
+    else:
+        text = "nothing running right now"
+    return {"result": text}
 
 
 def _run_desktop(operation, arguments):
@@ -601,7 +651,9 @@ def _capability_tool():
             "automatable half of the master validation prompt on yourself and returns "
             "pass/fail per item - use it when he asks you to check, verify or validate "
             "yourself. helpers/list says which upstream helpers exist and "
-            "whether they are up. "
+            "whether they are up. work/status says what is running right now - "
+            "use it when he asks what's running, how the work is going, or for "
+            "a status update. "
             "One exception to keeping errors to yourself: when a helper (social, "
             "research, scraping, media, commerce) answers 'unreachable ... set "
             "SOME_URL', tell him that setting by name in one line - it is the one "
@@ -673,8 +725,8 @@ def _with_health_hint(family: str, error: str) -> str:
                 hints.append("%s: %s" % (row["provider"], str(detail)[:140]))
         if hints:
             return error + " | " + "; ".join(hints)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("no health hint for %s: %s", family, exc)
     return error
 
 
@@ -701,6 +753,8 @@ def _run_capability(family, operation, arguments):
         return _run_files(operation, arguments or {})
     if family == "hermes":
         return _run_hermes(operation, arguments or {})
+    if family == "work":
+        return _run_work(operation, arguments or {})
     if family == "helpers":
         return _run_helpers(operation, arguments or {})
     if family == "selfcheck":
@@ -722,8 +776,8 @@ def _run_capability(family, operation, arguments):
                     real |= ops
                     if operation in ops and getattr(prov, "risk", "low") == "restricted":
                         restricted = True
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("could not read the registry for %s: %s", family, exc)
         if operation in real:
             from friday import policy as _policy
             if not (_policy.skip_permissions() and not restricted):
@@ -771,8 +825,8 @@ def _ensure_env():
             try:
                 from dotenv import load_dotenv
                 load_dotenv()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("no .env loaded for the voice brain: %s", exc)
 
 
 # role -> model, mirroring friday.providers. We do NOT import providers here:
@@ -818,10 +872,67 @@ def _memory_context(text):
         return ""
 
 
+_FINISHED_Q = re.compile(
+    r"\bwhat (did|has) hermes (just )?(finish|finished|complete|completed|deliver|"
+    r"delivered|do|done)\b"
+    r"|\b(did|has) hermes (just )?(finish|finished|complete|completed)\b"
+    r"|\bwhy that model\b|\b(which|what) model did hermes (use|run on)\b"
+    r"|\bhermes'?s? (last|latest) (job|run|task)\b")
+
+
+_DELEGATION_CLAIM = re.compile(
+    r"\b(?:hermes has it|i'?ve (?:asked|handed|told|given) (?:it to )?hermes"
+    r"|handed (?:this|that|it) (?:over )?to hermes|hermes is (?:now )?(?:on it|working on)"
+    r"|delegated (?:it|this|that)?\s*to hermes)\b", re.I)
+
+
+def _honest_about_hermes(answer: str, used) -> str:
+    """A delegation exists only if hermes/delegate ran this turn. 2026-09-04
+    16:31 and 21:33: "Hermes has it, sir, economy tier" was said with no tool
+    call at all - no run, no session - and the boss waited for a job that
+    never existed. The claim is replaced, never trusted."""
+    if "hermes" in (used or []) or not _DELEGATION_CLAIM.search(answer or ""):
+        return answer
+    logger.warning("voice: delegation claimed without hermes/delegate: %r", (answer or "")[:120])
+    return ("I have not handed anything to Hermes, sir - that sentence came from me, "
+            "not from a job. Say the task once more and I will delegate it properly.")
+
+
+def _grounded_work_answer(low: str):
+    """'What did Hermes finish, and why that model?' is answered from the run
+    ledger, never from the conversation - the sibling of the "what's running"
+    branch below. 2026-09-04 17:12: she said a job was "still working" forty
+    minutes after the ledger showed nothing active, because the model answered
+    from chat context instead of calling hermes/status. Deterministic here, so
+    the choice is no longer the model's."""
+    if "hermes" not in low:
+        return None
+    if _FINISHED_Q.search(low):
+        try:
+            from friday import hermes_bridge as hb
+            from friday import progress_digest as pd
+            from friday.tools.hermes_control import supervisor
+            rows = supervisor().log.recent(limit=12)
+        except Exception as exc:  # noqa: BLE001 - say so, never invent
+            return {"reply": "I could not read the Hermes ledger: %s" % str(exc)[:120],
+                    "action": "hermes.outcome", "used_capabilities": ["hermes"]}
+        done = [r for r in rows if r.get("status") in pd.TERMINAL and
+                (r.get("origin") or "production") in hb.DELIVERABLE_ORIGINS]
+        done.sort(key=lambda r: r.get("last_event_at") or 0, reverse=True)
+        said = (pd.outcome_line(done[0]) if done
+                else "I have no finished Hermes job on record, sir.")
+        return {"reply": said, "action": "hermes.outcome",
+                "used_capabilities": ["hermes"]}
+    return None
+
+
 def _try_command(text):
     """Explicit intents that must be REAL actions. Returns a dict or None."""
     t = text.strip()
     low = t.lower()
+    grounded = _grounded_work_answer(low)
+    if grounded:
+        return grounded
 
     # Owner switches. "full autonomy on" = policy.DANGEROUS: no more "say
     # okay". Deterministic on purpose: a mode change is not for a model to
@@ -844,8 +955,8 @@ def _try_command(text):
         try:                         # the access log is where mode changes belong
             from friday import access as _access
             _access.log({"kind": "autonomy", "mode": mode, "spoken": t[:80]})
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("autonomy switch not written to the access log: %s", exc)
         said = {
             _policy.DANGEROUS: "Full autonomy, sir: I act first and report. Stop still stops "
                                "me, and passwords, money, deleting data and security settings "
@@ -887,6 +998,15 @@ def _try_command(text):
                 % (info.get("tier"), info.get("effort")))
         return {"reply": said, "action": "hermes.delegate", "status": info.get("status"),
                 "used_capabilities": ["hermes"], "work_run_id": info.get("work_run_id")}
+
+    # "What's running" / "how's the work going" / "status of the work" - a
+    # direct ask for the same digest the room speaks on its own cadence.
+    if (len(low.split()) <= 12 and
+            re.search(r"\bwhat'?s running\b|\bhow(?:'s| is) the work going\b|"
+                      r"\bstatus of the work\b", low)):
+        out = _run_work("status", {})
+        text = out.get("result") or out.get("error") or "nothing running right now"
+        return {"reply": text, "action": "work.status", "used_capabilities": ["work"]}
 
     # "Clone / rebuild / study the UI of <url>" -- the useful half of the
     # website-cloning tools (bolt.diy, Open Lovable, onlook), done natively:
@@ -1079,12 +1199,25 @@ def conversation_id(now=None):
 
 
 def _remember_turn(role, text):
-    """Never lets a storage failure cost the boss his answer."""
+    """Never lets a storage failure cost the boss his answer. Returns the
+    message id (or None) so the page can truncate it on interruption."""
     try:
         from friday.toolsets.memory import store
-        store().add_message(conversation_id(), role, text)
-    except Exception:  # noqa: BLE001
-        pass
+        return store().add_message(conversation_id(), role, text)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("turn not remembered (%s): %s", role, exc)
+        return None
+
+
+def mark_interrupted(message_id, heard):
+    """FR-039: the page reports how much of a reply was actually played;
+    the stored turn becomes exactly that. See Store.truncate_message."""
+    try:
+        from friday.toolsets.memory import store
+        return bool(store().truncate_message(int(message_id), heard or ""))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("interruption not recorded for %s: %s", message_id, exc)
+        return False
 
 
 def reply(text, history=None):
@@ -1097,7 +1230,7 @@ def reply(text, history=None):
 
     cmd = _try_command(text)
     if cmd:
-        _remember_turn("assistant", cmd.get("reply", ""))
+        cmd["message_id"] = _remember_turn("assistant", cmd.get("reply", ""))
         return cmd
 
     # "Okay" after a desktop plan is the approval, not a new question. The
@@ -1113,8 +1246,9 @@ def reply(text, history=None):
         out = _run_desktop("step", {"nonce": _LAST_PLAN_NONCE["nonce"]})
         said = ("Done, sir." if "result" in out and '"succeeded"' in out["result"]
                 else "That step did not go through: %s" % (out.get("error") or out.get("result", ""))[:160])
-        _remember_turn("assistant", said)
-        return {"reply": said, "action": "desktop.step", "used_capabilities": ["desktop"]}
+        message_id = _remember_turn("assistant", said)
+        return {"reply": said, "action": "desktop.step", "used_capabilities": ["desktop"],
+                "message_id": message_id}
     # The offer to take over lapses unless the very next turn is the yes: a
     # bare "ok" three questions later must not spend a stashed nonce (review,
     # 2026-09-03). A new plan in this turn stashes a new one.
@@ -1214,9 +1348,10 @@ def reply(text, history=None):
             timer.stop("model")
             answer = (resp.text or "").strip() or (
                 "I found it, sir, but lost my words - ask me once more.")
-        _remember_turn("assistant", answer)
+        answer = _honest_about_hermes(answer, used)
+        message_id = _remember_turn("assistant", answer)
         latency = timer.report()
-        return {"reply": answer, "model": name,
+        return {"reply": answer, "model": name, "message_id": message_id,
                 "used_memory": bool(ctx), "thinking_budget": budget,
                 "history_turns": len(turns),
                 "used_capabilities": used,

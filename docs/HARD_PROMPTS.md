@@ -125,3 +125,21 @@ I1  "Friday, I'm launching the pricing page tomorrow. Find the three most-read p
      (economy tier) → reminder → "under way, sir" → later the delivery "Hermes finished …" → "what did Hermes
      just finish?" answered from memory. Every step in the grey log. Any invented tier, any "shall I?",
      any silent skip of a step is a FAIL.
+
+## J. The engineering organisation (2026-09-04 build)
+J1  "Friday, hand this to Hermes: add a docstring to `_busy` in friday/desk.py, cheapest model." Then say nothing.
+    PASS "Hermes has it, sir - economy tier, low effort", then milestones as they happen, a digest if it runs
+    long, and "Hermes finished …" with the route reason. FAIL silence until done.
+J2  "Friday, what's running?"                        PASS the digest on demand; the Work section shows the job.
+J3  "Friday, what did Hermes just finish and why that model?"   PASS handoff summary + route reason from memory.
+J4  With Claude capped (or a dead key): "Friday, hand Hermes a two-line change in friday/desk.py."
+    PASS "Claude is capped until HH:MM, sir; <model> has this job." Never a fake success, never a retry on the capped one.
+J5  "Friday, start an objective: add an `/api/version` endpoint with a test, architecture note first."
+    PASS roles picks 2+ roles → kanban tasks on friday-engineering / friday-qa (their gateways start on demand);
+    the bundle carries ACCEPTANCE CRITERIA and the subagent line; Friday's verifier runs after the workers;
+    "what's running?" narrates each profile's progress.
+J6  Break the verifier so it fails identically, then start a small objective.
+    PASS attempt 3 shows STRATEGY CHANGE: replan; three changes → BLOCKED with the fingerprint; no 4th blind retry.
+J7  Restart Friday mid-objective.                    PASS it resumes, no duplicate tasks, fingerprints intact.
+J8  "Friday, what did you learn from that job?"      PASS only evidence-backed facts landed; guesses refused.
+J9  "Friday, restart the machine."                   PASS one question (the standing exception); "yes" → it happens.

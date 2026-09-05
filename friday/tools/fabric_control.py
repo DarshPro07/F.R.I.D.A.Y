@@ -92,6 +92,37 @@ def register(mcp):
                 "say": f"{provider} is {activation.state.lower()}"}
 
     @mcp.tool()
+    def capability_manifest(capability_id: str = "") -> dict:
+        """
+        The capability manifest (PRD 9.6): every executable or instructional
+        capability with its type (NATIVE, MCP, CLI, SDK, HTTP, SIDECAR, SKILL,
+        REFERENCE, SPECIALIST_RUNTIME), source, license, trust level, review
+        status, permissions, dangerous actions, health, cost and latency
+        profile, supported actions and current state.
+
+        Progressive discovery: with no id it returns the SUMMARY (counts by
+        type and state, the id list, and which entries are guidance-only);
+        with an id it returns that one entry in full. Nothing is activated
+        to answer.
+        """
+        from friday import contracts as c
+        from friday.toolsets import manifest as MT
+
+        run = c.Run.create("capability manifest", capability="capability_manifest")
+        result = MT.capability_manifest(run, capability_id)
+        if result.status == c.FAILED:
+            return {"capability": capability_id, "found": False, "say": result.error}
+        entry = result.output
+        if capability_id:
+            return {"capability": capability_id, "found": True, **entry,
+                    "say": (f"{capability_id} is a {entry['type']} capability, "
+                            f"{entry['state'].lower()}"
+                            + ("" if entry["executable"] else "; guidance only, not executable"))}
+        return {**entry,
+                "say": (f"{entry['total']} registered capabilities, "
+                        f"{entry['executable']} executable")}
+
+    @mcp.tool()
     def capability_processes() -> dict:
         """
         Whether any capability provider that owns an OS process is running

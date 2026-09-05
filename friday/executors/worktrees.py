@@ -203,14 +203,43 @@ class WorktreeManager:
             return False, "the 'worktree' is the main checkout"
         return True, "ok"
 
+    # -- creation ----------------------------------------------------------
+
+    def create(self, name: str, *, base: str = "HEAD") -> Worktree:
+        """
+        A fresh checkout of `base` on its own branch, under WORKTREE_DIR.
+
+        This is the sandbox FR-048 requires: work happens here and the
+        main checkout does not move until `promote()` merges. Refuses to
+        reuse a name that already has a worktree - a sandbox that might
+        contain somebody else's half-finished change is not a sandbox.
+        """
+        if self.find(name) is not None:
+            raise WorktreeError(f"worktree {name!r} already exists")
+        path = self.path_for(name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        branch = self.branch_for(name)
+        git(self.repo, "worktree", "add", "-b", branch, str(path), base)
+        head = git(path, "rev-parse", "HEAD")
+        return Worktree(name=name, path=path, branch=branch, repo=self.repo,
+                        base_commit=head)
+
     # -- the work ----------------------------------------------------------
 
     def changes(self, name: str) -> list[str]:
         path = self.path_for(name)
         if not path.is_dir():
             return []
-        return [line[3:].strip()
-                for line in git(path, "status", "--porcelain").splitlines()
+        # `git()` strips the whole output, which eats the leading space of
+        # the first porcelain line (" M pkg/mod.py" -> "M pkg/mod.py"), so a
+        # fixed [3:] slice lost the first character of the first path.
+        # Read the raw output and slice each line on its own.
+        out = subprocess.run(["git", "status", "--porcelain"], cwd=str(path),
+                             capture_output=True, text=True, timeout=120)
+        if out.returncode != 0:
+            raise WorktreeError(f"git status failed in {path}: "
+                                f"{(out.stderr or '').strip()[:300]}")
+        return [line[3:].strip() for line in (out.stdout or "").splitlines()
                 if line.strip()]
 
     def commit(self, name: str, message: str) -> str:

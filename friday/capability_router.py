@@ -152,7 +152,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "browser": (
         "browser_open", "browser_navigate", "browser_inspect", "browser_close",
-        "browser_automate",
+        "browser_automate", "browser_act",
     ),
     "research": ("web_crawl", "web_deep_research"),
     "documents": ("documents_extract", "documents_inspect"),
@@ -169,6 +169,11 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "power": ("power_lock", "power_sleep", "power_hibernate", "power_shutdown", "power_restart"),
     "executor": ("ada_ask",),
     "hermes": ("hermes_delegate", "hermes_status", "hermes_steer", "hermes_interrupt"),
+    "model_gateway": ("model_providers", "model_infer", "model_usage"),
+    "adversarial": ("decision_deliberate", "change_review"),
+    "selfdev": ("selfdev_run", "selfdev_promote", "selfdev_rollback", "selfdev_status"),
+    "governor": ("system_pressure", "system_diagnostics"),
+    "observability": ("objective_trace",),
     "connectors": (
         "connector_list", "connector_describe", "connector_connect", "connector_verify",
         "connector_smoke", "connector_status", "connector_repair",
@@ -201,6 +206,10 @@ GROUPS: dict[str, tuple[str, ...]] = {
         "automations_create", "automations_list", "automations_run", "automations_history",
         "automations_delete",
     ),
+    "schedules": (
+        "schedules_create", "schedules_list", "schedules_run", "schedules_history",
+        "schedules_delete",
+    ),
     "products": (
         "product_process", "product_status", "product_result", "product_retry", "product_runs",
         "product_export",
@@ -223,6 +232,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "memory_extra": (
         "memory_forget", "memory_record_decision", "memory_project_context",
         "memory_session_recap", "memory_record_utterance",
+        "memory_provenance", "memory_export",
     ),
     "objectives": (
         "objective_start", "objective_status", "objective_list", "objective_pause",
@@ -230,7 +240,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "capabilities": (
         "capability_providers", "capability_health", "capability_processes",
-        "capability_reload",
+        "capability_reload", "capability_manifest",
     ),
     "utils": ("format_json", "word_count", "get_system_info"),
 }
@@ -251,6 +261,11 @@ GROUP_PURPOSE: dict[str, str] = {
     'power': 'locking, sleeping, hibernating, shutting down or restarting the computer',
     'executor': 'answer a development question from project decisions',
     'hermes': 'delegate a sustained engineering task to the Hermes agent, check on it, steer it, or stop it',
+    'model_gateway': 'ask which model providers Hermes can broker, run one inference-only request on a stronger model, or read gateway token usage',
+    'selfdev': 'improve Friday itself through the gated loop: sandbox a candidate change, test, review, benchmark, promote on approval, roll back',
+    'adversarial': 'deliberate a high-impact decision with proposer, contrarian, failure analyst, evidence checker and judge roles, or have an independent reviewer check a change against its claim',
+    'governor': 'why Friday is running fewer workers or browsers right now: resource pressure level, active workers, queue depth; the one diagnostics view',
+    'observability': 'the full trace of what happened to an objective: tool calls, workers, model calls, policy decisions, latency, retries, errors, verification',
     'connectors': 'connect, verify, repair or list AI providers and other connectors so the boss never configures Hermes by hand',
     'brain': 'the shared Friday/Hermes knowledge brain: recall what we already know, save a durable verified fact, look up an entity card, expire a superseded fact',
     'browser_policy': 'read a web page under the banking/secret policy gate, or connect an API key/credential safely',
@@ -263,6 +278,7 @@ GROUP_PURPOSE: dict[str, str] = {
     'music': "search music, skip tracks, play by mood, see what's playing",
     'reminders': 'set, list or cancel reminders',
     'automations': 'make something happen on a schedule, every day or every N minutes, without being asked each time - and check afterwards whether it ran',
+    'schedules': 'schedule a whole objective to run once or on a repeat with budgets, permissions and a delivery channel, or a monitor that only speaks up when its condition is met - and see every firing',
     'products': 'process a catalogue or spreadsheet of items, then report what happened to each one',
     'computer': 'close or focus apps, volume, clipboard, wifi',
     'news': 'world and finance headlines, and the monitor dashboards',

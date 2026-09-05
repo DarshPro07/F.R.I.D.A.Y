@@ -316,11 +316,23 @@ def resolve_policy(mode: str) -> dict[str, str]:
              for category, decision in DEFAULT_POLICY.items()}
     if mode == DANGEROUS:
         # The owner answered every question in advance. NON_APPROVABLE is
-        # exactly the set nobody can answer, so it is the one thing left out.
+        # exactly the set nobody can answer, and IRREVERSIBLE_KEEP_CONFIRM is
+        # the machine itself - both stay a question.
         for category, decision in table.items():
-            if decision == CONFIRM and category not in NON_APPROVABLE:
+            if (decision == CONFIRM and category not in NON_APPROVABLE
+                    and category not in IRREVERSIBLE_KEEP_CONFIRM):
                 table[category] = AUTO
     return table
+
+
+#: Machine-level actions that cannot be undone from the chair: even "never
+#: ask" stops here. A yes costs the owner one word; a shutdown, restart or
+#: forced kill mid-build costs him the build (test_action_chain: "the ones
+#: that cannot be undone are a question, not a refusal", kept 2026-09-04).
+IRREVERSIBLE_KEEP_CONFIRM = frozenset({
+    SESSION_LOCK, SLEEP, HIBERNATE, SHUTDOWN, RESTART, FORCED_SHUTDOWN,
+    POWER_ACTION, FORCE_PROCESS_TERMINATION,
+})
 
 
 def set_autonomy(mode: str) -> str:
@@ -435,6 +447,19 @@ TOOL_CATEGORIES: dict[str, str] = {
     'automations.run': REMINDER,
     'automations.list': READ_LOCAL_SAFE,
     'automations.history': READ_LOCAL_SAFE,
+    # PRD v3.1 FR-041/042 scheduled objectives: same tier as automations
+    # (the OS scheduler + a stored definition); the objective it fires is
+    # gated per tool when it runs.
+    'schedules.create': REMINDER,
+    'schedules.delete': REMINDER,
+    'schedules.run': REMINDER,
+    'schedules.list': READ_LOCAL_SAFE,
+    'schedules.history': READ_LOCAL_SAFE,
+    'schedules_create': REMINDER,
+    'schedules_delete': REMINDER,
+    'schedules_run': REMINDER,
+    'schedules_list': READ_LOCAL_SAFE,
+    'schedules_history': READ_LOCAL_SAFE,
     'files.read': READ_LOCAL_SAFE,
     'files.roots': READ_LOCAL_SAFE,
     'files.list': READ_LOCAL_SAFE,
@@ -469,6 +494,10 @@ TOOL_CATEGORIES: dict[str, str] = {
     'browser.inspect': BROWSER_CONTROL,
     'browser.close': BROWSER_CONTROL,
     'browser.automate': BROWSER_AUTOMATION,
+    # PRD FR-031/036: the primitive loop. The tool id is classified per
+    # primitive inside (reads browser.inspect, writes browser.automate); the
+    # bare id is what the approval channel and manifest see.
+    'browser_act': BROWSER_AUTOMATION,
     'get_world_news': WEB_SEARCH,
     'get_world_finance_news': WEB_SEARCH,
     'search_web': WEB_SEARCH,
@@ -487,6 +516,8 @@ TOOL_CATEGORIES: dict[str, str] = {
     'memory.project_resume': MEMORY_READ,
     'memory.session_recap': MEMORY_READ,
     'memory.remember': MEMORY_WRITE,
+    'memory.provenance': MEMORY_READ,
+    'memory.export': MEMORY_READ,
     'memory.record_decision': MEMORY_WRITE,
     'ada.ask': MEMORY_WRITE,
     'hermes.delegate': COMMAND_EXECUTION,
@@ -497,6 +528,26 @@ TOOL_CATEGORIES: dict[str, str] = {
     'hermes_status': READ_LOCAL_SAFE,
     'hermes_steer': OBJECTIVE_CONTROL,
     'hermes_interrupt': OBJECTIVE_CONTROL,
+    # PRD 4.9 Hermes MODEL_GATEWAY: inference only - no tools, no session,
+    # no side effects. Reads of provider inventory and usage are local.
+    'model_providers': READ_LOCAL_SAFE,
+    'model_infer': WEB_SEARCH,
+    'decision_deliberate': WEB_SEARCH,
+    'change_review': WEB_SEARCH,
+    # PRD FR-047..051: self-development. Running the gates edits only a
+    # sandbox worktree (FILE_WRITE); promotion and rollback move the live
+    # branch and are command execution, so they ask.
+    'selfdev_run': FILE_WRITE,
+    'selfdev_promote': COMMAND_EXECUTION,
+    'selfdev_rollback': COMMAND_EXECUTION,
+    'selfdev_status': READ_LOCAL_SAFE,
+    'model_usage': READ_LOCAL_SAFE,
+    # PRD FR-056: the resource governor's status is a local read.
+    'system_pressure': READ_LOCAL_SAFE,
+    'system_diagnostics': READ_LOCAL_SAFE,
+    'objective_trace': OBJECTIVE_CONTROL,
+    'objectives.trace': OBJECTIVE_CONTROL,
+    'system.diagnostics': READ_LOCAL_SAFE,
     'connector_list': READ_LOCAL_SAFE,
     'connector_describe': READ_LOCAL_SAFE,
     'connector_connect': COMMAND_EXECUTION,
@@ -508,6 +559,7 @@ TOOL_CATEGORIES: dict[str, str] = {
     'capability_providers': READ_LOCAL_SAFE,
     'capability_health': READ_LOCAL_SAFE,
     'capability_processes': READ_LOCAL_SAFE,
+    'capability_manifest': READ_LOCAL_SAFE,
     'capability_use': COMMAND_EXECUTION,
     'brain_recall': READ_LOCAL_SAFE,
     'brain_remember': MEMORY_WRITE,
@@ -566,6 +618,15 @@ class Verdict:
     @property
     def denied(self) -> bool:
         return self.decision == DENY
+
+    @property
+    def tier(self) -> str:
+        """PRD 4.11 risk tier (R0..R4) of this tool, from friday.trust's
+        category table. Deterministic; the approval card and audit say it."""
+        from friday import trust
+        if self.category == "UNKNOWN":
+            return trust.R2
+        return trust.tier_of_category(self.category)
 
 
 class PolicyError(PermissionError):
@@ -628,7 +689,16 @@ class PolicyEngine:
                       f"autonomy does not grant this one"),
             DENY: f"{category} is denied by policy",
         }
-        return Verdict(tool_id, category, decision, reasons[decision])
+        verdict = Verdict(tool_id, category, decision, reasons[decision])
+        # FR-065: every authorization decision above R0-AUTO is an audit
+        # row. The engine cannot be bypassed to reach a tool, so this is
+        # the one place the record is complete. Best-effort by design.
+        try:
+            from friday import trust
+            trust.record_decision(tool_id, verdict)
+        except Exception:  # noqa: BLE001 - audit failure never changes a verdict
+            pass
+        return verdict
 
     def approve_for_session(self, tool_id: str) -> None:
         """

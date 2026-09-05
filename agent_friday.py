@@ -751,6 +751,7 @@ class FridayAgent(Agent):
         # The session-side continuity plane, wired in the entrypoint once the
         # AgentSession exists. None in a bare unit context.
         self._continuity = None
+        self._input_gate = None                # FR-038 mute gate, attached in entrypoint
         super().__init__(
             instructions=build_instructions(),
             stt=stt,
@@ -2272,6 +2273,59 @@ async def drain_objective_deliveries(session, store=None) -> int:
     return delivered
 
 
+async def speak_progress_digests(session, sup=None, state=None) -> dict:
+    """
+    One digest pass: gather live Hermes runs, compose milestones + a
+    cadence digest (`friday.progress_digest`), and speak what is new
+    through `deliver_message` - the one place progress becomes speech on
+    the room path, same shape as `drain_hermes_deliveries` so a gate that
+    exercises it proves something about production.
+
+    `state` carries `last_digest_at` and which milestones were already
+    spoken across calls (compose() itself only dedupes within one call).
+    Defaults to a fresh dict so tests can pass their own and assert on it.
+    """
+    from friday import progress_digest as pd
+    from friday.tools.hermes_control import supervisor
+
+    if sup is None:
+        sup = supervisor()
+    now = time.time()
+    if state is None:
+        state = {}
+    # First poll of a session starts the cadence clock rather than firing
+    # a digest instantly - a fresh room should not open with a status dump.
+    state.setdefault("last_digest_at", now)
+    state.setdefault("spoken", set())
+
+    runs = await asyncio.to_thread(pd.gather, sup)
+    result = pd.compose(runs, now=now, last_digest_at=state["last_digest_at"])
+
+    spoken = 0
+    seen = state["spoken"]
+    for line in result.milestones:
+        if line in seen:
+            continue
+        if len(seen) >= 500:
+            # Bounded: a day-long room must not grow this set without limit.
+            # Clearing may re-speak a very old line once; that beats a leak.
+            seen.clear()
+        seen.add(line)
+        await deliver_message(session, line)
+        spoken += 1
+    if result.digest:
+        await deliver_message(session, result.digest)
+        spoken += 1
+    if result.digest:
+        # Only advance the cadence clock when a digest actually fired.
+        # `next_at` on a non-firing poll is a future DUE time, not a past
+        # firing time - storing it here pushed last_digest_at forward on
+        # every poll and the digest starved after the first held cadence.
+        state["last_digest_at"] = result.next_at
+    return {"spoken": spoken, "milestones": len(result.milestones),
+            "digest": bool(result.digest)}
+
+
 async def entrypoint(ctx: JobContext) -> None:
     settle_power_requests()
     config = session_config()
@@ -2314,6 +2368,19 @@ async def entrypoint(ctx: JobContext) -> None:
         worker_id=f"voice-{os.getpid()}")
     agent._continuity.attach(session)
 
+    # FR-038 (PRD v3.1): mute is a real state, not a UI colour. When every
+    # microphone publication in the room is muted the audio input is
+    # detached, so nothing the room's echo or a neighbour says is
+    # transcribed; unmuting re-attaches. The gate was built and never
+    # attached (reachability.KNOWN listed it as FUTURE); this is the seam.
+    from friday.voice_input import VoiceInputGate
+    agent._input_gate = VoiceInputGate(session, agent._continuity.telemetry)
+    try:
+        agent._input_gate.attach(ctx.room)
+        logger.info("voice input gate attached: %s", agent._input_gate.describe())
+    except Exception:                                        # noqa: BLE001
+        logger.exception("voice input gate could not attach; audio stays enabled")
+
     # The durable run driver lives in this process too, so runs whose wake
     # is due are picked up without a separate worker.
     engine = agent.start_objective_engine()
@@ -2332,6 +2399,7 @@ async def entrypoint(ctx: JobContext) -> None:
         from friday import hermes_bridge as hb
 
         log = hb.WorkRunLog()
+        digest_state: dict = {}
         try:
             swept = await asyncio.to_thread(log.sweep_undelivered)
             if swept:
@@ -2345,6 +2413,14 @@ async def entrypoint(ctx: JobContext) -> None:
                 # same say, same mark - the seam the RC1 regression was
                 # missing.
                 await drain_objective_deliveries(session)
+                # Progress narration: only when the boss is not mid-turn
+                # (`user_state == "speaking"`, the same primitive LiveKit
+                # uses for its own away-timer) and Friday is not already
+                # talking (`current_speech`) - a milestone or digest is
+                # not worth cutting either side off for.
+                if getattr(session, "user_state", None) != "speaking" and \
+                        not getattr(session, "current_speech", None):
+                    await speak_progress_digests(session, state=digest_state)
             except asyncio.CancelledError:
                 raise
             except Exception:                                # noqa: BLE001

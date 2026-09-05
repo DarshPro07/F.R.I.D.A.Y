@@ -94,6 +94,25 @@ def register(mcp):
         return _execute("resource usage", "system", S.system_resource_usage)
 
     @mcp.tool()
+    def system_pressure() -> dict:
+        """The resource governor's view: pressure level (NORMAL / ELEVATED /
+        HIGH / CRITICAL) with the measured reasons, active workers and
+        browsers, queue depth, caps, and the banner to show when
+        concurrency was reduced to protect the machine."""
+        from friday.toolsets import model_gateway as MG
+        return _execute("resource pressure", "system", MG.system_pressure)
+
+    @mcp.tool()
+    def system_diagnostics(sections: str = "") -> dict:
+        """One operational view of Friday (PRD 12.3): build identity, objective
+        and memory store health, provider status, Hermes/worker health,
+        browser connection, voice gateway, MCP/capability health, queue
+        depth, resource pressure and the most recent critical failures.
+        Secrets are redacted. `sections` narrows it, comma-separated."""
+        from friday.toolsets import model_gateway as MG
+        return _execute("diagnostics", "system", MG.system_diagnostics, sections=sections)
+
+    @mcp.tool()
     def system_wifi_status() -> dict:
         """Wi-Fi interface state, SSID and signal strength on the user's computer."""
         return _execute("wifi status", "system", S.system_wifi_status)

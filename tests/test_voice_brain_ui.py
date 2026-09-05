@@ -323,3 +323,31 @@ def test_reply_speaks_even_when_the_tool_loop_ends_without_words(monkeypatch):
     # first call + one per round + the forced, tool-free answer
     assert calls["n"] == V._MAX_TOOL_ROUNDS + 2
     assert out["used_capabilities"] == ["roles"] * V._MAX_TOOL_ROUNDS
+
+
+# ---------------------------------------------------------------------------
+# work/status - "what's running", read on demand from the same digest the
+# room speaks from (S3b)
+# ---------------------------------------------------------------------------
+
+def test_work_family_is_offered_with_a_status_op():
+    fams = V._surface()
+    assert fams.get("work") == {"status"}
+
+
+def test_work_status_reports_nothing_running_with_no_active_runs(monkeypatch):
+    from friday import progress_digest as pd
+    monkeypatch.setattr(pd, "gather", lambda sup, **k: [])
+    import friday.tools.hermes_control as hc
+    monkeypatch.setattr(hc, "supervisor", lambda: object())
+    out = V._run_capability("work", "status", {})
+    assert out["result"] == "nothing running right now"
+
+
+def test_whats_running_phrase_triggers_work_status_without_a_model(monkeypatch):
+    monkeypatch.setattr(V, "_run_work", lambda op, args: {"result": "did 2 tools, last: editing policy.py"})
+    out = V._try_command("what's running right now?")
+    assert out is not None
+    assert out["action"] == "work.status"
+    assert out["used_capabilities"] == ["work"]
+    assert "editing policy.py" in out["reply"]

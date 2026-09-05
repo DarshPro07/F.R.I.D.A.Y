@@ -112,3 +112,44 @@ def _never_the_real_database(tmp_path, monkeypatch):
     monkeypatch.setattr(memory, "_store", None, raising=False)
     yield
     monkeypatch.setattr(memory, "_store", None, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _governor_sees_a_healthy_machine():
+    """
+    The resource governor gates every worker dispatch on the LIVE machine.
+
+    That is the product behaviour (FR-056), and it made the suite depend
+    on the host: with the developer's RAM at 88% every Hermes/Claude
+    dispatch test was refused with "HIGH pressure: concurrency reduced to
+    1". A test that wants pressure injects its own sampler
+    (tests/test_governor.py); everyone else gets a fresh governor reading
+    a healthy synthetic sample, so admissions and leases are per-test and
+    deterministic.
+    """
+    import time
+    from friday import governor as G
+
+    healthy = G.Sample(at=time.time(), cpu_percent=5.0, ram_percent=30.0,
+                       ram_available_gb=16.0, disk_free_gb=100.0,
+                       browser_processes=0, friday_rss_mb=100.0)
+    G.configure(G.Governor(sampler=lambda: healthy, sample_ttl_s=60.0))
+    yield
+    G.configure(None)
+
+
+@pytest.fixture(autouse=True)
+def _audit_log_is_per_test(tmp_path):
+    """
+    `PolicyEngine.decide` writes every R1+/non-AUTO verdict to the audit
+    log (FR-065). Left alone, the suite would append thousands of rows to
+    the boss's live `data/audit.sqlite3` and contend on its lock with the
+    running agent. Each test gets its own log; a test that wants to read
+    the audit uses `friday.trust.audit()` and sees only its own rows.
+    """
+    from friday import trust
+    log = trust.AuditLog(tmp_path / "audit.sqlite3")
+    trust.configure_audit(log)
+    yield
+    trust.configure_audit(None)
+    log.close()

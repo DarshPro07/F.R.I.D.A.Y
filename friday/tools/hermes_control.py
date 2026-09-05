@@ -18,6 +18,7 @@ import threading
 import time
 
 from friday import execution_economics as ee
+from friday import governor as G
 from friday import hermes_bridge as hb
 
 logger = logging.getLogger("friday-agent")
@@ -109,11 +110,22 @@ def register(mcp):
             route_reason = plan["reason"]
         try:
             out = supervisor().delegate(bundle, model=model,
+                                        provider=plan.get("provider", ""),
                                         route_reason=route_reason,
                                         reasoning_effort=plan["effort"],
                                         wait=False)
         except hb.HermesUnavailable as exc:
             return {"status": "failed", "error": str(exc)}
+        except G.Refused as exc:
+            # FR-056: the machine cannot carry another worker right now.
+            # Say so, with the measured reason, instead of starting one.
+            d = exc.decision
+            return {"status": "queued" if d.decision == G.QUEUE else "shed",
+                    "reason": d.reason, "pressure": d.pressure,
+                    "active_workers": d.active_workers, "queued": d.queued,
+                    "note": ("Not started. Tell the boss the machine is under "
+                             "resource pressure and the task waits; do not "
+                             "retry immediately.")}
         work_run_id = out["work_run_id"]
         # Bounded wait, then hand back a poll token. A blocking wait for the
         # whole run held the MCP SSE stream open past its read timeout - the

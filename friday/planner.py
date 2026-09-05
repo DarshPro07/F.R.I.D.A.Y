@@ -120,6 +120,31 @@ _SPLIT = re.compile(
     r"show|tell|research|get|set|close|start|run|clean|tidy)\b))",
     re.IGNORECASE)
 
+#: A split on a bare verb (no comma, no "and") inside a question is a
+#: misreading: in "which windows are open right now" the word "open" is a
+#: state, not a second request, and "which windows are" + "open right now"
+#: became windows_list + open_in_browser (Golden GO-general-005, 2026-09-05).
+#: Punctuation, "then" and ", and <verb>" still split a question; a lone
+#: whitespace-before-verb separator does not.
+_WHITESPACE_ONLY_SEPARATOR = re.compile(r"^\s+$")
+
+
+def _split_requests(text: str) -> list[str]:
+    pieces = _SPLIT.split(text)
+    if len(pieces) < 3:
+        return pieces
+    merged: list[str] = [pieces[0]]
+    for index in range(1, len(pieces), 2):
+        separator, following = pieces[index], pieces[index + 1] if index + 1 < len(pieces) else ""
+        head = merged[-1]
+        if (_WHITESPACE_ONLY_SEPARATOR.match(separator or "")
+                and S._QUESTION.match(head.lstrip(" ,"))):
+            merged[-1] = f"{head}{separator}{following}"
+            continue
+        merged.append(separator)
+        merged.append(following)
+    return merged
+
 _SEQUENCING = re.compile('\\b(?:then|after that|afterwards)\\b', re.IGNORECASE)
 
 
@@ -157,6 +182,9 @@ class Goal:
     why: str = ""
     #: Leaves of a composite goal, as task specs; empty for a plain goal.
     children: tuple[dict, ...] = ()
+    #: True when no verb was recognised and READ was assumed: the shape is
+    #: weak, and resolution lets a capability's own examples overrule it.
+    operation_assumed: bool = False
 
 
 @dataclass
@@ -254,7 +282,7 @@ def segments(text: str) -> list[Segment]:
     found: list[Segment] = []
     # The separators are kept (the pattern captures them), so a sequencing
     # word between two pieces can be read before the next piece is.
-    pieces = _SPLIT.split(text or "")
+    pieces = _split_requests(text or "")
     follows = False
 
     # A bare verb ("open") followed by a piece that asks for something
@@ -388,6 +416,7 @@ def interpret(text: str) -> Plan:
             target=target or "",
             entity=_entity(segment.text),
             depends_on=depends,
+            operation_assumed=operation is None,
         )
         plan.goals.append(goal)
         previous = goal
@@ -439,7 +468,78 @@ def resolve(plan: Plan) -> Plan:
             # Interpretation could not place it. Resolution does not get a
             # second guess at it - that is where a wrong tool comes from.
             continue
+        backer = ""
+        blind_fallback = False
+        if goal.operation_assumed:
+            # "bring that window to the front", "put the computer to sleep":
+            # no verb the grammar knows, so READ was assumed - and READ of
+            # a WINDOW is windows_list, which is not what was said. When a
+            # capability of the same target (any operation) fits the words
+            # decisively and nothing READ-shaped fits at all, the words
+            # decide the operation. A recognised verb is never overruled
+            # here; only the assumption is.
+            decided = _operation_from_examples(goal.intent, goal.target)
+            if decided:
+                goal.operation, backer = decided
+        if not goal.target:
+            # The nouns named no target. Before falling back to the first
+            # eight capabilities of that operation in registry order (which
+            # is how "how many monitors do I have" reached world news), let
+            # a capability whose OWN example phrasings clearly fit the words
+            # supply its target - still only among capabilities structurally
+            # compatible with the operation, and only when the fit is
+            # decisive (Golden Objective suite, general category).
+            inferred, backer = _target_from_examples(goal.intent, goal.operation)
+            if inferred:
+                goal.target = inferred
+            else:
+                blind_fallback = True
         found = candidates(goal.operation, goal.target)
+        if blind_fallback and not any(_fit(goal.intent, cid) > 0 for cid in found):
+            # No target, no example fit anywhere, nothing in the fallback
+            # shortlist shares a word with the request: choosing one anyway
+            # is a confident wrong tool (KPI "capability routing accuracy":
+            # 25 of 144 labelled phrasings landed on world news / secrets /
+            # resource usage this way). Unresolved is the honest answer -
+            # the model planner takes it, or the run says a step was not
+            # understood - never a guess dressed as a decision.
+            goal.candidates = tuple(found)
+            goal.why = (f"no target named and nothing of shape {goal.operation} "
+                        f"fits these words")
+            continue
+        if not backer and goal.target:
+            # A named target, but the shortlist is eight registry-order
+            # slots: a capability of that exact shape whose examples fit
+            # decisively must still be considered ("which drive is nearly
+            # full" -> system_disks, ninth in the SYSTEM shortlist). And a
+            # noun can point at the wrong target ("screen brightness" ->
+            # VISION): when nothing in the noun's shortlist fits the words
+            # at all and one capability elsewhere fits decisively, the
+            # words win over the noun.
+            inferred, other = _target_from_examples(goal.intent, goal.operation)
+            if other and other not in found:
+                if inferred == goal.target:
+                    backer = other
+                elif inferred:
+                    best_here = max((_fit(goal.intent, cid) for cid in found), default=0)
+                    # Nothing in the noun's shortlist shares a word with the
+                    # request ("lock my computer": computer -> SYSTEM, whose
+                    # CONTROL shortlist is secrets/policy tools, all at 0)
+                    # while the other capability's own examples fit it
+                    # decisively: the noun was a red herring, the words win
+                    # outright. Only when something here does fit is the
+                    # 2x / 24-point margin required.
+                    if best_here <= 0 or _fit(goal.intent, other) >= max(
+                            _EXAMPLE_OVERRULE_MIN, best_here * _EXAMPLE_OVERRULE_FACTOR):
+                        goal.target = inferred
+                        found = candidates(goal.operation, goal.target)
+                        backer = other
+        if backer and backer not in found:
+            # The capability whose examples decided the target is a
+            # candidate even when the registry-order shortlist is full: it
+            # fit the words decisively, and the shortlist cut is about
+            # prompt size, not about who may be considered.
+            found.append(backer)
         goal.candidates = tuple(found)
         if not found:
             goal.why = (f"no capability does {goal.operation} to a "
@@ -449,7 +549,9 @@ def resolve(plan: Plan) -> Plan:
 
         if len(found) == 1:
             operation, _target = S.for_capability(found[0])
-            if operation != goal.operation:
+            if operation != goal.operation and not (
+                    goal.operation in S._INFORMATIONAL
+                    and operation in S._INFORMATIONAL):
                 # The one candidate is merely compatible - a CONTROL where an
                 # OPEN was asked for. Choosing it would do something the
                 # person did not ask for and call it the only option. It is
@@ -460,6 +562,12 @@ def resolve(plan: Plan) -> Plan:
                 # other side: a LIST tool must not win an OPEN request just
                 # by being the only tool left standing, any more than by
                 # having better example sentences.
+                #
+                # Two INFORMATIONAL operations are not that case: a
+                # question ("which windows are open right now" -> READ) and
+                # the LIST tool that answers it change nothing on the
+                # machine, so the only read-shaped tool for that target is
+                # the answer, not a guess (Golden Objective general-005).
                 goal.candidates = tuple(found)
                 goal.why = (f"{found[0]} is the nearest thing to "
                             f"{goal.operation}, not a match for it")
@@ -497,6 +605,74 @@ def _fit(intent: str, capability_id: str) -> int:
         elif word in name:
             score += 3
     return score
+
+
+#: A capability's own examples must share at least this many content
+#: words with the request before its target is borrowed, and lead the
+#: runner-up by the margin: one shared word is a coincidence.
+_EXAMPLE_DECISIVE_WORDS = 2
+_EXAMPLE_DECISIVE_MARGIN = 1
+#: For the words to overrule a noun-derived target, the backer's fit must
+#: be at least this, and at least this many times the best fit inside the
+#: noun's own shortlist ("screen brightness": brightness_get 38 vs
+#: vision_inspect_screen 14).
+_EXAMPLE_OVERRULE_MIN = 24
+_EXAMPLE_OVERRULE_FACTOR = 2
+
+
+def _operation_from_examples(intent: str, target: str) -> tuple[str, str] | None:
+    """(operation, capability id) when one capability of this target fits
+    the words decisively and no READ-shaped one fits at all; else None."""
+    from friday import capabilities as C
+    from friday import capability_router as R
+
+    lowered = intent.lower()
+    best: tuple[int, str, str] | None = None
+    read_fit = 0
+    for capability in C._ALL:
+        cap_operation, cap_target = S.for_capability(capability.id)
+        if target and cap_target != target:
+            continue
+        if not target and not cap_target:
+            continue
+        fit = (R._phrase_score(lowered, capability.intent_examples)
+               - R._phrase_score(lowered, capability.negative_examples))
+        if cap_operation in S._INFORMATIONAL:
+            read_fit = max(read_fit, fit)
+            continue
+        if fit >= _EXAMPLE_DECISIVE_WORDS and (best is None or fit > best[0]):
+            best = (fit, cap_operation, capability.id)
+    if best is None or read_fit >= best[0]:
+        return None
+    return best[1], best[2]
+
+
+def _target_from_examples(intent: str, operation: str) -> tuple[str, str]:
+    """(target, capability id) of the capability whose own example
+    phrasings decisively fit the request, among capabilities compatible
+    with the operation; ("", "") when nothing is decisive."""
+    from friday import capabilities as C
+    from friday import capability_router as R
+
+    lowered = intent.lower()
+    scored: list[tuple[int, str, str]] = []
+    for capability in C._ALL:
+        cap_operation, cap_target = S.for_capability(capability.id)
+        if not cap_target:
+            continue
+        if cap_operation != operation and not S.compatible(operation, capability.id):
+            continue
+        hit = R._phrase_score(lowered, capability.intent_examples)
+        miss = R._phrase_score(lowered, capability.negative_examples)
+        if hit - miss >= _EXAMPLE_DECISIVE_WORDS:
+            scored.append((hit - miss, capability.id, cap_target))
+    if not scored:
+        return "", ""
+    scored.sort(reverse=True)
+    if len(scored) > 1 and scored[0][0] - scored[1][0] < _EXAMPLE_DECISIVE_MARGIN \
+            and scored[0][2] != scored[1][2]:
+        return "", ""                       # two targets tie: not decisive
+    return scored[0][2], scored[0][1]
 
 
 class PlanProblem(Exception):

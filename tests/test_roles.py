@@ -165,3 +165,44 @@ def test_the_catalogue_stays_small_enough_to_choose_from():
 def test_at_least_one_role_can_do_and_one_can_review():
     assert any(not r.reviews for r in R.CATALOGUE)
     assert any(r.reviews for r in R.CATALOGUE)
+
+
+# --- which Claude subagent runs a role -------------------------------------
+
+import re
+from pathlib import Path
+
+_AGENTS_DIR = Path(__file__).resolve().parent.parent / ".claude" / "agents"
+
+
+def _frontmatter(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+    assert match, f"{path} has no YAML frontmatter"
+    return match.group(1)
+
+
+def test_role_to_agent_map_covers_every_role():
+    for role in R.CATALOGUE:
+        agent = R.claude_agent_for(role)
+        assert agent in R.CLAUDE_AGENT_FOR_ROLE.values() or agent == R._DEFAULT_CLAUDE_AGENT
+        assert (_AGENTS_DIR / f"{agent}.md").exists(), (
+            f"role {role.id!r} maps to missing agent {agent!r}"
+        )
+
+
+def test_reviewer_agents_have_no_write_tools():
+    """Dedicated review-only agents must not carry Write/Edit.
+
+    Not every agent behind a `reviews=True` role qualifies: e.g.
+    `friday-security-engineer` intentionally edits to apply fixes.
+    """
+    reviewer_agents = {"friday-final-reviewer", "friday-performance-reviewer",
+                       "friday-codebase-researcher", "friday-tech-lead"}
+    for name in reviewer_agents:
+        frontmatter = _frontmatter(_AGENTS_DIR / f"{name}.md")
+        tools_block = re.search(r"tools:\n((?:\s+-\s+\S+\n)+)", frontmatter)
+        tools = tools_block.group(1) if tools_block else ""
+        assert "Write" not in tools and "Edit" not in tools, (
+            f"{name} is a reviewer but carries a write tool"
+        )

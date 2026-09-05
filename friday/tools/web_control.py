@@ -151,6 +151,28 @@ def register(mcp):
         return await _execute("close browser", W.browser_close)
 
     @mcp.tool()
+    async def browser_act(primitive: str, target: str = "", args: dict | None = None) -> dict:
+        """
+        One browser primitive through the observe -> plan -> policy -> act ->
+        observe -> verify loop: open, inspect, navigate, click, type, scroll,
+        select, upload, download, tabs, screenshot, wait, verify.
+
+        `target` names an element in words ("the Sign in button", "Search
+        box") or as CSS. `args`: url (open/navigate), text/clear/enter
+        (type), value (select), paths (upload), into (download), op/index/url
+        (tabs: list/new/switch/close), condition/value (wait: selector/url/
+        text/load), dy (scroll), expect {url|title|text: substring} to verify.
+
+        Reads run automatically. State changes need approval. A purchase,
+        publish, destructive or security-settings action on the page returns
+        APPROVAL_REQUIRED even in a signed-in session; a CAPTCHA or human
+        verification page returns partial with HUMAN_VERIFICATION and is never
+        clicked through - hand it to the user.
+        """
+        return await _execute(f"browser {primitive} {target}".strip(), W.browser_act,
+                              primitive, target, args)
+
+    @mcp.tool()
     async def browser_automate(task: str, start_url: str = "https://www.google.com",
                                max_turns: int = 6) -> dict:
         """

@@ -160,4 +160,5 @@ def test_the_run_is_reportable_end_to_end(project):
     assert report['environment']['egress'] == 'DENY_ALL'
     assert report['verdict'] == E.PASSED
     assert report['gate']['allowed'] is True
-    assert [c['check'] for c in report['gate']['checks']] == ['changes', 'verified', 'scope', 'reviewable', 'secrets', 'approved']
+    # FR-012: independent review is a recorded check even when not required.
+    assert [c['check'] for c in report['gate']['checks']] == ['changes', 'verified', 'independent_review', 'scope', 'reviewable', 'secrets', 'approved']

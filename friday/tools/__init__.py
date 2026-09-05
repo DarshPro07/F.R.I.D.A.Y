@@ -8,9 +8,10 @@ from friday.tools import (
     audio_control, automation_control, brightness_control, document_control,
     browser_policy_control, brain_control, connector_control,
     executor_control, fabric_control, hardware_control, hermes_control,
+    model_gateway_control, adversarial_control, selfdev_control,
     window_control, product_control, file_control, identity_control,
     memory_control, music_control, power_control, process_control,
-    profile_control, objective_control, reminder_control, screen_control, system,
+    profile_control, objective_control, reminder_control, schedule_control, screen_control, system,
     system_control, utils, vision_control, web, web_control,
     workbench_control, vnext_control, youtube_control,
 )
@@ -41,6 +42,7 @@ def register_all_tools(mcp):
     reminder_control.register(mcp)  # Phase 1G: OS-scheduled reminders
     objective_control.register(mcp)  # Phase 3: the multi-step run book
     automation_control.register(mcp)  # §14: a trigger, a step graph, a record
+    schedule_control.register(mcp)  # PRD v3.1 FR-041/042: scheduled objectives + conditional monitoring
     product_control.register(mcp)  # §13: catalogues in, evidence out
     document_control.register(mcp)  # the files files_read cannot open
     hardware_control.register(mcp)  # batch 2A: what this machine is
@@ -55,6 +57,9 @@ def register_all_tools(mcp):
     profile_control.register(mcp)  # Phase 1H: the user model, learned daily
     executor_control.register(mcp)  # the question channel a Claude run calls back on
     hermes_control.register(mcp)
+    model_gateway_control.register(mcp)  # PRD 4.9: inference-only Hermes MODEL_GATEWAY
+    adversarial_control.register(mcp)  # PRD FR-008/FR-012: contrarian panel + independent review
+    selfdev_control.register(mcp)  # PRD FR-047..051: sandboxed, gated, reversible self-development
     browser_policy_control.register(mcp)
     vnext_control.register(mcp)
     identity_control.register(mcp)  # open things in the browser he is signed into

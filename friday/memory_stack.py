@@ -53,14 +53,24 @@ def _now():
 # tier 1: preferences (Mem0 role)
 # ---------------------------------------------------------------------------
 
-def preferences(task="", limit=12):
+def preferences(task="", limit=12, project_scope=""):
     from friday import ui_server as U
     conn = U._connect()
     try:
-        rows = U._rows(conn, "SELECT subject, value, scope, confidence, created_at "
-                             "FROM memories WHERE superseded=0 AND scope IN "
+        # FR-017: a project-scoped preference is only visible inside that
+        # project. `project_scope` '' (a request about nothing in particular)
+        # sees only the global ones - never another project's.
+        rows = U._rows(conn, "SELECT subject, value, scope, confidence, created_at, "
+                             "project_scope FROM memories WHERE superseded=0 AND scope IN "
                              "('preferences','wants','goals','identity') "
-                             "ORDER BY id DESC LIMIT 200")
+                             "AND (project_scope='' OR project_scope=?) "
+                             "ORDER BY id DESC LIMIT 200", (project_scope,))
+        if not rows and conn is not None:
+            # A database from before the project_scope column existed.
+            rows = U._rows(conn, "SELECT subject, value, scope, confidence, created_at "
+                                 "FROM memories WHERE superseded=0 AND scope IN "
+                                 "('preferences','wants','goals','identity') "
+                                 "ORDER BY id DESC LIMIT 200")
     finally:
         if conn is not None:
             conn.close()
@@ -263,7 +273,7 @@ def hermes_outcomes(task="", limit=3):
     return {"tier": "outcomes", "items": rows[:limit]}
 
 
-def aggregate(task, budget_tokens=None, include_episodes=True):
+def aggregate(task, budget_tokens=None, include_episodes=True, project_scope=""):
     """The task-scoped slice of every tier, within `budget_tokens`.
 
     `include_episodes=False` is the delegation shape. The episode tier is
@@ -274,9 +284,15 @@ def aggregate(task, budget_tokens=None, include_episodes=True):
     relations from a 600-token bundle. What Friday knows that a worker
     needs is the rules, specs, relations and preferences; what was said is
     already in the goal.
+
+    `project_scope` (FR-017) names the project the request is about; a
+    preference recorded for another project is excluded BEFORE anything
+    reaches a prompt. The token accounting returned here is the context
+    telemetry FR-020 asks for: budget, tokens used, items per tier.
     """
     budget = budget_tokens or BUDGET_TOKENS
-    t1, t2, t3, t4 = preferences(task), specs(task), rules(task), relations(task)
+    t1, t2, t3, t4 = (preferences(task, project_scope=project_scope), specs(task),
+                      rules(task), relations(task))
     t5 = episodes(task) if include_episodes else {"items": []}
     t6 = contacts(task)
     t7 = hermes_outcomes(task)
