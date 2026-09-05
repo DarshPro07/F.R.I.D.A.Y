@@ -18,8 +18,26 @@ Rather than banning asyncio.run in tests, every test gets a fresh loop.
 from __future__ import annotations
 
 import asyncio
+import sys
 
 import pytest
+
+#: Test modules that exercise Windows-native surfaces (COM audio via
+#: pycaw/comtypes, Win32 window enumeration, power/session APIs). They
+#: cannot even be collected elsewhere - `ctypes.WINFUNCTYPE` does not exist
+#: on Linux and pygetwindow raises NotImplementedError at import - which
+#: took the whole ubuntu CI gate down with "14 errors during collection"
+#: (first remote run of verify.yml, 2026-09-05). Windows is the product's
+#: platform and runs them; other platforms skip exactly these, by name, so
+#: a new Windows-only module fails loudly there instead of being hidden.
+WINDOWS_ONLY_MODULES = (
+    "test_audio.py", "test_execution_bridge.py", "test_file_control.py",
+    "test_live_pass_fixes.py", "test_objective_mcp.py", "test_product_mcp.py",
+    "test_run_control.py", "test_transport_parity.py", "test_windows.py",
+    "test_processes.py", "test_power.py", "test_platform_power.py",
+)
+
+collect_ignore = list(WINDOWS_ONLY_MODULES) if sys.platform != "win32" else []
 
 
 @pytest.hookimpl(tryfirst=True)

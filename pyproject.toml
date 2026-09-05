@@ -49,6 +49,9 @@ dev = [
     # pytest-asyncio 1.4+ hook — undeclared in the Stage A dependency
     # cleanup even though the test suite requires it to collect at all.
     "pytest-asyncio>=1.4",
+    # Per-test wall-clock ceiling (audit A-047): one hung subprocess fails
+    # one test instead of holding a CI job (or a local chunk) for hours.
+    "pytest-timeout>=2.3",
 ]
 
 [project.scripts]

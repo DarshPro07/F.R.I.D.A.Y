@@ -22,9 +22,17 @@ concurrency:
 
 jobs:
   python:
-    name: pytest (not live, not slow)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Windows first (audit A-046): it is the product's platform, and the
+    # 12 Windows-native test modules only collect there. ubuntu is the
+    # compatibility run; tests/conftest.py skips those modules by name on
+    # non-Windows so the rest of the gate still has to pass.
+    name: pytest (not live, not slow) - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -44,7 +52,17 @@ jobs:
         env:
           # Never the live database.
           ADA_DB: ${{ runner.temp }}/ci-ada.sqlite3
-        run: uv run pytest tests/ -m "not live and not slow" -q
+        # Per-test timeout (audit A-047): a hung subprocess fails one test,
+        # not the whole job.
+        run: uv run pytest tests/ -m "not live and not slow" -q -p no:cacheprovider --timeout=600
+
+      - name: Secret scan (history)
+        if: matrix.os == 'ubuntu-latest'
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_SUMMARY: 'true'
 
   e2e:
     name: Playwright (control room)
