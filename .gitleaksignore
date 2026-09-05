@@ -1,0 +1,16 @@
+# gitleaks fingerprint ignore list. ONE entry, deliberately.
+#
+# The companion bridge's private key was committed in the initial snapshot
+# (5b9cd75) and untracked in d1751bb. It was ROTATED the same day through
+# the production pairing path (`friday/companion/pairing.py`): the live
+# key's public-key fingerprint differs from this blob's, so the material
+# below authenticates nothing. Rewriting public history to remove the blob
+# is the owner's decision and is deferred (docs/architecture/
+# AUDIT_2026-09-05_TRIAGE.md, "Not done from P0").
+#
+# This ignores that single historical finding by fingerprint - commit,
+# path, rule, line - and nothing else: the same path in any other commit,
+# or any other rule on this blob, still fails the scan. A real secret must
+# never be added here; rotate it and untrack it, then record it in the
+# triage log. tests/test_repo_hygiene.py pins this file to this entry.
+5b9cd75df2f91a457ed0248fb3179d359ff69a03:data/companion/extension_key.pem:private-key:1
