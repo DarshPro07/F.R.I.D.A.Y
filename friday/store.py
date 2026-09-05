@@ -43,7 +43,9 @@ class _Rows:
     """A statement's result, fully materialised under the store lock.
 
     Looks like the cursor callers already use: `fetchone`, `fetchall`,
-    `fetchmany`, iteration, `lastrowid`, `rowcount`, `description`."""
+    iteration, `lastrowid`, `rowcount`, `description`. Deliberately no
+    `fetchmany`: nothing in the tree calls it, and an unused method is
+    dead code the reachability gate is right to refuse."""
 
     __slots__ = ("_rows", "_i", "lastrowid", "rowcount", "description")
 
@@ -60,11 +62,6 @@ class _Rows:
         row = self._rows[self._i]
         self._i += 1
         return row
-
-    def fetchmany(self, size: int = 1):
-        out = self._rows[self._i:self._i + size]
-        self._i += len(out)
-        return out
 
     def fetchall(self):
         out = self._rows[self._i:]

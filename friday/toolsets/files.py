@@ -342,7 +342,7 @@ def files_search(
             if scanned >= MAX_SEARCH_EXAMINED:
                 stopped = f"{MAX_SEARCH_EXAMINED} files examined"
                 break
-            if time.monotonic() > deadline:
+            if time.monotonic() >= deadline:
                 stopped = f"{SEARCH_SECONDS:.0f} seconds"
                 break
             if not fnmatch.fnmatch(filename, pattern):

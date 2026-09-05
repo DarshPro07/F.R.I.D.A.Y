@@ -7,6 +7,7 @@ every file capability, so it gets tested adversarially rather than happily.
 
 from __future__ import annotations
 
+import time
 import os
 import sys
 from pathlib import Path
@@ -397,3 +398,20 @@ def test_every_file_result_declares_local_machine_scope(jail, root, run, writer)
         F.files_write(run, str(root / "f.txt"), "y", engine=writer),
     ):
         assert result.output["execution_scope"] == "local_machine"
+
+
+def test_a_zero_budget_is_exhausted_even_when_the_clock_does_not_tick(jail, root, run, monkeypatch):
+    """CI (windows-latest AND ubuntu-latest) failed where this machine passed:
+    `monotonic() > deadline` is False when the clock has not ticked between
+    setting the deadline and testing it, so a 0-second budget scanned the whole
+    tree and reported `complete=True`. A budget of zero is spent on arrival."""
+    for index in range(5):
+        (root / f"file{index}.txt").write_text("nothing of interest")
+    monkeypatch.setattr(F, "SEARCH_SECONDS", 0.0)
+    frozen = time.monotonic()
+    monkeypatch.setattr(F.time, "monotonic", lambda: frozen)
+
+    result = F.files_search(run, "*", root=str(root), contains="reactor")
+    assert result.status == c.SUCCEEDED, "a budget is not a failure"
+    assert result.output["complete"] is False
+    assert "0 seconds" in result.output["stopped_at"]

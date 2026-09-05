@@ -125,3 +125,26 @@ def test_a_real_short_run_drives_every_move_with_no_violations(tmp_path, monkeyp
         assert report["counts"]["budget_refused"] >= 1
     finally:
         G.configure(None)
+
+
+def test_the_short_run_cadence_fires_every_move_at_least_twice():
+    """CI failed where this machine passed: at a fixed N=25 the Hermes
+    stop/start never fired inside a 45 s run on a slower runner, and the
+    report said INCOMPLETE for a reason that was the harness's, not the
+    product's. The cadence tightens with the planned duration - so assert
+    the arithmetic, not the wall clock."""
+    # The slowest observed rate is ~14 cycles in 45 s (CI). Every gated
+    # move must fire at least twice at that rate.
+    slowest_cycles = 14
+    tight = {"budget": 3, "cancel": 4, "hermes_crash": 4, "worker_crash": 5,
+             "hermes_stop_start": 6}
+    for move, n in tight.items():
+        assert slowest_cycles // n >= 2, f"{move} fires {slowest_cycles // n}x in the shortest run"
+
+
+def test_a_long_run_keeps_the_rare_moves_rare():
+    hourly_cycles = 3000            # measured: ~3,100 cycles/hour
+    loose = {"hermes_crash": 10, "worker_crash": 15, "hermes_stop_start": 25}
+    for move, n in loose.items():
+        fires = hourly_cycles // n
+        assert 100 < fires < 400, f"{move} fires {fires}x/hour"

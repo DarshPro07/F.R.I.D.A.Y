@@ -466,6 +466,17 @@ def run(duration_s: float, out: Path, sample_every_s: float = 5.0,
     access._seen_nonces.clear()
 
     wl = Workload(out)
+    # Cadence for the every-Nth moves. On a long run these are rare by
+    # design; on a short one (the CI smoke) a fixed N=25 means a slow
+    # runner never reaches the Hermes stop/start at all and the report is
+    # INCOMPLETE for a reason that has nothing to do with the product.
+    # So the divisors shrink with the planned duration: every promised
+    # move fires at least twice in the shortest run we allow.
+    tight = duration_s < 600
+    cadence = {"budget": 3, "cancel": 4,
+               "hermes_crash": 4 if tight else 10,
+               "worker_crash": 5 if tight else 15,
+               "hermes_stop_start": 6 if tight else 25}
     proc = psutil.Process()
     proc.cpu_percent(interval=None)
     samples: list[dict] = []
@@ -495,14 +506,14 @@ def run(duration_s: float, out: Path, sample_every_s: float = 5.0,
                 wl.nonce_cycle()
                 wl.scheduler_cycle()
                 wl.handoff_cycle()
-                if cycle % 3 == 0:
+                if cycle % cadence["budget"] == 0:
                     wl.budget_cycle()
-                if cycle % 4 == 0:
+                if cycle % cadence["cancel"] == 0:
                     wl.cancel_cycle()
-                wl.hermes_cycle(crash=(cycle % 10 == 0))
-                if cycle % 25 == 0:
+                wl.hermes_cycle(crash=(cycle % cadence["hermes_crash"] == 0))
+                if cycle % cadence["hermes_stop_start"] == 0:
                     wl.hermes_stop_start()
-                if cycle % 15 == 0:
+                if cycle % cadence["worker_crash"] == 0:
                     wl.worker_crash_cycle()
             except Exception as exc:  # noqa: BLE001 - recorded, the soak continues
                 msg = f"cycle {cycle}: {type(exc).__name__}: {exc}"
@@ -519,6 +530,7 @@ def run(duration_s: float, out: Path, sample_every_s: float = 5.0,
 
     report = analyse(samples, duration_s, wl.counts, wl.violations, errors, cycle)
     report["governor_mode"] = governor_mode
+    report["cadence"] = cadence
     (out / "samples.json").write_text(json.dumps(samples), encoding="utf-8")
     (out / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out / "report.md").write_text(render(report), encoding="utf-8")
