@@ -35,6 +35,7 @@ WINDOWS_ONLY_MODULES = (
     "test_live_pass_fixes.py", "test_objective_mcp.py", "test_product_mcp.py",
     "test_run_control.py", "test_transport_parity.py", "test_windows.py",
     "test_processes.py", "test_power.py", "test_platform_power.py",
+    "test_native_bindings.py", "test_jarvis_screen.py",
 )
 
 collect_ignore = list(WINDOWS_ONLY_MODULES) if sys.platform != "win32" else []
