@@ -52,6 +52,12 @@ OBJECTIVE_DELIVERY_TTL_S = 21600
 #: belongs here rather than in each caller. ADA_DB still overrides it.
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "data" / "ada.sqlite3"
 
+#: How long a connection waits for another process's write lock before
+#: giving up (audit A-038). Ten seconds covers a checkpoint or a slow
+#: objective-ledger transaction on a loaded host; anything longer is a
+#: hung writer and should surface as an error rather than a silent wait.
+BUSY_TIMEOUT_S = 10.0
+
 # Memory kinds. An INFERENCE must never be reported as a FACT.
 FACT = "FACT"
 PREFERENCE = "PREFERENCE"
@@ -823,8 +829,29 @@ class Store:
         self.path = Path(path)
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False,
+                                     timeout=BUSY_TIMEOUT_S)
         self._conn.row_factory = sqlite3.Row
+        # Concurrency contract (audit A-038). Several processes open this
+        # file at once - the voice agent, the MCP server, the UI server,
+        # schedule firings, the objective CLI - so the durability settings
+        # are set here, once, where the connection is made:
+        #   WAL        readers never block the writer and vice versa; a
+        #              crash mid-write leaves the main file consistent
+        #              and the WAL is replayed or discarded on next open.
+        #   busy_timeout (the `timeout=` above, plus the pragma for
+        #              statements SQLite issues itself) waits out another
+        #              process's write instead of failing "database is
+        #              locked" on the first contention.
+        #   synchronous=NORMAL is WAL's durable-enough default: the WAL is
+        #              fsynced at checkpoint, and a power cut can lose only
+        #              the last transactions, never corrupt the file.
+        # In-memory databases have no WAL; the pragmas are no-ops there.
+        if str(self.path) != ":memory:":
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute(f"PRAGMA busy_timeout={int(BUSY_TIMEOUT_S * 1000)}")
+        self._conn.execute("PRAGMA foreign_keys=ON")
         # One connection is shared across threads (check_same_thread=False),
         # and the continuity engine reserves narrations and attempts from a
         # thread pool. Without serialization, two threads' transactions

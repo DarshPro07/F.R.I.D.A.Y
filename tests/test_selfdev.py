@@ -403,3 +403,43 @@ def test_benchmark_claims_and_failed_measurement_shape():
     failed = B.measure("C:/no-such-checkout-for-friday")
     assert failed["failed"].startswith("no such checkout")
     assert failed["memory_p95_ms"] == float("inf") and failed["router_top1"] == 0.0
+
+
+# -- A-043: the loop cannot rewrite its own judge -------------------------------
+
+
+@pytest.mark.parametrize("path", [
+    "friday/policy.py", "friday/trust.py", "friday/confirmation.py",
+    "friday/promotion.py", "friday/evaluation.py", "friday/honesty.py",
+    "friday/adversarial.py", "friday/golden.py", "friday/selfdev.py",
+    "friday/selfdev_benchmark.py", "friday/toolsets/selfdev.py",
+    "docs/golden/objectives.jsonl", "docs/golden/failures.jsonl",
+    ".github/workflows/verify.yml", "tests/test_trust.py",
+    "tests/test_selfdev.py", "tests/conftest.py",
+    r"E:\some\worktree\friday\trust.py",            # absolute, Windows separators
+    "./friday/policy.py",
+])
+def test_every_judge_surface_is_kernel(path):
+    from friday import self_upgrade as SU
+    assert SU.is_kernel_path(path), path
+
+
+@pytest.mark.parametrize("path", [
+    "friday/planner.py", "friday/toolsets/files.py", "tests/test_planner.py",
+    "docs/architecture/MODULE_MAP.md", "friday/policy_helpers_not_kernel.py",
+    "scripts/other.py",
+])
+def test_ordinary_surfaces_are_not_kernel(path):
+    from friday import self_upgrade as SU
+    assert SU.is_kernel_path(path) is None, path
+
+
+def test_a_proposal_naming_the_judge_is_refused_before_a_sandbox_exists(repo, tmp_path):
+    sd = SD.SelfDevelopment(repo, journal=tmp_path / "j.jsonl", runner=runner_passing)
+    for judge in ("friday/promotion.py", "tests/test_trust.py", "docs/golden/objectives.jsonl",
+                  ".github/workflows/verify.yml"):
+        cand = sd.observe(f"k-{judge.replace('/', '-')}", "make the gate lenient", {"n": 1})
+        sd.propose(cand, "loosen it", ["pkg/mod.py", judge], tests=["tests/test_mod.py"], regression=[])
+        assert cand.state == SD.REJECTED, judge
+        assert "kernel surface" in cand.rejected_because, cand.rejected_because
+        assert cand.sandbox_path in (None, ""), "no sandbox may exist for a refused proposal"

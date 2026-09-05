@@ -35,12 +35,57 @@ from friday.execution_economics import (AFFECTED, FULL, INTEGRATION,
                                         TARGETED, classify_task,
                                         verification_depth)
 
-#: Level-6 surfaces: never self-upgradable. Matching is by path suffix.
+#: Level-6 kernel: files the self-development loop may never propose to
+#: change, at any autonomy level. Two kinds (audit A-043, 2026-09-05):
+#:
+#:   * the trust boundaries themselves - policy, tiers, confirmation,
+#:     network/file jails, sensitive domains, the constitution; and
+#:   * THE JUDGE - everything that decides whether a self-change passes:
+#:     the verifier, the honesty audit, the adversarial panel, the
+#:     promotion gate, the benchmark, the golden corpus and runner, the
+#:     tests that pin the trust plane, the CI workflow, and this loop.
+#:
+#: Matching is by path: an entry ending in "/" is a directory prefix, any
+#: other entry is a file, and a candidate matches when its normalized,
+#: repo-relative path ends with the entry (so absolute paths and sandbox
+#: worktree paths match too). A change to any of these goes through the
+#: human policy process, never through selfdev.
 KERNEL_PATHS = (
-    "friday/policy.py", "friday/sensitive_domains.py", "friday/netguard.py",
-    "friday/user_policy.py", "friday/self_upgrade.py",
+    # trust boundaries
+    "friday/policy.py", "friday/user_policy.py", "friday/trust.py",
+    "friday/confirmation.py", "friday/sensitive_domains.py",
+    "friday/netguard.py", "friday/fsjail.py", "friday/sandbox.py",
+    "friday/privacy.py", "friday/access.py", "friday/secret_broker.py",
+    "friday/vault.py",
     ".specify/memory/constitution.md",
+    # the judge
+    "friday/self_upgrade.py", "friday/selfdev.py", "friday/selfdev_benchmark.py",
+    "friday/toolsets/selfdev.py", "friday/promotion.py", "friday/evaluation.py",
+    "friday/honesty.py", "friday/adversarial.py", "friday/golden.py",
+    "friday/reachability.py",
+    "docs/golden/", "scripts/golden_corpus.py", "scripts/perf_profile.py",
+    ".github/workflows/",
+    "tests/conftest.py", "tests/test_trust.py", "tests/test_user_policy.py",
+    "tests/test_privacy.py", "tests/test_selfdev.py", "tests/test_self_upgrade.py",
+    "tests/test_promotion.py", "tests/test_adversarial.py", "tests/test_golden_suite.py",
+    "tests/test_silent_excepts.py", "tests/test_reachability.py",
+    "tests/test_tool_isolation.py", "tests/test_secret_broker.py",
+    "tests/test_sensitive_domains.py", "tests/test_netguard.py", "tests/test_fsjail.py",
 )
+
+
+def is_kernel_path(path: str) -> str | None:
+    """The kernel entry a path falls under, or None."""
+    normalized = path.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    for kernel in KERNEL_PATHS:
+        if kernel.endswith("/"):
+            if normalized.startswith(kernel) or f"/{kernel}" in normalized:
+                return kernel
+        elif normalized == kernel or normalized.endswith("/" + kernel):
+            return kernel
+    return None
 
 _SCOPE_TO_TESTS = {
     TARGETED: ["tests/test_execution_economics.py"],
@@ -82,14 +127,13 @@ class SelfUpgrade:
     def guard_kernel(self, files: list[str]) -> None:
         """Step 0: Level-6 refusal, before anything is touched."""
         for f in files:
-            normalized = f.replace("\\", "/")
-            for kernel in KERNEL_PATHS:
-                if normalized.endswith(kernel):
-                    self._log("refused_kernel", file=f)
-                    raise UpgradeRefused(
-                        f"{f} is constitutional-kernel surface: "
-                        "self-upgrade is not authorized at any level - "
-                        "changes go through the human policy process")
+            kernel = is_kernel_path(f)
+            if kernel:
+                self._log("refused_kernel", file=f, kernel=kernel)
+                raise UpgradeRefused(
+                    f"{f} is constitutional-kernel surface ({kernel}): "
+                    "self-upgrade is not authorized at any level - "
+                    "changes go through the human policy process")
 
     def checkpoint(self) -> str:
         """Step 1: rollback target BEFORE any change."""
