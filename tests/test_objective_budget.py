@@ -160,3 +160,50 @@ def test_a_missing_ledger_is_recorded_not_a_free_pass_and_not_a_block(tmp_path):
     assert v.allowed
     assert "gateway_error" in v.spend.sources
     store.close()
+
+
+def test_every_class_lets_one_task_exhaust_its_own_strategy_budget():
+    """The replans cap must not undercut the per-task loop-breaker.
+
+    A stuck fingerprint concludes BLOCKED after MAX_STRATEGY_CHANGES changes
+    (continuous._requeue_or_block); a class cap below that parks the run
+    PAUSED two failures earlier and the task never reaches a terminal state.
+    That is what the first CI run after A-022 found in
+    test_failure_fingerprint. The cap governs replanning across tasks.
+    """
+    from friday.continuous import MAX_STRATEGY_CHANGES
+    assert MAX_STRATEGY_CHANGES == B.MAX_STRATEGY_CHANGES
+    for klass, limits in B.CLASS_LIMITS.items():
+        assert limits["max_replans"] >= B.MAX_STRATEGY_CHANGES, \
+            f"{klass}: max_replans {limits['max_replans']} < MAX_STRATEGY_CHANGES {B.MAX_STRATEGY_CHANGES}"
+
+
+@pytest.mark.asyncio
+async def test_a_stuck_single_task_concludes_blocked_before_the_replans_cap(tmp_path):
+    """End to end through the engine: the same failure every time, a large
+    attempt budget, and the run must END (FAILED, outcome blocked:) rather
+    than park on the replans dimension."""
+    from friday.continuous import ContinuousTaskExecutor as Engine
+
+    async def always_stuck(_cap, _args):
+        raise TimeoutError("stuck")
+
+    store = Store(tmp_path / "b.sqlite3")
+    run_id = _run(store, [{"capability": "system_get_info", "arguments": {}}])
+    engine = Engine(store, always_stuck, executor_id="budget-stuck")
+    engine.max_attempts = 50
+    await engine.start(run_id)
+    deadline = asyncio.get_event_loop().time() + 5.0
+    while asyncio.get_event_loop().time() < deadline:
+        row = store.objective_run(run_id)
+        if row["status"] in O.RUN_TERMINAL or row["status"] == O.RUN_PAUSED:
+            break
+        await asyncio.sleep(0.05)
+    engine.stop()
+    row = store.objective_run(run_id)
+    assert row["status"] == O.RUN_FAILED, (row["status"], row.get("blocker"))
+    assert str(row["summary"]["outcome"]).startswith("blocked:")
+    task = store.objective_tasks(run_id)[0]
+    assert task["status"] == O.TaskStatus.BLOCKED
+    assert task["detail"]["strategy_changes"] == B.MAX_STRATEGY_CHANGES + 1
+    store.close()

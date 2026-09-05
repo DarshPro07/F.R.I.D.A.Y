@@ -151,6 +151,22 @@ def test_an_absolute_path_cannot_reach_out(workspace):
             box.resolve("C:/Windows/System32/drivers/etc/hosts")
 
 
+@pytest.mark.parametrize("path", [
+    "C:/Windows/System32/drivers/etc/hosts",   # Windows drive, forward slashes
+    "C:\\Windows\\win.ini",                    # Windows drive, backslashes
+    "/etc/passwd",                             # POSIX root
+    "//server/share/secret",                   # UNC
+])
+def test_an_absolute_path_is_refused_on_every_host(workspace, path):
+    """Both flavours, on both hosts. `workspace / "C:/Windows/x"` on Linux is
+    a RELATIVE join that lands inside the workspace, so the containment
+    check alone passed the exact input the Windows job refused (2026-09-05).
+    """
+    with S.Sandbox(workspace, name="T") as box:
+        with pytest.raises(S.SandboxError, match="absolute"):
+            box.resolve(path)
+
+
 def test_reading_and_writing_inside_is_fine(workspace):
     with S.Sandbox(workspace, name="T") as box:
         box.write("notes/todo.txt", "one thing")

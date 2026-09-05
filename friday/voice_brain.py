@@ -245,12 +245,19 @@ def _run_files(operation, arguments):
     # repo root and listed E:\ for ".". Anchor to ARTIFACTS_DIR unless the
     # boss gave an absolute path on purpose.
     import os
-    from pathlib import Path
+    from pathlib import Path, PurePosixPath, PureWindowsPath
     from friday.config import ARTIFACTS_DIR
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     root = ARTIFACTS_DIR.resolve()
     if path:
-        candidate = Path(path) if os.path.isabs(path) else root / path
+        # Absolute under EITHER flavour is the boss pointing somewhere on
+        # purpose. `os.path.isabs("C:/Windows/win.ini")` is False on a POSIX
+        # host, and the join below then quietly nested that path inside the
+        # workspace - so the ubuntu job's "outside my workspace" check got
+        # a successful read of nothing instead of the refusal (2026-09-05).
+        absolute = (os.path.isabs(path) or PureWindowsPath(path).is_absolute()
+                    or PurePosixPath(path).is_absolute() or bool(PureWindowsPath(path).drive))
+        candidate = Path(path) if absolute else root / path
         try:
             resolved = candidate.resolve()
         except OSError:

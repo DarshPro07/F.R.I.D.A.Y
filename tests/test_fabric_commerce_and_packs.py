@@ -95,7 +95,7 @@ def test_smartstore_key_is_numeric():
 # --- playbooks and skill packs --------------------------------------------
 
 cloned = pytest.mark.skipif(
-    not cp._skillpack.pack_root(cp.UPSTREAM).is_dir(), reason="not cloned")
+    not cp._skillpack.cloned(cp.UPSTREAM), reason="not cloned")
 
 
 @cloned

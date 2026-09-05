@@ -23,8 +23,18 @@ belongs with the destructive ones.
 from __future__ import annotations
 
 import re
+import sys
 
-import pygetwindow
+# pygetwindow raises NotImplementedError at IMPORT on anything but Windows
+# and macOS, which took the whole tool registry down on the Ubuntu CI job
+# (every `from friday.tools import ...` died here, 2026-09-05). The
+# dependency is Windows-only in fact, so it is optional in form: off
+# Windows every tool below answers UNSUPPORTED instead of never existing.
+AVAILABLE = sys.platform == "win32"
+if AVAILABLE:
+    import pygetwindow
+else:  # pragma: no cover - exercised by the Linux CI job
+    pygetwindow = None  # type: ignore[assignment]
 
 from friday import contracts as c
 from friday.policy import PolicyEngine, default_engine
@@ -46,13 +56,23 @@ class WindowError(RuntimeError):
 
 
 def _gate(run: c.Run, tool_id: str, engine: PolicyEngine) -> c.ActionResult | None:
+    """Policy first, then the platform. Every window tool enters here, so
+    off Windows every one of them answers UNSUPPORTED - the honest class
+    for "this machine has no window manager Friday can drive" - rather
+    than FAILED or an ImportError at registry load."""
     verdict = engine.decide(tool_id)
-    if verdict.allowed:
-        return None
-    return run.record(c.started(run.run_id, tool_id).finish(
-        status=c.CANCELLED,
-        error=f"{APPROVAL_PREFIX}: {verdict.reason} [{verdict.decision}]",
-    ))
+    if not verdict.allowed:
+        return run.record(c.started(run.run_id, tool_id).finish(
+            status=c.CANCELLED,
+            error=f"{APPROVAL_PREFIX}: {verdict.reason} [{verdict.decision}]",
+        ))
+    if not AVAILABLE:
+        return run.record(c.started(run.run_id, tool_id).finish(
+            status=c.UNSUPPORTED,
+            error=f"window control needs the Windows desktop (pygetwindow); "
+                  f"not available on {sys.platform}",
+        ))
+    return None
 
 
 def _scoped(payload: dict) -> dict:
@@ -80,6 +100,8 @@ def describe(window) -> dict:
 
 
 def _all_windows() -> list:
+    if pygetwindow is None:
+        return []
     return [w for w in pygetwindow.getAllWindows()
             if w.title.strip() and w.title not in INVISIBLE_TITLES]
 

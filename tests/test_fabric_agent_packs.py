@@ -22,9 +22,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 LOCK_PATH = ROOT / "third_party" / "UPSTREAM_LOCK.json"
 
 cloned_cs = pytest.mark.skipif(
-    not _skillpack.pack_root(cs.UPSTREAM).is_dir(), reason="not cloned")
+    not _skillpack.cloned(cs.UPSTREAM), reason="not cloned")
 cloned_at = pytest.mark.skipif(
-    not _skillpack.pack_root(at.UPSTREAM).is_dir(), reason="not cloned")
+    not _skillpack.cloned(at.UPSTREAM), reason="not cloned")
 
 
 @pytest.fixture(autouse=True)

@@ -65,6 +65,15 @@ def test_knowing_is_not_doing():
 
 
 def test_an_open_operation_needs_no_grant():
+    from friday.fabric_adapters import _skillpack
+    if not _skillpack.cloned("anthropic-cybersecurity-skills"):
+        # A fresh checkout has an empty gitlink placeholder, not the pack
+        # (actions/checkout, and the WSL gate). Absent upstream must report
+        # UNAVAILABLE without crashing (NON_NEGOTIABLE 15) - assert THAT
+        # here, and leave "search works" to a machine with the clone.
+        out = fabric.call("security_skills", "search", query="credential dumping")
+        assert out.status == "failed" and "UNAVAILABLE" in out.error
+        pytest.skip("anthropic-cybersecurity-skills not cloned; the open op cannot be read")
     out = fabric.call("security_skills", "search", query="credential dumping")
     assert out.status == "succeeded", out.error
 

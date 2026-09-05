@@ -97,7 +97,30 @@ def test_urls_that_are_refused_outright(url, reason):
         N.check(url)
 
 
-def test_an_ordinary_url_resolves_and_is_public():
+@pytest.fixture
+def public_dns(monkeypatch):
+    """Deterministic resolution for the deterministic gate.
+
+    These tests are about the VERDICT and the REDIRECT DISCIPLINE, not
+    about the machine's resolver. Real DNS made them fail in the 30-minute
+    baseline chunk the moment the network dropped (2026-09-05: 'example.com
+    does not resolve' x3), which is a network fact, not a netguard fact.
+    The real resolver is exercised once, under the `live` mark, below.
+    """
+    table = {"example.com": [ipaddress.ip_address("93.184.216.34")]}
+
+    def fake(host):
+        if host in table:
+            return table[host]
+        try:
+            return [ipaddress.ip_address(host)]   # literals resolve to themselves
+        except ValueError:
+            return []
+    monkeypatch.setattr(N, "resolve", fake)
+    return table
+
+
+def test_an_ordinary_url_resolves_and_is_public(public_dns):
     verdict = N.check("https://example.com/a.jpg")
     assert verdict["verdict"] == N.PUBLIC
     assert verdict["host"] == "example.com"
@@ -146,7 +169,7 @@ def test_fetch_refuses_an_unresolvable_host_rather_than_trying():
         N.fetch("https://nonexistent-host.invalid/a.jpg")
 
 
-def test_fetch_does_not_follow_redirects_automatically(monkeypatch):
+def test_fetch_does_not_follow_redirects_automatically(monkeypatch, public_dns):
     """
     The destination of a redirect is chosen by the server being fetched. A
     validated URL that 302s to the metadata endpoint is the same attack with
@@ -193,7 +216,7 @@ def test_fetch_does_not_follow_redirects_automatically(monkeypatch):
     assert len(hops) == 1, "it connected to the redirect destination"
 
 
-def test_the_redirect_chain_is_capped(monkeypatch):
+def test_the_redirect_chain_is_capped(monkeypatch, public_dns):
     class FakeResponse:
         is_redirect = True
         status_code = 302

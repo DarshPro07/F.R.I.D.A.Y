@@ -61,8 +61,11 @@ ULONG_PTR = ctypes.c_size_t
 
 #: The callback EnumWindows takes. Declared once because the signature is easy
 #: to get subtly wrong and the consequence is a silent empty result.
-ENUM_WINDOWS_PROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND,
-                                       wintypes.LPARAM)
+#: `WINFUNCTYPE` (stdcall) only exists on Windows; `CFUNCTYPE` stands in
+#: elsewhere so the module imports - the binding it types is None there
+#: anyway, and every caller checks `AVAILABLE` first.
+_FUNCTYPE = ctypes.WINFUNCTYPE if AVAILABLE else ctypes.CFUNCTYPE
+ENUM_WINDOWS_PROC = _FUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 # --- messages ---------------------------------------------------------------
 

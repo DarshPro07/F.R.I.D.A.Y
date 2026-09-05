@@ -331,8 +331,36 @@ def test_resource_usage_within_plausible_bounds(run):
 @WINDOWS_ONLY
 def test_volume_get_returns_a_percentage(run):
     result = S.volume_get(run)
+    if result.status == c.UNSUPPORTED:
+        # A machine with no audio output (a hosted build agent) is the
+        # environment, not the code; the read-back below needs a device.
+        pytest.skip(result.error)
     assert result.status == c.SUCCEEDED
     assert 0 <= result.output["volume_percent"] <= 100
+
+
+@WINDOWS_ONLY
+def test_no_audio_device_is_unsupported_not_failed(run, monkeypatch):
+    """
+    Not finding a device and the device refusing are different classes.
+    `GetDefaultAudioEndpoint` raising E_NOTFOUND means there is nothing to
+    talk to; the tool must say UNSUPPORTED (as power does for "this machine
+    cannot sleep") rather than FAILED, which reads as something broke. The
+    windows-latest runner has no sound card and reported "failed" (2026-09-05).
+    """
+    import comtypes
+    from pycaw.utils import AudioUtilities
+
+    def no_device():
+        raise comtypes.COMError(-2147023728, "Element not found.", (None,) * 5)
+
+    monkeypatch.setattr(AudioUtilities, "GetSpeakers", staticmethod(no_device))
+    got = S.volume_get(run)
+    assert got.status == c.UNSUPPORTED, got
+    assert "no default audio output device" in got.error
+    assert "0x80070490" in got.error
+    set_ = S.volume_set(run, 30)
+    assert set_.status == c.UNSUPPORTED, set_
 
 
 @WINDOWS_ONLY
@@ -368,6 +396,9 @@ def test_volume_and_clipboard_work_off_the_main_thread(run):
     thread.start()
     thread.join(timeout=45)
     assert "error" not in box, box.get("error")
+    if box["volume"] == c.UNSUPPORTED:
+        pytest.skip("no audio output device on this machine; COM off the main thread "
+                    "cannot be exercised through the endpoint here")
     assert box["volume"] == c.SUCCEEDED, "COM/volume failed off the main thread"
 
     clipboard = box["clipboard"]

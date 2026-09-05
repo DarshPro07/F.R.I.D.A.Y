@@ -25,6 +25,12 @@ dependencies = [
     # article instead of the nav bar. 16 small packages and no browser of its
     # own — see docs/architecture/WEB_RESEARCH.md for why not Crawl4AI.
     "trafilatura>=2.2",       # HTML -> Markdown  (Apache-2.0)
+    # Imported at call time by registered tools and undeclared until the
+    # first CI run on a clean machine failed on them (2026-09-05): the live
+    # .venv had them by accident, a fresh `uv sync` did not.
+    "mss>=9",                 # screen capture, vision.capture_screen (MIT)
+    "send2trash>=1.8",        # files_recycle: recycle bin, never rm (BSD-3-Clause)
+    "pyyaml>=6",              # Hermes profile/config reads (MIT)
 ]
 
 [project.optional-dependencies]

@@ -33,10 +33,14 @@ import pytest
 WINDOWS_ONLY_MODULES = (
     "test_audio.py", "test_execution_bridge.py", "test_file_control.py",
     "test_live_pass_fixes.py", "test_objective_mcp.py", "test_product_mcp.py",
-    "test_run_control.py", "test_transport_parity.py", "test_windows.py",
+    "test_run_control.py", "test_transport_parity.py",
     "test_processes.py", "test_power.py", "test_platform_power.py",
     "test_native_bindings.py", "test_jarvis_screen.py",
 )
+# test_windows.py left this list 2026-09-05: friday/toolsets/windows.py now
+# imports everywhere (pygetwindow is optional) and the suite fakes the
+# window manager, so its logic tests run on Linux and the UNSUPPORTED path
+# is asserted there too.
 
 collect_ignore = list(WINDOWS_ONLY_MODULES) if sys.platform != "win32" else []
 

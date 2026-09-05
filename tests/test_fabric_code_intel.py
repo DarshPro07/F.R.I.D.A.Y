@@ -167,7 +167,7 @@ def test_a_missing_binary_is_unavailable_not_a_crash(monkeypatch, tmp_path):
     assert cbm.health(None)["state"] == fabric.UNAVAILABLE
 
 
-def test_no_warm_daemon_is_degraded_rather_than_down(monkeypatch):
+def test_no_warm_daemon_is_degraded_rather_than_down(monkeypatch, tmp_path):
     """
     The CLI still answers without a daemon, just slowly. Reporting that as
     UNAVAILABLE would route around a provider that can still do the work.
@@ -177,6 +177,11 @@ def test_no_warm_daemon_is_degraded_rather_than_down(monkeypatch):
         stdout = "daemon: inactive"
         stderr = ""
 
+    # The probe under test is the daemon-status parse, not the binary's
+    # presence - a runner without the binary must still exercise it.
+    present = tmp_path / "codebase-memory-mcp.exe"
+    present.write_bytes(b"not run; _run is patched below")
+    monkeypatch.setattr(cbm, "BINARY", present)
     monkeypatch.setattr(cbm, "_run", lambda args, timeout=0: Result())
     probe = cbm.health(None)
     assert probe["state"] == fabric.DEGRADED

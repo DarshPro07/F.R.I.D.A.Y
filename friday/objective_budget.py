@@ -26,17 +26,33 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+#: How many times one task may change strategy (re-plan, different role,
+#: reduce scope) on the same failure fingerprint before it stops asking and
+#: goes BLOCKED. Owned here, not in `continuous`, because the run-level
+#: `max_replans` below must be reconciled with it: a class cap smaller than
+#: this makes the per-task loop-breaker unreachable - the run parks PAUSED
+#: on "budget exhausted (replans)" two failures before the task would have
+#: concluded BLOCKED, and a stuck fingerprint never reaches a terminal state
+#: (test_failure_fingerprint, first CI run after A-022 landed).
+MAX_STRATEGY_CHANGES = 3
+
 #: Per-class limits for the dimensions that are not tokens. Tokens and
 #: wall time come from the run row (set at admission from the task class);
 #: these come from the same class so one table decides everything.
+#:
+#: `max_replans` is expressed in whole tasks' worth of strategy changes so
+#: the invariant above holds by construction: every class allows at least
+#: one task to exhaust its own strategy budget and conclude, and the run
+#: cap governs replanning ACROSS tasks, which is the runaway the audit
+#: (A-022) was about.
 CLASS_LIMITS: dict[str, dict[str, int]] = {
     #                 tool calls, worker delegations, replans (strategy changes)
-    "TRIVIAL":      {"max_tool_calls": 4,   "max_workers": 0, "max_replans": 0},
-    "SIMPLE":       {"max_tool_calls": 12,  "max_workers": 1, "max_replans": 1},
-    "STANDARD":     {"max_tool_calls": 40,  "max_workers": 2, "max_replans": 3},
-    "COMPLEX":      {"max_tool_calls": 120, "max_workers": 4, "max_replans": 3},
-    "LONG_RUNNING": {"max_tool_calls": 400, "max_workers": 6, "max_replans": 6},
-    "CRITICAL":     {"max_tool_calls": 160, "max_workers": 4, "max_replans": 3},
+    "TRIVIAL":      {"max_tool_calls": 4,   "max_workers": 0, "max_replans": 1 * MAX_STRATEGY_CHANGES},
+    "SIMPLE":       {"max_tool_calls": 12,  "max_workers": 1, "max_replans": 1 * MAX_STRATEGY_CHANGES},
+    "STANDARD":     {"max_tool_calls": 40,  "max_workers": 2, "max_replans": 2 * MAX_STRATEGY_CHANGES},
+    "COMPLEX":      {"max_tool_calls": 120, "max_workers": 4, "max_replans": 3 * MAX_STRATEGY_CHANGES},
+    "LONG_RUNNING": {"max_tool_calls": 400, "max_workers": 6, "max_replans": 4 * MAX_STRATEGY_CHANGES},
+    "CRITICAL":     {"max_tool_calls": 160, "max_workers": 4, "max_replans": 2 * MAX_STRATEGY_CHANGES},
 }
 _DEFAULT_LIMITS = CLASS_LIMITS["STANDARD"]
 

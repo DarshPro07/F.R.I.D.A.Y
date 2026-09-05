@@ -17,7 +17,7 @@ from friday.fabric_adapters import _skillpack
 PACKS = ("no_ai_slop", "adhd_mode", "role_recipes")
 
 cloned = pytest.mark.skipif(
-    not (_skillpack.UPSTREAM / "agency-agents").is_dir(),
+    not _skillpack.cloned("agency-agents"),
     reason="upstream packs not cloned; run scripts/fabric_upstreams.py clone")
 
 
@@ -147,13 +147,30 @@ def test_a_pack_that_was_never_cloned_is_unavailable(monkeypatch, tmp_path):
 def test_a_cloned_pack_missing_its_entry_file_is_degraded(monkeypatch, tmp_path):
     """
     Present but wrong is a different fact from absent, and routing around it
-    needs to know which.
+    needs to know which. "Present" means the clone has files - a pack that
+    has a README but lost its entry file - not a bare directory.
     """
     (tmp_path / "half-pack").mkdir()
+    (tmp_path / "half-pack" / "README.md").write_text("# half a pack\n", encoding="utf-8")
     monkeypatch.setattr(_skillpack, "UPSTREAM", tmp_path)
     probe = _skillpack.health("half-pack", "skills/thing/SKILL.md")
     assert probe["state"] == fabric.DEGRADED
     assert "missing" in probe["detail"]
+
+
+def test_an_empty_placeholder_directory_is_not_cloned(monkeypatch, tmp_path):
+    """
+    A checkout of this repository creates `third_party/upstream/<name>` as an
+    EMPTY directory for every gitlink; nothing fills it. That is absent, not
+    present-but-wrong: UNAVAILABLE, and `cloned()` says False, so pack tests
+    skip on a fresh runner instead of asserting against nothing (2026-09-05).
+    """
+    (tmp_path / "placeholder").mkdir()
+    monkeypatch.setattr(_skillpack, "UPSTREAM", tmp_path)
+    assert _skillpack.cloned("placeholder") is False
+    probe = _skillpack.health("placeholder", "README.md")
+    assert probe["state"] == fabric.UNAVAILABLE
+    assert "not cloned" in probe["detail"]
 
 
 @cloned

@@ -110,8 +110,9 @@ PROVIDER_BACKOFF_SECONDS = float(os.getenv("ADA_PROVIDER_BACKOFF", "20"))
 
 #: How many times a task may change strategy (re-plan, different role,
 #: reduce scope) before a recurring failure gives up and goes BLOCKED
-#: instead of retrying the same thing forever.
-MAX_STRATEGY_CHANGES = 3
+#: instead of retrying the same thing forever. The number lives with the
+#: objective budget so the run-level replans cap is defined in terms of it.
+MAX_STRATEGY_CHANGES = budget_module.MAX_STRATEGY_CHANGES
 STRATEGY_HINTS = ("replan", "different_role", "reduce")
 
 _FP_PATH_RE = re.compile(r"(?:[A-Za-z]:)?[\\/][\w.\-\\/]+")

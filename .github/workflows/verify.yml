@@ -23,9 +23,11 @@ concurrency:
 jobs:
   python:
     # Windows first (audit A-046): it is the product's platform, and the
-    # 12 Windows-native test modules only collect there. ubuntu is the
-    # compatibility run; tests/conftest.py skips those modules by name on
-    # non-Windows so the rest of the gate still has to pass.
+    # 13 Windows-native test modules only collect there. ubuntu is the
+    # compatibility run; tests/conftest.py skips exactly those modules by
+    # name on non-Windows (WINDOWS_ONLY_MODULES) so the rest of the gate
+    # still has to pass - and a platform-neutral module that imports a
+    # Windows-only library fails there, which is the point (PRD Req. 37).
     name: pytest (not live, not slow) - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -46,7 +48,11 @@ jobs:
           enable-cache: true
 
       - name: Install the project
-        run: uv sync --extra dev
+        # Every extra: the deterministic gate exercises the document reader
+        # (pypdf/openpyxl/python-docx) and the scraping parser (scrapling),
+        # and `--extra dev` alone left 20 tests failing on ModuleNotFoundError
+        # in the first green-attempt run (2026-09-05).
+        run: uv sync --all-extras
 
       - name: Run the deterministic gate
         env:

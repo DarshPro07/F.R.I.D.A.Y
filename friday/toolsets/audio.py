@@ -26,16 +26,38 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
+import sys
 
-import comtypes
-from pycaw.pycaw import (AudioUtilities, IAudioSessionControl2,
-                         ISimpleAudioVolume)
+# Windows Core Audio only exists on Windows, and pycaw/comtypes are declared
+# `sys_platform == 'win32'` for that reason. The module still has to import
+# elsewhere: `friday.tools` registers every toolset unconditionally, and one
+# platform-specific ImportError took the whole registry - and with it 57
+# unrelated tests - down on the ubuntu CI job (2026-09-05). Off Windows the
+# tools stay registered and answer UNSUPPORTED; the audio machinery is simply
+# absent.
+AVAILABLE = sys.platform == "win32"
+
+if AVAILABLE:
+    import comtypes
+    from pycaw.pycaw import (AudioUtilities, IAudioSessionControl2,
+                             ISimpleAudioVolume)
+else:                                                   # pragma: no cover
+    comtypes = None
+    AudioUtilities = IAudioSessionControl2 = ISimpleAudioVolume = None
 
 from friday import contracts as c
 from friday.policy import PolicyEngine, default_engine
 from friday.toolsets.system import APPROVAL_PREFIX
 
 EXECUTION_SCOPE = "local_machine"
+
+
+def _com_errors() -> tuple[type[BaseException], ...]:
+    """The exception classes a COM call can raise here; OSError alone off
+    Windows, where `comtypes.COMError` does not exist."""
+    if comtypes is None:
+        return (OSError,)
+    return (OSError, comtypes.COMError)
 
 #: Volumes are floats 0.0-1.0 in the API and percentages to everyone else.
 #: The conversion happens once, here, rather than at four call sites.
@@ -69,6 +91,17 @@ def _gate(run: c.Run, tool_id: str, engine: PolicyEngine) -> c.ActionResult | No
 
 def _scoped(payload: dict) -> dict:
     return {"execution_scope": EXECUTION_SCOPE, **payload}
+
+
+def _unsupported_here(run: c.Run, started: c.ActionResult) -> c.ActionResult | None:
+    """Off Windows there is no Core Audio to talk to. Said plainly, as
+    UNSUPPORTED, rather than raised from inside a COM call that never ran."""
+    if AVAILABLE:
+        return None
+    return run.record(started.finish(
+        status=c.UNSUPPORTED,
+        error=f"audio sessions need Windows Core Audio; not available on {sys.platform}",
+    ))
 
 
 @contextlib.contextmanager
@@ -241,10 +274,12 @@ def session_by_id(session_id: str):
 
 def sessions() -> list:
     """Every rendering session, system sounds included."""
+    if not AVAILABLE:
+        return []
     try:
         with com():
             return list(AudioUtilities.GetAllSessions())
-    except (OSError, comtypes.COMError):
+    except _com_errors():
         return []
 
 
@@ -288,6 +323,9 @@ def audio_sessions(
     if blocked:
         return blocked
     started = c.started(run.run_id, tool_id)
+    unsupported = _unsupported_here(run, started)
+    if unsupported:
+        return unsupported
 
     found = find_sessions(pattern) if pattern.strip() else sessions()
     described = [describe_session(s) for s in found]
@@ -322,6 +360,9 @@ def audio_session_volume(
     if blocked:
         return blocked
     started = c.started(run.run_id, tool_id)
+    unsupported = _unsupported_here(run, started)
+    if unsupported:
+        return unsupported
 
     if not 0 <= percent <= 100:
         return run.record(c.failed(
@@ -347,7 +388,7 @@ def audio_session_volume(
         before = to_percent(volume.GetMasterVolume())
         try:
             volume.SetMasterVolume(to_level(percent), None)
-        except (OSError, comtypes.COMError) as exc:
+        except _com_errors() as exc:
             return run.record(c.failed(started, f"the session refused: {exc}"))
         after = to_percent(volume.GetMasterVolume())
     described = describe_session(session)
@@ -380,6 +421,9 @@ def audio_session_mute(
     if blocked:
         return blocked
     started = c.started(run.run_id, tool_id)
+    unsupported = _unsupported_here(run, started)
+    if unsupported:
+        return unsupported
 
     matched = find_sessions(pattern)
     if not matched:
@@ -395,7 +439,7 @@ def audio_session_mute(
         before = bool(volume.GetMute())
         try:
             volume.SetMute(bool(muted), None)
-        except (OSError, comtypes.COMError) as exc:
+        except _com_errors() as exc:
             return run.record(c.failed(started, f"the session refused: {exc}"))
         after = bool(volume.GetMute())
     described = describe_session(session)
@@ -454,6 +498,9 @@ def audio_master_volume(
     if blocked:
         return blocked
     started = c.started(run.run_id, tool_id)
+    unsupported = _unsupported_here(run, started)
+    if unsupported:
+        return unsupported
 
     if not 0 <= percent <= 100:
         return run.record(c.failed(
@@ -464,7 +511,7 @@ def audio_master_volume(
             before = to_percent(control.GetMasterVolumeLevelScalar())
             control.SetMasterVolumeLevelScalar(to_level(percent), None)
             after = to_percent(control.GetMasterVolumeLevelScalar())
-    except (OSError, comtypes.COMError) as exc:
+    except _com_errors() as exc:
         return run.record(c.failed(
             started, f"the audio endpoint refused or went away: {exc}"))
 

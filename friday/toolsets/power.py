@@ -133,7 +133,19 @@ def _authorised(run: c.Run, action: str, nonce: str, ledger: CF.Book,
     3. policy - CONFIRM, which no autonomy setting grants;
     4. the confirmation itself - bound to this action and this target, spent
        once, recomputed here rather than trusted from when it was asked.
+
+    Split in two so `_suspend` can put the machine's capability check between
+    them: the refusals in `_refused` do not depend on hardware and come
+    first; the question in `_confirmed` must not be asked for something the
+    machine cannot do.
     """
+    return (_refused(run, action, engine, started)
+            or _confirmed(run, action, nonce, ledger, started))
+
+
+def _refused(run: c.Run, action: str, engine: PolicyEngine,
+             started: c.ActionResult) -> c.ActionResult | None:
+    """Provenance and policy: the refusals that hold on any machine."""
     tool_id = ACTIONS[action][0]
 
     refusal = policy_module.provenance_verdict(tool_id, run.provenance)
@@ -145,7 +157,12 @@ def _authorised(run: c.Run, action: str, nonce: str, ledger: CF.Book,
     if verdict.denied:
         return run.record(started.finish(
             status=c.FAILED, error=f"BLOCKED: {verdict.reason}"))
+    return None
 
+
+def _confirmed(run: c.Run, action: str, nonce: str, ledger: CF.Book,
+               started: c.ActionResult) -> c.ActionResult | None:
+    """The person's yes: asked for, or spent."""
     if not nonce:
         if not attended(run):
             return run.record(started.finish(
@@ -250,6 +267,19 @@ def _suspend(run: c.Run, action: str, nonce: str, engine: PolicyEngine,
     tool_id = ACTIONS[action][0]
     started = c.started(run.run_id, tool_id)
 
+    # Refusals first, then whether the machine can do it, then the question.
+    # The old order put the capability check ahead of everything and
+    # answered a planted "put the computer to sleep" with UNSUPPORTED ("this
+    # machine cannot sleep") on a runner with no sleep states: the machine's
+    # business reported before the page's request had been refused at all,
+    # and FULL autonomy got the same non-answer instead of its CANCELLED.
+    # Provenance and policy do not depend on hardware. The confirmation
+    # stays after the capability check - no yes is offered for something the
+    # machine cannot do.
+    refused = _refused(run, action, engine, started)
+    if refused is not None:
+        return refused
+
     try:
         capabilities = native.power_capabilities()
     except OSError as exc:
@@ -272,7 +302,7 @@ def _suspend(run: c.Run, action: str, nonce: str, engine: PolicyEngine,
                             "hibernate_available": capabilities.hibernate}),
         ))
 
-    refused = _authorised(run, action, nonce, ledger, engine, started)
+    refused = _confirmed(run, action, nonce, ledger, started)
     if refused is not None:
         return refused
 

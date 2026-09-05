@@ -540,16 +540,44 @@ def apps_list_known(
 # ---------------------------------------------------------------------------
 
 
+class NoAudioEndpoint(RuntimeError):
+    """The machine has no default audio render device.
+
+    `IMMDeviceEnumerator::GetDefaultAudioEndpoint` fails (E_NOTFOUND,
+    0x80070490) on a machine with no sound output at all - a headless
+    build agent, a server, a VM with audio removed. That is not the device
+    refusing a request; there is no device. The tools report it as
+    UNSUPPORTED, the same word the power toolset uses for "this machine
+    cannot sleep", rather than FAILED, which would read as something broke.
+    """
+
+
 def _endpoint_volume():
     """
     Windows Core Audio endpoint. COM must be initialised per calling thread,
     and the LiveKit job runner calls tools off the main thread.
+
+    Finding the device and talking to it are kept apart on purpose: a COM
+    failure while *finding* it means there is nothing to talk to
+    (`NoAudioEndpoint`); a failure *talking* to it propagates as the fault
+    it is. The two were one bare `except` before, and a runner with no
+    sound card reported the volume read as "failed" (2026-09-05).
     """
     import comtypes
     from pycaw.utils import AudioUtilities
 
     comtypes.CoInitialize()
-    return AudioUtilities.GetSpeakers().EndpointVolume
+    try:
+        speakers = AudioUtilities.GetSpeakers()
+    except comtypes.COMError as exc:
+        code = (exc.hresult or 0) & 0xFFFFFFFF
+        raise NoAudioEndpoint(
+            f"no default audio output device on this machine (HRESULT {code:#010x})") from exc
+    return speakers.EndpointVolume
+
+
+def _no_audio(run: c.Run, started: c.ActionResult, exc: NoAudioEndpoint) -> c.ActionResult:
+    return run.record(started.finish(status=c.UNSUPPORTED, error=str(exc)))
 
 
 def volume_get(run: c.Run, *, engine: PolicyEngine = default_engine) -> c.ActionResult:
@@ -565,6 +593,8 @@ def volume_get(run: c.Run, *, engine: PolicyEngine = default_engine) -> c.Action
         endpoint = _endpoint_volume()
         level = round(endpoint.GetMasterVolumeLevelScalar() * 100)
         muted = bool(endpoint.GetMute())
+    except NoAudioEndpoint as exc:
+        return _no_audio(run, started, exc)
     except Exception as exc:
         return run.record(c.failed(started, f"could not read volume: {exc}"))
 
@@ -597,6 +627,8 @@ def volume_set(
         before = round(endpoint.GetMasterVolumeLevelScalar() * 100)
         endpoint.SetMasterVolumeLevelScalar(level / 100.0, None)
         after = round(endpoint.GetMasterVolumeLevelScalar() * 100)
+    except NoAudioEndpoint as exc:
+        return _no_audio(run, started, exc)
     except Exception as exc:
         return run.record(c.failed(started, f"could not set volume: {exc}"))
 

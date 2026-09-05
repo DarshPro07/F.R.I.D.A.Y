@@ -60,7 +60,7 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import Protocol
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 logger = logging.getLogger("friday-agent")
 
@@ -329,6 +329,18 @@ class ExecutionError(RuntimeError):
     """A containment guarantee could not be met, so nothing was run."""
 
 
+def _looks_absolute(path: str | Path) -> bool:
+    """Absolute under Windows OR POSIX rules, whatever the host.
+
+    `Path("C:/x").is_absolute()` is False on Linux and `Path("/etc").is_absolute()`
+    is False on Windows for the `\\` flavour of the same question; the sandbox
+    must refuse both everywhere, so both flavours are asked.
+    """
+    text = str(path)
+    return (PureWindowsPath(text).is_absolute() or PurePosixPath(text).is_absolute()
+            or text.startswith(("\\\\", "//")) or bool(PureWindowsPath(text).drive))
+
+
 class NativeExecutionEnvironment:
     """
     One controlled place for one development run.
@@ -500,7 +512,16 @@ class NativeExecutionEnvironment:
         Resolved before checking, so a symlink inside the workspace pointing
         outside it is caught. `FileJail` makes the same argument at greater
         length; this is the same rule applied to one narrower root.
+
+        Absolute under either path flavour is refused outright: a sandbox
+        path is relative by definition, and `C:/Windows/...` handed to a
+        Linux host is not a relative path that happens to contain a colon
+        - `workspace / "C:/Windows/..."` quietly nests it inside the
+        workspace there, which is how the ubuntu job passed the very input
+        the Windows job refused (2026-09-05).
         """
+        if _looks_absolute(relative):
+            raise ExecutionError(f"{relative!r} is an absolute path; the sandbox takes paths relative to its workspace")
         target = (self.workspace / Path(relative)).resolve()
         try:
             target.relative_to(self.workspace)

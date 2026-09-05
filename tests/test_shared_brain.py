@@ -28,8 +28,21 @@ class FakeTransport(B.SharedBrainAdapter):
 
 
 @pytest.fixture
-def fake():
+def fake(tmp_path, monkeypatch):
+    # `remember()` appends to the canonical ledger, which is git-tracked.
+    # Without this the suite wrote a line into docs/knowledge/brain_ledger.jsonl
+    # on every run (two appeared in one day's `git status`), which is test
+    # state leaking into the repository. The brain honours GBRAIN_LEDGER.
+    monkeypatch.setenv("GBRAIN_LEDGER", str(tmp_path / "brain_ledger.jsonl"))
     return FakeTransport()
+
+
+def test_the_suite_never_writes_the_tracked_ledger(fake, tmp_path):
+    fake.answers['remember'] = {'status': 'inserted', 'id': '1'}
+    fake.remember('a test fact', provenance='test', entity='friday')
+    assert (tmp_path / "brain_ledger.jsonl").exists()
+    import os
+    assert os.environ["GBRAIN_LEDGER"] != B.SharedBrainAdapter._LEDGER_DEFAULT
 
 
 def test_recall_always_carries_a_server_side_budget(fake):

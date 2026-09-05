@@ -106,7 +106,14 @@ def claimed_by(capability_id: str, *, arguments: dict | None = None,
     outstanding = [task for task in tasks
                    if task["status"] not in O.TASK_TERMINAL]
 
-    if age > CLAIM_SECONDS:
+    # Both windows are half-open on the "still fresh" side: a run aged
+    # exactly CLAIM_SECONDS has left the claim window, and one aged exactly
+    # REPLY_SECONDS has left the reply window. That makes a zero-width
+    # window empty, which matters because `datetime.now()` ticks at ~15 ms
+    # on Windows and a run created in the current tick has age exactly 0.0
+    # - with inclusive bounds a window of 0 seconds still admitted it, and
+    # "the claim is dead" was true on one CI runner and false on another.
+    if age >= CLAIM_SECONDS:
         if arguments is None:
             return None
         for task in outstanding:
@@ -117,7 +124,7 @@ def claimed_by(capability_id: str, *, arguments: dict | None = None,
                 return run["run_id"]
         return None
 
-    if age <= REPLY_SECONDS:
+    if age < REPLY_SECONDS:
         planned = tasks or []
         if any(task["capability"] == capability_id for task in planned):
             return None if _is_conversational(capability_id) else run["run_id"]

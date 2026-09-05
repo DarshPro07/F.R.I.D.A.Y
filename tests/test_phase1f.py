@@ -21,6 +21,20 @@ def run():
     return c.Run.create("test", capability="media")
 
 
+@pytest.fixture(autouse=True)
+def _spotify_is_a_windows_app(monkeypatch):
+    """
+    Every transport test below replaces the Win32 boundary (`spotify_window`,
+    `_send`, `current_state`, `_wait_for_change`) and asserts the verdict
+    logic above it: sent-is-not-changed, already-there-is-success. That
+    logic is platform-neutral; only the platform GATE in front of it is not,
+    and on the ubuntu job the gate answered "not implemented for posix"
+    before any of it ran (7 failures, 2026-09-05). Pin the gate open so the
+    boundary stubs are what decide, as they were written to.
+    """
+    monkeypatch.setattr(M, "_IS_WINDOWS", True)
+
+
 # ---------------------------------------------------------------------------
 # Title parsing - the only now-playing source without the Web API
 # ---------------------------------------------------------------------------

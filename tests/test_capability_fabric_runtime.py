@@ -11,6 +11,8 @@ caller would send, run through the real `fabric_control` tool functions.
 
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
 
 from friday import fabric
@@ -49,9 +51,30 @@ def use(tools, family, operation, **arguments):
     return tools["capability_use"](family, operation, arguments)
 
 
+def _needs_pack(*upstreams: str):
+    """These routing tests read real upstream packs through the bridge. On a
+    fresh checkout the packs are empty gitlink placeholders (no submodule
+    machinery fills them), so the honest outcome there is a skip that names
+    the missing clone - not a failure that reads as broken routing."""
+    from friday.fabric_adapters import _skillpack
+    missing = [u for u in upstreams if not _skillpack.cloned(u)]
+    return pytest.mark.skipif(
+        bool(missing),
+        reason=f"upstream pack(s) not cloned: {missing}; scripts/fabric_upstreams.py clone")
+
+
+research_pack = _needs_pack("scientific-agent-skills")
+roles_pack = _needs_pack("gstack")
+security_pack = _needs_pack("anthropic-cybersecurity-skills")
+scrapling_installed = pytest.mark.skipif(
+    importlib.util.find_spec("scrapling") is None,
+    reason="scrapling not installed (pip install -e .[web])")
+
+
 # --- routing: the family reaches the right provider ------------------------
 
 
+@research_pack
 def test_research_routes_to_the_science_skills_provider(tools):
     out = use(tools, "research", "search", query="single cell rna sequencing")
     assert out["status"] == "succeeded", out
@@ -59,6 +82,7 @@ def test_research_routes_to_the_science_skills_provider(tools):
     assert names & {"scanpy", "anndata", "scvelo"}, names
 
 
+@scrapling_installed
 def test_scraping_routes_to_scrapling_and_extracts_fields(tools):
     html = ("<div class=c><h3 class=n>Widget</h3><span class=p>42</span></div>"
             "<div class=c><h3 class=n>Gadget</h3><span class=p>7</span></div>")
@@ -68,6 +92,7 @@ def test_scraping_routes_to_scrapling_and_extracts_fields(tools):
     assert out["output"] == {"name": ["Widget", "Gadget"], "price": ["42", "7"]}
 
 
+@roles_pack
 def test_roles_routes_to_gstack_and_ranks_the_right_workflow(tools):
     out = use(tools, "roles", "route", task="review this pr before landing")
     assert out["status"] == "succeeded", out
@@ -122,6 +147,7 @@ def test_malformed_arguments_do_not_crash_the_bridge(tools):
 # --- the security family stays gated through the bridge ---------------------
 
 
+@security_pack
 def test_a_security_procedure_needs_scope_even_through_the_bridge(tools):
     """
     The scope gate is the adapter's, and the bridge must not bypass it. Reading
@@ -134,6 +160,7 @@ def test_a_security_procedure_needs_scope_even_through_the_bridge(tools):
            "authorized_scope" in str(out["output"]).lower()
 
 
+@security_pack
 def test_security_search_is_open_because_knowing_is_not_doing(tools):
     out = use(tools, "security", "search", query="detect credential dumping")
     assert out["status"] == "succeeded", out

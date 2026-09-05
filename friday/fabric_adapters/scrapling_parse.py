@@ -71,12 +71,16 @@ def _storage_file() -> str:
 
 
 def _selector(html: str, *, url: str = "", adaptive: bool = False):
-    from scrapling import Selector
-
+    # The boundary before the dependency: "no markup, no work" is Friday's
+    # rule, and it must hold whether or not scrapling is installed - the old
+    # order imported first, so on a machine without the `web` extra the
+    # refusal was a ModuleNotFoundError instead of the contract's own words.
     if not html:
         raise fabric.FabricError(
             "scrapling parses markup it is given; pass `html`. Fetch with "
             "Friday's own web_fetch so egress stays inside netguard.")
+    from scrapling import Selector
+
     if adaptive:
         return Selector(html, url=url, adaptive=True,
                         storage_args={"storage_file": _storage_file()})

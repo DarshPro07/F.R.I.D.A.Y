@@ -531,7 +531,9 @@ def provenance() -> dict:
         ram, cpus = None, os.cpu_count()
     return {
         "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "commit": git("rev-parse", "--short", "HEAD"),
+        # An empty commit is a report nobody can reproduce, so it is named
+        # rather than blank: a tarball/`git archive` checkout has no .git.
+        "commit": git("rev-parse", "--short", "HEAD") or "unknown (not a git checkout)",
         "dirty": bool(git("status", "--porcelain")),
         "python": platform.python_version(),
         "machine": {"host": socket.gethostname(), "os": platform.platform(),

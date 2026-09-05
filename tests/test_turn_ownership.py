@@ -398,6 +398,26 @@ def test_ownership_does_not_depend_on_the_claim_still_being_live(admitted, monke
     assert not set(offered) & set(DOMAIN), 'with the claim expired, only the tool surface prevents duplication'
 
 
+def test_a_zero_width_window_is_empty_even_at_age_zero(admitted, monkeypatch):
+    """
+    Deterministic form of the race above. `datetime.now()` ticks at ~15 ms
+    on Windows, so a run created in the current tick has age exactly 0.0;
+    the three tests here that set a window to 0.0 to mean "expired" then
+    depended on which side of a tick they ran (green locally, red on the
+    windows-latest runner, 2026-09-05). Pin the age and assert the boundary.
+    """
+    store, run_id = admitted
+    monkeypatch.setattr(ownership, "_age_seconds", lambda _iso: 0.0)
+    monkeypatch.setattr(ownership, "REPLY_SECONDS", 0.0)
+    monkeypatch.setattr(ownership, "CLAIM_SECONDS", 0.0)
+    for capability_id in WHAT_THE_REPLY_DID:
+        assert ownership.claimed_by(capability_id) is None, capability_id
+    # And the production-sized window still claims at age zero.
+    monkeypatch.setattr(ownership, "REPLY_SECONDS", 30.0)
+    monkeypatch.setattr(ownership, "CLAIM_SECONDS", 45.0)
+    assert ownership.claimed_by("apps_open") == run_id
+
+
 def test_use_capability_is_refused_on_an_owned_turn():
     """
     The route the model actually took. `use_capability` is a function tool on

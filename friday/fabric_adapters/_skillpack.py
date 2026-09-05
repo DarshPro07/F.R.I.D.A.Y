@@ -38,6 +38,25 @@ def pack_root(upstream: str) -> pathlib.Path:
     return UPSTREAM / upstream
 
 
+def cloned(upstream: str) -> bool:
+    """Whether the pack's source is actually here, not merely its directory.
+
+    A checkout of this repository creates every `third_party/upstream/<name>`
+    as an EMPTY directory - they are gitlinks (mode 160000) and no submodule
+    machinery fills them - so `pack_root(x).is_dir()` answered "cloned" on a
+    fresh CI runner and every pack test then ran against nothing (2026-09-05,
+    first green-attempt run: 20 failures of the shape "catalogue is empty").
+    A clone has files in it; a placeholder does not.
+    """
+    root = pack_root(upstream)
+    if not root.is_dir():
+        return False
+    try:
+        return any(root.iterdir())
+    except OSError:
+        return False
+
+
 def health(upstream: str, *entries: str) -> dict:
     """READY only when an entry file exists AND has content worth reading.
 
@@ -53,7 +72,7 @@ def health(upstream: str, *entries: str) -> dict:
     from friday import fabric
 
     root = pack_root(upstream)
-    if not root.is_dir():
+    if not cloned(upstream):
         return {"state": fabric.UNAVAILABLE,
                 "detail": f"not cloned: {root}"}
     missing = [entry for entry in entries if not (root / entry).exists()]

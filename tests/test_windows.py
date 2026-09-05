@@ -13,10 +13,25 @@ by scripts/golden_windows.py, against a window Friday opened itself.
 
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
 from friday import contracts as c
 from friday.toolsets import windows as W
+
+
+@pytest.fixture(autouse=True)
+def _a_window_manager_to_fake(monkeypatch):
+    """The tool logic under test is platform-neutral (find, verify, read
+    back); only the enumeration is Windows. Off Windows the module has
+    `pygetwindow = None` and every tool answers UNSUPPORTED, so give it a
+    stand-in module to patch `getAllWindows` on and open the gate. The
+    UNSUPPORTED path itself is asserted separately below."""
+    if W.pygetwindow is None:
+        monkeypatch.setattr(W, "pygetwindow", types.SimpleNamespace(getAllWindows=lambda: []))
+        monkeypatch.setattr(W, "AVAILABLE", True)
 
 
 class FakeWindow:
@@ -358,3 +373,20 @@ def test_nothing_here_presses_a_key():
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module.split(".")[0])
     assert "pyautogui" not in imported
+
+
+def test_off_windows_every_tool_is_unsupported_not_broken(run, monkeypatch):
+    """pygetwindow raises NotImplementedError at import on Linux, which
+    took the whole tool registry down on the Ubuntu CI job. Now the module
+    imports everywhere and each tool says UNSUPPORTED - the honest class for
+    a machine with no window manager Friday can drive - with the platform
+    named, before touching anything."""
+    monkeypatch.setattr(W, "AVAILABLE", False)
+    monkeypatch.setattr(W, "pygetwindow", None)
+    for call in (lambda: W.windows_list(run), lambda: W.windows_focus(run, "Notepad"),
+                 lambda: W.windows_minimize(run, "Notepad"), lambda: W.windows_restore(run, "Notepad"),
+                 lambda: W.windows_maximize(run, "Notepad"), lambda: W.windows_arrange(run, "Notepad", "left")):
+        result = call()
+        assert result.status == c.UNSUPPORTED, result
+        assert "not available on" in result.error and sys.platform in result.error
+    assert W._all_windows() == []
