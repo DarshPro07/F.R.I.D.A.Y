@@ -216,6 +216,7 @@ def test_a_forbidden_task_is_refused_before_the_screen_is_read(monkeypatch):
     from friday.toolsets import vision
     monkeypatch.setattr(vision, "capture_screen",
                         lambda **k: (_ for _ in ()).throw(AssertionError("captured")))
+    monkeypatch.setitem(V._CURRENT_TURN, "text", "take over and type my bank password")
     out = V._run_capability("desktop", "plan", {"task": "type my bank password"})
     d = json.loads(out["result"])
     assert d["result"] == "refused"
@@ -250,6 +251,7 @@ def test_a_plan_returns_a_nonce_and_touches_nothing(monkeypatch):
     # 2026-09-03 18:00) runs it - covered in tests/test_autonomy_and_selfcheck.py.
     from friday import policy
     monkeypatch.setattr(policy, "default_engine", policy.PolicyEngine(autonomy=policy.FULL))
+    monkeypatch.setitem(V._CURRENT_TURN, "text", "take over and open the start menu")
     out = V._run_capability("desktop", "plan", {"task": "open the start menu"})
     d = json.loads(out["result"])
     assert d["result"] == "planned" and d["confirm"]["nonce"]
