@@ -56,12 +56,16 @@ def test_the_transcript_does_not_eat_the_whole_budget(db):
     assert out["injected"]["episodes"] * 60 < 900
 
 
-def test_contacts_are_remembered_and_recalled(db):
+def test_contacts_are_remembered_and_recalled(db, monkeypatch):
     from friday import voice_brain as V
     from friday import memory_stack as M
+    # Saving a contact is a write; the UI brain does it only when the
+    # owner's words for the turn ask for it (A-036), so say them.
+    monkeypatch.setitem(V._CURRENT_TURN, "text", "save my mum's contact: Sunita Rao")
     assert "saved" in V._run_capability(
         "contacts", "save",
         {"name": "Sunita Rao", "relation": "mother", "aliases": "mum, mummy"})["result"]
+    monkeypatch.setitem(V._CURRENT_TURN, "text", "call mum")
     found = V._run_capability("contacts", "lookup", {"query": "call mum"})["result"]
     assert found and found[0]["name"] == "Sunita Rao"
     assert "Sunita Rao" in M.aggregate("ring mum tonight")["prompt"]

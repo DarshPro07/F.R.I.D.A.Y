@@ -96,6 +96,13 @@ class CaptureError(RuntimeError):
     """No usable frame could be obtained."""
 
 
+class NoDisplay(CaptureError):
+    """There is no screen to capture on this machine at all - a headless
+    runner, an SSH session with no $DISPLAY. Not a failed capture: nothing
+    was there to capture, which the tool reports as UNSUPPORTED (the same
+    class as "no audio endpoint" in system.py) rather than FAILED."""
+
+
 class Frame:
     """A captured image plus everything needed to prove it is real and recent."""
 
@@ -149,7 +156,19 @@ def capture_screen(monitor: int = 1, region: dict | None = None) -> Frame:
     except ImportError as exc:  # pragma: no cover - dependency present in prod
         raise CaptureError(f"mss unavailable: {exc}") from exc
 
-    with mss.MSS() as sct:
+    try:
+        sct = mss.MSS()
+    except Exception as exc:  # noqa: BLE001 - mss raises ScreenShotError, and on
+        # a headless host it does so at construction: "Cannot connect to
+        # display: display is unset or invalid (check $DISPLAY)". Seen on the
+        # ubuntu CI runner 2026-09-05, where it was reported as a failed
+        # capture of monitor 99 instead of the truth: no display here.
+        text = str(exc)
+        if "display" in text.lower():
+            raise NoDisplay(f"no display to capture on this machine: {text}") from exc
+        raise CaptureError(f"screen capture could not start: {text}") from exc
+
+    with sct:
         monitors = sct.monitors
         if region:
             box = region
@@ -505,6 +524,8 @@ def _capture_result(
     try:
         frame = grab()
         path = frame.save()
+    except NoDisplay as exc:
+        return run.record(started.finish(status=c.UNSUPPORTED, error=str(exc)))
     except CaptureError as exc:
         return run.record(c.failed(started, str(exc)))
     except Exception as exc:
@@ -560,6 +581,8 @@ def _inspect(
     try:
         frame = grab()
         path = frame.save()
+    except NoDisplay as exc:
+        return run.record(started.finish(status=c.UNSUPPORTED, error=str(exc)))
     except CaptureError as exc:
         return run.record(c.failed(started, str(exc)))
     except Exception as exc:

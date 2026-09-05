@@ -185,8 +185,38 @@ def test_a_stale_frame_is_refused(run, captures, monkeypatch):
 
 def test_missing_monitor_fails(run, captures):
     result = V.screen_capture(run, monitor=99)
+    if result.status == c.UNSUPPORTED:
+        # No display on this machine (headless CI runner): the index check
+        # cannot be reached because mss cannot open at all. That verdict is
+        # asserted by test_no_display_is_unsupported_not_a_failed_capture.
+        pytest.skip(result.error)
     assert result.status == c.FAILED
     assert "does not exist" in result.error
+
+
+def test_no_display_is_unsupported_not_a_failed_capture(run, captures, monkeypatch):
+    """The ubuntu CI runner (2026-09-05): mss raised "Cannot connect to
+    display: display is unset or invalid (check $DISPLAY)" at construction,
+    and the tool called it a FAILED capture of monitor 99. A machine with no
+    screen is a fact about the machine, reported as UNSUPPORTED - the same
+    class system.volume_* uses for "no audio endpoint"."""
+    import mss
+
+    class Headless:
+        def __init__(self, *a, **k):
+            raise mss.exception.ScreenShotError(
+                "Cannot connect to display: display is unset or invalid (check $DISPLAY)")
+    monkeypatch.setattr(mss, "MSS", Headless)
+    result = V.screen_capture(run, monitor=1)
+    assert result.status == c.UNSUPPORTED, result
+    assert "no display" in result.error
+    # a different construction failure is still a FAILURE, with the reason
+    class Broken:
+        def __init__(self, *a, **k):
+            raise mss.exception.ScreenShotError("XGetImage() failed")
+    monkeypatch.setattr(mss, "MSS", Broken)
+    result = V.screen_capture(run, monitor=1)
+    assert result.status == c.FAILED and "XGetImage" in result.error
 
 
 # ---------------------------------------------------------------------------
