@@ -470,3 +470,72 @@ def test_growth_guard_memory_is_bounded_per_objective_and_across_objectives():
     assert guard.spent("RUN-49") == 20 * 10 + sum(100 + n for n in range(20))
     v = guard.check("RUN-49", input_tokens=10 ** 9, ceiling=5000, fingerprint="new")
     assert not v.allowed and "ceiling" in v.reason
+
+
+def test_the_gateway_does_not_start_a_thread_per_request(tmp_path):
+    """A-051, found by py-spy on a live stall.
+
+    `_request` used to create a `gateway-read` thread per call, with the
+    watchdog on the line AFTER `t.start()`. Under memory pressure (253 MB
+    free of 16 GB, observed 2026-09-06) Windows could not allocate the new
+    thread's stack, `Thread.start()` blocked on its `_started` event, and no
+    timeout applied - one soak cycle "took" 3 h 22 m and the gate reported
+    INCONCLUSIVE.
+
+    Assert the RESOURCE, not the clock: thread count must not scale with
+    request count. A wall-clock assertion passes against the bad version on
+    any machine with memory to spare, which is every machine until it isn't.
+    """
+    import threading
+    from friday import model_gateway as M
+
+    # Count thread CREATIONS, not live threads: the old per-request threads
+    # were daemons that finished in microseconds, so `active_count()` recovers
+    # between calls and reads flat against the very bug this guards. What
+    # cannot recover is the number of times `Thread.start()` was called - and
+    # that call is what blocks when the OS cannot allocate a stack.
+    started: list[str] = []
+    real_start = threading.Thread.start
+
+    def counting_start(self, *a, **kw):
+        started.append(self.name)
+        return real_start(self, *a, **kw)
+
+    worker = M.ModelGatewayWorker(
+        command=[sys.executable, str(Path("tests") / "fake_model_gateway_worker.py")])
+    threading.Thread.start = counting_start
+    try:
+        worker.start()
+        at_start = len(started)
+        for _ in range(40):
+            reply = worker._request("providers", {}, timeout=10.0)
+            assert reply.get("ok"), reply
+        during = len(started) - at_start
+        assert during == 0, (
+            f"{during} threads were started across 40 requests: the request "
+            f"path creates threads again, so a request can block on thread "
+            f"creation with no timeout covering it")
+        assert at_start <= 2, (
+            f"start() created {at_start} threads; one reader per worker is "
+            f"the contract")
+    finally:
+        threading.Thread.start = real_start
+        worker.stop()
+
+
+def test_a_wedged_worker_still_times_out_without_the_per_request_thread():
+    """The negative case. Removing the per-request thread must not remove the
+    backstop: a worker that never answers still has to raise, not hang."""
+    from friday import model_gateway as M
+
+    worker = M.ModelGatewayWorker(
+        command=[sys.executable, "-c",
+                 "import sys,time\n"
+                 "sys.stdin.readline()\n"      # take the request, answer never
+                 "time.sleep(60)\n"])
+    # start() itself does a `hello`, which is the request that must time out.
+    with pytest.raises(M.GatewayUnavailable) as caught:
+        worker.START_TIMEOUT = 1.0
+        worker.start()
+    assert "did not answer" in str(caught.value)
+    worker.stop()

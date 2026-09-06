@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import subprocess
 import threading
 import time
@@ -427,6 +428,17 @@ class ModelGatewayWorker:
         self._next_id = 0
         self.started_at: float | None = None
         self.hermes_home: str = ""
+        # ONE reader thread per worker process, not one per request. The old
+        # code started a `gateway-read` thread for every `_request` and relied
+        # on `done.wait(timeout + 5)` as the backstop - but that wait is on the
+        # line AFTER `t.start()`, so it cannot cover the start itself. Under
+        # memory pressure (observed 2026-09-06 with 253 MB free of 16 GB)
+        # Windows cannot allocate the new thread's stack, `Thread.start()`
+        # blocks on its `_started` event forever, and the whole gateway wedges
+        # with no timeout in play. py-spy caught exactly that: two threads
+        # parked in `threading.py:969` while a soak cycle "took" 3h22m.
+        self._reader: threading.Thread | None = None
+        self._lines: "queue.Queue[str | None]" = queue.Queue()
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -462,6 +474,30 @@ class ModelGatewayWorker:
                 encoding="utf-8", errors="replace", bufsize=1)
         except OSError as exc:
             raise GatewayUnavailable(f"could not start gateway worker: {exc}") from exc
+        # Drain the queue of anything a previous worker left behind, then start
+        # the single reader for THIS process. Started once, here, where a
+        # failure is a start failure and reported as one.
+        self._lines = queue.Queue()
+        proc = self._proc
+
+        def _pump() -> None:
+            try:
+                for line in proc.stdout:
+                    self._lines.put(line)
+            except (OSError, ValueError):
+                pass
+            finally:
+                self._lines.put(None)      # EOF sentinel: the worker is gone
+
+        reader = threading.Thread(target=_pump, daemon=True,
+                                  name="gateway-read")
+        try:
+            reader.start()
+        except RuntimeError as exc:        # cannot start a new thread
+            self.stop()
+            raise GatewayUnavailable(
+                f"could not start the gateway reader thread: {exc}") from exc
+        self._reader = reader
         self.started_at = time.time()
         hello = self._request("hello", {}, timeout=self.START_TIMEOUT)
         if not hello.get("ok"):
@@ -493,6 +529,12 @@ class ModelGatewayWorker:
                     stream.close()
                 except (OSError, ValueError, AttributeError):
                     pass
+            # The reader exits on its own once stdout closes (it puts the EOF
+            # sentinel). Join briefly so a restart does not leave the previous
+            # process's reader alive alongside the new one.
+            reader, self._reader = self._reader, None
+            if reader is not None and reader.is_alive():
+                reader.join(timeout=2.0)
 
     # -- wire ---------------------------------------------------------------
 
@@ -510,27 +552,17 @@ class ModelGatewayWorker:
             except (OSError, ValueError) as exc:
                 self.stop()
                 raise GatewayUnavailable(f"gateway worker pipe broke: {exc}") from exc
-            # One outstanding request at a time, so a blocking readline with
-            # a watchdog is enough; the worker itself enforces the provider
-            # timeout, and this is the backstop for a wedged worker.
-            result: dict = {}
-            done = threading.Event()
-
-            def _read() -> None:
-                try:
-                    line = self._proc.stdout.readline()
-                    result["line"] = line
-                finally:
-                    done.set()
-
-            t = threading.Thread(target=_read, daemon=True, name="gateway-read")
-            t.start()
-            if not done.wait(timeout + 5.0):
+            # One outstanding request at a time, and the reader thread started
+            # with the worker is already draining stdout into `_lines`. A get()
+            # with a timeout is the whole backstop - no thread is created on
+            # the request path, so a request cannot block on thread creation.
+            try:
+                line = self._lines.get(timeout=timeout + 5.0)
+            except queue.Empty:
                 self.stop()
                 raise GatewayUnavailable(
                     f"gateway worker did not answer {method} within {timeout + 5:.0f}s")
-            line = result.get("line") or ""
-            if not line:
+            if line is None:               # EOF sentinel from the reader
                 self.stop()
                 raise GatewayUnavailable("gateway worker exited")
             try:
