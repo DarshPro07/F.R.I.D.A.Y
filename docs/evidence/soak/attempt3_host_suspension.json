@@ -1,0 +1,38 @@
+{
+  "attempt": 3,
+  "commit": "030795f",
+  "verdict_source": "in-flight snapshot, harness had not written its report",
+  "cycles": 7359,
+  "errors": 0,
+  "violations": 1,
+  "wall_h": 5.02,
+  "suspended_h": 2.65,
+  "active_h": 2.37,
+  "in_log_gaps": [
+    {
+      "minutes": 158.1,
+      "from": "2026-09-06T13:48:05+00:00",
+      "to": "2026-09-06T16:26:13+00:00"
+    },
+    {
+      "minutes": 1.0,
+      "from": "2026-09-06T17:12:43+00:00",
+      "to": "2026-09-06T17:13:44+00:00"
+    }
+  ],
+  "log_quiet_s_at_snapshot": 3097,
+  "diagnosis": "host Modern Standby, not a product stall: an INDEPENDENT watchdog process froze in the same window, and Kernel-Power 506/507 bracket every gap",
+  "product_telemetry": {
+    "rss_mb": [
+      155.8,
+      189.6
+    ],
+    "threads": [
+      20,
+      28
+    ],
+    "handles_max": 1488,
+    "errors": 0,
+    "note": "flat across 7,359 cycles"
+  }
+}
