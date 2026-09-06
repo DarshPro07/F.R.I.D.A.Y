@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from friday import provider_health as PH
 
 from friday import model_gateway as mg
 
@@ -539,3 +540,73 @@ def test_a_wedged_worker_still_times_out_without_the_per_request_thread():
         worker.start()
     assert "did not answer" in str(caught.value)
     worker.stop()
+
+
+def test_failover_skips_a_dead_route_not_the_whole_provider(tmp_path, clean_env):
+    """A-018/A-019 wired into ROUTING, not merely available as a helper.
+
+    The failover branch offers each authenticated provider at its own catalog
+    default. It used the PROVIDER verdict to decide whether to try, so one
+    unsupported model condemned every model on that provider - the
+    `opencode-free` shape from the live suite.
+
+    Reaching that branch takes care: it is skipped for providers the tier
+    table named (`tabled`), and an empty tier table still emits a blank route
+    that fills `out`. So the table names a provider that is then denylisted -
+    every table route is filtered, `out` is empty, and anthropic/openai-codex
+    arrive from the failover branch where health is consulted.
+    """
+    tiers = {mg.TIER_FAST: ("lmstudio", "fake-local"),
+             mg.TIER_STANDARD: ("lmstudio", "fake-local"),
+             mg.TIER_DEEP: ("lmstudio", "fake-local")}
+
+    def build(name):
+        return mg.ModelGateway(
+            worker=mg.ModelGatewayWorker(command=[sys.executable, FAKE], profile=""),
+            telemetry=mg.GatewayTelemetry(tmp_path / name),
+            tier_table=tiers, max_failover=3)
+
+    req = request(allow_failover=True, provider_denylist=("lmstudio",))
+
+    clean = build("clean.sqlite3")
+    before = {(p, m) for _, p, m in clean.candidates(req)}
+    assert ("anthropic", "fake-haiku") in before, before
+    assert ("openai-codex", "fake-codex-default") in before, before
+
+    dead = build("dead.sqlite3")
+    cred = dead.credential_label("")
+    # The distinguishing shape. A dead route on openai-codex's DEFAULT model,
+    # followed by a healthy row for a DIFFERENT model on the same provider.
+    # Keyed per route, the default is skipped. Keyed per provider, the newest
+    # row (the healthy one) is the whole provider's verdict and the dead
+    # default is offered anyway - which is the defect. One failure alone
+    # cannot tell the two keyings apart, because then both call the provider
+    # unavailable.
+    dead.telemetry.record(objective_id="x", worker="w", task_class="TRIVIAL",
+                          provider="openai-codex", model="fake-codex-default",
+                          credential=cred, status="failed",
+                          entitlement_state="MODEL_UNAVAILABLE",
+                          error="MODEL_UNAVAILABLE: no such model",
+                          output_tokens=0)
+    dead.telemetry.record(objective_id="x", worker="w", task_class="TRIVIAL",
+                          provider="openai-codex", model="fake-codex-other",
+                          credential=cred, status="ok", output_tokens=9)
+    dead.telemetry.record(objective_id="x", worker="w", task_class="TRIVIAL",
+                          provider="anthropic", model="fake-haiku",
+                          credential=cred, status="failed",
+                          entitlement_state="MODEL_UNAVAILABLE",
+                          error="MODEL_UNAVAILABLE: no such model",
+                          output_tokens=0)
+    verdict = PH.assess_routes(dead.telemetry)[
+        PH.route_key("anthropic", "fake-haiku", cred)]
+    assert verdict.state == PH.UNAVAILABLE, verdict
+
+    after = {(p, m) for _, p, m in dead.candidates(req)}
+    assert ("anthropic", "fake-haiku") not in after, (
+        f"a route whose last evidence is MODEL_UNAVAILABLE was still offered: {after}")
+    # The load-bearing assertion: openai-codex's newest row is a SUCCESS on a
+    # different model, so the provider reads healthy - but its default model
+    # is dead and must not be offered.
+    assert ("openai-codex", "fake-codex-default") not in after, (
+        "a dead route was offered because a sibling model on the same provider "
+        f"succeeded - routing is keyed by provider, not by route: {after}")

@@ -302,6 +302,7 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
     provider          TEXT NOT NULL DEFAULT '',
     model             TEXT NOT NULL DEFAULT '',
     route_kind        TEXT NOT NULL DEFAULT '',
+    credential        TEXT NOT NULL DEFAULT '',
     status            TEXT NOT NULL,
     entitlement_state TEXT NOT NULL DEFAULT '',
     input_tokens      INTEGER NOT NULL DEFAULT 0,
@@ -318,6 +319,23 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
 CREATE INDEX IF NOT EXISTS idx_gateway_calls_obj ON gateway_calls(objective_id, created_at);
 """
 
+#: Columns added after the first release. `CREATE TABLE IF NOT EXISTS` does
+#: nothing to a table that already exists, so an existing ledger keeps its old
+#: shape and the first INSERT naming a new column fails - on the owner's live
+#: machine, not here. Added idempotently at open, BEFORE any index that
+#: mentions them: an index in the schema script runs against the old table and
+#: dies with "no such column".
+_ADDED_COLUMNS = (
+    ("credential", "TEXT NOT NULL DEFAULT ''"),
+)
+
+#: Indexes over columns that may have just been added. Created after the
+#: migration, never inside GATEWAY_CALLS_SCHEMA.
+_LATE_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_gateway_calls_route"
+    " ON gateway_calls(provider, model, credential, id)",
+)
+
 
 class GatewayTelemetry:
     """Append-only usage ledger. Its own SQLite file by default so the
@@ -332,6 +350,12 @@ class GatewayTelemetry:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(GATEWAY_CALLS_SCHEMA)
+            have = {r[1] for r in conn.execute("PRAGMA table_info(gateway_calls)")}
+            for name, decl in _ADDED_COLUMNS:
+                if name not in have:
+                    conn.execute(f"ALTER TABLE gateway_calls ADD COLUMN {name} {decl}")
+            for statement in _LATE_INDEXES:
+                conn.execute(statement)
 
     def _connect(self):
         from friday.dbconn import ledger_connection
@@ -649,6 +673,26 @@ class ModelGateway:
             self._providers_cache = (now, inventory)
         return inventory
 
+    def credential_label(self, provider: str) -> str:
+        """An OPAQUE name for the credential a provider is currently using.
+
+        Health is per (provider, model, credential): the same provider under a
+        revoked key, an exhausted account or a second profile is a different
+        entitlement, and evidence from one says nothing about the other.
+
+        NEVER the secret itself, and never a hash of it - a value derived from
+        a key is still key material in a ledger the model can read (NON_NEGOTIABLE
+        4). The Hermes profile is the identity that actually selects which
+        credentials are in play here, so it IS the label; providers whose key
+        can change under a fixed profile are the follow-up, and the column
+        holds whatever the transport can honestly name.
+        """
+        try:
+            profile = self.worker.profile or ""
+        except Exception:  # noqa: BLE001
+            profile = ""
+        return f"profile:{profile}" if profile else ""
+
     def route_kind(self, provider: str) -> str:
         try:
             inventory = self.providers()
@@ -745,6 +789,15 @@ class ModelGateway:
         wants_more = bool(request.provider_allowlist) or (request.allow_failover and not out)
         if wants_more:
             verdicts = self.provider_health(self._authenticated_providers())
+            # Per-ROUTE evidence, keyed (provider, model, credential). The
+            # provider-level verdict above answers "is this provider reachable
+            # at all"; it must not decide whether THIS model is worth trying.
+            # Keyed by provider alone, one unsupported model condemns every
+            # other model on it - which is exactly how `opencode-free` became
+            # UNAVAILABLE for one unsupported free model (live suite,
+            # 2026-09-05) - and one working model hides a sibling's 401.
+            routes = provider_health.assess_routes(self.telemetry)
+            credential = self.credential_label("")
             for provider in self._authenticated_providers():
                 if provider in tabled and not request.provider_allowlist:
                     continue
@@ -756,10 +809,11 @@ class ModelGateway:
                 # failure (auth, credits, unsupported model) is not tried
                 # again until a probe says otherwise. Degraded and stale
                 # routes ARE tried - that is how they get fresh evidence.
-                verdict = verdicts.get(provider)
+                route = routes.get(provider_health.route_key(provider, model, credential))
+                verdict = route if route is not None else verdicts.get(provider)
                 if verdict is not None and verdict.state == provider_health.UNAVAILABLE \
                         and not request.provider_allowlist:
-                    logger.info("skipping %s: %s", provider, verdict.reason)
+                    logger.info("skipping %s/%s: %s", provider, model, verdict.reason)
                     continue
                 key = (provider, model)
                 if key in seen or any(p == provider for _, p, _ in out):
@@ -1048,13 +1102,14 @@ class ModelGateway:
                 output_tokens: int = 0, cached_tokens: int = 0,
                 reasoning_tokens: int = 0, failover_count: int = 0,
                 fingerprint: str = "", entitlement_state: str = "",
-                route_kind: str = "") -> int:
+                route_kind: str = "", credential: str = "") -> int:
         try:
             return self.telemetry.record(
                 objective_id=request.objective_id, worker=request.worker,
                 task_class=request.task_class,
                 tier=tier or request.preferred_quality_tier or "",
                 provider=provider, model=model, route_kind=route_kind,
+                credential=credential or self.credential_label(provider),
                 status=status, entitlement_state=entitlement_state,
                 input_tokens=input_tokens, output_tokens=output_tokens,
                 cached_tokens=cached_tokens, reasoning_tokens=reasoning_tokens,

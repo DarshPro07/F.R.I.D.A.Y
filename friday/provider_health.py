@@ -148,9 +148,102 @@ def verdict_for(provider: str, row: dict | None, *, now: float | None = None,
     return Verdict(provider, DEGRADED, reason=f"{code or 'UNCLASSIFIED'}: {error}", **base)
 
 
+def route_key(provider: str, model: str = "", credential: str = "") -> tuple:
+    """The identity health is actually a property of.
+
+    A verdict keyed by provider alone is wrong in both directions, and both
+    were reproduced against this module before it was changed:
+
+      * one unsupported MODEL condemns the provider - the live suite recorded
+        `opencode-free` UNAVAILABLE because `laguna-s-2.1-free` is not
+        supported, which is a model fact filed as a provider fact, and it
+        makes every OTHER model on that provider unreachable;
+      * one working model HIDES a broken one - a 401 on `gpt-5.4-mini`
+        followed by a success on `gpt-5.4` reads HEALTHY, and routing keeps
+        selecting the model that cannot authenticate.
+
+    Credential is part of the key because the same provider under a different
+    key is a different entitlement: a revoked key, an exhausted account or a
+    second profile is not evidence about the first. It is an OPAQUE label
+    (never the secret) - the gateway passes a fingerprint or profile name.
+    """
+    return (str(provider or ""), str(model or ""), str(credential or ""))
+
+
+def latest_by_route(rows: list[dict]) -> dict[tuple, dict]:
+    """Most recent evidence per (provider, model, credential).
+
+    Same filter as `latest_by_provider`: a refusal never touched a route and
+    says nothing about its health, and rows with no provider are the
+    gateway's own bookkeeping.
+    """
+    latest: dict[tuple, dict] = {}
+    for row in rows:
+        provider = str(row.get("provider") or "")
+        if not provider or row.get("status") == "refused":
+            continue
+        key = route_key(provider, row.get("model") or "",
+                        row.get("credential") or "")
+        current = latest.get(key)
+        if current is None or int(row.get("id") or 0) > int(current.get("id") or 0):
+            latest[key] = row
+    return latest
+
+
+def assess_routes(telemetry, *, now: float | None = None,
+                  max_age_s: float = DEFAULT_MAX_AGE_S,
+                  limit: int = 2000) -> dict[tuple, Verdict]:
+    """A verdict per observed route, not per provider.
+
+    Only routes with evidence appear: an unobserved (provider, model) pair is
+    UNPROBED by absence, and inventing a row for every catalogue model would
+    be asserting something no call ever showed.
+    """
+    try:
+        rows = telemetry.recent(limit=limit)
+    except Exception as exc:  # noqa: BLE001 - unreadable ledger is never "healthy"
+        return {}
+    return {key: verdict_for(key[0], row, now=now, max_age_s=max_age_s)
+            for key, row in latest_by_route(rows).items()}
+
+
+def verdict_for_route(telemetry, provider: str, model: str = "",
+                      credential: str = "", *, now: float | None = None,
+                      max_age_s: float = DEFAULT_MAX_AGE_S,
+                      limit: int = 2000) -> Verdict:
+    """This exact route's verdict, falling back to the provider's own.
+
+    A model never tried on a provider that answers has no evidence of its
+    own; the provider-level verdict is the honest prior (UNPROBED at worst),
+    and it is what routing needs to decide whether to try at all. What must
+    NOT happen is the reverse - a model-specific failure being read as the
+    provider's state.
+    """
+    try:
+        rows = telemetry.recent(limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        return Verdict(provider, UNPROBED, reason=f"telemetry unreadable: {exc}")
+    exact = latest_by_route(rows).get(route_key(provider, model, credential))
+    if exact is not None:
+        return verdict_for(provider, exact, now=now, max_age_s=max_age_s)
+    # No evidence for this exact route. Fall back to the provider's own view,
+    # but only over rows from THIS credential - `latest_by_provider` ignores
+    # the credential, so a revoked key's 401 would be reported as the state of
+    # a working one, which is the defect this function exists to prevent.
+    same_credential = [r for r in rows
+                       if str(r.get("credential") or "") == str(credential or "")]
+    return verdict_for(provider, latest_by_provider(same_credential).get(provider),
+                       now=now, max_age_s=max_age_s)
+
+
 def assess(telemetry, providers: list[str], *, now: float | None = None,
            max_age_s: float = DEFAULT_MAX_AGE_S, limit: int = 2000) -> dict[str, Verdict]:
-    """Every named provider's verdict from the ledger's recent rows."""
+    """Every named provider's verdict from the ledger's recent rows.
+
+    Kept as the provider-level view: "can this provider be reached at all",
+    which is what the control room and failover want. Per-route truth is
+    `assess_routes` / `verdict_for_route`.
+    """
     try:
         rows = telemetry.recent(limit=limit)
     except Exception as exc:  # noqa: BLE001 - a missing ledger is "unprobed", never "healthy"
