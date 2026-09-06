@@ -26,16 +26,39 @@ test.describe('real-time state transitions', () => {
     // the real bug (that is exactly the F4 class of defect). So: click, let the
     // engine land wherever it lands, then assert self-consistency.
     const mic = page.locator('#mic');
-    const wasListening = (await mic.getAttribute('aria-pressed')) === 'true';
 
-    // The accessible name must always describe the ACTION, never the state.
-    await expect(
-      page.getByRole('button', {
-        name: wasListening ? /mute microphone/i : /unmute microphone/i,
-      }),
-    ).toBeVisible();
+    // The invariant must already hold before anything is clicked, and reading
+    // it takes ONE round trip: `aria-pressed` and `aria-label` fetched in two
+    // separate calls can straddle the boot's async start-listening, which is
+    // exactly how this test failed on CI - it read pressed=false, then waited
+    // 10 s for "Unmute microphone" while the button had already relabelled
+    // itself "Mute microphone".
+    const consistent = () =>
+      page.evaluate(() => {
+        const m = document.getElementById('mic')!;
+        const listening = m.getAttribute('aria-pressed') === 'true';
+        const label = (m.getAttribute('aria-label') || '').toLowerCase();
+        // The accessible name must always describe the ACTION, never the state.
+        return listening ? label.startsWith('mute') : label.startsWith('unmute');
+      });
+    await expect
+      .poll(consistent, {
+        message:
+          'before any click, the mic button already announces the wrong action ' +
+          'for its pressed state',
+      })
+      .toBe(true);
 
-    await mic.click();
+    // Read the pre-click state and click in the SAME evaluation: JavaScript is
+    // single-threaded, so nothing can flip the state between the two, and the
+    // branch below is then reasoning about the state the click actually acted
+    // on rather than one that may have moved on.
+    const wasListening = await page.evaluate(() => {
+      const m = document.getElementById('mic')!;
+      const was = m.getAttribute('aria-pressed') === 'true';
+      m.click();
+      return was;
+    });
 
     if (wasListening) {
       // Turning it OFF never depends on an engine: it must always succeed.
