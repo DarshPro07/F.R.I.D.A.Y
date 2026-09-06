@@ -121,6 +121,80 @@ class RetrievalIntent:
             raise ValueError("SQL_AGGREGATE requires an aggregate operation")
 
 
+class TrustLevel(str, enum.Enum):
+    """How far a fragment may be trusted once it is in a prompt.
+
+    `brain.py` already refuses to let untrusted provenance write facts
+    directly (UNTRUSTED_PROVENANCE -> the promotion gate). That is the WRITE
+    side. This is the READ side: once a fragment is retrieved and placed in
+    a prompt, nothing downstream currently knows whether it came from the
+    owner's own words or from a web page that asked to be trusted.
+
+    OWNER      the user said it
+    SYSTEM     Friday's own records, policy, config
+    VERIFIED   external but checked (API read-back, tool result with evidence)
+    REPORTED   external, unverified (a worker's summary, a model's claim)
+    UNTRUSTED  read material: pages, messages, scraped text, other models
+    """
+
+    OWNER = "owner"
+    SYSTEM = "system"
+    VERIFIED = "verified"
+    REPORTED = "reported"
+    UNTRUSTED = "untrusted"
+
+
+#: Trust levels whose content may be treated as instruction rather than
+#: data. Everything below this line is quotable but never obeyed - the
+#: prompt-injection boundary, stated once.
+DIRECTIVE_TRUST = (TrustLevel.OWNER, TrustLevel.SYSTEM)
+
+
+class PrivacyClass(str, enum.Enum):
+    """PRD §64. LOCAL_ONLY must be physically unroutable to public providers -
+    the f81c2d4 defect (a `local_only` request reaching an api endpoint)
+    became a permanent regression test, and this is the vocabulary that
+    keeps context fragments on the same footing as routes."""
+
+    PUBLIC = "public"
+    INTERNAL = "internal"
+    PERSONAL = "personal"
+    CONFIDENTIAL = "confidential"
+    SECRET = "secret"
+    LOCAL_ONLY = "local_only"
+
+
+#: Classes that may never be sent to a non-local provider.
+LOCAL_ONLY_CLASSES = (PrivacyClass.SECRET, PrivacyClass.LOCAL_ONLY)
+
+
+@dataclasses.dataclass(frozen=True)
+class Provenance:
+    """Where a fragment came from and what may be done with it.
+
+    Travels WITH the fragment. A provenance that is computed at retrieval
+    and then dropped before the prompt is built proves nothing.
+    """
+
+    source: str
+    scope: str = ""
+    timestamp: str = ""
+    confidence: float = 0.0
+    freshness_s: float | None = None
+    trust: TrustLevel = TrustLevel.REPORTED
+    privacy: PrivacyClass = PrivacyClass.INTERNAL
+    retrieved_for: str = ""
+
+    @property
+    def may_be_obeyed(self) -> bool:
+        """Whether this fragment's content may act as an instruction."""
+        return self.trust in DIRECTIVE_TRUST
+
+    @property
+    def may_leave_this_machine(self) -> bool:
+        return self.privacy not in LOCAL_ONLY_CLASSES
+
+
 @dataclasses.dataclass(frozen=True)
 class Evidence:
     """Where one part of an answer came from."""
@@ -141,6 +215,7 @@ class RetrievalResult:
     confidence: float = 0.0
     query_ms: float = 0.0
     evidence: tuple[Evidence, ...] = ()
+    provenance: tuple[Provenance, ...] = ()
     note: str = ""
 
     @property
@@ -151,6 +226,22 @@ class RetrievalResult:
         happened to rank highest".
         """
         return self.coverage in COUNTABLE_COVERAGE
+
+    @property
+    def directive_rows(self) -> tuple[Any, ...]:
+        """The rows whose content may be treated as instruction.
+
+        A result with no provenance yields nothing: absence of a trust
+        label is not evidence of trustworthiness, and defaulting the other
+        way would make prompt injection a one-line regression.
+        """
+        return tuple(row for row, prov in zip(self.rows, self.provenance)
+                     if prov.may_be_obeyed)
+
+    @property
+    def must_stay_local(self) -> bool:
+        """Whether any fragment here forbids a remote provider."""
+        return any(not p.may_leave_this_machine for p in self.provenance)
 
 
 class RetrievalSource(Protocol):

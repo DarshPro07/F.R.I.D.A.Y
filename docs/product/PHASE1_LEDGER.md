@@ -31,7 +31,7 @@ verification.**
 | FR-103k | Targeted benchmarks | IMPLEMENTING | next |
 | FR-101a | Child budget leases (parent dominates) | VERIFIED | probe proved a child got a fresh 400k while parent had 1k left; `tests/test_objective_budget_lease.py` 12 passed; 2 plants red; 37 passed across all budget suites |
 | FR-101b | Objective-scoped CONTEXT budget | NOT_AUDITED | needs `memory_stack` wiring - full-suite surface, blocked on soak |
-| FR-102 | Context provenance | NOT_AUDITED | after FR-101 |
+| FR-102 | Context provenance + trust/privacy classes | VERIFIED | `tests/test_retrieval_provenance.py` 19 passed; 3 plants red; caught a real bug (`_ranked` never selected `source`) |
 | FR-106 | Model fitness router | DEFERRED | needs an eval registry; no opinions-as-architecture |
 
 ---
@@ -43,6 +43,8 @@ verification.**
 | `friday/retrieval.py` (new, 392) | Intent, strategy, coverage, aggregate SQL builder, `describe_count` |
 | `friday/retrieval_sources.py` (new) | `MemorySource`, `RetrievalRouter` |
 | `friday/objective_budget.py` | `lease_for_child` - parent's remaining budget bounds every child |
+| `friday/retrieval.py` | `TrustLevel`, `PrivacyClass`, `Provenance`, `directive_rows`, `must_stay_local` |
+| `tests/test_retrieval_provenance.py` (new) | 19 provenance/injection tests |
 | `tests/test_retrieval_router.py` (new) | 32 contract tests |
 | `tests/test_retrieval_sources.py` (new) | 17 tests against a real SQLite corpus |
 | `tests/test_task_class_mapping.py` (new) | 14 mapping/drift tests |
@@ -86,6 +88,7 @@ verification.**
 | `rename all occurrences` asserted mechanical | **my test was wrong** | `_MECHANICAL` is filesystem/counting phrases; a repo-wide rename is a code change | Read the vocabulary; test corrected, code untouched |
 | `TypeError: cannot convert dictionary update sequence` | real bug in new code | `_ranked` builds dicts from rows but `row_factory` was never set; aggregation passed because tuples suffice | Set `conn.row_factory = sqlite3.Row` in `query()` |
 | "refunds" returned the 500 newest rows | **real product limitation** | substring matching: `refunds` does not match `refund`, every row scores 0, result degrades to newest-first | Recorded as `test_a_plural_query_term_does_not_match_the_singular_row`; motivates a real semantic source |
+| Every retrieved row's trust was REPORTED | **real bug in new code** | `_ranked` never SELECTed `source`, the column trust is derived from - a scraped page and a worker note looked identical | Added `source` to the projection; a row without it is now UNTRUSTED, never defaulted |
 
 ---
 
@@ -97,6 +100,9 @@ Every guard was planted, observed red, restored, observed green.
 |-------|-----------|
 | Lease ignores the parent (today's behaviour) | 6 |
 | Reserve ignored | 1 |
+| Missing `source` column defaults to OWNER | 2 |
+| Untrusted fragments become obeyable | 5 |
+| No provenance -> every row directive | 3 |
 | `T2_LLM_TOOL` added to `TASK_CLASSES` | 3 |
 | TOP_K allowed to back a numeric claim | 3 |
 | Counting stops demanding complete coverage | 2 |

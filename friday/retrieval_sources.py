@@ -29,6 +29,56 @@ _PREFERENCE_SCOPES = ("preferences", "wants", "goals", "identity")
 _RANKED_LIMIT = 200
 
 
+def provenance_for_row(row: dict, *, retrieved_for: str = "") -> R.Provenance:
+    """Trust and privacy for one memory row, derived from the row itself.
+
+    The trust level comes from `source`, using the same vocabulary
+    `brain.UNTRUSTED_PROVENANCE` uses on the write side - a fact whose only
+    source is a page, a message or a worker is read material, and read
+    material is quotable but never obeyed. Deriving it here rather than
+    accepting a caller's word keeps the two sides consistent: a row that
+    could not have been written directly cannot be read as an instruction
+    either.
+    """
+    from friday.brain import UNTRUSTED_PROVENANCE
+
+    if "source" not in row:
+        # The caller fetched rows without the column trust is derived from.
+        # Guessing here would be the whole defect: this once returned
+        # REPORTED for a scraped page because `_ranked` did not SELECT
+        # `source`, so an injected row looked no different from a worker's
+        # note. Unknown provenance is untrusted provenance.
+        return R.Provenance(
+            source=f"memories#{row.get('id')}", scope=str(row.get("scope") or ""),
+            trust=R.TrustLevel.UNTRUSTED, privacy=R.PrivacyClass.PERSONAL,
+            retrieved_for=retrieved_for)
+
+    source = str(row.get("source") or "")
+    scope = str(row.get("scope") or "")
+
+    if UNTRUSTED_PROVENANCE.match(source):
+        trust = R.TrustLevel.UNTRUSTED
+    elif source.lower() in ("owner", "user", "voice", "spoken"):
+        trust = R.TrustLevel.OWNER
+    elif scope in _PREFERENCE_SCOPES:
+        # The owner's own preferences, recorded by Friday.
+        trust = R.TrustLevel.OWNER
+    elif source.lower() in ("friday", "system", "policy", "config"):
+        trust = R.TrustLevel.SYSTEM
+    else:
+        trust = R.TrustLevel.REPORTED
+
+    return R.Provenance(
+        source=f"memories#{row.get('id')}",
+        scope=scope,
+        timestamp=str(row.get("created_at") or ""),
+        confidence=float(row.get("confidence") or 0.0),
+        trust=trust,
+        privacy=R.PrivacyClass.PERSONAL,
+        retrieved_for=retrieved_for,
+    )
+
+
 class MemorySource:
     """The `memories` table, answering through the retrieval contract."""
 
@@ -149,7 +199,7 @@ class MemorySource:
                 where.append(clause)
                 params.extend(tparams)
 
-        select = "SELECT id, subject, value, scope, confidence, created_at"
+        select = "SELECT id, subject, value, scope, source, confidence, created_at"
         if has_scope:
             select += ", project_scope"
         base = f"{select} FROM memories WHERE " + " AND ".join(where)
@@ -183,6 +233,8 @@ class MemorySource:
             total_matching=candidates if coverage is not R.Coverage.TOP_K else None,
             confidence=intent.confidence,
             query_ms=(time.monotonic() - started) * 1000.0,
+            provenance=tuple(provenance_for_row(r, retrieved_for=intent.subject or "")
+                             for r in rows),
             evidence=tuple(
                 R.Evidence(source=self.name, locator=f"memories#{r['id']}",
                            excerpt=(r.get("value") or "")[:80])
