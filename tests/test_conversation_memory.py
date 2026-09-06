@@ -86,3 +86,50 @@ def test_mutating_operations_still_need_a_gate():
     assert not V._is_read_only("run")
     assert V._is_read_only("search")
     assert V._is_read_only("architecture")
+
+
+def test_an_old_preference_is_still_found_behind_newer_ones(tmp_path, monkeypatch):
+    """Tier-1 retrieval must rank over ALL rows, not the newest 200.
+
+    `preferences()` took `ORDER BY id DESC LIMIT 200` and scored those 200 in
+    Python, so a preference that answered the question was invisible once 200
+    newer rows existed - silently, with no error and no log line, and worse
+    every day as memory grows. The soak database had 9,180 rows in these
+    scopes; the window covered 2% of them.
+
+    Assert the RESOURCE the guard bounds - whether the matching row is
+    reachable at all - with the target deliberately the OLDEST row, so a
+    recency window cannot pass this by luck.
+    """
+    import importlib
+    import sqlite3
+    from friday.store import Store
+
+    db = tmp_path / "prefs.sqlite3"
+    Store(str(db))                                  # real schema
+    raw = sqlite3.connect(str(db))
+    def add(subject, value):
+        raw.execute(
+            "INSERT INTO memories (subject,value,kind,scope,confidence,"
+            "created_at,superseded,project_scope,source) VALUES "
+            "(?,?,'fact','preferences',0.9,datetime('now'),0,'','test')",
+            (subject, value))
+    add("coffee", "the boss takes his coffee black, no sugar")   # OLDEST
+    for i in range(500):
+        add(f"filler{i}", f"unrelated preference number {i}")
+    raw.commit()
+    raw.close()
+
+    monkeypatch.setenv("ADA_DB", str(db))
+    from friday import ui_server as U
+    importlib.reload(U)
+    from friday import memory_stack as M
+
+    items = M.preferences("how does he take his coffee")["items"]
+    found = [p for p in items
+             if "coffee" in (p["subject"] + " " + p["value"]).lower()]
+    assert found, (
+        "the one relevant preference was the oldest of 501 and did not "
+        "survive retrieval: tier 1 is ranking a recency window, not the "
+        f"corpus (got {[p['subject'] for p in items]})")
+    assert found[0]["matched"] is True

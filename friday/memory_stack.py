@@ -56,15 +56,35 @@ def _now():
 def preferences(task="", limit=12, project_scope=""):
     from friday import ui_server as U
     conn = U._connect()
+    # Rank in SQL over EVERY candidate row, then take a slice. The old query
+    # took `ORDER BY id DESC LIMIT 200` and scored those 200 in Python, so a
+    # preference that mattered to this task was invisible if 200 newer rows
+    # existed - silently, with no error and no log line, and worse every day
+    # as memory grows. In the soak database (9,180 preference-scope rows) that
+    # window covered 2% of them.
+    #
+    # The scoring stays lexical token overlap, which is what it was; the fix
+    # is WHICH rows get scored, not how. LIKE terms are parameterised, and the
+    # token list is bounded so a long request cannot build an unbounded query.
+    toks = [t for t in dict.fromkeys(_tokens(task)) if len(t) > 2][:12]
     try:
-        # FR-017: a project-scoped preference is only visible inside that
-        # project. `project_scope` '' (a request about nothing in particular)
-        # sees only the global ones - never another project's.
-        rows = U._rows(conn, "SELECT subject, value, scope, confidence, created_at, "
-                             "project_scope FROM memories WHERE superseded=0 AND scope IN "
-                             "('preferences','wants','goals','identity') "
-                             "AND (project_scope='' OR project_scope=?) "
-                             "ORDER BY id DESC LIMIT 200", (project_scope,))
+        base = ("SELECT id, subject, value, scope, confidence, created_at, "
+                "project_scope FROM memories WHERE superseded=0 AND scope IN "
+                "('preferences','wants','goals','identity') "
+                "AND (project_scope='' OR project_scope=?)")
+        params: list = [project_scope]
+        if toks:
+            # One +1 per matching token, computed by SQLite over all rows.
+            score = " + ".join(
+                "(CASE WHEN lower(subject || ' ' || COALESCE(value,'')) LIKE ? "
+                "THEN 1 ELSE 0 END)" for _ in toks)
+            params.extend("%%%s%%" % t for t in toks)
+            sql = ("SELECT * FROM (%s) ORDER BY (%s) DESC, id DESC LIMIT ?"
+                   % (base, score))
+        else:
+            sql = "SELECT * FROM (%s) ORDER BY id DESC LIMIT ?" % base
+        params.append(max(int(limit or 12) * 8, 200))
+        rows = U._rows(conn, sql, tuple(params))
         if not rows and conn is not None:
             # A database from before the project_scope column existed.
             rows = U._rows(conn, "SELECT subject, value, scope, confidence, created_at "
