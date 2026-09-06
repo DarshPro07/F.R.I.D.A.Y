@@ -18,9 +18,45 @@ Rather than banning asyncio.run in tests, every test gets a fresh loop.
 from __future__ import annotations
 
 import asyncio
+import os
+import pathlib
 import sys
 
 import pytest
+
+
+def _assert_the_checkout_under_test_is_this_one() -> None:
+    """Fail collection if `import friday` resolved to a different checkout.
+
+    This tree is a git worktree (`product/phase1-context` at
+    D:/friday-product-phase1) forked from the release candidate at
+    E:/friday-tony-stark-demo-main, and the verify venv holds an EDITABLE
+    install pointing at E:. Which one you get is decided by cwd: run pytest
+    from the worktree and `friday` resolves here; run it from anywhere else
+    and every assertion in this suite silently describes the OTHER tree.
+
+    That failure is invisible - the tests pass, against the wrong code - so
+    it is checked once at collection rather than trusted. Set
+    FRIDAY_EXPECTED_ROOT to pin an explicit root; otherwise the root is the
+    parent of this tests/ directory, which is by definition the checkout
+    that owns this conftest.
+    """
+    import friday
+
+    expected = pathlib.Path(
+        os.environ.get("FRIDAY_EXPECTED_ROOT") or pathlib.Path(__file__).parent.parent
+    ).resolve()
+    actual = pathlib.Path(friday.__file__).resolve()
+    if expected not in actual.parents:
+        raise RuntimeError(
+            f"wrong FRIDAY checkout loaded: `import friday` gave {actual}, "
+            f"but this suite belongs to {expected}. Run pytest with "
+            f"{expected} as the working directory (cwd wins over the venv's "
+            f"editable .pth), or set FRIDAY_EXPECTED_ROOT deliberately."
+        )
+
+
+_assert_the_checkout_under_test_is_this_one()
 
 #: Test modules that exercise Windows-native surfaces (COM audio via
 #: pycaw/comtypes, Win32 window enumeration, power/session APIs). They
