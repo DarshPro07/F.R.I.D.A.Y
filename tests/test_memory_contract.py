@@ -226,3 +226,72 @@ def test_the_graph_is_rebuilt_only_when_memory_changes(tmp_path, monkeypatch):
     assert third is not second, "a forgotten fact was still served from cache"
     assert not any(n.get("value") == "Pune" for n in third["nodes"])
     store.close()
+
+
+def test_the_graph_stays_bounded_and_fast_on_a_large_memory(tmp_path, monkeypatch):
+    """The 8-hour soak grew memories to 456k rows and one `build()` then cost
+    4.4 s and 152 MB, on the Hermes delegation path - long enough to look
+    like a hang (a single cycle took 3.4 hours). It also built 9,470 nodes
+    against a stated ceiling of 480, because the old trim kept EVERY
+    non-fact node and a dotless subject is its own hub. Bound the read, and
+    make the ceiling count nodes."""
+    import time
+    from friday import memory_graph as G
+    from friday.store import Store
+
+    db = tmp_path / "big.sqlite3"
+    monkeypatch.setenv("ADA_DB", str(db))
+    store = Store(db)
+    # Flat subjects: the shape that defeated the old trim. Written through
+    # the schema directly - 6k active rows plus 240k SUPERSEDED ones, which
+    # is what a long-running Friday actually accumulates (the soak reached
+    # 456k rows, 447k of them superseded) and what made the unbounded read
+    # cost seconds. `remember()` for each would take minutes.
+    rows = []
+    for i in range(6000):
+        rows.append((f"soak subject {i}", f"value {i}", 0))
+        for v in range(40):
+            rows.append((f"soak subject {i}", f"old value {v}", 1))
+    with store._tx() as conn:
+        conn.executemany(
+            "INSERT INTO memories (subject, value, kind, scope, source, confidence,"
+            " created_at, evidence_count, memory_type, project_scope, source_ref,"
+            " retention_policy, importance, superseded) VALUES"
+            " (?,?,'FACT','user','t',1.0,'2026-01-01T00:00:00+00:00',1,'semantic','','','',0.5,?)",
+            rows)
+    assert store._conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0] == 246000
+    G.invalidate()
+
+    # Count the rows the build actually pulls back, by wrapping the row
+    # reader the graph uses.
+    read = {"memories": 0}
+    real_rows = G._conn.__globals__["_conn"]
+
+    import friday.ui_server as U
+    original = U._rows
+
+    def counting_rows(conn, sql, args=()):
+        out = original(conn, sql, args)
+        if "FROM memories" in sql and "COUNT(" not in sql:
+            read["memories"] += len(out)
+        return out
+
+    monkeypatch.setattr(U, "_rows", counting_rows)
+    started = time.monotonic()
+    g = G.build()
+    elapsed = time.monotonic() - started
+
+    assert g["stats"]["nodes"] <= G.MAX_NODES, g["stats"]["by_type"]
+    # A wall-clock ceiling would be luck on a fast machine, so assert the
+    # ROWS the build was willing to read: that is what turns linear in the
+    # size of memory, and it is what cost 4.4 s at 456k rows.
+    assert read["memories"] <= G.MAX_FACT_ROWS, (
+        f"the build read {read['memories']} memory rows; the bound is "
+        f"{G.MAX_FACT_ROWS}. An unbounded read is linear in a corpus that "
+        f"only grows.")
+    assert elapsed < 2.0, f"a cold build took {elapsed:.1f}s"
+    # every kept fact still hangs from a kept parent
+    targets = {l["target"] for l in g["links"]}
+    facts = [n["id"] for n in g["nodes"] if n["type"] == "fact"]
+    assert facts and all(f in targets for f in facts), "a fact was orphaned by the trim"
+    store.close()

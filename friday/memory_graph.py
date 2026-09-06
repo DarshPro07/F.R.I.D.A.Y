@@ -31,6 +31,11 @@ from pathlib import Path
 
 MAX_DEPTH = 3           # user.goals.exam.chapter -> user.goals.exam (+1 fact)
 MAX_NODES = 480         # hard ceiling for the 3D view
+#: Active memory rows read per build. The trim below keeps every non-fact
+#: node, so a corpus of dotless subjects becomes one hub each and MAX_NODES
+#: does not bind: the 8 h soak built 9,470 nodes (8,990 hubs) against a
+#: ceiling of 480. Bound the READ as well as the trim.
+MAX_FACT_ROWS = 4000
 NODE_TYPES = ("hub", "topic", "fact", "brain", "entity", "conflict")
 
 #: The last built graph, with the token that says what it was built from.
@@ -106,7 +111,16 @@ def build():
                 return _CACHE["graph"]
         facts = rows(conn, "SELECT id, subject, value, kind, scope, source, "
                            "confidence, created_at, superseded FROM memories "
-                           "ORDER BY id")
+                           "WHERE superseded=0 "
+                           "ORDER BY id DESC LIMIT ?", (MAX_FACT_ROWS,))
+        # `versions` (how many times a subject was superseded) is a count,
+        # not content: read it as a count instead of dragging every
+        # superseded row through Python. At 456k memories the unbounded
+        # read cost 4.4 s and 152 MB per build - a stall long enough to
+        # look like a hang, on the Hermes delegation path.
+        history = {r["subject"]: r["n"] for r in rows(
+            conn, "SELECT subject, COUNT(*) AS n FROM memories "
+                  "WHERE superseded=1 GROUP BY subject")}
         conflicts = rows(conn, "SELECT id, subject, existing_value, new_value, "
                                "resolution, created_at FROM contradictions "
                                "ORDER BY id DESC LIMIT 60")
@@ -130,16 +144,11 @@ def build():
         return n
 
     # ---- memories -> hierarchy -------------------------------------------
-    history = defaultdict(int)
     latest = {}
     for f in facts:
         subj = (f.get("subject") or "").strip()
-        if not subj:
-            continue
-        if f.get("superseded"):
-            history[subj] += 1
-            continue
-        latest[subj] = f
+        if subj and subj not in latest:
+            latest[subj] = f            # rows arrive newest-first
     for subj, f in latest.items():
         parts = [p for p in subj.split(".") if p]
         ns = parts[0]
@@ -197,13 +206,32 @@ def build():
         link(eid, bid, "wrote")
         nodes[eid]["facts"] += 1
 
-    # ---- ceiling: keep hubs/topics/entities/conflicts, trim oldest facts --
+    # ---- ceiling: newest facts first, then the structure they need -------
+    # The old trim kept EVERY non-fact node and spent what was left on
+    # facts, which reads as "structure is cheap". It is not: a subject with
+    # no dot becomes its own hub, so a corpus of flat subjects is one hub
+    # each and the ceiling never binds - the 8 h soak built 9,470 nodes
+    # against MAX_NODES=480. Choose the facts first (newest), then keep
+    # only the hubs/topics those facts actually hang from, plus the
+    # entity/brain/conflict nodes that are few by construction.
     if len(nodes) > MAX_NODES:
-        keep = {k for k, v in nodes.items() if v["type"] != "fact"}
         leaves = sorted((v for v in nodes.values() if v["type"] == "fact"),
                         key=lambda v: v.get("at") or "", reverse=True)
-        for v in leaves[:MAX_NODES - len(keep)]:
-            keep.add(v["id"])
+        small = {k for k, v in nodes.items()
+                 if v["type"] in ("entity", "brain", "conflict")}
+        keep = set(small)
+        parent_of = {l["target"]: l["source"] for l in links if l["kind"] == "child"}
+        for v in leaves:
+            # A fact costs itself plus any ancestor not already kept, so
+            # add it only if the whole chain fits: the ceiling counts
+            # NODES, and a fact whose hub was dropped is not renderable.
+            chain, cur = [v["id"]], parent_of.get(v["id"])
+            while cur and cur not in keep:
+                chain.append(cur)
+                cur = parent_of.get(cur)
+            if len(keep) + len(chain) > MAX_NODES:
+                break
+            keep.update(chain)
         nodes = {k: v for k, v in nodes.items() if k in keep}
         links = [l for l in links if l["source"] in nodes and l["target"] in nodes]
 
