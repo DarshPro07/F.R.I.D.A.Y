@@ -76,6 +76,16 @@ def test_acknowledgement_opening_does_not_repeat_within_previous_four(tmp_path):
     assert sum(('boss' in line.lower() for line in lines)) <= 1
 
 
+class _Turn:
+    """Minimal stand-in for FridayAgent: only what the gate reads."""
+
+    def __init__(self, acted=()):
+        self._acted_this_turn = tuple(acted)
+
+    _refuse_unbacked_claim = None       # bound below from the real class
+
+
+
 def test_friday_tts_node_cleans_only_the_tts_stream(monkeypatch):
     import agent_friday as A
     captured = []
@@ -88,10 +98,88 @@ def test_friday_tts_node_cleans_only_the_tts_stream(monkeypatch):
     monkeypatch.setattr(A.Agent.default, 'tts_node', fake_tts)
     original = ['See **status** at https://exa', 'mple.com. All good.']
 
+    # tts_node now runs the completion gate, which reads `_acted_this_turn`
+    # off the agent - so `self` has to be an object that has it, not a bare
+    # `object()`. Nothing here claims completion, so the gate is a no-op.
+    agent = _Turn(("desktop_plan",))
+    agent._refuse_unbacked_claim = A.FridayAgent._refuse_unbacked_claim.__get__(agent)
+
     async def consume():
-        stream = A.FridayAgent.tts_node(object(), chunks(original), object())
+        stream = A.FridayAgent.tts_node(agent, chunks(original), object())
         return [frame async for frame in stream]
     assert asyncio.run(consume()) == []
     assert 'http' not in ''.join(captured)
     assert 'status' in ''.join(captured)
     assert original[0].startswith('See **status**')
+
+# ---------------------------------------------------------------------------
+# The spoken completion gate (the voice twin of TestTheCompletionGate).
+#
+# 2026-09-06: on the browser path Friday said "I have opened the Start Menu for
+# you, sir" having called nothing at all. On THIS path the same sentence is
+# spoken aloud, so the gate sits in tts_node - on the first flush only, because
+# buffering the whole answer would cost the time-to-first-word this node exists
+# to protect.
+# ---------------------------------------------------------------------------
+
+def _spoken(acted, said):
+    import agent_friday as A
+    captured = []
+
+    async def fake_tts(agent, text, model_settings):
+        async for part in text:
+            captured.append(part)
+        if False:
+            yield
+
+    agent = _Turn(acted)
+    # The real method, bound to the stand-in: the gate under test, not a copy.
+    agent._refuse_unbacked_claim = A.FridayAgent._refuse_unbacked_claim.__get__(agent)
+
+    async def consume():
+        import agent_friday as AA
+        old = AA.Agent.default.tts_node
+        AA.Agent.default.tts_node = fake_tts
+        try:
+            stream = AA.FridayAgent.tts_node(agent, chunks(said), object())
+            return [f async for f in stream]
+        finally:
+            AA.Agent.default.tts_node = old
+
+    asyncio.run(consume())
+    return "".join(captured)
+
+
+def test_an_unbacked_spoken_claim_is_replaced_before_it_is_synthesised():
+    out = _spoken((), ["I have opened the Start Menu ", "for you, sir. Anything else?"])
+    assert "not actually done that" in out.lower()
+    assert "start menu" not in out.lower()
+
+
+def test_a_spoken_claim_backed_by_a_real_action_is_spoken_unchanged():
+    """The negative case: she DID act, so she may say so."""
+    out = _spoken(("desktop_plan",), ["I have opened the Start Menu ", "for you, sir."])
+    assert "start menu" in out.lower()
+    assert "not actually done" not in out.lower()
+
+
+def test_an_ordinary_spoken_answer_is_never_gated():
+    out = _spoken((), ["It is half past four, sir. ", "The rain has stopped."])
+    assert "half past four" in out.lower()
+    assert "not actually done" not in out.lower()
+
+
+def test_a_plan_is_not_an_action_on_the_voice_path_either():
+    """`desktop_plan` proposes; `desktop_step` acts. `ownership.is_read_only`
+    already draws that line, so `use_capability` records only the second - but
+    assert it, because the browser path had this exact bug (2026-09-06: a plan
+    licensed "I've opened the Start Menu")."""
+    from friday import ownership
+    assert ownership.is_read_only("desktop_plan"), (
+        "a plan must not count as an action, or it can back a false claim")
+    assert not ownership.is_read_only("desktop_step")
+
+
+def test_the_contraction_the_live_model_used_is_caught_when_spoken():
+    out = _spoken((), ["I've opened the Start Menu ", "for you, sir."])
+    assert "not actually done that" in out.lower()

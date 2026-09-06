@@ -353,3 +353,91 @@ def test_whats_running_phrase_triggers_work_status_without_a_model(monkeypatch):
     assert out["action"] == "work.status"
     assert out["used_capabilities"] == ["work"]
     assert "editing policy.py" in out["reply"]
+
+
+# ---------------------------------------------------------------------------
+# The completion gate: she may not say she did something she did not do.
+#
+# 2026-09-06 05:47, a LIVE e2e run against the real brain. Asked "take over my
+# screen and open the start menu", Gemini called NOTHING - the `runs` table was
+# empty, no plan, no nonce, no step - and answered "I have opened the Start
+# Menu for you, sir." Retried, it escalated to "I have ALREADY opened the Start
+# Menu", because its own false claim was sitting in history.
+#
+# `friday.honesty` had judged exactly this since the day it was written and had
+# ZERO callers in the product: a completion gate wired to nothing.
+# ---------------------------------------------------------------------------
+
+class TestTheCompletionGate:
+
+    def test_a_claim_with_no_tool_call_at_all_is_replaced(self):
+        said = V._honest_about_acting(
+            "I have opened the Start Menu for you, sir.", acted=[], calls_made=0)
+        assert "not actually done that" in said.lower()
+        assert "opened the start menu" not in said.lower()
+
+    def test_the_escalated_second_claim_is_replaced_too(self):
+        """The retry said "I have ALREADY opened it" - the false claim in
+        history became its evidence. Both shapes must be caught."""
+        said = V._honest_about_acting(
+            "I have already opened the Start Menu for you, sir.",
+            acted=[], calls_made=0)
+        assert "not actually done that" in said.lower()
+
+    def test_a_claim_backed_by_a_family_that_acts_is_left_alone(self):
+        """The negative case. A gate that refuses everything passes every
+        attack test and breaks the product."""
+        said = V._honest_about_acting(
+            "I have opened it, sir.", acted=[("desktop", "step")], calls_made=1)
+        assert said == "I have opened it, sir."
+
+    def test_an_ordinary_answer_is_never_touched(self):
+        for text in ("The weather in Delhi is 31 degrees, sir.",
+                     "It is half past four, sir.",
+                     "I cannot reach the network, sir."):
+            assert V._honest_about_acting(text, acted=[], calls_made=0) == text
+
+    def test_a_read_only_family_cannot_back_an_action_claim(self):
+        """`web` ran, so a tool call happened - but reading is not acting, and
+        the claim is still unbacked. Different wording, still refused."""
+        said = V._honest_about_acting(
+            "I have deleted the file, sir.", acted=[("web", "search")], calls_made=1)
+        assert "have not done it yet" in said.lower()
+
+    def test_every_family_that_can_act_is_in_the_gate(self):
+        """Structural: a new write-capable family must be added to
+        `_ACTED_FAMILIES` or its claims are refused even when true."""
+        from friday import voice_brain as vb
+        # The gate lists what changes NOTHING, so an unknown operation counts
+        # as possibly-acting and a true claim is never refused. Every real
+        # write must therefore be ABSENT from the read-only list.
+        PROPOSALS = {("desktop", "plan")}      # licensed, but changes nothing
+        for pair in set(vb._OWN_WRITES) - PROPOSALS:
+            assert pair not in vb._READ_ONLY_OPERATIONS, (
+                f"{pair} writes but is listed read-only: a true claim after a "
+                f"real {pair[0]}/{pair[1]} would be wrongly refused")
+        for pair in PROPOSALS:
+            assert pair in vb._READ_ONLY_OPERATIONS, (
+                f"{pair} only proposes; letting it back a claim is the "
+                f"2026-09-06 defect")
+
+    def test_a_proposal_is_not_an_action(self):
+        """desktop/plan reads the screen and returns steps plus a nonce; only
+        desktop/step spends it. Observed live 2026-09-06: after a plan the
+        model said "I've opened the Start Menu for you, sir" - keyed by
+        family the gate let it through, which is why it is keyed by
+        (family, operation)."""
+        from friday import voice_brain as vb
+        assert ("desktop", "plan") in vb._READ_ONLY_OPERATIONS
+        said = vb._honest_about_acting(
+            "I've opened the Start Menu for you, sir.",
+            acted=[("desktop", "plan")], calls_made=1)
+        assert "have not done it yet" in said.lower()
+
+    def test_the_contraction_the_live_model_actually_used_is_caught(self):
+        """The first gate passed my "I have opened" fixtures and the live
+        model wrote "I've opened". Same claim, and the fixtures must carry
+        the wording that was really observed."""
+        said = V._honest_about_acting(
+            "I've opened the Start Menu for you, sir.", acted=[], calls_made=0)
+        assert "not actually done that" in said.lower()

@@ -921,6 +921,78 @@ def _honest_about_hermes(answer: str, used) -> str:
             "not from a job. Say the task once more and I will delegate it properly.")
 
 
+#: (family, operation) pairs known to CHANGE NOTHING. The gate is keyed on
+#: these rather than on a list of "acting" operations, and the direction
+#: matters: an unknown operation is treated as possibly-acting, so a true
+#: statement after real work is never called a lie. Refusing a claim Friday
+#: could actually back would be its own dishonesty, and fabric providers add
+#: write operations this module has never heard of.
+#:
+#: `desktop/plan` is the entry that proves the gate needs operation-level
+#: keying. A plan is a PROPOSAL - it reads the screen, returns steps and a
+#: confirmation nonce, and touches nothing; only `desktop/step` spends the
+#: nonce and moves the mouse. Keyed by family, a plan licensed "I've opened
+#: the Start Menu", which is the exact sentence observed live on 2026-09-06.
+_READ_ONLY_OPERATIONS = frozenset({
+    ("desktop", "plan"),        # proposes; touches nothing until `step`
+    ("desktop", "point"),       # finds a target on screen, does not click
+    ("files", "read"),
+    ("files", "list"),
+    ("hermes", "status"),
+    ("clock", "now"),
+    ("web", "search"),
+    ("web", "extract"),
+    ("web", "research"),
+    ("contacts", "find"),
+    ("contacts", "list"),
+})
+
+
+def _honest_about_acting(answer: str, acted, calls_made) -> str:
+    """Refuse a completion claim the turn cannot back.
+
+    `_honest_about_hermes` closed this for one family after Friday announced a
+    delegation that never happened. 2026-09-06 05:47 is the same bug wearing a
+    different hat: asked to "take over my screen and open the start menu", the
+    model called NOTHING - no plan, no nonce, no step - and said "I have opened
+    the Start Menu for you, sir." Retried, it escalated to "I have ALREADY
+    opened it", because its own false claim was in history.
+
+    `friday.honesty` has judged exactly this since it was written and had zero
+    callers in the product: the completion gate existed and was wired to
+    nothing. This is its call site on the browser path.
+
+    Two refusals only, both certain:
+
+    * nothing was called at all - no tool ran, so nothing was done;
+    * everything called is on the read-only list - looking is not doing.
+
+    Anything else is allowed through. The gate's job is to catch a claim that
+    is provably empty, not to adjudicate every sentence.
+    """
+    text = (answer or "").strip()
+    if not text:
+        return answer
+    from friday import honesty
+
+    if not honesty.find_claims(text):
+        return answer
+    ran = tuple(acted or ())
+    if ran and any(pair not in _READ_ONLY_OPERATIONS for pair in ran):
+        return answer                      # something that can act ran
+    if not ran:
+        logger.warning("voice: completion claimed with no tool call at all: %r",
+                       text[:160])
+        return ("I have not actually done that, sir - I said it without doing "
+                "it. Nothing on your machine was touched. Ask me once more and "
+                "I will carry it out properly, or say 'plan it' and I will show "
+                "you the steps first.")
+    logger.warning("voice: completion claimed, only read-only ran (%s): %r",
+                   sorted(ran), text[:160])
+    return ("I have not done it yet, sir - what I ran only looked. Say the "
+            "word and I will carry it out.")
+
+
 def _grounded_work_answer(low: str):
     """'What did Hermes finish, and why that model?' is answered from the run
     ledger, never from the conversation - the sibling of the "what's running"
@@ -1325,6 +1397,8 @@ def reply(text, history=None):
             thinking_config=types.ThinkingConfig(thinking_budget=budget))
 
         used = []                      # families touched, for the response meta
+        acted = []                     # (family, operation) pairs that ran OK
+        calls_made = 0                 # tool calls the model actually issued
         timer.start("model")
         resp = client.models.generate_content(model=name, contents=contents, config=cfg)
         timer.stop("model")
@@ -1334,6 +1408,7 @@ def reply(text, history=None):
                 break
             contents.append(resp.candidates[0].content)
             for call in calls:
+                calls_made += 1
                 args = dict(call.args or {})
                 fam, op = args.get("family", ""), args.get("operation", "")
                 # Attribute tool time to what it actually was: the screen,
@@ -1345,6 +1420,7 @@ def reply(text, history=None):
                 timer.stop(stage)
                 if "result" in out:
                     used.append(fam)
+                    acted.append((fam, op))
                 contents.append(types.Content(role="tool", parts=[
                     types.Part.from_function_response(name=call.name, response=out)]))
             timer.start("model")
@@ -1372,6 +1448,7 @@ def reply(text, history=None):
             answer = (resp.text or "").strip() or (
                 "I found it, sir, but lost my words - ask me once more.")
         answer = _honest_about_hermes(answer, used)
+        answer = _honest_about_acting(answer, acted, calls_made)
         message_id = _remember_turn("assistant", answer)
         latency = timer.report()
         return {"reply": answer, "model": name, "message_id": message_id,

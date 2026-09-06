@@ -47,7 +47,7 @@ def test_ui_reply_carries_latency_meta(monkeypatch):
     from friday import voice_brain as V
 
     class Resp:
-        text = "Done, sir."
+        text = "The sky is clear tonight, sir."
         function_calls = []
         candidates = []
 
@@ -64,7 +64,7 @@ def test_ui_reply_carries_latency_meta(monkeypatch):
     monkeypatch.setattr(V, "_remember_turn", lambda *a: None)
     monkeypatch.setattr(V, "_try_command", lambda t: None)
     out = V.reply("hello there friend")
-    assert out["reply"] == "Done, sir."
+    assert out["reply"] == "The sky is clear tonight, sir."
     assert "latency" in out and "stages_s" in out["latency"]
     assert "model" in out["latency"]["stages_s"]
     assert out["latency_note"] == ""     # a fast fake is not slow

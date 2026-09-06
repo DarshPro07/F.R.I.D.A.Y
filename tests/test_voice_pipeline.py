@@ -124,7 +124,7 @@ def test_no_word_is_lost_or_reordered(monkeypatch):
 def test_a_trailing_fragment_is_still_spoken(monkeypatch):
     """A final clause with no full stop must not be swallowed."""
     chunks = asyncio.run(_run_tts(
-        ["Done, boss. ", "One more thing without punctuation"], monkeypatch))
+        ["The report is on screen, boss. ", "One more thing without punctuation"], monkeypatch))
     assert "one more thing" in " ".join(chunks).lower()
 
 

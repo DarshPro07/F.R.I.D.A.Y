@@ -722,6 +722,9 @@ class FridayAgent(Agent):
     """F.R.I.D.A.Y. - Iron Man-style voice assistant. Tools arrive via MCP."""
 
     _already_read: tuple[str, ...] = ()
+    #: Capabilities that ACTED this turn, for the completion gate in
+    #: `tts_node`. Reset per turn alongside `_already_read`.
+    _acted_this_turn: tuple[str, ...] = ()
 
     def __init__(self, stt, llm, tts) -> None:
         self._toolset = mcp.MCPToolset(
@@ -790,6 +793,15 @@ class FridayAgent(Agent):
         async def cleaned():
             buf = ""
             spoken_once = False
+            # The completion gate runs on the FIRST flush only. A claim to
+            # have done something lives in the opening sentence ("I have
+            # opened the Start Menu for you, sir."), so checking the first
+            # chunk costs nothing and does not buffer the answer - the whole
+            # point of this node is time-to-first-word. If the claim is
+            # unbacked, what gets spoken is the correction and the rest of
+            # the model's sentence is dropped, because continuing would
+            # narrate the same fiction.
+            gated = False
             async for chunk in text:
                 buf += chunk
                 while True:
@@ -807,14 +819,46 @@ class FridayAgent(Agent):
                         cut = (ready[0].end() if ready else ends[-1].end())
                     out = _clean_for_speech(buf[:cut])
                     buf = buf[cut:]
+                    if out and not gated:
+                        gated = True
+                        correction = self._refuse_unbacked_claim(out)
+                        if correction is not None:
+                            yield correction
+                            return
                     if out:
                         spoken_once = True
                         yield out
             tail = _clean_for_speech(buf)
+            if tail and not gated:
+                gated = True
+                correction = self._refuse_unbacked_claim(tail)
+                if correction is not None:
+                    yield correction
+                    return
             if tail:
                 yield tail
         async for frame in Agent.default.tts_node(self, cleaned(), model_settings):
             yield frame
+
+    def _refuse_unbacked_claim(self, spoken: str):
+        """The spoken twin of `voice_brain._honest_about_acting`.
+
+        2026-09-06: asked on the browser path to "take over my screen and open
+        the start menu", Friday called nothing and said "I have opened the
+        Start Menu for you, sir." The `runs` table was empty. This is the same
+        gate on the voice path, where the lie would be spoken aloud.
+
+        `friday.honesty.find_claims` decides what counts as a completion claim;
+        `_acted_this_turn` is the evidence. Returns the correction to speak
+        instead, or None to let the sentence through.
+        """
+        from friday import honesty
+
+        if self._acted_this_turn or not honesty.find_claims(spoken or ""):
+            return None
+        logger.warning("voice: unbacked completion claim refused: %r", (spoken or "")[:160])
+        return ("I have not actually done that, boss - I said it without doing "
+                "it. Nothing was touched. Ask me again and I will carry it out.")
 
     @function_tool
     async def list_capability_areas(self) -> str:
@@ -1040,6 +1084,12 @@ class FridayAgent(Agent):
                 "error": f"{capability} failed: {type(exc).__name__}: {exc}",
                 "may_claim_completion": False,
             })
+        # What actually ACTED this turn, for the completion gate in tts_node.
+        # Recorded after the call returned without raising: a capability that
+        # threw is handled above and never reaches here, so it can never back
+        # a claim.
+        if not ownership.is_read_only(capability):
+            self._acted_this_turn = self._acted_this_turn + (capability,)
         # Latency attribution (the owner's rule: report the cause, keep the
         # quality). A slow capability is named in the tool result so the
         # model can say WHY it took a while - and whether it was the
@@ -1390,6 +1440,7 @@ class FridayAgent(Agent):
         not connected.
         """
         self._already_read = ()
+        self._acted_this_turn = ()
         self._spoke_this_turn = False
         # The owner's words for THIS turn. `use_capability` licenses a
         # Friday-own write against these and nothing else (A-036): a page
