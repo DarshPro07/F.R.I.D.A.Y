@@ -140,6 +140,44 @@ def measure(store, run_id: str, *, telemetry=None, work_log=None,
     return spend
 
 
+def lease_for_child(store, parent_run_id: str, requested: int, *,
+                    telemetry=None, work_log=None,
+                    reserve_fraction: float = 0.0) -> int:
+    """The token ceiling a child of `parent_run_id` may be given.
+
+    PRD v5.0 §12: the parent budget must dominate. Without this, a
+    delegation RESETS the ceiling - measured on this tree, a parent with
+    1,000 tokens left could create a child holding a fresh 400,000, and
+    nothing bounded the number of such children. The parent's limit then
+    means nothing, which is the same failure shape as a budget gate you
+    cannot reach when the network is down.
+
+    The lease is the parent's REMAINING budget, never more than requested:
+
+        min(requested, parent_ceiling - parent_spend - reserve)
+
+    `reserve_fraction` holds back part of the remainder so the parent can
+    still verify and report after the child returns - a child that consumes
+    the last token leaves the parent unable to say what happened.
+
+    A parent with no ceiling (0 = unlimited, the LONG_RUNNING shape) leases
+    `requested` unchanged: unlimited dominates nothing. A parent already
+    over budget leases 0, and the caller must refuse the delegation rather
+    than quietly start work that cannot be paid for.
+    """
+    parent = store.objective_run(parent_run_id) or {}
+    ceiling = int(parent.get("cost_budget_tokens") or 0)
+    if ceiling <= 0:
+        return max(0, int(requested))
+
+    spend = measure(store, parent_run_id, telemetry=telemetry, work_log=work_log)
+    remaining = ceiling - spend.tokens
+    if remaining <= 0:
+        return 0
+    reserve = int(remaining * max(0.0, min(1.0, reserve_fraction)))
+    return max(0, min(int(requested), remaining - reserve))
+
+
 def check(store, run_id: str, *, next_capability: str = "", next_task_id: str | None = None,
           telemetry=None, work_log=None, now: datetime | None = None) -> Verdict:
     """May the run make one more call? Decided from recorded spend."""

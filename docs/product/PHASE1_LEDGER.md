@@ -29,7 +29,8 @@ verification.**
 | FR-103i | Structured vs approximate counts | VERIFIED | `describe_count`; dropped-filter plant → red |
 | FR-103j | Lexical/semantic/hybrid selection | PARTIAL | lexical + hybrid routing work; **no semantic source exists** — see Limitations |
 | FR-103k | Targeted benchmarks | IMPLEMENTING | next |
-| FR-101 | Objective-scoped context budget | NOT_AUDITED | blocked on full-suite regression (soak) |
+| FR-101a | Child budget leases (parent dominates) | VERIFIED | probe proved a child got a fresh 400k while parent had 1k left; `tests/test_objective_budget_lease.py` 12 passed; 2 plants red; 37 passed across all budget suites |
+| FR-101b | Objective-scoped CONTEXT budget | NOT_AUDITED | needs `memory_stack` wiring - full-suite surface, blocked on soak |
 | FR-102 | Context provenance | NOT_AUDITED | after FR-101 |
 | FR-106 | Model fitness router | DEFERRED | needs an eval registry; no opinions-as-architecture |
 
@@ -41,9 +42,12 @@ verification.**
 |------|---------|
 | `friday/retrieval.py` (new, 392) | Intent, strategy, coverage, aggregate SQL builder, `describe_count` |
 | `friday/retrieval_sources.py` (new) | `MemorySource`, `RetrievalRouter` |
+| `friday/objective_budget.py` | `lease_for_child` - parent's remaining budget bounds every child |
 | `tests/test_retrieval_router.py` (new) | 32 contract tests |
 | `tests/test_retrieval_sources.py` (new) | 17 tests against a real SQLite corpus |
 | `tests/test_task_class_mapping.py` (new) | 14 mapping/drift tests |
+| `tests/test_objective_budget_lease.py` (new) | 12 lease tests |
+| `tests/test_retrieval_scaling.py` (new) | 8 scaling/shape tests |
 | `tests/conftest.py` | Collection-time checkout-identity guard |
 | `docs/product/PHASE1_CONTEXT_ROUTING.md` (new) | Audit + sequence |
 
@@ -91,6 +95,8 @@ Every guard was planted, observed red, restored, observed green.
 
 | Plant | Red tests |
 |-------|-----------|
+| Lease ignores the parent (today's behaviour) | 6 |
+| Reserve ignored | 1 |
 | `T2_LLM_TOOL` added to `TASK_CLASSES` | 3 |
 | TOP_K allowed to back a numeric claim | 3 |
 | Counting stops demanding complete coverage | 2 |
