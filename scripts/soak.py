@@ -69,7 +69,20 @@ MIN_JUDGED_S = 1800.0
 #: overnight baseline on this machine (Kernel-Power 506/507, a subprocess
 #: reporting "timed out after -668 s"). A soak that sleeps through part of
 #: its window measured less than it claims, so it is INCONCLUSIVE.
+#: A sample interval this many times the configured one means the run has a
+#: hole in it. Judged against an absolute floor as well, because a fast
+#: sampler makes the relative test hair-trigger: at `--sample-every 0.5` a
+#: 1.6 s scheduling hiccup on a loaded machine is 3x the interval and is NOT
+#: the thing this detector exists to catch. What it exists to catch is the
+#: host sleeping (Modern Standby) or the process being starved for long
+#: enough that the surviving samples describe a window the run did not
+#: actually measure.
 MAX_SAMPLE_GAP_FACTOR = 3.0
+
+#: No gap shorter than this is a hole, whatever the sample interval. A
+#: machine at 94% RAM descheduling a thread for a few seconds is load, not a
+#: missing window; sleep is minutes.
+MIN_SAMPLE_GAP_S = 30.0
 #: Series reported as rates; growth is information, not failure.
 RATE_SERIES = ("tokens", "provider_calls", "log_lines", "queue_depth", "cpu_pct",
                "host_ram_pct", "host_cpu_pct")
@@ -587,7 +600,11 @@ def analyse(samples: list[dict], duration_s: float, counts: dict, violations: li
     gaps = []
     for a, b in zip(samples, samples[1:]):
         step = b["t"] - a["t"]
-        if sample_every_s and step > sample_every_s * MAX_SAMPLE_GAP_FACTOR:
+        if not sample_every_s:
+            continue
+        # Both tests must agree: many times the configured interval AND long
+        # enough in wall-clock terms to be a real hole rather than contention.
+        if step > sample_every_s * MAX_SAMPLE_GAP_FACTOR and step >= MIN_SAMPLE_GAP_S:
             gaps.append({"from_s": round(a["t"], 1), "to_s": round(b["t"], 1),
                          "gap_s": round(step, 1)})
     win = min(3600.0, span / 4)

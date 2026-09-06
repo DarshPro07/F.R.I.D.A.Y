@@ -154,6 +154,73 @@ def _default_model_for(provider_id: str) -> str:
     return str(picked).strip()
 
 
+#: Provider ids whose transport is a consumer SUBSCRIPTION or OAuth app
+#: rather than a metered API key. Entitlement, not billing: a subscription
+#: route can be rate-limited by plan and cannot be topped up with credit.
+_SUBSCRIPTION_IDS = frozenset({
+    "openai-codex", "xai-oauth", "qwen-oauth", "minimax-oauth",
+    "opencode-go", "copilot", "copilot-acp", "kimi-coding",
+})
+
+#: Ids that are local ONLY when their endpoint actually is. `custom`
+#: ("Custom endpoint") is the dangerous one: its base_url is whatever the
+#: user configured, and on this machine it points at https://opencode.ai.
+#: Friday's `privacy_policy="local_only"` trusts this label, so a wrong
+#: answer here sends private context off the machine while promising it did
+#: not - the id must never be the whole test.
+_LOCAL_IDS = frozenset({"lmstudio", "ollama", "ollama-local", "custom"})
+
+#: Hosts that are genuinely this machine.
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", "[::1]"})
+
+
+def _is_local_endpoint(base_url: str) -> bool:
+    """Is this URL served by the machine Friday runs on?
+
+    An empty base_url means the provider never told us where it points. That
+    is not evidence of locality, so it is not treated as local: for a privacy
+    promise the burden of proof runs the other way.
+    """
+    url = str(base_url or "").strip()
+    if not url:
+        return False
+    from urllib.parse import urlparse
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    if host in _LOCAL_HOSTS or host.endswith(".local") or host == "host.docker.internal":
+        return True
+    # A literal loopback address in any notation (127.0.0.0/8, ::1).
+    import ipaddress
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _route_kind_for(provider: dict) -> str:
+    """Classify one provider's transport from what it actually is.
+
+    PRD A-010: the transport model (API vs subscription vs OAuth app vs
+    local) must be a property of the route, not a guess. The id list decides
+    the CANDIDATE kind; the endpoint decides whether a `local` claim stands.
+    """
+    pid = str(provider.get("id") or "")
+    if pid in _SUBSCRIPTION_IDS:
+        return "subscription"
+    if pid in _LOCAL_IDS:
+        # Locality is proven by the endpoint, never by the name. A `custom`
+        # provider pointed at a public URL is an API route that happens to be
+        # user-configured, and calling it local is what leaks private context.
+        return "local" if _is_local_endpoint(provider.get("base_url")) else "api"
+    if pid == "opencode-free":
+        return "free_tier"
+    return "api"
+
+
 def _providers() -> dict:
     from hermes_cli.models import list_available_providers
     from hermes_cli.config import load_config
@@ -164,19 +231,11 @@ def _providers() -> dict:
     main = {k: v for k, v in main.items()
             if k in ("default", "provider", "base_url", "api_mode")}
     fallbacks = cfg.get("fallback_providers") if isinstance(cfg, dict) else None
-    # Route kind is derived from the provider id; PRD FR-072 needs the
-    # subscription/API distinction visible, not inferred by Friday later.
     for p in providers:
         pid = p.get("id", "")
-        if pid in ("openai-codex", "xai-oauth", "qwen-oauth", "minimax-oauth",
-                   "opencode-go", "copilot", "copilot-acp", "kimi-coding"):
-            p["route_kind"] = "subscription"
-        elif pid in ("lmstudio", "ollama", "ollama-local", "custom"):
-            p["route_kind"] = "local"
-        elif pid == "opencode-free":
-            p["route_kind"] = "free_tier"
-        else:
-            p["route_kind"] = "api"
+        # PRD A-010: the transport model is a property of the ROUTE, derived
+        # from what the provider actually is - see `_route_kind_for`.
+        p["route_kind"] = _route_kind_for(p)
         # Requirement 10: every provider carries its own default so Friday
         # never has to guess - and an empty one is a fact Friday can refuse
         # on (NO_ROUTE) rather than a blank Hermes fills with the main model.

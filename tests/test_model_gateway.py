@@ -610,3 +610,86 @@ def test_failover_skips_a_dead_route_not_the_whole_provider(tmp_path, clean_env)
     assert ("openai-codex", "fake-codex-default") not in after, (
         "a dead route was offered because a sibling model on the same provider "
         f"succeeded - routing is keyed by provider, not by route: {after}")
+
+
+# ---------------------------------------------------------------------------
+# A-010: the transport model is a property of the ROUTE, and a `local` claim
+# has to be true.
+#
+# `route_kind` came from a hardcoded provider-id list, and `custom`
+# ("Custom endpoint") was on the LOCAL list. Its base_url is whatever the user
+# configured - on this machine `hermes_cli` reports it pointing at
+# https://opencode.ai/zen/v1. `ModelGateway.candidates()` uses that label to
+# honour `privacy_policy="local_only"`, so a request that promised to stay on
+# the machine was routed to a public endpoint. Probed before the fix:
+#
+#   route_kind('custom')       : local
+#   candidates under local_only: [('fast', 'custom', 'some-remote-model')]
+#   LEAK: a 'local_only' request is routed to https://opencode.ai/zen/v1
+# ---------------------------------------------------------------------------
+
+
+class TestTheTransportModel:
+
+    def test_a_custom_provider_pointed_at_the_internet_is_not_local(self):
+        from friday import hermes_model_gateway_worker as W
+        kind = W._route_kind_for({"id": "custom",
+                                  "base_url": "https://opencode.ai/zen/v1"})
+        assert kind == "api", (
+            "a user-configured endpoint on a public host was classified "
+            f"{kind!r}; local_only would route private context to it")
+
+    def test_a_custom_provider_on_loopback_is_local(self):
+        """The negative case: a gate that refuses everything is not a fix."""
+        from friday import hermes_model_gateway_worker as W
+        for url in ("http://127.0.0.1:1234/v1", "http://localhost:1234/v1",
+                    "http://[::1]:1234/v1", "http://box.local:11434"):
+            assert W._route_kind_for({"id": "custom", "base_url": url}) == "local", url
+
+    def test_an_unknown_endpoint_is_not_assumed_local(self):
+        """A provider that never says where it points has not PROVEN locality.
+        For a privacy promise the burden of proof runs the other way."""
+        from friday import hermes_model_gateway_worker as W
+        assert W._route_kind_for({"id": "custom"}) == "api"
+        assert W._route_kind_for({"id": "custom", "base_url": ""}) == "api"
+
+    def test_a_lan_address_is_not_this_machine(self):
+        """`local_only` means this machine, not this network: another host on
+        the LAN is still somewhere the data left for."""
+        from friday import hermes_model_gateway_worker as W
+        assert W._route_kind_for(
+            {"id": "ollama", "base_url": "http://192.168.1.50:11434"}) == "api"
+
+    def test_the_other_transports_still_classify(self):
+        from friday import hermes_model_gateway_worker as W
+        assert W._route_kind_for({"id": "openai-codex"}) == "subscription"
+        assert W._route_kind_for({"id": "copilot"}) == "subscription"
+        assert W._route_kind_for({"id": "opencode-free"}) == "free_tier"
+        assert W._route_kind_for({"id": "anthropic"}) == "api"
+        assert W._route_kind_for({"id": "some-new-provider"}) == "api"
+
+    def test_local_only_refuses_a_remote_custom_route(self, tmp_path, clean_env):
+        """The end-to-end shape: routing must not offer the remote endpoint."""
+        from friday import hermes_model_gateway_worker as W
+
+        class RemoteCustom(mg.ModelGatewayWorker):
+            def __init__(self):
+                super().__init__(command=[sys.executable, FAKE], profile="")
+
+            def call(self, method, params=None, timeout=30.0):
+                reply = super().call(method, params, timeout=timeout)
+                if method == "providers" and reply.get("ok"):
+                    prov = {"id": "custom", "label": "Custom endpoint",
+                            "aliases": [], "authenticated": True,
+                            "base_url": "https://opencode.ai/zen/v1",
+                            "default_model": "some-remote-model"}
+                    prov["route_kind"] = W._route_kind_for(prov)
+                    reply["result"]["providers"] = [prov]
+                return reply
+
+        gw = mg.ModelGateway(worker=RemoteCustom(),
+                             telemetry=mg.GatewayTelemetry(tmp_path / "g.sqlite3"),
+                             tier_table={}, max_failover=3)
+        picks = gw.candidates(request(privacy_policy="local_only", allow_failover=True))
+        assert not [p for _, p, _ in picks if p == "custom"], (
+            f"local_only routed to a public endpoint: {picks}")

@@ -210,3 +210,29 @@ def test_rss_is_attributed_to_the_move_that_caused_it():
     assert "RSS attributed per move" in out
     # ordered worst-first, so the owner of the growth is the first row
     assert out.index("| hermes |") < out.index("| db |")
+
+
+def test_load_contention_is_not_a_sampling_gap_but_sleep_still_is():
+    """The gap detector must catch a hole, not a busy machine.
+
+    With `--sample-every 0.5` (what the 45 s test uses) a 1.6 s scheduling
+    hiccup is 3x the interval, so the relative test alone made the guard fire
+    at the end of a 16-minute suite on a host at 94% RAM - a flaky test that
+    blames the product for the machine. The absolute floor fixes that without
+    weakening what the guard is FOR: Modern Standby has destroyed an
+    overnight baseline here, and that gap is minutes.
+    """
+    from scripts import soak as S
+
+    fast = _gapped([100.0] * 40, step=0.5, gap_at=20, gap=1.6)     # contention
+    assert S.analyse(fast, 20.0, COUNTS_ALL, [], [], 40, sample_every_s=0.5)["gaps"] == [], (
+        "a 1.6 s hiccup on a fast sampler was called a sampling gap")
+
+    slept = _gapped([100.0] * 40, step=0.5, gap_at=20, gap=180.0)  # standby
+    assert S.analyse(slept, 200.0, COUNTS_ALL, [], [], 40, sample_every_s=0.5)["gaps"], (
+        "a three-minute hole was not detected")
+
+    # And at the 8-hour run's own interval, where the floor must not mask it.
+    hourly = _gapped([100.0] * 40, step=20.0, gap_at=20, gap=400.0)
+    assert S.analyse(hourly, 1200.0, COUNTS_ALL, [], [], 40, sample_every_s=20.0)["gaps"], (
+        "the real 8 h configuration stopped detecting a 400 s hole")
