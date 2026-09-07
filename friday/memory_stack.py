@@ -319,12 +319,40 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
     used, lines, injected = 0, [], {"preferences": 0, "specs": 0, "rules": 0,
                                     "relations": 0, "episodes": 0, "contacts": 0,
                                     "outcomes": 0}
+    pending_header = [None]
+
+    def header(text):
+        """Announce a section only if something under it survives the budget.
+
+        Headers used to be appended straight to `lines`, which had two
+        consequences, both measured on real data:
+
+        1. they cost tokens nobody counted - at budget=300 the bundle
+           reported 296 tokens and actually sent 317, over its own budget,
+           because seven header lines were free;
+        2. at small budgets a header could be emitted with EVERY item under
+           it rejected - "RELEVANT SPECS FROM THE VAULT:" followed by
+           nothing, telling the model a section exists and then showing it
+           an empty one.
+
+        Deferring the header until its first item fits fixes both: the cost
+        is charged, and an empty section is never announced.
+        """
+        pending_header[0] = text
 
     def take(section, text, key):
         nonlocal used
         cost = _approx_tokens(text)
-        if used + cost > budget:
+        head = pending_header[0]
+        head_cost = _approx_tokens(head) if head else 0
+        # The header is charged together with the first item it introduces,
+        # so a header can never be paid for and then left dangling.
+        if used + head_cost + cost > budget:
             return False
+        if head:
+            lines.append(head)
+            used += head_cost
+            pending_header[0] = None
         lines.append(text)
         used += cost
         injected[key] += 1
@@ -334,7 +362,7 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
     # so whatever is appended last is what gets dropped - and the thing that
     # must never be dropped is what he actually said last time.
     if t6["items"]:
-        lines.append("PEOPLE HE MENTIONED:")
+        header("PEOPLE HE MENTIONED:")
         for c in t6["items"]:
             detail = ", ".join(x for x in (
                 c.get("relation"), c.get("phone"), c.get("email"),
@@ -359,7 +387,7 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
             kept.append(line)
             spent += cost
         if kept:
-            lines.append("WHAT WAS SAID BEFORE (most recent last):")
+            header("WHAT WAS SAID BEFORE (most recent last):")
             for line in reversed(kept):
                 if not take("episode", line, "episodes"):
                     break
@@ -368,33 +396,43 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
         # the one thing a Hermes follow-up bundle needs (include_episodes
         # =False skips episodes entirely, so this must not depend on it),
         # and it is also what "what did Hermes just do?" needs live.
-        lines.append("RECENT HERMES OUTCOMES:")
+        header("RECENT HERMES OUTCOMES:")
         for d in t7["items"]:
             if not take("outcome", "- %s" % d["decision"][:300], "outcomes"):
                 break
     if t1["items"]:
-        lines.append("YOUR PREFERENCES AND RULES:")
+        header("YOUR PREFERENCES AND RULES:")
         for it in t1["items"]:
             if not take("pref", "- %s: %s" % (it["subject"].split(".", 1)[-1], it["value"]), "preferences"):
                 break
     if t3["items"]:
-        lines.append("RULES OF ENGAGEMENT (git-tracked):")
+        header("RULES OF ENGAGEMENT (git-tracked):")
         for it in t3["items"]:
             if not take("rule", "- %s" % it["rule"], "rules"):
                 break
     if t2["items"]:
-        lines.append("RELEVANT SPECS FROM THE VAULT:")
+        header("RELEVANT SPECS FROM THE VAULT:")
         for it in t2["items"]:
             if not take("spec", "- [%s] %s" % (it["path"], it["excerpt"][:300].replace("\n", " ")), "specs"):
                 break
     if t4["items"] or t4["conflicts"]:
-        lines.append("HOW THINGS CONNECT:")
+        header("HOW THINGS CONNECT:")
         for e in t4["items"]:
             if not take("rel", "- %s -%s-> %s" % (e["from"], e["kind"], e["to"]), "relations"):
                 break
         for c in t4["conflicts"]:
             take("rel", "- OPEN CONTRADICTION on %s: '%s' vs '%s'" % (c["subject"], c["existing"], c["proposed"]), "relations")
-    return {"task": task, "budget_tokens": budget, "tokens_used": used, "injected": injected,
+    return {"task": task, "budget_tokens": budget,
+            # Measured against the string that is ACTUALLY sent, not summed
+            # from per-line estimates. `_approx_tokens` floors each line
+            # (max(1, len//4)), so summing per-line costs drifts below the
+            # real prompt - it under-reported by 8 tokens at a 600 budget
+            # even after headers were charged. A budget enforced against a
+            # number smaller than the payload silently overspends, so the
+            # reported figure is now the payload's own size.
+            "tokens_used": _approx_tokens("\n".join(lines)),
+            "tokens_charged": used,
+            "injected": injected,
             "tiers": {"preferences": t1, "specs": t2, "rules": t3, "relations": t4,
                       "episodes": t5, "contacts": t6, "outcomes": t7},
             "prompt": "\n".join(lines)}
