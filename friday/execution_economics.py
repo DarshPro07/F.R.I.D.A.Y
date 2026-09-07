@@ -538,6 +538,88 @@ class RouteOutcomes:
                 (task_class, limit)).fetchall()
         return [dict(r) for r in rows]
 
+    #: Below this many completed records for a model, its numbers are an
+    #: anecdote. Ranking on two runs is how a lucky model gets promoted and
+    #: an unlucky one gets condemned - the same mistake provider health made
+    #: when it judged a whole provider on one model's evidence.
+    EVIDENCE_MINIMUM = 5
+
+    def fitness_by_model(self, task_class: str, *, limit: int = 500,
+                         minimum: int | None = None) -> dict:
+        """Measured per-model fitness for one task class.
+
+        The evaluation registry FR-106 needs, built on the records the
+        bridge already writes rather than a second store beside them.
+
+        Returns, per model, the numbers a router may act on:
+
+            samples        completed + failed records seen
+            pass_rate      COMPLETE / samples
+            rework_rate    reworked / completed
+            median_seconds latency as experienced, not advertised
+            mean_tokens    prompt + output
+            value          median execution_value (quality-adjusted cost)
+
+        `ranked` is ordered best-value-first and contains ONLY models that
+        cleared the evidence minimum. Models below it appear in
+        `insufficient` with their sample count, never silently dropped and
+        never ranked - "we have not measured this enough to say" is a real
+        answer and the registry is required to give it.
+        """
+        need = self.EVIDENCE_MINIMUM if minimum is None else minimum
+        rows = self.by_class(task_class, limit=limit)
+
+        by_model: dict[str, list[dict]] = {}
+        for row in rows:
+            name = (row.get("model") or "").strip()
+            if not name:
+                # A record with no model cannot be attributed to one. It
+                # still counts as evidence about the CLASS, but ranking it
+                # under a name we invented would be a fabrication.
+                continue
+            by_model.setdefault(name, []).append(row)
+
+        ranked, insufficient = [], []
+        for name, records in by_model.items():
+            completed = [r for r in records if r.get("status") == "COMPLETE"]
+            durations = sorted(float(r.get("duration_s") or 0) for r in completed)
+            tokens = [int(r.get("prompt_tokens") or 0) + int(r.get("output_tokens") or 0)
+                      for r in completed]
+            values = sorted(self.execution_value(r) for r in completed)
+            entry = {
+                "model": name,
+                "provider": (records[0].get("provider") or ""),
+                "samples": len(records),
+                "completed": len(completed),
+                "pass_rate": round(len(completed) / len(records), 4) if records else 0.0,
+                "rework_rate": (round(sum(1 for r in completed if (r.get("rework") or 0) > 0)
+                                      / len(completed), 4) if completed else 0.0),
+                "median_seconds": round(durations[len(durations) // 2], 2) if durations else 0.0,
+                "mean_tokens": round(sum(tokens) / len(tokens)) if tokens else 0,
+                "value": round(values[len(values) // 2], 2) if values else 0.0,
+            }
+            if len(records) >= need:
+                ranked.append(entry)
+            else:
+                insufficient.append(entry)
+
+        # Best measured value first; a model that never completed anything
+        # has value 0 and sorts last regardless of how fast it failed.
+        ranked.sort(key=lambda e: (e["value"], e["pass_rate"]), reverse=True)
+        insufficient.sort(key=lambda e: e["samples"], reverse=True)
+
+        return {
+            "task_class": task_class,
+            "evidence_minimum": need,
+            "records_examined": len(rows),
+            "ranked": ranked,
+            "insufficient": insufficient,
+            # The one question a router asks. None means exactly what it
+            # says: nothing here has been measured enough to choose on.
+            "best": ranked[0]["model"] if ranked else None,
+            "verdict": "RANKED" if ranked else "INSUFFICIENT_EVIDENCE",
+        }
+
     def execution_value(self, record: dict) -> float:
         """
         Quality-adjusted cost, the H6 evaluation philosophy:
