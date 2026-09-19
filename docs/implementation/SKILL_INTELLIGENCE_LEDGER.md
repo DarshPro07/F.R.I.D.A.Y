@@ -81,6 +81,15 @@ tests, or a narrow extension of code that already works.
 Everything Phase 3+ (browser profiles, comms, reservations, phone) waits on
 these, because each of them consumes the skill/permission/self-model layer.
 
+## Package close (2026-09-19)
+
+Canonical suite on `d75e972`: 4 chunks, all exit 0, 4,271 passed / 72 skipped /
+0 failed (`docs/evidence/suite/baseline_d75e972_summary.txt`). The prior run on
+`02fe012` was red in three chunks; every cause was fixed at the root
+(`ec35920`, `d75e972`) or was a launcher-environment fault reproduced and
+removed — no test was weakened. Final report:
+`docs/implementation/MARK_LIV_FRIDAY_FINAL_REPORT.md`.
+
 ## External skill ecosystem check (`npx skills find`, 2026-09-19)
 
 Searched before building GB-13 / ML-09 / project-brain, per the
