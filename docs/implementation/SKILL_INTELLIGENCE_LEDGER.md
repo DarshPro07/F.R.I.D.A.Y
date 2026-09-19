@@ -47,7 +47,7 @@ tests, or a narrow extension of code that already works.
 | FR-070..074 | Communication router / calendar | PARTIAL | NOT_AUDITED | no `scheduling.py` in this tree (memory note was stale) |
 | FR-080..082 | Reservations | MISSING | NOT_AUDITED | Phase 4 |
 | FR-090..094 | Phone operator | PARTIAL | BLOCKED_EXTERNAL | no SIP provider credentials; LiveKit SIP adapter unbuilt |
-| FR-100..106 | Proactive runtime: event bus, WAITING_* states | PARTIAL | NOT_AUDITED | `automations` is schedule-driven; no event bus; Phase 6 |
+| FR-100..106 | Proactive runtime: event bus, WAITING_* states | PARTIAL | **VERIFIED** (the gap; the rest EXISTING) | Mapping first: `docs/product/PROACTIVE_RUNTIME_MAPPING.md` — heartbeat (`_driver_tick`/`next_wake`), schedules (`schedules`/`automations`, OS-owned clock), WAITING_APPROVAL/PROVIDER/TIME, worker waits, notification intelligence (`objective_deliveries`) all EXISTING under other names; the ONE gap was an external-event wait. Built on the existing wait machinery, not beside it: `contracts.WAITING` (non-terminal, not CLAIMABLE) + `output["wait"]={kind,key,deadline_s}` → `RunStatus.WAITING_EVENT` (in `RUN_WAITING_STATUSES`, so driver/watchdog/invariant already treat it as legitimate) + `FailureKind.EVENT_REQUIRED`; `continuous.deliver_event(store, kind, key, payload)` is the one door back (exact-key match, payload redacted via `observability.redact`, `event.delivered`/`event.unmatched` in the trace); deadline expiry is honest (TRANSIENT, "did not arrive"); unknown kinds refused at park time; the resumed task re-runs WITH `delivered_event` (runtime passes it only to a function that declares it). First source: `files_wait` (parks on a missing path; the driver tick is the file watcher; read-back still the verification, an event claiming a file that is not on disk FAILS). Remote door `POST /api/event` (session gate 423 + A-042 nonce/timestamp; `file` kind refused from outside). 12 tests on a real Store incl. end-to-end park→appear→deliver→re-run→COMPLETED, 11 plants red/restored byte-identical; gates 158 + 394 + 115 + 59 green |
 | FR-140..142 | Capability broker / metadata / states | EXISTING | VERIFIED | `capabilities.CAPABILITIES` + `fabric.Provider` |
 | FR-150..152 | Data classes + LOCAL_ONLY physical enforcement | EXISTING | VERIFIED | `f81c2d4`; test_model_gateway |
 | FR-160..166 | Authorized security pack | PARTIAL | NOT_AUDITED | fabric `risk=restricted` + `authorized_scope`; no PASSIVE/ACTIVE/BLOCKED modes |
@@ -66,7 +66,7 @@ tests, or a narrow extension of code that already works.
 | GB-22 | Fresh Claude worker from task ledger | PARTIAL | NOT_AUDITED | `executors/claude_code.TaskBundle` is the work packet |
 | GB-23 | Windows arg-length-safe prompt transport | EXISTING | TESTING | stdin transport at `cli.py:279`, decided for a different reason; arg-length property unpinned |
 | GB-32 | Team packs as data | PARTIAL | NOT_AUDITED | `org.assemble(goal)` |
-| GB-35 | Push broker | PARTIAL | NOT_AUDITED | same gap as FR-100 |
+| GB-35 | Push broker | PARTIAL | **VERIFIED** | same mechanism as FR-100: `deliver_event` + `/api/event` is the door an external signal takes to a waiting objective; no second bus, no subscriptions table |
 
 ## Order of work (by what the tree lacks, not by document numbering)
 
@@ -76,7 +76,7 @@ tests, or a narrow extension of code that already works.
 3b. ~~GB-16~~ VERIFIED (skill behaviour evaluator; ECC quarantine)
 4. ~~ML-05~~ VERIFIED (RuntimeSelfModel; static capability claims removed from both prompts)
 5. ~~ML-09~~ VERIFIED (ActionJournal; `files_undo` verified by read-back, conflict-safe)
-6. FR-100/GB-35 — event bus + WAITING_* states (Phase 6; needed by both packages)
+6. ~~FR-100/GB-35~~ VERIFIED (external-event wait on the existing wait machinery; `files_wait` + `/api/event`)
 
 Everything Phase 3+ (browser profiles, comms, reservations, phone) waits on
 these, because each of them consumes the skill/permission/self-model layer.

@@ -974,6 +974,59 @@ RECORDED_STATE = "RECORDED"
 
 
 # ---------------------------------------------------------------------------
+# Waiting on a file (FR-103/104: "resume when file exists")
+# ---------------------------------------------------------------------------
+
+
+def files_wait(run: c.Run, path: str, *, deadline_s: float = 3600.0,
+               delivered_event: dict | None = None,
+               engine: PolicyEngine = default_engine) -> c.ActionResult:
+    """Wait for a file to exist, then report it - the objective parks on it
+    instead of polling.
+
+    If the path already exists this succeeds at once (read back: exists,
+    size). If not, the result is `status: "waiting"` with a `wait`
+    condition {kind: "file", key: <resolved path>, deadline_s}: the
+    objective engine parks the task at WAITING_EVENT and the driver tick
+    delivers the event when the file appears (or expires it honestly at the
+    deadline). When the task is re-run after delivery, `delivered_event`
+    carries what arrived, and the read-back is still the verification - an
+    event that says a file exists is not the file existing.
+    """
+    tool_id = "files.wait"
+    blocked = _gate(run, tool_id, engine)
+    if blocked:
+        return blocked
+    started = c.started(run.run_id, tool_id)
+    target, failure = _safe(run, started, path)
+    if failure:
+        return failure
+    if target.exists():
+        size = target.stat().st_size if target.is_file() else 0
+        return run.record(c.succeeded(
+            started,
+            output=_scoped({"path": str(target), "exists": True, "size_bytes": size,
+                            "arrived_via": (delivered_event or {}).get("source") or "already present"}),
+            verification=c.Verification(
+                method="path_exists_read_back",
+                evidence=f"{target.name} exists ({size} bytes)")))
+    if delivered_event is not None:
+        # The event said it arrived; the disk says otherwise. Report the
+        # disagreement rather than trusting the message.
+        return run.record(c.failed(
+            started, f"an event reported {target.name} but it is not on disk"))
+    # Not there yet: park. The condition rides in `output["wait"]`, where the
+    # objective engine's `_wait_condition` reads it; WAITING is not terminal
+    # and cannot back a claim (contracts.CLAIMABLE).
+    return run.record(started.finish(
+        status=c.WAITING,
+        output=_scoped({"path": str(target), "exists": False,
+                        "wait": {"kind": "file", "key": str(target),
+                                 "deadline_s": float(deadline_s)}}),
+    ))
+
+
+# ---------------------------------------------------------------------------
 # Reads
 # ---------------------------------------------------------------------------
 

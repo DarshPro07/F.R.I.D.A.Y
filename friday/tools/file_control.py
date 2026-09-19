@@ -167,6 +167,17 @@ def register(mcp):
         return _execute(f"undo {action_id or 'the last file change'}", F.files_undo, action_id)
 
     @mcp.tool()
+    def files_wait(path: str, deadline_s: float = 3600.0) -> dict:
+        """
+        Wait for a file to appear. Inside an objective this parks the task
+        (WAITING_EVENT) until the file exists or the deadline passes - no
+        polling, no retries; the run resumes on its own the moment the file
+        is there. If the path already exists it reports it at once. Use it
+        for "carry on once the download / export / report lands".
+        """
+        return _execute(f"wait for {path}", F.files_wait, path, deadline_s=deadline_s)
+
+    @mcp.tool()
     def files_delete(path: str, permanent: bool = False, nonce: str = "") -> dict:
         """
         Delete a file. By default this recycles it (undoable, goes to the

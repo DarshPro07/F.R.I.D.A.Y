@@ -993,6 +993,49 @@ async def api_objective_status(request):
     return JSONResponse(await run_in_threadpool(read))
 
 
+#: FR-100: the event kinds the remote door accepts. `file` is deliberately
+#: absent - the driver tick observes files itself, and a remote claim that
+#: a local file exists is not evidence of it.
+REMOTE_EVENT_KINDS = ("email", "ci", "webhook", "booking", "message", "calendar")
+
+
+async def api_event(request):
+    """FR-100/104 (GB-35): an external event for a parked objective -
+    "the email arrived", "CI is green", "the booking is confirmed".
+
+    Same door as a remote objective: the session gate is the identity (423
+    before this runs), and every delivery carries a one-time nonce and a
+    fresh timestamp (audit A-042) so a captured event cannot be replayed
+    to wake a run twice. `continuous.deliver_event` matches the exact
+    (kind, key) a task parked on; nothing else is resumed, and an event
+    that matched nothing is recorded as such - never invented into a wake.
+    The payload is redacted before it reaches the ledger."""
+    from friday import continuous as CT
+    from friday.toolsets import objectives as OT
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        data = {}
+    kind = str(data.get("kind") or "").strip().lower()
+    key = str(data.get("key") or "").strip()
+    channel = _remote_channel(request)
+    if kind not in REMOTE_EVENT_KINDS or not key:
+        return JSONResponse({"ok": False, "error": f"kind must be one of {list(REMOTE_EVENT_KINDS)} and key is required"},
+                            status_code=400)
+    accepted, why = access.check_replay(data.get("nonce"), data.get("timestamp"))
+    if not accepted:
+        access.log({"kind": "remote_event_refused", "channel": channel, "event": kind, "reason": why})
+        return JSONResponse({"ok": False, "error": f"replay protection: {why}", "channel": channel},
+                            status_code=409)
+    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+    resumed = await run_in_threadpool(
+        CT.deliver_event, OT.store(), kind, key[:512], payload, source=f"remote:{channel}")
+    access.log({"kind": "remote_event", "channel": channel, "event": kind,
+                "resumed": len(resumed)})                       # the key can name a person; not logged
+    return JSONResponse({"ok": True, "kind": kind, "resumed": resumed,
+                         "matched": bool(resumed), "channel": channel})
+
+
 async def api_interrupted(request):
     """FR-039: the page tells us how much of a reply it actually played
     before the boss cut it off; the stored turn becomes exactly that."""
@@ -1535,6 +1578,7 @@ def create_app():
         Route("/api/harness", api_harness),
         Route("/api/objective", api_objective, methods=["POST"]),
         Route("/api/objective/status", api_objective_status),
+        Route("/api/event", api_event, methods=["POST"]),
         Route("/api/ask", api_ask, methods=["POST"]),
         Route("/api/interrupted", api_interrupted, methods=["POST"]),
         Route("/api/hermes/progress", api_hermes_progress),

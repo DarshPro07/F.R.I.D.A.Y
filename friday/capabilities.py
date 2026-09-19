@@ -2690,6 +2690,20 @@ _ALL = (
         risk='MEDIUM',
         policy_tool_id='files.undo',
     ),
+    # FR-103/104: the first external-event wait. An objective parks on it.
+    Capability(
+        id='files_wait',
+        intent_examples=(
+            'wait for the export file to appear and then carry on',
+            'carry on once the download has landed in that folder',
+            'wait until the report file exists before continuing',
+        ),
+        negative_examples=('does that file exist', 'list the files in my downloads', 'resume the objective'),
+        description='Wait for a file to appear: inside an objective the task parks at WAITING_EVENT until the path exists or the deadline passes, then resumes on its own; already-present paths report at once. Not a poll.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+        policy_tool_id='files.wait',
+    ),
 )
 
 CAPABILITIES: dict[str, Capability] = {cap.id: cap for cap in _ALL}

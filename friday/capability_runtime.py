@@ -122,6 +122,18 @@ def _takes_a_run(function) -> bool:
     return bool(parameters) and parameters[0] == "run"
 
 
+def _accepts(function, name: str) -> bool:
+    """Whether `function` declares `name` (or **kwargs). Read off the
+    signature, so an optional argument reaches only a function that asked
+    for it and every other capability keeps its exact signature."""
+    try:
+        params = inspect.signature(function).parameters
+    except (TypeError, ValueError):                         # pragma: no cover
+        return False
+    return name in params or any(p.kind == inspect.Parameter.VAR_KEYWORD
+                                 for p in params.values())
+
+
 def _by_domain_prefix(capability_id: str) -> tuple[str, str] | None:
     """
     `memory_project_context` -> `friday.toolsets.memory.project_context`.
@@ -386,6 +398,10 @@ class CapabilityRuntime:
         # arguments), the ASK is answered for this call only. CONFIRM /
         # DENY tiers are untouched - they are not ASKs.
         approved_by = str(arguments.pop("approved_by", "") or "")
+        # FR-104: the event that resumed a parked task travels in the
+        # arguments and reaches only a function that declares it - every
+        # other capability keeps its signature.
+        delivered_event = arguments.pop("delivered_event", None)
         approved_run = ""
         approved = False
         if approved_by:
@@ -414,6 +430,8 @@ class CapabilityRuntime:
                 break
 
         function = resolution.load()
+        if delivered_event is not None and _accepts(function, "delivered_event"):
+            arguments["delivered_event"] = delivered_event
         try:
             result = function(run, **arguments)
         except TypeError as exc:

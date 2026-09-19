@@ -69,9 +69,16 @@ UNSUPPORTED = "unsupported"
 #: be false, and manufacturing a success would be worse.
 NOT_CONFIGURED = "not_configured"
 
+#: Parked on something outside the process (FR-104): a file that is not there
+#: yet, an email, CI. Not a failure and not a success - the capability has
+#: said what it is waiting for (`output["wait"] = {kind, key, deadline_s}`)
+#: and the objective engine holds the task until that arrives or the deadline
+#: passes. Like INITIATED it is not terminal and cannot back a claim.
+WAITING = "waiting"
+
 ACTION_STATUSES = (QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED, PARTIAL,
                    INITIATED, OBSERVED, NOT_CARRIED_OUT, NOT_PERMITTED,
-                   UNSUPPORTED, NOT_CONFIGURED)
+                   UNSUPPORTED, NOT_CONFIGURED, WAITING)
 
 #: Statuses that permit a completion claim ("opened", "created", ...).
 #:

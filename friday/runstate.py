@@ -83,6 +83,8 @@ _SPLIT: dict[str, tuple[str, str]] = {
     'working': (RUNNING, PENDING),
     'waiting_permission': (WAITING, PENDING),
     'waiting_user_secret': (WAITING, PENDING),
+    'waiting_event': (WAITING, PENDING),
+    'waiting': (WAITING, PENDING),
     'succeeded': (COMPLETED, SUCCEEDED),
     'completed': (COMPLETED, SUCCEEDED),
     'partial': (COMPLETED, PARTIAL),

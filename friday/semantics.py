@@ -234,6 +234,7 @@ _OPERATION_BY_SUFFIX = {
     'rollback': RECOVERY,
     'undo': RECOVERY,
     'actions': LIST,
+    'wait': READ,
     'crawl': SEARCH,
     'research': SEARCH,
     'videos': LIST,

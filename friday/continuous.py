@@ -256,6 +256,46 @@ def _working_worker(result) -> bool:
             and bool(result.get("work_run_id")))
 
 
+#: The wait kinds a capability may park on (FR-104). `file` is swept by the
+#: driver tick itself; the rest arrive through `deliver_event` from a
+#: connector or the remote door. An unknown kind is refused at park time -
+#: a task parked on a condition nothing can ever deliver is a hang with a
+#: name, not a wait.
+WAIT_KINDS = ("file", "email", "ci", "webhook", "booking", "message", "calendar")
+
+#: A wait with no deadline of its own gets this one. Forever is not a state.
+DEFAULT_WAIT_DEADLINE_S = float(os.getenv("FRIDAY_WAIT_DEADLINE_S", str(7 * 24 * 3600)))
+
+
+def _wait_condition(result) -> dict | None:
+    """The {kind, key, deadline?} a capability asked to park on, or None.
+
+    Shape (contracts.WAITING): `{"status": "waiting", "output": {"wait":
+    {"kind": "file", "key": "<path>", "deadline_s": 3600}}}`. Read from
+    the envelope the same way `_refused` does, so an adapter that wraps its
+    result is still understood; a top-level `wait` is accepted too."""
+    if not isinstance(result, dict):
+        return None
+    status = str(result.get("status") or "").lower()
+    if status != c.WAITING:
+        for envelope_key in ("result", "run"):
+            inner = result.get(envelope_key)
+            if isinstance(inner, dict) and str(inner.get("status") or "").lower() == c.WAITING:
+                result = inner
+                status = c.WAITING
+                break
+    if status != c.WAITING:
+        return None
+    wait = result.get("wait")
+    if not isinstance(wait, dict):
+        output = result.get("output")
+        wait = output.get("wait") if isinstance(output, dict) else None
+    if not isinstance(wait, dict) or not wait.get("kind") or not wait.get("key"):
+        return None
+    return {"kind": str(wait["kind"]).lower(), "key": str(wait["key"]),
+            "deadline_s": wait.get("deadline_s"), "detail": wait.get("detail") or {}}
+
+
 def _pending_worker_id(task: dict) -> str:
     """The WorkRun identity persisted on a WAITING objective task."""
     if task.get("status") != O.TaskStatus.WAITING:
@@ -417,6 +457,12 @@ class ContinuousTaskExecutor:
 
     async def _driver_tick(self) -> None:
         """Drive runs whose next_wake is due and whose lease is free."""
+        # FR-104 first: an expired or satisfied event wait becomes a due
+        # wake in the same tick, so the loop below picks it up at once.
+        try:
+            self._sweep_event_waits()
+        except Exception:
+            logger.exception("event-wait sweep failed")
         for run in self.store.objective_runs(limit=100):
             run_id = run["run_id"]
             if run["status"] in O.RUN_TERMINAL:
@@ -658,6 +704,13 @@ class ContinuousTaskExecutor:
             # The strategy change must reach the worker, not just the log: a
             # hint nobody reads is a blind retry with better bookkeeping.
             arguments = {**arguments, "strategy_hint": hint}
+        # FR-104: a task resumed by an event re-runs WITH the event. The
+        # capability that parked ("the file is not there yet") now sees the
+        # delivery and can finish; the runtime passes it only to a function
+        # that declares the parameter.
+        prior = task.get("result") or {}
+        if isinstance(prior, dict) and isinstance(prior.get("event"), dict):
+            arguments = {**arguments, "delivered_event": prior["event"]}
         try:
             result = await self.call_capability(task["capability"], arguments)
         except Exception as exc:
@@ -728,6 +781,15 @@ class ContinuousTaskExecutor:
                 run_id, O.EVENT_WORKER_WAITING, task_id=task_id,
                 detail={"work_run_id": worker_id, "attempt": attempt})
             self._schedule_wake(run_id, seconds=WAKE_SECONDS)
+            return
+
+        # FR-104: the capability says the answer is OUTSIDE the process (a
+        # file that is not there yet, an email, CI). Park on the condition;
+        # only a matching event or the deadline moves it. No poll wake: the
+        # driver tick expires deadlines and sweeps the watchable kinds.
+        wait = _wait_condition(result)
+        if wait is not None:
+            self._park_for_event(run_id, task_id, task, wait, attempt=attempt)
             return
 
         # A capability that returned rather than raised can still be a
@@ -843,6 +905,88 @@ class ContinuousTaskExecutor:
         logger.info("objective.auth_boundary run_id=%s task=%s",
                     run_id, task_id)
         self.release(run_id)
+
+    def _park_for_event(self, run_id: str, task_id: str, task: dict,
+                        wait: dict, *, attempt: int) -> None:
+        """FR-104 event boundary: the task WAITS on {kind, key} with a
+        deadline, the run parks at WAITING_EVENT with the condition as its
+        blocker. No wake is scheduled - a wait is not a poll. The driver
+        tick expires it at the deadline and sweeps the kinds this process
+        can observe itself (`file`); everything else needs `deliver_event`.
+
+        An unknown kind is failed rather than parked: nothing would ever
+        deliver it, and a WAITING task nobody can wake is the forbidden
+        state wearing a legitimate status."""
+        kind, key = wait["kind"], wait["key"]
+        if kind not in WAIT_KINDS:
+            self._fail_task(run_id, task_id, O.FailureKind.INVALID_ARGUMENT,
+                            f"cannot wait on {kind!r}: known kinds are {', '.join(WAIT_KINDS)}")
+            return
+        try:
+            deadline_s = float(wait.get("deadline_s") or DEFAULT_WAIT_DEADLINE_S)
+        except (TypeError, ValueError):
+            deadline_s = DEFAULT_WAIT_DEADLINE_S
+        deadline_s = max(1.0, min(deadline_s, DEFAULT_WAIT_DEADLINE_S))
+        deadline = _in_seconds(deadline_s)
+        condition = {"kind": kind, "key": key, "deadline": deadline,
+                     "parked_at": now_iso(), "detail": wait.get("detail") or {}}
+        self.store.update_objective_task(
+            task_id, status=O.TaskStatus.WAITING,
+            failure_kind=O.FailureKind.EVENT_REQUIRED,
+            evidence=f"waiting for {kind} {key} (until {deadline})",
+            next_wake=None, detail={"wait": condition})
+        self.store.touch_objective_run(
+            run_id, status=O.RunStatus.WAITING_EVENT, next_wake=None,
+            blocker=f"waiting for {kind}: {key}")
+        self.store.append_objective_event(
+            run_id, O.EVENT_WAIT_PARKED, task_id=task_id,
+            detail={"kind": kind, "key": key, "deadline": deadline, "attempt": attempt})
+        logger.info("objective.event_boundary run_id=%s task=%s kind=%s key=%s",
+                    run_id, task_id, kind, key)
+        self.release(run_id)
+
+    def _sweep_event_waits(self) -> None:
+        """Driver-tick duty for WAITING_EVENT runs: expire waits whose
+        deadline has passed (honestly, as TRANSIENT with the condition
+        named) and deliver the one kind this process can see for itself -
+        a file that now exists. Deterministic; nothing is polled remotely."""
+        for run in self.store.objective_runs(limit=100):
+            if run["status"] != O.RunStatus.WAITING_EVENT:
+                continue
+            for task in self.store.objective_tasks(run["run_id"]):
+                if task["status"] != O.TaskStatus.WAITING:
+                    continue
+                if task.get("failure_kind") != O.FailureKind.EVENT_REQUIRED:
+                    continue
+                wait = (task.get("detail") or {}).get("wait") or {}
+                if not wait:
+                    continue
+                if wait.get("deadline") and _due(wait["deadline"]):
+                    self._expire_event_wait(run["run_id"], task, wait)
+                    continue
+                if wait.get("kind") == "file":
+                    path = str(wait.get("key") or "")
+                    if path and os.path.exists(path):
+                        deliver_event(self.store, "file", path,
+                                      {"exists": True, "size": os.path.getsize(path)},
+                                      source="driver_tick")
+
+    def _expire_event_wait(self, run_id: str, task: dict, wait: dict) -> None:
+        """The deadline came first. Said so - never a silent forever."""
+        self.store.update_objective_task(
+            task["task_id"], status=O.TaskStatus.FAILED,
+            failure_kind=O.FailureKind.TRANSIENT, finished_at=now_iso(),
+            evidence=f"waited for {wait.get('kind')} {wait.get('key')} until "
+                     f"{wait.get('deadline')}; it did not arrive")
+        self.store.append_objective_event(
+            run_id, O.EVENT_WAIT_EXPIRED, task_id=task["task_id"],
+            detail={"kind": wait.get("kind"), "key": wait.get("key"),
+                    "deadline": wait.get("deadline")})
+        # Back to RUNNING with an immediate wake so the driver settles the
+        # graph (cascade skips, finish or continue with what is left).
+        self.store.touch_objective_run(
+            run_id, status=O.RunStatus.RUNNING, next_wake=_in_seconds(0.0),
+            blocker="")
 
     def _live_worker_ids(self, run_id: str) -> tuple[str, ...]:
         """WorkRun ids still in flight for this run - the restart guard."""
@@ -1513,6 +1657,67 @@ def resume_after_auth(store: Store, *, reason: str = "") -> list[str]:
     return resumed
 
 
+def deliver_event(store: Store, kind: str, key: str, payload: dict | None = None,
+                  *, source: str = "") -> list[str]:
+    """FR-100/104: an external event arrived. Resume every task parked on
+    exactly this (kind, key); return the run ids resumed.
+
+    Deterministic and executor-free, like `resume_after_auth`: the task
+    goes READY with the event payload as its result, the run goes RUNNING
+    with an immediate wake, `event.delivered` is appended, and the driver
+    tick (or the watchdog) picks it up. The payload is redacted before it
+    is written - an email body or a webhook can carry a token, and the
+    ledger is read by the model.
+
+    An event that matched nothing is not dropped silently: `event.
+    unmatched` is appended to the most recent active run's trace (or logged
+    when there is none), so the morning-after read shows it arrived.
+    The match is on the key as recorded, never a pattern - a delivery must
+    name the wait it satisfies."""
+    from friday.observability import redact
+    kind = str(kind or "").lower().strip()
+    key = str(key or "").strip()
+    safe_payload = redact(dict(payload or {}))
+    resumed: list[str] = []
+    if not kind or not key:
+        return resumed
+    for run in store.objective_runs(limit=100):
+        if run["status"] != O.RunStatus.WAITING_EVENT:
+            continue
+        matched = [t for t in store.objective_tasks(run["run_id"])
+                   if t["status"] == O.TaskStatus.WAITING
+                   and t.get("failure_kind") == O.FailureKind.EVENT_REQUIRED
+                   and ((t.get("detail") or {}).get("wait") or {}).get("kind") == kind
+                   and ((t.get("detail") or {}).get("wait") or {}).get("key") == key]
+        if not matched:
+            continue
+        for task in matched:
+            store.update_objective_task(
+                task["task_id"], status=O.TaskStatus.READY, failure_kind="",
+                result={"event": {"kind": kind, "key": key, "payload": safe_payload,
+                                  "delivered_at": now_iso(), "source": source}},
+                evidence=f"{kind} {key} arrived", next_wake=_in_seconds(0.0))
+            store.append_objective_event(
+                run["run_id"], O.EVENT_WAIT_DELIVERED, task_id=task["task_id"],
+                detail={"kind": kind, "key": key, "source": source,
+                        "payload_keys": sorted(safe_payload)[:20]})
+        store.touch_objective_run(
+            run["run_id"], status=O.RunStatus.RUNNING,
+            next_wake=_in_seconds(0.0), blocker="")
+        resumed.append(run["run_id"])
+        logger.info("objective.event_delivered run_id=%s kind=%s key=%s",
+                    run["run_id"], kind, key)
+    if not resumed:
+        target = next((r for r in store.objective_runs(limit=20)
+                       if r["status"] not in O.RUN_TERMINAL), None)
+        if target is not None:
+            store.append_objective_event(
+                target["run_id"], O.EVENT_UNMATCHED,
+                detail={"kind": kind, "key": key, "source": source})
+        logger.info("objective.event_unmatched kind=%s key=%s source=%s", kind, key, source)
+    return resumed
+
+
 def speak(store: Store, run_id: str) -> str:
     """Module-level prose summary, so the objective tools can narrate a run
     without constructing an executor (which would spawn a driver loop)."""
@@ -1547,6 +1752,11 @@ def speak(store: Store, run_id: str) -> str:
         return line
     if status == O.RunStatus.PAUSED:
         return "That's paused - say the word and I'll pick it back up."
+    if status == O.RunStatus.WAITING_EVENT:
+        blocker = str(run.get("blocker") or "").strip()
+        return (f"That's parked - {blocker}. I'll carry on the moment it arrives."
+                if blocker else "That's parked, waiting on something outside - "
+                                "I'll carry on the moment it arrives.")
     if status in (O.RunStatus.WAITING_QUESTION,
                   O.RunStatus.WAITING_PERMISSION):
         return ("That's waiting on your answer before it can continue.")

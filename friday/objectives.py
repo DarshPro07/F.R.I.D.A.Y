@@ -61,11 +61,15 @@ RUN_FAILED = "FAILED"
 RUN_CANCELLED = "CANCELLED"
 RUN_WAITING_QUESTION = "WAITING_QUESTION"
 RUN_WAITING_PERMISSION = "WAITING_PERMISSION"
+#: FR-104: parked on something OUTSIDE the process - a file appearing, an
+#: email, CI going green, a booking confirmation. The condition is on the
+#: task (`detail.wait`); `continuous.deliver_event` is the only way back.
+RUN_WAITING_EVENT = "WAITING_EVENT"
 RUN_PAUSED = "PAUSED"
 
 RUN_STATUSES = (RUN_RUNNING, RUN_COMPLETED, RUN_PARTIAL, RUN_FAILED,
                 RUN_CANCELLED, RUN_WAITING_QUESTION, RUN_WAITING_PERMISSION,
-                RUN_PAUSED)
+                RUN_WAITING_EVENT, RUN_PAUSED)
 RUN_TERMINAL = (RUN_COMPLETED, RUN_PARTIAL, RUN_FAILED, RUN_CANCELLED)
 
 #: Statuses where the run is deliberately not executing. The driver loop, the
@@ -74,7 +78,7 @@ RUN_TERMINAL = (RUN_COMPLETED, RUN_PARTIAL, RUN_FAILED, RUN_CANCELLED)
 #: `RUN_PAUSED` is the control-plane pause: nobody woke it, it stays put until
 #: an explicit resume.
 RUN_WAITING_STATUSES = (RUN_WAITING_QUESTION, RUN_WAITING_PERMISSION,
-                        RUN_PAUSED)
+                        RUN_WAITING_EVENT, RUN_PAUSED)
 
 
 class RunStatus:
@@ -85,6 +89,7 @@ class RunStatus:
     CANCELLED = RUN_CANCELLED
     WAITING_QUESTION = RUN_WAITING_QUESTION
     WAITING_PERMISSION = RUN_WAITING_PERMISSION
+    WAITING_EVENT = RUN_WAITING_EVENT
     PAUSED = RUN_PAUSED
 
 
@@ -102,10 +107,17 @@ FAILURE_CONNECTIVITY = "CONNECTIVITY"
 #: PROVIDER_BACKOFF_SECONDS on the same provider.
 FAILURE_CAPPED = "CAPPED"
 
+#: FR-104: not a failure at all - the task is parked on an external
+#: condition (`detail.wait`) and only `continuous.deliver_event` or the
+#: wait's own deadline moves it. Kept in the failure_kind column because
+#: that is where the executor reads WHY a task is WAITING.
+FAILURE_EVENT_REQUIRED = "EVENT_REQUIRED"
+
 FAILURE_KINDS = (FAILURE_TRANSIENT, FAILURE_PROVIDER_DOWN, FAILURE_STRUCTURAL,
                  FAILURE_CAPABILITY_MISSING, FAILURE_POLICY_BLOCK,
                  FAILURE_INVALID_ARGUMENT, FAILURE_NOT_CONFIGURED,
-                 FAILURE_USER_REQUIRED, FAILURE_CONNECTIVITY, FAILURE_CAPPED)
+                 FAILURE_USER_REQUIRED, FAILURE_CONNECTIVITY, FAILURE_CAPPED,
+                 FAILURE_EVENT_REQUIRED)
 
 #: The only kinds that may be retried, and only a bounded number of times.
 RETRYABLE_KINDS = (FAILURE_TRANSIENT, FAILURE_PROVIDER_DOWN,
@@ -123,6 +135,7 @@ class FailureKind:
     USER_REQUIRED = FAILURE_USER_REQUIRED
     CONNECTIVITY = FAILURE_CONNECTIVITY
     CAPPED = FAILURE_CAPPED
+    EVENT_REQUIRED = FAILURE_EVENT_REQUIRED
 
 
 #: Events the engine appends to the continuation trace.
@@ -148,6 +161,11 @@ EVENT_RUN_CANCELLED = "run.cancelled"
 EVENT_RUN_PAUSED = "run.paused"
 EVENT_RUN_RESUMED = "run.resumed"
 EVENT_MANUAL_CONTINUE_REQUIRED = "manual_continue.required"
+# FR-100/104: the external-event wait, in the same trace as everything else.
+EVENT_WAIT_PARKED = "event.waiting"          # task parked on {kind, key}
+EVENT_WAIT_DELIVERED = "event.delivered"     # a matching event resumed it
+EVENT_WAIT_EXPIRED = "event.expired"         # the deadline passed first
+EVENT_UNMATCHED = "event.unmatched"          # an event arrived that nothing was waiting for
 
 UNMAPPED_CAPABILITY = 'objective.unmapped'
 

@@ -475,6 +475,7 @@ TOOL_CATEGORIES: dict[str, str] = {
     'files.recycle': FILE_WRITE,
     'files.actions': READ_LOCAL_SAFE,
     'files.undo': FILE_WRITE,
+    'files.wait': READ_LOCAL_SAFE,
     'web.search': WEB_SEARCH,
     'web.fetch': WEB_SEARCH,
     'web.news': WEB_SEARCH,
