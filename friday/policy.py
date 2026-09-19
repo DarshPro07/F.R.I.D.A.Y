@@ -581,6 +581,8 @@ TOOL_CATEGORIES: dict[str, str] = {
     'operation_update': MEMORY_WRITE,
     'skill_capture': MEMORY_WRITE,
     'skill_list': READ_LOCAL_SAFE,
+    'skill_declare_dependencies': MEMORY_WRITE,
+    'skill_revalidation_sweep': MEMORY_WRITE,
     'memory.record_utterance': MEMORY_WRITE,
     'memory.forget': DELETE,
     'profile.learn': MEMORY_WRITE,

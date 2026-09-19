@@ -185,9 +185,54 @@ def register(mcp):
     @mcp.tool()
     def skill_list(state: str = "") -> dict:
         """Skill candidates/validated skills (optionally by state:
-        CANDIDATE / VALIDATED / REJECTED / DEPRECATED)."""
+        CANDIDATE / VALIDATED / NEEDS_REVALIDATION / REJECTED / DEPRECATED)."""
         try:
             return {"status": "succeeded",
                     "skills": sl.SkillLadder().listing(state)}
+        except Exception as exc:                             # noqa: BLE001
+            return {"status": "failed", "error": str(exc)[:500]}
+
+    # -- skill fingerprints (FR-012) ----------------------------------------
+
+    def _fingerprints():
+        from friday import skill_fingerprint as sf
+        from friday.config import PROJECT_ROOT
+        return sf, sf.SkillFingerprints(sl.SkillLadder(), root=PROJECT_ROOT)
+
+    @mcp.tool()
+    def skill_declare_dependencies(name: str, dependencies: str) -> dict:
+        """
+        Record what a VALIDATED skill's procedure rests on, so a later code
+        change can say whether it invalidates THIS skill - and leave every
+        unrelated skill alone. `dependencies` is comma-separated
+        `kind:target` pairs; kinds are file, directory, package, schema,
+        skill (e.g. `file:friday/model_gateway.py,package:livekit`).
+        Digests are taken now, at validation state.
+        """
+        try:
+            sf, fp = _fingerprints()
+            deps = []
+            for item in (x.strip() for x in dependencies.split(",") if x.strip()):
+                kind, _, target = item.partition(":")
+                deps.append(sf.Dependency(kind.strip(), target.strip()))
+            out = fp.record(name, deps)
+            return {"status": "succeeded", **out}
+        except Exception as exc:                             # noqa: BLE001
+            return {"status": "failed", "error": str(exc)[:500]}
+
+    @mcp.tool()
+    def skill_revalidation_sweep(changed_paths: str = "") -> dict:
+        """
+        After a code change, mark the skills whose declared dependencies
+        actually moved as NEEDS_REVALIDATION and report which ones were
+        left alone. `changed_paths` is comma-separated (feed it
+        `git diff --name-only`); empty means check every validated skill.
+        A README typo must invalidate nothing - the `untouched` list is the
+        proof.
+        """
+        try:
+            _, fp = _fingerprints()
+            paths = [p.strip() for p in changed_paths.split(",") if p.strip()] or None
+            return {"status": "succeeded", **fp.sweep(changed_paths=paths)}
         except Exception as exc:                             # noqa: BLE001
             return {"status": "failed", "error": str(exc)[:500]}

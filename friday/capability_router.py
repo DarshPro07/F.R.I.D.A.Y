@@ -189,6 +189,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "operations": (
         "operation_create", "operation_status", "operation_assign", "operation_update",
         "skill_capture", "skill_list",
+        "skill_declare_dependencies", "skill_revalidation_sweep",
     ),
     "identity": ("browser_profiles",),
     "workbench": ("workbench_write", "workbench_preview", "workbench_list", "workbench_stop"),

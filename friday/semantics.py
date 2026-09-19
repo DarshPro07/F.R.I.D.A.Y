@@ -150,6 +150,11 @@ _OPERATION_BY_SUFFIX = {
     'record': CREATE,
     'capture': CREATE,
     'frame': CREATE,
+    # Skill fingerprints: declaring dependencies writes a record; a sweep
+    # walks every validated skill and moves the stale ones - an imperative
+    # over the runtime, so EXECUTE, not the READ it would default to.
+    'dependencies': CREATE,
+    'sweep': EXECUTE,
     # The screen powers. Pointing and planning only look; the step is the one
     # that drives, so it derives as EXECUTE rather than another READ.
     'point': READ,

@@ -2578,6 +2578,30 @@ _ALL = (
         requires_edge=True,
         operation_kind='CANCEL',
     ),
+    # Skill fingerprints (FR-012). Operating-layer, rare - appended at the
+    # tail so they never crowd a daily driver out of the planner shortlist.
+    Capability(
+        id='skill_declare_dependencies',
+        intent_examples=(
+            'record which source files this skill depends on',
+            'declare the dependencies of the provider debugging skill',
+        ),
+        negative_examples=('save that procedure as a skill candidate', 'what skills have you learned'),
+        description='Record the files, packages, schemas and skills a VALIDATED skill rests on, digested now, so a later change can say whether it invalidates this skill and leave unrelated skills alone.',
+        execution_scope='agent_runtime',
+        side_effect='write',
+    ),
+    Capability(
+        id='skill_revalidation_sweep',
+        intent_examples=(
+            'sweep the validated skills for stale dependencies',
+            'mark the skills whose dependencies changed as needs revalidation',
+        ),
+        negative_examples=('list skill candidates', 'run the tests'),
+        description='After a code change, mark the skills whose declared dependencies actually moved as NEEDS_REVALIDATION and report which were left alone.',
+        execution_scope='agent_runtime',
+        side_effect='write',
+    ),
 )
 
 CAPABILITIES: dict[str, Capability] = {cap.id: cap for cap in _ALL}
