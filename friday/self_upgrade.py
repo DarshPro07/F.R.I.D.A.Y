@@ -59,6 +59,9 @@ KERNEL_PATHS = (
     "friday/vault.py",
     # the owner's words are the licence for a write; provider truth
     "friday/write_licence.py", "friday/provider_health.py",
+    # the undo path writes to disk from a journal row: the row's conflict
+    # check and jail re-resolution are what stop it rewriting the wrong file
+    "friday/action_journal.py", "tests/test_action_journal.py",
     ".specify/memory/constitution.md",
     # protected agent instructions (read at runtime as tier-3 rules)
     "AGENTS.md",

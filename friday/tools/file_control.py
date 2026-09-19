@@ -144,6 +144,29 @@ def register(mcp):
         return _execute(f"recycle {path}", F.files_recycle, path)
 
     @mcp.tool()
+    def files_actions(limit: int = 10, run_id: str = "") -> dict:
+        """
+        The action journal: what Friday changed on disk lately (create, write,
+        edit, move) and which of it can still be undone. Every row carries an
+        `action_id` for `files_undo`, its state (RECORDED = undoable,
+        IRREVERSIBLE with the reason, REVERSED, CONFLICT), and the run it
+        belonged to.
+        """
+        return _execute("list recent file actions", F.files_actions, limit=limit, run_id=run_id)
+
+    @mcp.tool()
+    def files_undo(action_id: str = "") -> dict:
+        """
+        Undo one thing Friday did to a file: the named `action_id`, or with no
+        id the most recent change that can still be reversed. Refuses with
+        CONFLICT if the file is no longer exactly as Friday left it (someone
+        edited it since) - it never overwrites later work to restore earlier
+        state. Verified by reading the file back; only a match is reported as
+        undone. Say what was put back and where.
+        """
+        return _execute(f"undo {action_id or 'the last file change'}", F.files_undo, action_id)
+
+    @mcp.tool()
     def files_delete(path: str, permanent: bool = False, nonce: str = "") -> dict:
         """
         Delete a file. By default this recycles it (undoable, goes to the

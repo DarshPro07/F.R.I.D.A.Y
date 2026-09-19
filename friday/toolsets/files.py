@@ -22,6 +22,8 @@ import fnmatch
 
 import hashlib
 
+import logging
+
 import os
 
 import shutil
@@ -40,6 +42,8 @@ from friday.policy import PolicyEngine, default_engine
 from friday.toolsets.system import APPROVAL_PREFIX
 
 EXECUTION_SCOPE = "local_machine"
+
+logger = logging.getLogger("friday.files")
 
 #: The outcomes files_delete reports, so a caller reads a fact, not a status
 #: code it has to interpret. RECYCLED can be undone; DELETED cannot.
@@ -135,6 +139,52 @@ def _safe(run: c.Run, started: c.ActionResult, raw: str) -> tuple[Path | None, c
         return jail().resolve(raw), None
     except JailError as exc:
         return None, run.record(c.failed(started, f"path refused: {exc}"))
+
+
+# --- the action journal (ML-09) ---------------------------------------------
+#
+# Every mutating op captures the target's prior state BEFORE touching it and
+# records the entry AFTER the write is verified. A journal failure is logged
+# and never fails the file operation: the write happened and was read back,
+# and hiding that behind a bookkeeping error would be a false failure.
+
+_journal = None
+
+
+def journal():
+    global _journal
+    if _journal is None:
+        from friday.action_journal import ActionJournal
+        _journal = ActionJournal()
+    return _journal
+
+
+def reset_journal(new=None) -> None:
+    """Swap the journal (tests)."""
+    global _journal
+    _journal = new
+
+
+def _capture_before(target: Path):
+    try:
+        return journal().before_file_write(target)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("action journal could not capture %s: %s", target, exc)
+        return None
+
+
+def _journal_write(run: c.Run, target: Path, captured, *, operation: str) -> str:
+    """Record a verified write. Returns the action_id ('' if not journaled)."""
+    if captured is None:
+        return ""
+    before, backup, reversible, reason = captured
+    try:
+        return journal().record_file_write(
+            target, before, backup, reversible, reason, operation=operation,
+            run_id=run.run_id).action_id
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("action journal could not record %s: %s", target, exc)
+        return ""
 
 
 def files_read(
@@ -397,6 +447,8 @@ def _write_and_verify(
     tool: str, existed: bool,
 ) -> c.ActionResult:
     payload = content.encode("utf-8")
+    # ML-09: capture the prior state before a byte is touched.
+    captured = _capture_before(target)
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(payload)
@@ -412,6 +464,10 @@ def _write_and_verify(
             output=_scoped({"path": str(target)}),
         ))
 
+    operation = {"files.create": "file.create", "files.edit": "file.edit"}.get(tool, "file.write")
+    action_id = _journal_write(run, target, captured, operation=operation)
+    reversible = bool(captured and captured[2])
+
     artifact = c.new_artifact(
         run_id=run.run_id, type="file", title=target.name,
         path_or_uri=str(target), producer=tool,
@@ -424,7 +480,8 @@ def _write_and_verify(
     return run.record(c.succeeded(
         started,
         output=_scoped({"path": str(target), "bytes": len(payload),
-                        "overwrote_existing": existed}),
+                        "overwrote_existing": existed,
+                        "action_id": action_id, "reversible": reversible}),
         artifacts=(artifact,),
         side_effects=(f"{'overwrote' if existed else 'created'} {target}",),
         verification=c.Verification(
@@ -546,6 +603,14 @@ def _transfer(
         return run.record(c.failed(started, f"{dst} already exists"))
 
     size = src.stat().st_size
+    # ML-09: the source's state, captured while it is still there.
+    before_source = None
+    if move:
+        try:
+            from friday.action_journal import _file_state
+            before_source = _file_state(src)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("action journal could not capture %s: %s", src, exc)
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
         if move:
@@ -563,6 +628,14 @@ def _transfer(
             output=_scoped({"source": str(src), "destination": str(dst)}),
         ))
 
+    action_id, reversible = "", False
+    if move and before_source is not None:
+        try:
+            entry = journal().record_file_move(src, dst, before_source=before_source, run_id=run.run_id)
+            action_id, reversible = entry.action_id, entry.reversible
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("action journal could not record move %s: %s", dst, exc)
+
     evidence = f"{dst.name} exists, {dst.stat().st_size} bytes (source was {size})"
     if move:
         evidence += "; source no longer exists"
@@ -575,7 +648,8 @@ def _transfer(
     return run.record(c.succeeded(
         started,
         output=_scoped({"source": str(src), "destination": str(dst),
-                        "size_bytes": dst.stat().st_size}),
+                        "size_bytes": dst.stat().st_size,
+                        "action_id": action_id, "reversible": reversible}),
         artifacts=(artifact,),
         side_effects=(f"{'moved' if move else 'copied'} {src} -> {dst}",),
         verification=c.Verification(
@@ -812,6 +886,91 @@ def files_delete(run: c.Run, path: str, *, permanent: bool = False,
         side_effects=(f"permanently deleted {target.name}",),
         verification=c.Verification(method="path_absent_after_delete",
             evidence=f"{target.name} ({size} bytes) is permanently gone from {target}")))
+
+
+# ---------------------------------------------------------------------------
+# The action journal, read and reversed (ML-09/10)
+# ---------------------------------------------------------------------------
+
+
+def files_actions(run: c.Run, *, limit: int = 10, run_id: str = "",
+                  engine: PolicyEngine = default_engine) -> c.ActionResult:
+    """What Friday changed on disk lately, and which of it can still be put
+    back. Each row says RECORDED (undoable), IRREVERSIBLE (and why), or what
+    became of it (REVERSED / CONFLICT / REVERSAL_FAILED)."""
+    tool_id = "files.actions"
+    blocked = _gate(run, tool_id, engine)
+    if blocked:
+        return blocked
+    started = c.started(run.run_id, tool_id)
+    try:
+        entries = journal().recent(limit=max(1, min(int(limit), 100)), run_id=run_id)
+    except Exception as exc:  # noqa: BLE001
+        return run.record(c.failed(started, f"action journal unavailable: {exc}"))
+    rows = [{"action_id": e.action_id, "operation": e.operation, "target": e.target,
+             "state": e.state, "reversible": e.reversible and e.state == RECORDED_STATE,
+             "reason": e.reason, "created_at": e.created_at, "run_id": e.run_id}
+            for e in entries]
+    return run.record(c.succeeded(
+        started,
+        output=_scoped({"actions": rows, "count": len(rows),
+                        "undoable": sum(1 for r in rows if r["reversible"])}),
+        verification=c.Verification(method="journal_read",
+                                    evidence=f"{len(rows)} journal rows read from {journal().path.name}")))
+
+
+def files_undo(run: c.Run, action_id: str = "", *, engine: PolicyEngine = default_engine) -> c.ActionResult:
+    """Put back one thing Friday did to a file - the named action, or with no
+    id the most recent one that can still be reversed.
+
+    The journal decides whether it is still safe: the target must be exactly
+    as Friday left it (hash), otherwise CONFLICT and nothing is touched. The
+    reversal is then read back and only a match is REVERSED. Both the target
+    and, for a move, the original location are re-resolved through the jail
+    first - a journal row cannot make Friday write outside it.
+    """
+    tool_id = "files.undo"
+    blocked = _gate(run, tool_id, engine)
+    if blocked:
+        return blocked
+    started = c.started(run.run_id, tool_id)
+
+    try:
+        j = journal()
+        entry = j.get(action_id) if action_id else j.last_reversible()
+    except Exception as exc:  # noqa: BLE001
+        return run.record(c.failed(started, f"action journal unavailable: {exc}"))
+    if entry is None:
+        msg = f"no such action: {action_id}" if action_id else "nothing in the journal can be undone"
+        return run.record(c.failed(started, msg))
+
+    # The jail is the boundary for the undo too, in both directions of a move.
+    paths = [entry.target]
+    if entry.operation == "file.move":
+        paths.append(str(entry.before.get("source", "")))
+    for raw in paths:
+        _, failure = _safe(run, started, raw)
+        if failure:
+            return failure
+
+    reversal = j.reverse(entry.action_id)
+    payload = _scoped({"action_id": entry.action_id, "operation": entry.operation,
+                       "target": entry.target, "state": reversal.state,
+                       "evidence": reversal.evidence})
+    if reversal.ok:
+        return run.record(c.succeeded(
+            started, output=payload,
+            side_effects=(f"reversed {entry.operation} on {Path(entry.target).name}",),
+            verification=c.Verification(method="state_read_back_equals_before",
+                                        evidence=reversal.evidence)))
+    if reversal.state == "CONFLICT":
+        return run.record(started.finish(status=c.FAILED, error=f"not undone: {reversal.evidence}", output=payload))
+    if reversal.state == "IRREVERSIBLE":
+        return run.record(started.finish(status=c.FAILED, error=f"cannot be undone: {reversal.evidence}", output=payload))
+    return run.record(c.partial(started, f"undo did not verify: {reversal.evidence}", output=payload))
+
+
+RECORDED_STATE = "RECORDED"
 
 
 # ---------------------------------------------------------------------------

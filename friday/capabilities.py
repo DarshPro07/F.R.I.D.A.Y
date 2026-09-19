@@ -2658,6 +2658,38 @@ _ALL = (
         execution_scope='agent_runtime',
         side_effect='write',
     ),
+    # ML-09/10: the action journal. Appended at the tail so the daily file
+    # drivers keep their shortlist slots; "undo" is its own verb.
+    Capability(
+        id='files_actions',
+        intent_examples=(
+            'list the recent file changes in your action journal',
+            'what files have you changed lately and which can still be undone',
+        ),
+        negative_examples=('list the files in my downloads', 'what did we talk about earlier'),
+        description='The action journal: recent file changes Friday made (create, write, edit, move) with an action_id each, whether it can still be undone, and why not if it cannot.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+        policy_tool_id='files.actions',
+    ),
+    Capability(
+        id='files_undo',
+        intent_examples=(
+            'undo that file change',
+            'put that file back the way it was',
+            'revert the last edit you made to that file',
+        ),
+        negative_examples=('undo the volume change', 'restore the file from the recycle bin'),
+        description='Undo one file change Friday made, by action_id or the most recent reversible one: restores the prior content or moves the file back, refuses with CONFLICT if the file changed since, and verifies by read-back.',
+        execution_scope='user_device',
+        side_effect='write',
+        requires_edge=True,
+        requires_auth=True,
+        operation_kind='MUTATE',
+        verification_scope='LOCAL_REAL',
+        risk='MEDIUM',
+        policy_tool_id='files.undo',
+    ),
 )
 
 CAPABILITIES: dict[str, Capability] = {cap.id: cap for cap in _ALL}

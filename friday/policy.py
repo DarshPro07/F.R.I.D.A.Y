@@ -473,6 +473,8 @@ TOOL_CATEGORIES: dict[str, str] = {
     'files.copy': FILE_WRITE,
     'files.move': FILE_WRITE,
     'files.recycle': FILE_WRITE,
+    'files.actions': READ_LOCAL_SAFE,
+    'files.undo': FILE_WRITE,
     'web.search': WEB_SEARCH,
     'web.fetch': WEB_SEARCH,
     'web.news': WEB_SEARCH,

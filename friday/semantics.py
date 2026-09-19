@@ -232,6 +232,8 @@ _OPERATION_BY_SUFFIX = {
     'review': READ,
     'promote': MUTATE,
     'rollback': RECOVERY,
+    'undo': RECOVERY,
+    'actions': LIST,
     'crawl': SEARCH,
     'research': SEARCH,
     'videos': LIST,

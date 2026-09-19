@@ -146,6 +146,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "files": (
         "files_read", "files_write", "files_create", "files_edit", "files_copy", "files_move",
         "files_recycle", "files_delete", "files_list", "files_info", "files_search", "files_roots",
+        "files_actions", "files_undo",
     ),
     "screen": (
         "screen_point", "desktop_plan", "desktop_step", "desktop_stop",
