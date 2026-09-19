@@ -437,6 +437,15 @@ EARN, not guess. Before any such sentence leaves your mouth:
 3. Only if BOTH come back empty may you say you cannot, and then say exactly
    what you tried.
 
+Any question about YOURSELF right now - can you see the camera or the
+screen, what is switched off, which capability areas are up, which model
+routes are healthy, stale or unprobed, how many tools you have - is answered
+by calling `self_model_snapshot` (in your core, no search) and reading the
+numbers from its output. It is the only source that knows the route ledger
+and the operator's switches. Never answer those from memory, from
+`capability_families`, or from the web: a number you did not read from the
+snapshot is a number you made up.
+
 `capability_families` is NOT the list of what you can do. It covers the
 curated expert skills only (writing, presentation, research, roles...). Vision,
 screen, files, music and the rest are tool AREAS and never appear there -
@@ -2503,7 +2512,16 @@ async def entrypoint(ctx: JobContext) -> None:
     # The durable run driver lives in this process too, so runs whose wake
     # is due are picked up without a separate worker.
     engine = agent.start_objective_engine()
-    ctx.add_shutdown_callback(engine.stop)
+
+    async def stop_engine() -> None:
+        # LiveKit awaits every shutdown callback; `engine.stop` is
+        # synchronous, and handing it over bare produced "TypeError: object
+        # NoneType can't be used in 'await' expression" at the end of every
+        # job (agent_boot.log, each session close) - after which the other
+        # callbacks in the same gather were skipped, so the delivery loop
+        # and the resilience report never ran on teardown.
+        engine.stop()
+    ctx.add_shutdown_callback(stop_engine)
 
     # Terminal WorkRuns and finished objectives are delivered into the live
     # session by this loop. It is the one place the executor's durable

@@ -139,6 +139,14 @@ CORE_TOOLS: tuple[str, ...] = (
     # the model would not take when it could just answer from its own LLM.
     # Core makes the fabric one call away; the persona says when to prefer it.
     'capability_use',
+    # ML-05: the self-model is the ONLY truthful source for "what can you do
+    # / can you see the camera / which providers are unprobed". Measured live
+    # 2026-09-19 with it grouped under `governor`: asked for a snapshot of
+    # herself, Friday called capability_families and list_capability_areas
+    # (both core) and answered from those - "14 families, no providers
+    # unprobed" - while the snapshot tool that holds the route ledger sat one
+    # discovery hop away and was never taken. Same lesson as capability_use.
+    'self_model_snapshot',
 )
 
 #: group -> tool names. Every non-core tool belongs to exactly one group.
@@ -173,7 +181,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "model_gateway": ("model_providers", "model_infer", "model_usage"),
     "adversarial": ("decision_deliberate", "change_review"),
     "selfdev": ("selfdev_run", "selfdev_promote", "selfdev_rollback", "selfdev_status"),
-    "governor": ("system_pressure", "system_diagnostics", "self_model_snapshot", "self_model_switch"),
+    "governor": ("system_pressure", "system_diagnostics", "self_model_switch"),
     "observability": ("objective_trace",),
     "connectors": (
         "connector_list", "connector_describe", "connector_connect", "connector_verify",
