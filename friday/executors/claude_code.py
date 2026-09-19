@@ -107,6 +107,11 @@ class TaskBundle:
     #: `context` so the bridge can render its own ASSUMPTIONS section.
     assumptions: tuple[str, ...] = ()
     isolate: bool = True          # a git worktree, not the live checkout
+    #: GB-13: skills this worker is expected to follow. Their manifests
+    #: narrow the launch profile (`launch_for`) - a skill that requested no
+    #: write scope takes Write/Edit off the CLI allowlist, whatever its
+    #: prose says. Empty means the profile stands as chosen.
+    skills: tuple[str, ...] = ()
 
     def worktree_name(self) -> str:
         """One name, used by the launch flag and by the guard that checks it."""
@@ -224,11 +229,42 @@ class ClaudeCodeExecutor:
         rows = self.store.recall(f"executor.claude.session.{run_id}")
         return str(rows[0]["value"]) if rows else None
 
+    # -- authority ---------------------------------------------------------
+
+    @staticmethod
+    def _narrowed_by_skills(profile: Profile, bundle: TaskBundle) -> Profile:
+        """GB-13: the launch profile ∩ every named skill's manifest.
+
+        The profile is the WORKER layer; each skill manifest is a SKILL
+        layer; the meet is what reaches --allowedTools, which the CLI
+        enforces outside the model. A skill with no manifest is read-only,
+        so naming an unmanifested skill on a BUILD task removes its write
+        tools - loud and visible in the run's `permission_denials`, which
+        is the point: an author declares scope or the worker does not get
+        it. A ladder that cannot be opened narrows nothing and is logged.
+        """
+        if not bundle.skills:
+            return profile
+        try:
+            from friday import skill_permissions as SP
+            from friday.skill_ladder import SkillLadder
+            perms = SP.SkillPermissions(SkillLadder())
+            authority = None
+            for name in bundle.skills:
+                layer = perms.authority_for(name)
+                authority = layer if authority is None else authority.intersect(layer)
+            return SP.narrow_profile(profile, authority) if authority else profile
+        except Exception:                                    # noqa: BLE001
+            logger.exception("skill manifests could not be read; profile %s stands",
+                             profile.name)
+            return profile
+
     # -- running -----------------------------------------------------------
 
     def launch_for(self, bundle: TaskBundle, *, profile: Profile | None = None,
                    resume: str | None = None) -> cli.Launch:
         chosen = profile or profile_for(bundle.goal)
+        chosen = self._narrowed_by_skills(chosen, bundle)
         ask_tool = "mcp__ada__ada_ask" if self.mcp_config else ""
         return cli.Launch(
             prompt=bundle.prompt(ask_tool=ask_tool),

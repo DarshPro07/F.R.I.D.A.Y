@@ -583,6 +583,7 @@ TOOL_CATEGORIES: dict[str, str] = {
     'skill_list': READ_LOCAL_SAFE,
     'skill_declare_dependencies': MEMORY_WRITE,
     'skill_revalidation_sweep': MEMORY_WRITE,
+    'skill_declare_permissions': MEMORY_WRITE,
     'memory.record_utterance': MEMORY_WRITE,
     'memory.forget': DELETE,
     'profile.learn': MEMORY_WRITE,

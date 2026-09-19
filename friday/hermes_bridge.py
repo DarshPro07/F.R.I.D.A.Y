@@ -263,6 +263,29 @@ class TaskBundle:
     #: to the owner. It is a bounded, task-scoped slice, never the store.
     memory_context: str = ""
 
+    def with_skill_prohibitions(self) -> "TaskBundle":
+        """GB-13: what the hinted skills forswear, added to PROHIBITED ACTIONS.
+
+        A Hermes worker's tool surface is the profile's (the gateway owns
+        it), so the manifest reaches Hermes as the one part that composes
+        across skills - the deny set - rendered in the contract the worker
+        is held to. This never widens: prohibitions only ever add. A ladder
+        that cannot be read adds nothing.
+        """
+        if not self.skill_hints:
+            return self
+        try:
+            from friday import skill_permissions as SP
+            from friday.skill_ladder import SkillLadder
+            banned = SP.SkillPermissions(SkillLadder()).prohibited_by(self.skill_hints)
+        except Exception:                                    # noqa: BLE001
+            return self
+        if not banned:
+            return self
+        extra = tuple(f"{b} (forsworn by skill manifest)" for b in banned
+                      if not any(b in d for d in self.disallowed))
+        return replace(self, disallowed=self.disallowed + extra) if extra else self
+
     def with_memory(self, budget_tokens: int = 600) -> "TaskBundle":
         """The same bundle, with the shared memory relevant to its goal.
 
@@ -1668,6 +1691,7 @@ class HermesSupervisor:
 
         if share_memory:
             bundle = bundle.with_memory()
+        bundle = bundle.with_skill_prohibitions()
         measure = bundle.measure()
         if measure["oversized"]:
             logger.warning("hermes.bundle_oversized chars=%d", measure["chars"])

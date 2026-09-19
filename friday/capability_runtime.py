@@ -326,9 +326,15 @@ class CapabilityRuntime:
     """
 
     def __init__(self, *, engine: PolicyEngine | None = None,
-                 principal: str = OBJECTIVE_EXECUTOR) -> None:
+                 principal: str = OBJECTIVE_EXECUTOR,
+                 authority=None) -> None:
         self.engine = engine or default_engine
         self.principal = principal
+        #: GB-13: the intersection of every layer above policy - worker,
+        #: skill manifest, objective - or None for "no layer narrowed this
+        #: runtime" (the conversational default). Policy is never in it:
+        #: policy runs after, unchanged, on every call.
+        self.authority = authority
 
     def execute(self, capability_id: str, arguments: dict | None = None, *,
                 run: c.Run | None = None) -> c.ActionResult:
@@ -341,6 +347,18 @@ class CapabilityRuntime:
         if capability is None:
             raise LookupError(
                 f"no capability is registered as {capability_id!r}")
+
+        # GB-13: the authority intersection is checked before privacy,
+        # configuration and policy - a capability outside the worker's or
+        # the skill's requested scope is refused before anything about it
+        # is resolved or loaded. This narrows only; it cannot answer an ASK
+        # or a CONFIRM, which policy alone decides below.
+        if self.authority is not None:
+            refusal = self.authority.permits(capability_id)
+            if refusal:
+                return run.record(started.finish(
+                    status=c.NOT_PERMITTED,
+                    error=f"OUT_OF_AUTHORITY: {refusal}"))
 
         # Before anything is configured, loaded or called: may this leave the
         # machine at all? Refused here rather than at the adapter, because a

@@ -2602,6 +2602,17 @@ _ALL = (
         execution_scope='agent_runtime',
         side_effect='write',
     ),
+    Capability(
+        id='skill_declare_permissions',
+        intent_examples=(
+            'record the permission manifest for this skill',
+            'declare what scope the provider debugging skill requests',
+        ),
+        negative_examples=('save that procedure as a skill candidate', 'record which source files this skill depends on'),
+        description='Lint and record the scope a skill requests (risk class, capabilities, prohibited, filesystem, network, commands). A manifest never grants; workers run under worker ∩ manifest ∩ objective ∩ policy.',
+        execution_scope='agent_runtime',
+        side_effect='write',
+    ),
 )
 
 CAPABILITIES: dict[str, Capability] = {cap.id: cap for cap in _ALL}

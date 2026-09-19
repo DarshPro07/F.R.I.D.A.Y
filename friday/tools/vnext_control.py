@@ -236,3 +236,22 @@ def register(mcp):
             return {"status": "succeeded", **fp.sweep(changed_paths=paths)}
         except Exception as exc:                             # noqa: BLE001
             return {"status": "failed", "error": str(exc)[:500]}
+
+    # -- skill permission manifests (GB-13) ---------------------------------
+
+    @mcp.tool()
+    def skill_declare_permissions(name: str, manifest_yaml: str) -> dict:
+        """
+        Record the scope a skill REQUESTS (never grants): a YAML manifest
+        with `risk: LOW|MEDIUM|HIGH` and `permissions:` {capabilities,
+        prohibited, filesystem: {read, write}, network, commands}. Linted
+        deterministically; a FAIL is refused with every finding and the
+        skill stays read-only. Workers that follow the skill run under
+        worker ∩ manifest ∩ objective ∩ policy - a manifest cannot widen
+        anything, and a bare '*' is refused.
+        """
+        try:
+            from friday import skill_permissions as sp
+            return sp.SkillPermissions(sl.SkillLadder()).record(name, manifest_yaml)
+        except Exception as exc:                             # noqa: BLE001
+            return {"status": "failed", "error": str(exc)[:500]}

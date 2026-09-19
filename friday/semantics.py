@@ -155,6 +155,7 @@ _OPERATION_BY_SUFFIX = {
     # over the runtime, so EXECUTE, not the READ it would default to.
     'dependencies': CREATE,
     'sweep': EXECUTE,
+    'permissions': CREATE,
     # The screen powers. Pointing and planning only look; the step is the one
     # that drives, so it derives as EXECUTE rather than another READ.
     'point': READ,
