@@ -145,8 +145,15 @@ class Reversal:
 class ActionJournal:
     def __init__(self, path: str | Path | None = None, *, backups: str | Path | None = None) -> None:
         if path is None:
-            from friday.config import DATA_DIR
-            path = Path(DATA_DIR) / "action_journal.sqlite3"
+            # FRIDAY_ACTION_JOURNAL lets a test (or a second install) point
+            # the default journal elsewhere; the suite's conftest sets it so
+            # no test writes into the owner's data/ directory.
+            override = os.getenv("FRIDAY_ACTION_JOURNAL", "").strip()
+            if override:
+                path = Path(override)
+            else:
+                from friday.config import DATA_DIR
+                path = Path(DATA_DIR) / "action_journal.sqlite3"
         self.path = Path(path)
         self.backups = Path(backups) if backups else self.path.parent / "action_journal_backups"
         self.path.parent.mkdir(parents=True, exist_ok=True)

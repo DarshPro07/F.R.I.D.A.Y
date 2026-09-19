@@ -166,11 +166,18 @@ def _never_the_real_database(tmp_path, monkeypatch):
     touched it first.
     """
     import friday.toolsets.memory as memory
+    import friday.toolsets.files as files
 
     monkeypatch.setenv("ADA_DB", str(tmp_path / "test-store.sqlite3"))
     monkeypatch.setattr(memory, "_store", None, raising=False)
+    # The action journal (ML-09) is the same kind of durable state: a test
+    # that writes a file through the toolset must not leave its before-state
+    # in the boss's data/action_journal*. Same rule, same fixture.
+    monkeypatch.setenv("FRIDAY_ACTION_JOURNAL", str(tmp_path / "test-journal.sqlite3"))
+    monkeypatch.setattr(files, "_journal", None, raising=False)
     yield
     monkeypatch.setattr(memory, "_store", None, raising=False)
+    monkeypatch.setattr(files, "_journal", None, raising=False)
 
 
 @pytest.fixture(autouse=True)
