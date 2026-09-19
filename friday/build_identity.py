@@ -104,9 +104,13 @@ class Build:
 
 
 def _git(*arguments: str) -> str:
+    # 30 s, not 5: under a four-chunk suite run on this laptop `git
+    # rev-parse` took longer than five seconds and the build reported
+    # `unknown`, which `restart_friday.py --check` reads as STALE. A slow
+    # answer is still the answer; only no answer is "unknown".
     try:
         return subprocess.run(
-            ("git", *arguments), capture_output=True, text=True, timeout=5,
+            ("git", *arguments), capture_output=True, text=True, timeout=30,
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         ).stdout.strip()
     except Exception:                                       # noqa: BLE001

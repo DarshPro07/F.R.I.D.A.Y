@@ -1425,7 +1425,14 @@ class FridayAgent(Agent):
             return False
         self._briefing = brief
         try:
-            count = len(self._router.all_tools) if (not self._tools_offline and self._router.all_tools) else None
+            # The live tool count is a nicety for the self-model line; an
+            # agent without a router (a test double, a session whose MCP
+            # link is down) must still get its briefing refreshed. The
+            # refresh itself is the load-bearing part.
+            router = getattr(self, "_router", None)
+            offline = getattr(self, "_tools_offline", True)
+            tools = getattr(router, "all_tools", None) if router is not None else None
+            count = len(tools) if (not offline and tools) else None
             await self.update_instructions(
                 build_instructions(tool_count=count) + ("\n\n---\n\n" + brief if brief else ""))
             logger.info("briefing refreshed (%d chars)", len(brief))

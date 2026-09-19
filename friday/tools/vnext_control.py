@@ -192,12 +192,20 @@ def register(mcp):
         except Exception as exc:                             # noqa: BLE001
             return {"status": "failed", "error": str(exc)[:500]}
 
-    # -- skill fingerprints (FR-012) ----------------------------------------
+    # -- skill intelligence + self-model -----------------------------------
+    #
+    # These seven are thin over `friday/toolsets/skills.py` so that a durable
+    # objective can call them through capability_runtime with a verified
+    # ActionResult beneath; they used to return plain dicts from here, which
+    # made them unreachable to the objective engine (test_core01_red).
 
-    def _fingerprints():
-        from friday import skill_fingerprint as sf
-        from friday.config import PROJECT_ROOT
-        return sf, sf.SkillFingerprints(sl.SkillLadder(), root=PROJECT_ROOT)
+    def _execute(request: str, fn, *args, **kwargs) -> dict:
+        from friday import contracts as c
+        run = c.Run.create(request, capability="skills")
+        result = fn(run, *args, **kwargs)
+        run.transition("completed" if run.all_succeeded else "partial",
+                       None if run.all_succeeded else (result.error or "not verified"))
+        return result.to_dict()
 
     @mcp.tool()
     def skill_declare_dependencies(name: str, dependencies: str) -> dict:
@@ -209,16 +217,8 @@ def register(mcp):
         skill (e.g. `file:friday/model_gateway.py,package:livekit`).
         Digests are taken now, at validation state.
         """
-        try:
-            sf, fp = _fingerprints()
-            deps = []
-            for item in (x.strip() for x in dependencies.split(",") if x.strip()):
-                kind, _, target = item.partition(":")
-                deps.append(sf.Dependency(kind.strip(), target.strip()))
-            out = fp.record(name, deps)
-            return {"status": "succeeded", **out}
-        except Exception as exc:                             # noqa: BLE001
-            return {"status": "failed", "error": str(exc)[:500]}
+        from friday.toolsets import skills as S
+        return _execute(f"declare dependencies of {name}", S.skill_declare_dependencies, name, dependencies)
 
     @mcp.tool()
     def skill_revalidation_sweep(changed_paths: str = "") -> dict:
@@ -230,14 +230,8 @@ def register(mcp):
         A README typo must invalidate nothing - the `untouched` list is the
         proof.
         """
-        try:
-            _, fp = _fingerprints()
-            paths = [p.strip() for p in changed_paths.split(",") if p.strip()] or None
-            return {"status": "succeeded", **fp.sweep(changed_paths=paths)}
-        except Exception as exc:                             # noqa: BLE001
-            return {"status": "failed", "error": str(exc)[:500]}
-
-    # -- skill permission manifests (GB-13) ---------------------------------
+        from friday.toolsets import skills as S
+        return _execute("sweep validated skills for stale dependencies", S.skill_revalidation_sweep, changed_paths)
 
     @mcp.tool()
     def skill_declare_permissions(name: str, manifest_yaml: str) -> dict:
@@ -250,13 +244,8 @@ def register(mcp):
         worker ∩ manifest ∩ objective ∩ policy - a manifest cannot widen
         anything, and a bare '*' is refused.
         """
-        try:
-            from friday import skill_permissions as sp
-            return sp.SkillPermissions(sl.SkillLadder()).record(name, manifest_yaml)
-        except Exception as exc:                             # noqa: BLE001
-            return {"status": "failed", "error": str(exc)[:500]}
-
-    # -- skill behaviour evaluation (brief §16; ECC skill-comply, native) ----
+        from friday.toolsets import skills as S
+        return _execute(f"declare permissions of {name}", S.skill_declare_permissions, name, manifest_yaml)
 
     @mcp.tool()
     def skill_behavior_scenarios(skill: str, task: str, competing_pressure: str = "") -> dict:
@@ -267,10 +256,9 @@ def register(mcp):
         the traces, then grade with skill_behavior_grade. A verdict needs all
         three; the competing one finds skills a worker abandons under pressure.
         """
-        from friday import skill_behavior as sb
-        return {"status": "succeeded", "skill": skill,
-                "scenarios": [{"id": s.id, "strictness": s.strictness, "prompt": s.prompt}
-                              for s in sb.scenarios(skill, task, competing_pressure=competing_pressure)]}
+        from friday.toolsets import skills as S
+        return _execute(f"behaviour scenarios for {skill}", S.skill_behavior_scenarios,
+                        skill, task, competing_pressure)
 
     @mcp.tool()
     def skill_behavior_grade(spec_json: str, trace_json: str, report_dir: str = "") -> dict:
@@ -285,28 +273,8 @@ def register(mcp):
         the verdict is INCOMPLETE unless all three scenarios were run. With
         `report_dir`, a redacted markdown+json report is written there.
         """
-        try:
-            import json as _json
-            from friday import skill_behavior as sb
-            spec = sb.Spec.from_dict(_json.loads(spec_json))
-            raw = _json.loads(trace_json)
-            traces: dict[str, list[sb.Event]] = {}
-            for key, val in (raw or {}).items():
-                if isinstance(val, str):
-                    traces[key] = sb.events_from_stream_json(val)
-                else:
-                    traces[key] = [sb.Event(order=i, tool=str(e.get("tool", "")),
-                                            arguments=sb._redact(sb._ser(e.get("arguments"))),
-                                            status=str(e.get("status", "")),
-                                            output=sb._redact(sb._ser(e.get("output"))))
-                                   for i, e in enumerate(val or [])]
-            ev = sb.evaluate(spec, traces)
-            out = {"status": "succeeded", **ev.to_dict()}
-            if report_dir:
-                out["report"] = str(sb.write_report(ev, report_dir))
-            return out
-        except Exception as exc:                             # noqa: BLE001
-            return {"status": "failed", "error": str(exc)[:500]}
+        from friday.toolsets import skills as S
+        return _execute("grade skill behaviour", S.skill_behavior_grade, spec_json, trace_json, report_dir)
 
     # -- runtime self-model (ML-05) ------------------------------------------
 
@@ -319,12 +287,8 @@ def register(mcp):
         model routes with current health evidence. This is the source of
         every capability claim in the prompts; there is no static list.
         """
-        try:
-            from friday import self_model
-            snap = self_model.snapshot()
-            return {"status": "succeeded", "description": snap.describe(), **snap.to_dict()}
-        except Exception as exc:                             # noqa: BLE001
-            return {"status": "failed", "error": str(exc)[:500]}
+        from friday.toolsets import skills as S
+        return _execute("self-model snapshot", S.self_model_snapshot)
 
     @mcp.tool()
     def self_model_switch(name: str, enabled: bool, reason: str = "") -> dict:
@@ -334,12 +298,6 @@ def register(mcp):
         the reason and the prompts stop offering it on the next refresh; on =
         it returns without any prompt edit. Durable across restarts.
         """
-        try:
-            from friday import self_model
-            current = (self_model.enable(name) if enabled
-                       else self_model.disable(name, reason or "switched off by the operator"))
-            return {"status": "succeeded", "name": name, "enabled": enabled,
-                    "switched_off": current,
-                    "description": self_model.snapshot().describe()}
-        except Exception as exc:                             # noqa: BLE001
-            return {"status": "failed", "error": str(exc)[:500]}
+        from friday.toolsets import skills as S
+        return _execute(f"switch {name} {'on' if enabled else 'off'}", S.self_model_switch,
+                        name, enabled, reason)
