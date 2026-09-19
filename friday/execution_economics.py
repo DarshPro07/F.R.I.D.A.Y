@@ -282,6 +282,198 @@ def tier_from_requirements(text: str) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# Named-model requests and the catalog (FR-030 / FR-033)
+# ---------------------------------------------------------------------------
+
+#: Spoken names for a model family -> the substring a catalog id must
+#: contain. "send this to opus", "use gemini for this", "give it to
+#: 5.6 terra". A family, not a model: the CATALOG picks the concrete id,
+#: so a name that Hermes does not list can never be requested (FR-030:
+#: the router never invents a model). Most specific phrase first, so
+#: "gemini flash" beats "gemini" and "terra" beats "gpt".
+MODEL_FAMILIES: tuple[tuple[str, str], ...] = (
+    ("gemini flash lite", "flash-lite"), ("gemini flash", "gemini-*flash"),
+    ("gemini pro", "gemini-*pro"), ("gemini", "gemini-"),
+    ("5.6 terra", "gpt-5.6-terra"), ("terra", "gpt-5.6-terra"),
+    ("5.6 sol", "gpt-5.6-sol"), ("sol", "gpt-5.6-sol"),
+    ("5.6 luna", "gpt-5.6-luna"), ("luna", "gpt-5.6-luna"),
+    ("astra", "gpt-6-astra"),
+    ("opus", "claude-opus"), ("sonnet", "claude-sonnet"), ("haiku", "claude-haiku"),
+    ("fable", "claude-fable"), ("claude", "claude-"),
+    ("gpt", "gpt-"), ("codex", "gpt-"),
+    ("nemotron", "nemotron"), ("deepseek", "deepseek"), ("glm", "glm-"),
+)
+
+#: Words that signal a model is being NAMED for the task rather than
+#: mentioned. "use gemini for this", "send it to opus", "with sonnet",
+#: "route this to terra". Without one of these, "the gemini adapter is
+#: broken" is a task about Gemini, not a request to run on it. Bare "to "
+#: is deliberately absent: "compares to haiku" mentions haiku; "send it
+#: to haiku" is covered by its own phrase.
+_NAMING = ("use ", "using ", "with ", "send this to ", "send it to ", "give it to ",
+           "give this to ", "route this to ", "route it to ", "hand this to ",
+           "hand it to ", "this to ", "it to ", "on ", "via ", "through ", "ask ",
+           "let ", "have ")
+
+
+def _matches(model: str, needle: str) -> bool:
+    """`needle` with `*` as "anything": "gemini-*flash" matches
+    gemini-3.5-flash and gemini-3.6-flash-lite, not gemini-3.1-pro."""
+    if "*" not in needle:
+        return needle in model
+    head, tail = needle.split("*", 1)
+    i = model.find(head)
+    return i >= 0 and tail in model[i + len(head):]
+
+
+def _version(model: str) -> tuple:
+    """Sortable version key from an id: claude-opus-5 > claude-opus-4-8,
+    gemini-3.6-flash > gemini-3.5-flash. Previews and lites sort below
+    their plain sibling at the same number; among OpenAI's named
+    siblings at one version (sol / terra / luna) the ordering the
+    catalog uses is terra > sol > luna, terra being the capable default
+    and luna the small one."""
+    import re
+    nums = tuple(int(n) for n in re.findall(r"\d+", model)[:4])
+    penalty = sum(1 for w in ("preview", "lite", "free", "mini", "nano") if w in model)
+    sibling = {"terra": 3, "sol": 2, "luna": 1}
+    rank = next((v for k, v in sibling.items() if k in model), 0)
+    return nums, -penalty, rank
+
+
+def _catalog() -> dict[str, list[str]]:
+    """provider -> model ids, from the friday profile's provider cache.
+    Empty when the cache is absent."""
+    from friday.hermes_bridge import ENV_PROFILE, ENV_PROFILE_HOME, \
+        profile_home
+    home = os.environ.get(ENV_PROFILE_HOME) or profile_home(
+        os.environ.get(ENV_PROFILE, "friday"))
+    if not home:
+        return {}
+    try:
+        import json
+        raw = json.loads((Path(home) / "provider_models_cache.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out: dict[str, list[str]] = {}
+    for provider, entry in (raw.items() if isinstance(raw, dict) else []):
+        models = entry.get("models") if isinstance(entry, dict) else entry
+        ids = [m if isinstance(m, str) else str(m.get("id", "")) for m in (models or [])]
+        out[str(provider)] = [m for m in ids if m]
+    return out
+
+
+def _credentialed_providers() -> list[str]:
+    """Providers the friday profile holds a credential for, from the
+    profile's auth.json `credential_pool` - names only, never the
+    values. Empty when unreadable: no credential file, no cross-provider
+    route (FR-030 fail-closed)."""
+    from friday.hermes_bridge import ENV_PROFILE, ENV_PROFILE_HOME, \
+        profile_home
+    home = os.environ.get(ENV_PROFILE_HOME) or profile_home(
+        os.environ.get(ENV_PROFILE, "friday"))
+    if not home:
+        return []
+    try:
+        import json
+        raw = json.loads((Path(home) / "auth.json").read_text(encoding="utf-8"))
+        pool = raw.get("credential_pool") if isinstance(raw, dict) else None
+        return sorted(str(p) for p in (pool or {}).keys())
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def _first_model(provider: str, needle: str, catalog: dict[str, list[str]],
+                 prefer: str = "") -> str:
+    """The provider's best catalog id for a family, or "".
+
+    `prefer` (the profile's own default model) wins when it is in the
+    family - "send this to opus" on a profile whose default IS an opus
+    means that opus. Otherwise the highest version number, with previews,
+    lites and free tiers below their plain sibling. Catalog order is NOT
+    preference order (measured: anthropic lists opus-4-8 before opus-5,
+    gemini lists 3.1-pro before 3.6-flash)."""
+    hits = [m for m in catalog.get(provider, []) if _matches(m, needle)]
+    if not hits:
+        return ""
+    if prefer in hits:
+        return prefer
+    return max(hits, key=_version)
+
+
+def model_from_requirements(text: str) -> tuple[str, str, str]:
+    """(provider, model, family) the request names, or ("", "", "").
+
+    Measured live 2026-09-19: "use gemini for this", "send this to opus"
+    and "use gpt-5.6-terra" were all routed to the tier's haiku/sonnet -
+    a named model was ignored unless it was a tier word. The owner
+    chooses the model by saying it; the catalog and the credential pool
+    decide whether that is possible.
+
+    Resolution, FR-030 (a pinned provider resolves its own compatible
+    model; cross-provider leakage impossible):
+
+      1. an EXACT catalog id in the sentence wins ("use gpt-5.6-terra");
+         else the family must be NAMED for the task ("use X", "send to
+         X"), not merely mentioned;
+      2. only providers with a credential are considered, the profile's
+         main provider first;
+      3. the concrete id is the provider's own catalog entry for that
+         family - never the phrase, never a name from another provider.
+
+    A family with no credentialed provider listing it resolves to
+    ("", "", family) so the caller can say WHY the request was not
+    honoured instead of silently substituting.
+    """
+    low = " " + " ".join((text or "").lower().split()) + " "
+    catalog = _catalog()
+    pool = _credentialed_providers()
+    from friday.hermes_bridge import _profile_model_default
+    main_provider, main_model = _profile_model_default()
+    order = ([main_provider] if main_provider in pool else []) + [p for p in pool if p != main_provider]
+
+    # 1a. an exact id, spoken as written
+    for provider in order:
+        for model in sorted(catalog.get(provider, []), key=len, reverse=True):
+            if f" {model.lower()} " in low or f" {model.lower()}:" in low or f" {model.lower()}," in low:
+                return provider, model, model
+    # 1b. a family, named for the task
+    family = ""
+    needle = ""
+    for phrase, sub in MODEL_FAMILIES:
+        idx = low.find(" " + phrase)
+        if idx < 0:
+            continue
+        before = low[max(0, idx - 20):idx + 1]
+        if not any(before.endswith(" " + n.strip() + " ") or before.endswith(n) for n in _NAMING):
+            continue
+        family, needle = phrase, sub
+        break
+    if not family:
+        return "", "", ""
+    # A version spoken next to the family is a constraint, not a hint:
+    # "gemini 3.5 flash" is 3.5, not the newest flash. Keep only catalog
+    # ids carrying that number; if none does, fall through to the family.
+    import re
+    spoken = re.search(r"\b(\d+(?:\.\d+)?)\b", low[low.find(" " + family):low.find(" " + family) + len(family) + 12])
+    for provider in order:
+        hits = [m for m in catalog.get(provider, []) if _matches(m, needle)]
+        if spoken:
+            # "opus 4.7" -> claude-opus-4-7: ids write the dot as a dash.
+            wanted = (spoken.group(1), spoken.group(1).replace(".", "-"))
+            hits = [m for m in hits if any(w in m for w in wanted)]
+        if not hits:
+            continue
+        prefer = main_model if provider == main_provider else ""
+        model = prefer if prefer in hits else max(hits, key=_version)
+        return provider, model, family
+    if spoken:
+        # the number was named but no credentialed provider lists it
+        return "", "", f"{family} {spoken.group(1)}"
+    return "", "", family
+
+
 def resolve_model(tier: str) -> str:
     """Concrete model for a tier, or "" meaning the profile default."""
     return _tier_table().get(tier, "")
@@ -402,45 +594,69 @@ def plan_delegation(text: str, *, code_refs: int = 0, acceptance: int = 0,
     provider = ""
     switched_from = ""
     wait_until = ""
+    unhonoured = ""
     if model:
         chosen_model = model
         reason = f"model pinned by caller ({model}); " + base_reason
     else:
-        from friday.provider_cooldowns import active
-        cooled = active()
-        cands = candidates(route.tier)
-        first_provider, first_model = cands[0]
-        chosen = None
-        earliest = ""
-        for cand_provider, cand_model in cands:
-            until = cooled.get((cand_provider, cand_model))
-            if until is None:
-                chosen = (cand_provider, cand_model)
-                break
-            if not earliest or until < earliest:
-                earliest = until
-        if chosen is None:
-            # Every candidate is cooled - do NOT hand back a capped
-            # candidate as "chosen" (that hammers it inside its own
-            # cooldown window). model/provider stay empty; the caller gets
-            # wait_until so it can requeue instead of dispatching.
-            chosen_model = ""
-            wait_until = earliest
-            reason = (f"waiting for {first_provider or 'the profile default'} "
-                      f"until {_fmt_hhmm(earliest)}")
-        else:
-            provider, chosen_model = chosen
-            if chosen != (first_provider, first_model):
-                switched_from = first_provider or first_model
-                when = _fmt_hhmm(cooled.get((first_provider, first_model), ""))
-                reason = (f"{switched_from} capped until {when} → "
-                          f"{provider or chosen_model}; " + base_reason)
+        # The owner named a model out loud. That is the pin - resolved
+        # through the credential pool and the provider's own catalog, so
+        # the pair Hermes receives is one it can actually serve (FR-030).
+        # A cooled named route is still honoured: he asked for it, and
+        # the gateway's own failover says no if it is capped - the
+        # alternative is silently running his "opus" task on haiku.
+        named_provider, named_model, family = model_from_requirements(text)
+        if named_model:
+            provider, chosen_model = named_provider, named_model
+            reason = (f"{family} requested in the goal -> {named_provider}/{named_model}; "
+                      + base_reason)
+            route = Route(route.level, route.tier, route.reason)
+        elif family:
+            # Named, but no credentialed provider lists it. Do not
+            # substitute in silence: fall through to the tier route and
+            # carry the refusal so the caller can say it.
+            unhonoured = (f"no credentialed provider lists a {family} model; "
+                          f"using the {route.tier} tier instead")
+            named_model = ""
+        if not named_model:
+            from friday.provider_cooldowns import active
+            cooled = active()
+            cands = candidates(route.tier)
+            first_provider, first_model = cands[0]
+            chosen = None
+            earliest = ""
+            for cand_provider, cand_model in cands:
+                until = cooled.get((cand_provider, cand_model))
+                if until is None:
+                    chosen = (cand_provider, cand_model)
+                    break
+                if not earliest or until < earliest:
+                    earliest = until
+            if chosen is None:
+                # Every candidate is cooled - do NOT hand back a capped
+                # candidate as "chosen" (that hammers it inside its own
+                # cooldown window). model/provider stay empty; the caller gets
+                # wait_until so it can requeue instead of dispatching.
+                chosen_model = ""
+                wait_until = earliest
+                reason = (f"waiting for {first_provider or 'the profile default'} "
+                          f"until {_fmt_hhmm(earliest)}")
             else:
-                reason = base_reason
+                provider, chosen_model = chosen
+                if chosen != (first_provider, first_model):
+                    switched_from = first_provider or first_model
+                    when = _fmt_hhmm(cooled.get((first_provider, first_model), ""))
+                    reason = (f"{switched_from} capped until {when} → "
+                              f"{provider or chosen_model}; " + base_reason)
+                else:
+                    reason = base_reason
+            if unhonoured:
+                reason = unhonoured + "; " + reason
     return {"level": route.level, "tier": route.tier, "model": chosen_model,
             "provider": provider, "effort": chosen_effort, "reason": reason,
             "kind": econ.kind, "consequence": econ.consequence,
-            "switched_from": switched_from, "wait_until": wait_until}
+            "switched_from": switched_from, "wait_until": wait_until,
+            "unhonoured": unhonoured}
 
 
 # ---------------------------------------------------------------------------

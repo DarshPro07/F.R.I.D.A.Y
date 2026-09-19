@@ -382,15 +382,27 @@ def _run_hermes(operation, arguments):
                                acceptance=tuple(a for a in (args.get("acceptance") or []) if a))
         plan = ee.plan_delegation(goal, acceptance=len(bundle.acceptance))
         from friday.config import PROJECT_ROOT
-        out = sup.delegate(bundle, model=plan["model"], route_reason=plan["reason"],
+        # provider travels WITH the model (FR-030): a named Gemini model
+        # sent without its provider reaches Hermes under the profile's main
+        # provider and 404s - or worse, silently runs on the wrong one.
+        out = sup.delegate(bundle, model=plan["model"], provider=plan.get("provider", ""),
+                           route_reason=plan["reason"],
                            reasoning_effort=plan["effort"], wait=False,
                            workspace=str(PROJECT_ROOT))
+        say = "Hermes has it; I will tell you when it is done."
+        if plan.get("unhonoured"):
+            say = ("Hermes has it, but not on the model you named - %s. I will tell "
+                   "you when it is done." % plan["unhonoured"])
+        elif plan.get("provider") and plan.get("model"):
+            say = "Hermes has it on %s; I will tell you when it is done." % plan["model"]
         return {"result": _json.dumps({
             "status": "working", "work_run_id": out["work_run_id"],
             "tier": plan["tier"], "model": plan["model"] or "profile default",
+            "provider": plan.get("provider") or "profile default",
             "effort": plan["effort"], "route": plan["reason"][:160],
+            "unhonoured": plan.get("unhonoured", ""),
             "bundle_chars": out["bundle"]["chars"],
-            "say": "Hermes has it; I will tell you when it is done."})}
+            "say": say})}
     except hb.HermesUnavailable as exc:
         return {"error": "Hermes is not reachable: %s" % str(exc)[:160]}
     except AttributeError as exc:

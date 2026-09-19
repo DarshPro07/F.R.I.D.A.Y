@@ -163,6 +163,9 @@ def register(mcp):
                      "conversation automatically when Hermes finishes - "
                      "tell the boss it is in progress and stop. Do not "
                      "delegate the same task again."),
+            "route": {"tier": plan["tier"], "model": plan["model"] or "profile default",
+                      "provider": plan.get("provider") or "profile default",
+                      "effort": plan["effort"], "unhonoured": plan.get("unhonoured", "")},
             "bundle": out["bundle"],
         }
 

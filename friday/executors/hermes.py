@@ -95,7 +95,8 @@ class HermesExecutor:
             sup = self.supervisor()
             out = sup.delegate(
                 to_bridge_bundle(bundle), friday_run_id=run_ctx.run_id,
-                model=plan["model"], reasoning_effort=plan["effort"],
+                model=plan["model"], provider=plan.get("provider", ""),
+                reasoning_effort=plan["effort"],
                 route_reason=plan["reason"], workspace=bundle.workspace,
                 wait=True, turn_timeout=timeout)
         except hb.HermesUnavailable as exc:
