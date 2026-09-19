@@ -227,9 +227,13 @@ def skill_behavior_grade(run: c.Run, spec_json: str, trace_json: str, report_dir
 # runtime self-model (ML-05)
 # ---------------------------------------------------------------------------
 
-def self_model_snapshot(run: c.Run, *, engine: PolicyEngine = default_engine) -> c.ActionResult:
+def self_model_snapshot(run: c.Run, *, tool_count: int | None = None,
+                        engine: PolicyEngine = default_engine) -> c.ActionResult:
     """What Friday actually has right now, from runtime state. A read; the
-    evidence is the snapshot's own timestamp and counts."""
+    evidence is the snapshot's own timestamp and counts. `tool_count` is
+    what the caller can see of the MCP surface (the server passes its own
+    inventory; an objective worker passes nothing and the model is told not
+    to recite a number)."""
     tool_id = "self_model_snapshot"
     blocked = _gate(run, tool_id, engine)
     if blocked:
@@ -237,7 +241,7 @@ def self_model_snapshot(run: c.Run, *, engine: PolicyEngine = default_engine) ->
     started = c.started(run.run_id, tool_id)
     try:
         from friday import self_model
-        snap = self_model.snapshot()
+        snap = self_model.snapshot(tool_count=tool_count)
         data = snap.to_dict()
     except Exception as exc:  # noqa: BLE001
         return run.record(c.failed(started, f"{type(exc).__name__}: {exc}"))

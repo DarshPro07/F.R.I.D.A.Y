@@ -741,6 +741,10 @@ class FridayAgent(Agent):
     #: Capabilities that ACTED this turn, for the completion gate in
     #: `tts_node`. Reset per turn alongside `_already_read`.
     _acted_this_turn: tuple[str, ...] = ()
+    #: Every capability that RETURNED this turn, reads included, for the
+    #: perception gate: "I'm looking at your screen" needs a look to have
+    #: happened, and a look is a read.
+    _ran_this_turn: tuple[str, ...] = ()
 
     def __init__(self, stt, llm, tts) -> None:
         self._toolset = mcp.MCPToolset(
@@ -867,14 +871,29 @@ class FridayAgent(Agent):
         `friday.honesty.find_claims` decides what counts as a completion claim;
         `_acted_this_turn` is the evidence. Returns the correction to speak
         instead, or None to let the sentence through.
+
+        2026-09-19, the owner's master prompt: "Okay, Darsh, I'm looking at
+        your screen. STEP 1: PASS - the snapshot shows ... 288 capability
+        families live" with no vision or self-model tool called. Not a
+        completion claim, so the gate above let it through. A perception
+        claim needs the read that would have produced it (`_ran_this_turn`),
+        and the correction names what was not looked at.
         """
         from friday import honesty
 
-        if self._acted_this_turn or not honesty.find_claims(spoken or ""):
-            return None
-        logger.warning("voice: unbacked completion claim refused: %r", (spoken or "")[:160])
-        return ("I have not actually done that, boss - I said it without doing "
-                "it. Nothing was touched. Ask me again and I will carry it out.")
+        text = spoken or ""
+        if not self._acted_this_turn and honesty.find_claims(text):
+            logger.warning("voice: unbacked completion claim refused: %r", text[:160])
+            return ("I have not actually done that, boss - I said it without doing "
+                    "it. Nothing was touched. Ask me again and I will carry it out.")
+        unseen = honesty.unbacked_perception(text, self._ran_this_turn)
+        if unseen:
+            logger.warning("voice: unbacked perception claim refused: %r (ran=%s)",
+                           unseen[0][:160], list(self._ran_this_turn))
+            return ("I have not actually looked, boss - I described something I "
+                    "never checked. Nothing was captured. Ask me again and I will "
+                    "take the snapshot first and tell you what it shows.")
+        return None
 
     @function_tool
     async def list_capability_areas(self) -> str:
@@ -1104,6 +1123,7 @@ class FridayAgent(Agent):
         # Recorded after the call returned without raising: a capability that
         # threw is handled above and never reaches here, so it can never back
         # a claim.
+        self._ran_this_turn = self._ran_this_turn + (capability,)
         if not ownership.is_read_only(capability):
             self._acted_this_turn = self._acted_this_turn + (capability,)
         # Latency attribution (the owner's rule: report the cause, keep the
@@ -1465,6 +1485,7 @@ class FridayAgent(Agent):
         """
         self._already_read = ()
         self._acted_this_turn = ()
+        self._ran_this_turn = ()
         self._spoke_this_turn = False
         # The owner's words for THIS turn. `use_capability` licenses a
         # Friday-own write against these and nothing else (A-036): a page

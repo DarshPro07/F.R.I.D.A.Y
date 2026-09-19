@@ -1007,6 +1007,42 @@ def _honest_about_acting(answer: str, acted, calls_made) -> str:
             "word and I will carry it out.")
 
 
+#: The browser brain's tool ids, for the perception gate: the room agent
+#: records MCP tool ids; this path records (family, operation) pairs, and the
+#: perception evidence table is written in tool-id prefixes. A screen look
+#: on this path is desktop/plan or desktop/point (both capture the screen);
+#: a self-check is selfcheck/run; a status read is work/status or
+#: hermes/status.
+_PERCEPTION_IDS = {
+    ("desktop", "plan"): "screen_plan", ("desktop", "point"): "screen_point",
+    ("desktop", "step"): "screen_step",
+    ("selfcheck", "run"): "selfcheck", ("work", "status"): "work_status",
+    ("hermes", "status"): "hermes_status",
+}
+
+
+def _honest_about_seeing(answer: str, acted) -> str:
+    """Refuse a perception claim the turn cannot back - the sibling of
+    `_honest_about_acting` for "I'm looking at your screen" / "the snapshot
+    shows" / "I checked" said with nothing looked at. Measured on the room
+    path 2026-09-19 (the owner's master prompt); the same model runs here,
+    with the same words available to it."""
+    text = (answer or "").strip()
+    if not text:
+        return answer
+    from friday import honesty
+    ran = tuple(_PERCEPTION_IDS.get(tuple(pair), "%s_%s" % tuple(pair))
+                for pair in (acted or ()))
+    unseen = honesty.unbacked_perception(text, ran)
+    if not unseen:
+        return answer
+    logger.warning("voice: perception claimed with nothing looked at (%s): %r",
+                   sorted(ran), unseen[0][:160])
+    return ("I have not actually looked, sir - I described something I never "
+            "checked. Nothing was captured. Ask me again and I will look first "
+            "and tell you what I see.")
+
+
 def _grounded_work_answer(low: str):
     """'What did Hermes finish, and why that model?' is answered from the run
     ledger, never from the conversation - the sibling of the "what's running"
@@ -1463,6 +1499,7 @@ def reply(text, history=None):
                 "I found it, sir, but lost my words - ask me once more.")
         answer = _honest_about_hermes(answer, used)
         answer = _honest_about_acting(answer, acted, calls_made)
+        answer = _honest_about_seeing(answer, acted)
         message_id = _remember_turn("assistant", answer)
         latency = timer.report()
         return {"reply": answer, "model": name, "message_id": message_id,

@@ -158,6 +158,42 @@ class TestSelfModel:
         assert res.output["description"] and "modalities" in res.output
         assert res.verification.method == "runtime_snapshot"
 
+    def test_the_server_passes_its_own_inventory_count(self):
+        """The MCP tool runs inside the server that owns the tools; spoken
+        live, it said "the MCP tool inventory is not readable right now" from
+        the one process where it always is. With the count the description
+        recites it; without, it says not to."""
+        with_count = S.self_model_snapshot(_run(), tool_count=200, engine=PolicyEngine())
+        assert with_count.output["tool_count"] == 200
+        assert "You have 200 tools" in with_count.output["description"]
+        without = S.self_model_snapshot(_run(), engine=PolicyEngine())
+        assert without.output["tool_count"] is None
+        assert "do not recite a tool count" in without.output["description"]
+
+    def test_the_mcp_adapter_reads_the_count_from_the_server(self, monkeypatch):
+        """The adapter, not the toolset, knows the server: the count it passes
+        is FastMCP's own tool manager's list, so it cannot drift from the
+        inventory the client sees."""
+        from friday.tools import vnext_control as V
+        captured = {}
+
+        class _Manager:
+            def list_tools(self):
+                return [object()] * 7
+
+        class _MCP:
+            _tool_manager = _Manager()
+
+            def tool(self):
+                def deco(fn):
+                    captured[fn.__name__] = fn
+                    return fn
+                return deco
+        V.register(_MCP())
+        out = captured["self_model_snapshot"]()
+        assert out["output"]["tool_count"] == 7
+        assert "You have 7 tools" in out["output"]["description"]
+
     def test_switch_off_and_on_are_read_back_from_disk(self, switches):
         off = S.self_model_switch(_run(), "camera", False, "lens cap", engine=PolicyEngine())
         assert off.status == c.SUCCEEDED, off.error

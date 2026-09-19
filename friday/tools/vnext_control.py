@@ -288,7 +288,15 @@ def register(mcp):
         every capability claim in the prompts; there is no static list.
         """
         from friday.toolsets import skills as S
-        return _execute("self-model snapshot", S.self_model_snapshot)
+        # This tool runs INSIDE the server that owns the inventory, so the
+        # count is a fact here - it used to be passed as None and the answer
+        # said "the MCP tool inventory is not readable right now" from the
+        # one process where it always is.
+        try:
+            tool_count = len(mcp._tool_manager.list_tools())
+        except Exception:                                    # noqa: BLE001
+            tool_count = None
+        return _execute("self-model snapshot", S.self_model_snapshot, tool_count=tool_count)
 
     @mcp.tool()
     def self_model_switch(name: str, enabled: bool, reason: str = "") -> dict:

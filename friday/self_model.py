@@ -197,6 +197,15 @@ class Snapshot:
             parts.append("Model routes with current evidence: " + ", ".join(sorted(healthy)) + ".")
         else:
             parts.append("No model route has current health evidence; a route is only healthy after it answers.")
+        # The rest of the ledger, by state, so "which providers are unprobed /
+        # stale" is answered from here and never guessed: the live answer to
+        # that question was "none" with seven STALE rows on disk.
+        other: dict[str, list[str]] = {}
+        for r in self.routes:
+            if r.state != "HEALTHY":
+                other.setdefault(r.state.lower(), []).append(r.provider)
+        for state, names in sorted(other.items()):
+            parts.append(f"Model routes {state}: " + ", ".join(sorted(names)) + ".")
         for lim in self.limits:
             parts.append(lim)
         return " ".join(parts)
@@ -286,19 +295,30 @@ def _families(off: dict[str, str]) -> list[Family]:
 
 def _routes(telemetry=None, providers: list[str] | None = None) -> list[Route]:
     """Route verdicts from the gateway ledger. No ledger, no providers ->
-    empty, which describe() renders as 'no current evidence'."""
-    if not providers:
-        return []
+    empty, which describe() renders as 'no current evidence'.
+
+    `providers=None` means "whatever the ledger has seen": the callers that
+    matter (the two prompt assemblers, `self_model_snapshot`) do not know
+    the provider list, and passing nothing used to yield an empty route
+    list - so the description said "No model route has current health
+    evidence" with seven providers in the ledger, and the spoken answer to
+    "which providers are unprobed" was invented. An explicit empty list
+    still means "ask about nobody"."""
     try:
-        from friday import provider_health as ph
         if telemetry is None:
             from friday.model_gateway import GatewayTelemetry
             telemetry = GatewayTelemetry()
+        if providers is None:
+            from friday import provider_health as ph
+            providers = sorted(ph.latest_by_provider(telemetry.recent(limit=500)))
+        if not providers:
+            return []
+        from friday import provider_health as ph
         verdicts = ph.assess(telemetry, providers)
         return [Route(p, v.state, getattr(v, "reason", "") or "") for p, v in sorted(verdicts.items())]
     except Exception as exc:  # noqa: BLE001
         logger.warning("self-model: provider health unreadable: %s", exc)
-        return [Route(p, UNPROBED, f"health unreadable: {exc}"[:120]) for p in providers]
+        return [Route(p, UNPROBED, f"health unreadable: {exc}"[:120]) for p in (providers or [])]
 
 
 def snapshot(*, tool_count: int | None = None, providers: list[str] | None = None,

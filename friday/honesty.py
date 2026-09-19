@@ -96,6 +96,70 @@ _NEGATION_RE = tuple(re.compile(p, re.I) for p in NEGATION_PATTERNS)
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 
+#: Perception claims: "I'm looking at your screen", "the snapshot shows",
+#: "I can see the camera is on", "I checked my status". Not completion
+#: claims - nothing was built - but the same lie in a different tense: a
+#: sentence asserting Friday LOOKED when no look happened. Measured live
+#: (owner's master prompt, 2026-09-19): "Okay, Darsh, I'm looking at your
+#: screen. STEP 1: PASS - the snapshot shows the camera and screen capture
+#: are available, there are 288 capability families live" - with no vision
+#: tool and no self-model tool called that turn. The completion gate let it
+#: through because "looking at" and "shows" are not on its list.
+#:
+#: Each claim word names the tool ids (as prefixes) that can back it. The
+#: reads are the evidence here, which is why this is a separate audit from
+#: `audit()`: there, a read never backs a claim; here, a read is the claim.
+PERCEPTION_EVIDENCE: dict[str, tuple[str, ...]] = {
+    # what she says she is looking at / saw. "I can see X" is the assertion
+    # itself here, unlike "I can create X" (an offer), so `can` is not a
+    # negation for this pattern. "I see." alone is a discourse marker and
+    # needs an object: "I see a terminal", "I can see the camera is on".
+    r"(?:i(?:'m| am) (?:looking|glancing) at|^looking at (?:your|the|his)|i (?:can |could )?see (?:a|an|the|that|your|my|two|three|\d+|it|them|him|her|nothing|no|[A-Z][a-z]+)\b(?! you mean| what you)|i(?:'ve| have)? (?:just )?(?:looked|glanced) at|i (?:took|grabbed|captured) (?:a )?(?:snapshot|screenshot|frame|look))":
+        ("vision_", "screen_", "desktop_point", "self_model_snapshot"),
+    # what she says the snapshot / check / status told her
+    r"(?:the |my |a )?(?:snapshot|screenshot|frame|self[- ]model|status check|check) (?:shows|says|reports|confirms|indicates|tells me)":
+        ("vision_", "screen_", "self_model_snapshot", "system_", "objective_status", "hermes_status", "work_status"),
+    r"(?:i(?:'ve| have)? (?:just )?checked|i (?:ran|did) (?:a |the )?(?:check|snapshot|scan|probe)|having checked)":
+        ("vision_", "screen_", "self_model_snapshot", "system_", "objective_", "hermes_", "work_", "files_", "selfcheck", "skill_", "connector_", "model_"),
+}
+_PERCEPTION_RE = {re.compile(rf"\b{pattern}\b", re.I | re.M): prefixes
+                  for pattern, prefixes in PERCEPTION_EVIDENCE.items()}
+
+#: The negation list minus the offer modals: "I can see the terminal" is a
+#: claim of sight, where "I can open Spotify" is an offer. Questions,
+#: "can't", "cannot", "once", "if you" and the rest still disqualify.
+_PERCEPTION_NEGATION_RE = tuple(
+    re.compile(p.replace("can|could|will|would|shall|should|may|might|", "will|would|shall|should|may|might|"), re.I)
+    for p in NEGATION_PATTERNS)
+
+
+def _perception_negated(sentence: str) -> bool:
+    return any(rx.search(sentence) for rx in _PERCEPTION_NEGATION_RE)
+
+
+def perception_claims(text: str) -> list[tuple[str, tuple[str, ...]]]:
+    """(sentence, tool prefixes that could back it) for every sentence that
+    asserts Friday looked at or checked something. Negated, hypothetical and
+    question sentences are not claims."""
+    out = []
+    for sentence in sentences(text):
+        if _perception_negated(sentence):
+            continue
+        for rx, prefixes in _PERCEPTION_RE.items():
+            if rx.search(sentence):
+                out.append((sentence, prefixes))
+                break
+    return out
+
+
+def unbacked_perception(text: str, ran: tuple[str, ...] | list[str]) -> list[str]:
+    """The perception claims in `text` that none of the tool ids in `ran`
+    can back. `ran` is every capability that returned without raising this
+    turn - reads included, because a read is exactly what a look is."""
+    ran = tuple(ran or ())
+    return [sentence for sentence, prefixes in perception_claims(text)
+            if not any(tool.startswith(p) for tool in ran for p in prefixes)]
+
 
 @dataclass(frozen=True)
 class ClaimAudit:

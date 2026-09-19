@@ -135,6 +135,32 @@ _ABOUT_THIS_CODEBASE = re.compile(
     re.IGNORECASE,
 )
 
+#: A question about Friday HERSELF - what she can do, see, hear, has switched
+#: on, is running - or about her own runs. Measured live (owner's master
+#: prompt, 2026-09-19): "tell me whether the camera and screen capture are
+#: available on this machine right now" classified RESEARCH on `right now`,
+#: went to web_deep_research, and Friday answered from web findings: "288
+#: capability families live, no providers unprobed" - numbers that exist
+#: nowhere in her runtime - while `self_model_snapshot` (the tool that holds
+#: the true answer) sat unused. The web cannot know what this process has;
+#: like the codebase guard, this is not a preference between two routes.
+_ABOUT_HERSELF = re.compile(
+    r"\b(?:"
+    # her senses, state and actions - "can you see", "are you listening",
+    # "did you open", "have you finished". NOT "did you think/hear about": an
+    # opinion on an iPhone launch is a web question that happens to say "you".
+    r"(?:can|could|do|are|were|did|have|will|would) you (?:still |actually |really )?"
+    r"(?:see|look|hear|listen|do|have|run|open|finish|start|stop|wait|delete|write|read|undo|remember|know what|still)\b"
+    r"|(?:are|were) you (?:still )?(?:there|listening|awake|running|online|busy|working|ready|able)\b"
+    r"|(?:your|yourself|urself)\b"                                     # your camera, snapshot of yourself
+    r"|(?:what|which) (?:tools?|capabilit(?:y|ies)|skills?|providers?|models?|routes?) (?:do you|can you|are you|have you)"
+    r"|(?:the|this|that|my|an?) (?:current |active |running |last |latest )?(?:objectives?|runs?|tasks?|delegations?|snapshot|workers?)\b"
+    r"|\b(?:friday|jarvis|hermes)\b"
+    r"|\bwhat time is it\b|\bwhat(?:'s| is) the (?:time|date)\b"
+    r"|\b(?:capability famil(?:y|ies)|self[- ]model|ladder states?|permissions? manifest|action journal|file actions)\b"
+    r")",
+    re.IGNORECASE)
+
 
 def classify(question: str) -> tuple[str, str]:
     """
@@ -158,6 +184,8 @@ def classify(question: str) -> tuple[str, str]:
     if _CURRENT.search(text) or _NEWS.search(text) or _VERSIONED.search(text):
         if _ABOUT_THIS_CODEBASE.search(text):
             return FAST, "about our own source; the answer is on this disk"
+        if _ABOUT_HERSELF.search(text) or _ABOUT_THIS_MACHINE.search(text):
+            return FAST, "about Friday herself or this machine; the answer is in the runtime, not on the web"
         return RESEARCH, "the answer has a date on it"
 
     if _DEFINITIONAL.match(text):

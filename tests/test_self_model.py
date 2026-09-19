@@ -101,6 +101,32 @@ class TestSnapshot:
         assert "do not recite a tool count" in sm.snapshot(tool_count=None).describe()
         assert "You have 42 tools" in sm.snapshot(tool_count=42).describe()
 
+    def test_routes_default_to_whatever_the_ledger_has_seen(self, switches, tmp_path):
+        """Live (2026-09-19): every caller passed no provider list, so the
+        route list was empty and the description said "No model route has
+        current health evidence" with seven providers in the ledger - and
+        "which providers are unprobed" was answered "none". No list means
+        the ledger's providers; an explicit empty list still means nobody."""
+        from friday.model_gateway import GatewayTelemetry
+        t = GatewayTelemetry(tmp_path / "t.sqlite3")
+        t.record(objective_id="o", worker="probe", task_class="probe", provider="anthropic",
+                 model="claude-x", status="ok", output_tokens=4)
+        t.record(objective_id="o", worker="probe", task_class="probe", provider="gemini",
+                 model="g-x", status="failed", output_tokens=0)
+        snap = sm.snapshot(telemetry=t)
+        assert {r.provider for r in snap.routes} == {"anthropic", "gemini"}
+        assert snap.healthy_routes() == ["anthropic"]
+        text = snap.describe()
+        assert "Model routes with current evidence: anthropic." in text
+        assert "gemini" in text and "Model routes " in text.split("anthropic.")[1]
+        assert sm.snapshot(providers=[], telemetry=t).routes == []
+
+    def test_every_non_healthy_route_is_named_with_its_state(self, switches, tmp_path):
+        from friday.model_gateway import GatewayTelemetry
+        empty = GatewayTelemetry(tmp_path / "empty.sqlite3")
+        snap = sm.snapshot(providers=["openai", "nvidia"], telemetry=empty)
+        assert "Model routes unprobed: nvidia, openai." in snap.describe()
+
     def test_to_dict_is_json_serialisable(self, switches):
         json.dumps(sm.snapshot(tool_count=3).to_dict())
 

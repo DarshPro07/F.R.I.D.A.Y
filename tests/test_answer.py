@@ -293,3 +293,49 @@ def test_the_codebase_guard_does_not_swallow_real_research(question):
     to sources. A guard that catches everything is not a guard."""
     mode, _ = A.classify(question)
     assert mode == A.RESEARCH, question
+
+
+ABOUT_HERSELF = [
+    "Take a live snapshot of yourself. Tell me, from the snapshot and not from "
+    "memory: whether the camera and screen capture are available on this "
+    "machine right now, how many capability families are live, and which "
+    "providers are unprobed.",
+    "can you look through the camera right now?",
+    "what can you do right now?",
+    "are you listening right now?",
+    "is hermes running right now",
+    "what's the status of that objective",
+    "did you open notepad at any point during this run?",
+    "what time is it right now",
+    "which tools do you have right now",
+]
+
+
+@pytest.mark.parametrize('question', ABOUT_HERSELF)
+def test_a_question_about_friday_herself_is_not_researched_on_the_web(question):
+    """
+    Measured live (owner's master prompt, 2026-09-19): "tell me whether the
+    camera and screen capture are available on this machine right now"
+    classified RESEARCH on `right now`, went to web_deep_research, and Friday
+    answered from web findings - "288 capability families live, no providers
+    unprobed" - numbers that exist nowhere in her runtime, while
+    `self_model_snapshot` sat unused. The web cannot know what this process
+    has; sending the question there is not a preference between two routes.
+    """
+    mode, why = A.classify(question)
+    assert mode != A.RESEARCH, f"{question!r} routed to the web: {why}"
+
+
+STILL_WEB_DESPITE_YOU = [
+    "what did you think of the latest iphone launch",
+    "have you heard about the new gemini release today",
+    "do you know the current inflation rate",
+]
+
+
+@pytest.mark.parametrize('question', STILL_WEB_DESPITE_YOU)
+def test_saying_you_does_not_make_a_web_question_about_her(question):
+    """The negative control for the guard above: an opinion or a fact with a
+    date is still research even when the sentence addresses her."""
+    mode, _ = A.classify(question)
+    assert mode == A.RESEARCH, question
