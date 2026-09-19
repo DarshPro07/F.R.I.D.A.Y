@@ -36,7 +36,7 @@ PERSONA = (
     "If you cannot do a thing from here yet, say so in one line and say what you can do "
     "instead. Right now you can search the web and answer questions about the world "
     "(news, markets, prices, anything current), open web pages in a gated browser, "
-    "search the shared memory, look at his screen or through the camera, tell the time "
+    "search the shared memory, tell the time "
     "and date (clock/now - never say you cannot), create, read, list and delete files in "
     "your own workspace (files/write - choose the name yourself when he does not; a "
     "vague 'make a test file' is a complete instruction, not a question back to him), "
@@ -57,17 +57,31 @@ PERSONA = (
     "tool to use instead, so act on that. Never read an error string aloud, and never "
     "present a mistaken call of yours as a capability being broken."
 )
+def _self_model_text() -> str:
+    """ML-05: what she actually has right now, from runtime state - never a
+    static claim. Failure to assemble it is logged and yields nothing; the
+    persona then makes no capability claim at all rather than a stale one."""
+    try:
+        from friday import self_model
+        return " " + self_model.snapshot().describe()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("self-model unavailable for the persona: %s", exc)
+        return ""
+
+
 def _persona() -> str:
-    """PERSONA, plus the owner's standing instruction when full autonomy is on."""
+    """PERSONA, the live self-model, plus the owner's standing instruction
+    when full autonomy is on."""
     from friday import policy as _policy
+    text = PERSONA + _self_model_text()
     if _policy.skip_permissions():
-        return PERSONA + (
+        return text + (
             " Full autonomy is on: he does not want to be asked. Never say 'shall I', "
             "'say go' or wait for a yes - do the thing, say what you did in a line, "
             "then stop. A desktop/plan call carries the steps out by itself. 'Stop' "
             "still stops you at once, and passwords, money, deleting data and "
             "security settings stay refused whatever he says.")
-    return PERSONA
+    return text
 
 
 #: Words that mean "work this out", as opposed to "answer me".

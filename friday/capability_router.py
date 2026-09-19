@@ -172,7 +172,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "model_gateway": ("model_providers", "model_infer", "model_usage"),
     "adversarial": ("decision_deliberate", "change_review"),
     "selfdev": ("selfdev_run", "selfdev_promote", "selfdev_rollback", "selfdev_status"),
-    "governor": ("system_pressure", "system_diagnostics"),
+    "governor": ("system_pressure", "system_diagnostics", "self_model_snapshot", "self_model_switch"),
     "observability": ("objective_trace",),
     "connectors": (
         "connector_list", "connector_describe", "connector_connect", "connector_verify",

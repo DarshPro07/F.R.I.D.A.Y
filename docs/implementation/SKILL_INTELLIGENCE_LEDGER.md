@@ -52,7 +52,7 @@ tests, or a narrow extension of code that already works.
 | FR-150..152 | Data classes + LOCAL_ONLY physical enforcement | EXISTING | VERIFIED | `f81c2d4`; test_model_gateway |
 | FR-160..166 | Authorized security pack | PARTIAL | NOT_AUDITED | fabric `risk=restricted` + `authorized_scope`; no PASSIVE/ACTIVE/BLOCKED modes |
 | FR-170..182 | Self-audit / change-type / self-dev isolation | PARTIAL | NOT_AUDITED | `self_upgrade.KERNEL_PATHS` protects trust roots |
-| ML-05 | RuntimeSelfModel from live capability state | PARTIAL | NOT_AUDITED | data exists in `fabric.report()` + `provider_health`; no assembled self-description |
+| ML-05 | RuntimeSelfModel from live capability state | PARTIAL | **VERIFIED** | `friday/self_model.py`; 15 tests, 7 plants red/restored (incl. both static claims restored → red, no-ledger-reads-healthy → red); snapshot = modalities (mss/display, cv2; "snapshot only, never a live feed") + `fabric.family_report()` + `provider_health.assess` (no ledger = UNPROBED) + durable operator switches; injected into BOTH prompt paths (`voice_brain._persona`, `agent_friday.build_instructions`); static "look at his screen or through the camera" and "You have 169 tools" removed; golden journey §87 (camera off → "cannot look at the camera (lens cap on)" → on → identical text, no prompt edit) passes; live probe on this host: verify venv says camera UNAVAILABLE (cv2 missing), live venv says AVAILABLE; tools `self_model_snapshot` / `self_model_switch` (DEVICE_SETTING); gates 268 + 176 + 107 green |
 | ML-09/10 | ActionJournal / undo with before-state | PARTIAL | NOT_AUDITED | files recycle exists; no general journal |
 | ML-11 | Unforgeable human confirmation | EXISTING | VERIFIED | `confirmation.Book` binds nonce to exact action; R21 timeout≠consent |
 | ML-18 | EchoGuard | UNVERIFIED | BLOCKED_EXTERNAL | needs real-hardware measurement; cannot verify from this session |
@@ -74,7 +74,7 @@ tests, or a narrow extension of code that already works.
 2. ~~FR-012 / GB-07/08~~ VERIFIED `b251844`
 3. ~~GB-13~~ VERIFIED `8252cd4`
 3b. ~~GB-16~~ VERIFIED (skill behaviour evaluator; ECC quarantine)
-4. ML-05 — RuntimeSelfModel assembled from `fabric.report()` + `provider_health` (data exists; assembly missing)
+4. ~~ML-05~~ VERIFIED (RuntimeSelfModel; static capability claims removed from both prompts)
 5. ML-09 — ActionJournal generalised from the files recycle path
 6. FR-100/GB-35 — event bus + WAITING_* states (Phase 6; needed by both packages)
 

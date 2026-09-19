@@ -426,7 +426,8 @@ that is what to search for:
 
 ## Never claim a capability is missing
 
-You have 169 tools. Almost nothing the boss asks for is genuinely absent, so
+You have well over a hundred tools (the live count is in your self-model
+below). Almost nothing the boss asks for is genuinely absent, so
 "I am unable to" and "that capability is not available" are answers you must
 EARN, not guess. Before any such sentence leaves your mouth:
 
@@ -597,9 +598,24 @@ def temporal_context(now: "datetime | None" = None) -> str:
     )
 
 
-def build_instructions(now=None) -> str:
-    """System prompt with the date stamped in at session start."""
-    return f"{temporal_context(now)}\n---\n\n{SYSTEM_PROMPT}"
+def self_model_section(tool_count: int | None = None) -> str:
+    """ML-05: the runtime's own account of what it has - screen/camera
+    modalities, capability families, switched-off items, the live tool
+    count. Assembled from state at call time; an assembly failure yields an
+    honest one-liner rather than a stale claim."""
+    try:
+        from friday import self_model
+        return "## What you actually have right now\n\n" + self_model.snapshot(tool_count=tool_count).describe()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("self-model unavailable for the prompt: %s", exc)
+        return ("## What you actually have right now\n\nThe self-model could not be read; "
+                "do not claim or deny any capability without checking a tool first.")
+
+
+def build_instructions(now=None, tool_count: int | None = None) -> str:
+    """System prompt with the date stamped in at session start, and the
+    live self-model appended so capability claims come from runtime state."""
+    return f"{temporal_context(now)}\n---\n\n{SYSTEM_PROMPT}\n\n---\n\n{self_model_section(tool_count)}"
 
 
 #: Speech is not writing: a URL read aloud is noise, and markdown asterisks
@@ -1409,8 +1425,9 @@ class FridayAgent(Agent):
             return False
         self._briefing = brief
         try:
+            count = len(self._router.all_tools) if (not self._tools_offline and self._router.all_tools) else None
             await self.update_instructions(
-                build_instructions() + ("\n\n---\n\n" + brief if brief else ""))
+                build_instructions(tool_count=count) + ("\n\n---\n\n" + brief if brief else ""))
             logger.info("briefing refreshed (%d chars)", len(brief))
             return True
         except Exception:

@@ -2635,6 +2635,29 @@ _ALL = (
         execution_scope='agent_runtime',
         side_effect='read',
     ),
+    # Runtime self-model (ML-05). Operating-layer; tail of the registry.
+    Capability(
+        id='self_model_snapshot',
+        intent_examples=(
+            'what do you actually have available right now, from your self-model',
+            'read your runtime self-model: which modalities and capability areas are up',
+        ),
+        negative_examples=('list the capability areas', 'run a self check'),
+        description='The runtime self-model: screen/camera modalities (snapshot only), capability families and state, switched-off items with reasons, live tool count, model routes with current health evidence. The source of every capability claim in the prompts.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+    ),
+    Capability(
+        id='self_model_switch',
+        intent_examples=(
+            'switch off the camera in your self-model until I say otherwise',
+            'turn the browser capability back on in the self-model',
+        ),
+        negative_examples=('close the browser', 'mute the microphone'),
+        description='Switch a capability off or back on by name (screen, camera, browser, desktop, web, hermes); the self-model and both prompts reflect it on the next refresh with no prompt edit. Durable across restarts.',
+        execution_scope='agent_runtime',
+        side_effect='write',
+    ),
 )
 
 CAPABILITIES: dict[str, Capability] = {cap.id: cap for cap in _ALL}

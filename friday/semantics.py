@@ -158,6 +158,7 @@ _OPERATION_BY_SUFFIX = {
     'permissions': CREATE,
     'grade': READ,
     'scenarios': READ,
+    'switch': UPDATE,
     # The screen powers. Pointing and planning only look; the step is the one
     # that drives, so it derives as EXECUTE rather than another READ.
     'point': READ,

@@ -307,3 +307,39 @@ def register(mcp):
             return out
         except Exception as exc:                             # noqa: BLE001
             return {"status": "failed", "error": str(exc)[:500]}
+
+    # -- runtime self-model (ML-05) ------------------------------------------
+
+    @mcp.tool()
+    def self_model_snapshot() -> dict:
+        """
+        What Friday actually has right now, from runtime state: screen and
+        camera modalities (snapshot only, never live), capability families
+        and their state, anything switched off and why, the live tool count,
+        model routes with current health evidence. This is the source of
+        every capability claim in the prompts; there is no static list.
+        """
+        try:
+            from friday import self_model
+            snap = self_model.snapshot()
+            return {"status": "succeeded", "description": snap.describe(), **snap.to_dict()}
+        except Exception as exc:                             # noqa: BLE001
+            return {"status": "failed", "error": str(exc)[:500]}
+
+    @mcp.tool()
+    def self_model_switch(name: str, enabled: bool, reason: str = "") -> dict:
+        """
+        Switch a capability off or back on by name (screen, camera, browser,
+        desktop, web, hermes). Off = the self-model reports it DISABLED with
+        the reason and the prompts stop offering it on the next refresh; on =
+        it returns without any prompt edit. Durable across restarts.
+        """
+        try:
+            from friday import self_model
+            current = (self_model.enable(name) if enabled
+                       else self_model.disable(name, reason or "switched off by the operator"))
+            return {"status": "succeeded", "name": name, "enabled": enabled,
+                    "switched_off": current,
+                    "description": self_model.snapshot().describe()}
+        except Exception as exc:                             # noqa: BLE001
+            return {"status": "failed", "error": str(exc)[:500]}
