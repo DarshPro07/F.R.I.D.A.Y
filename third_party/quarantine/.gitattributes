@@ -1,0 +1,3 @@
+# Audit evidence: bytes must survive checkout unchanged on every platform,
+# or the sha256 pins in QUARANTINE.json become platform-dependent.
+* -text

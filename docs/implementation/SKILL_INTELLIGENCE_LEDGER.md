@@ -35,7 +35,7 @@ tests, or a narrow extension of code that already works.
 | FR-009 | Skill lifecycle (lint/test/version/rollback/publish) | PARTIAL | NOT_AUDITED | `skill_ladder` has capture/validate/deprecate; no lint/version |
 | FR-010 | Skill candidate detection | PARTIAL | NOT_AUDITED | `self_upgrade`/autolearn exist; no detector contract |
 | FR-011 | Skill lazy loading | EXISTING | VERIFIED | Hermes progressive disclosure |
-| FR-012 / GB-07/08 | Skill fingerprint + dependency graph + NEEDS_REVALIDATION | MISSING | NOT_AUDITED | the load-bearing gap of the Gawkbot package |
+| FR-012 / GB-07/08 | Skill fingerprint + dependency graph + NEEDS_REVALIDATION | MISSING | **VERIFIED** | `b251844` `friday/skill_fingerprint.py`; 16 tests on a real ladder + temp tree; 4 plants red/restored; live probe: README sweep → `untouched`, unchanged declared file → `clean`, absent dependency reported at record time; tools `skill_declare_dependencies` / `skill_revalidation_sweep` on the vnext surface, gates 105+292 green |
 | FR-013 | Skill publication gates | MISSING | DEFERRED_WITH_REASON | no publication target exists yet; gates without a publisher are decoration |
 | FR-015 | Learn by demonstration | MISSING | DEFERRED_WITH_REASON | PRD marks "future workflow" |
 | FR-020..024 | Task classes / E-A-D / width-depth / specialists | EXISTING | VERIFIED | `execution_economics`; test_width_depth_routing 14; test_task_class_mapping |
@@ -61,7 +61,8 @@ tests, or a narrow extension of code that already works.
 | ML-23 | Transcript dedup | UNVERIFIED | NOT_AUDITED | |
 | ML-28..30 | Plugin quarantine / crash isolation | PARTIAL | NOT_AUDITED | fabric UNAVAILABLE-never-breaks-boot is the crash-isolation half |
 | GB-04 | Project brain (structured, provenance) | PARTIAL | NOT_AUDITED | `brain.py` ledger is git-tracked |
-| GB-13 | Skill permission manifest enforced at runtime | MISSING | NOT_AUDITED | policy categories exist for TOOLS not SKILLS |
+| GB-13 | Skill permission manifest enforced at runtime | MISSING | **VERIFIED** | `8252cd4` `friday/skill_permissions.py`; 36 tests, 9 plants red/restored; enforced at `CapabilityRuntime` (refuses before resolve), `ClaudeCodeExecutor.launch_for` (CLI allowlist narrowed), `HermesSupervisor.delegate` (prohibitions into contract); no manifest = read-only; gates 135+263+213 green |
+| GB-16 | Skill behaviour testing (trigger / procedure / negative / competing) | MISSING | **VERIFIED** | `friday/skill_behavior.py` (SkillBehaviorEvaluator, native); 17 tests, 5 plants red/restored; deterministic detectors over the trace (no model grades), failed step never satisfies a later `after_step`, verdict INCOMPLETE unless all three strictness scenarios ran, trace constructors redact home/secret shapes (ECC #2730); tools `skill_behavior_scenarios` / `skill_behavior_grade` on the vnext surface; gates 305 + 223 green. Concept from ECC `skill-comply`, quarantined (see below) |
 | GB-22 | Fresh Claude worker from task ledger | PARTIAL | NOT_AUDITED | `executors/claude_code.TaskBundle` is the work packet |
 | GB-23 | Windows arg-length-safe prompt transport | EXISTING | TESTING | stdin transport at `cli.py:279`, decided for a different reason; arg-length property unpinned |
 | GB-32 | Team packs as data | PARTIAL | NOT_AUDITED | `org.assemble(goal)` |
@@ -69,12 +70,50 @@ tests, or a narrow extension of code that already works.
 
 ## Order of work (by what the tree lacks, not by document numbering)
 
-1. GB-23 — pin the existing stdin transport against a 200 KB packet (cheap, closes a P0 class)
-2. FR-012 / GB-07/08 — skill fingerprint + dependency graph + NEEDS_REVALIDATION (the one genuine architecture gap in the Gawkbot package)
-3. GB-13 — skill permission manifest, enforced as an intersection with worker/objective/user authority
+1. ~~GB-23~~ VERIFIED `d7e365d`
+2. ~~FR-012 / GB-07/08~~ VERIFIED `b251844`
+3. ~~GB-13~~ VERIFIED `8252cd4`
+3b. ~~GB-16~~ VERIFIED (skill behaviour evaluator; ECC quarantine)
 4. ML-05 — RuntimeSelfModel assembled from `fabric.report()` + `provider_health` (data exists; assembly missing)
 5. ML-09 — ActionJournal generalised from the files recycle path
 6. FR-100/GB-35 — event bus + WAITING_* states (Phase 6; needed by both packages)
 
 Everything Phase 3+ (browser profiles, comms, reservations, phone) waits on
 these, because each of them consumes the skill/permission/self-model layer.
+
+## External skill ecosystem check (`npx skills find`, 2026-09-19)
+
+Searched before building GB-13 / ML-09 / project-brain, per the
+audit-before-build rule. Nothing clears the find-skills quality bar
+(1K+ installs, reputable source) for the load-bearing pieces:
+
+| Query | Best hit | Verdict |
+|-------|----------|---------|
+| skill lint | Go linters; `ar9av/obsidian-wiki@wiki-lint` 3.4K (Obsidian vaults) | not applicable |
+| skill permissions | Salesforce / Argent / NetSuite domain skills | not applicable |
+| codebase memory | `reason-machines/mcp-skills@codebase-memory-mcp-intelligence` 446 | below bar; FR-007 is a fabric adapter pinned by commit, not a skill install |
+| project knowledge wiki | `codesight-ai-context` 536, rest <100 | below bar |
+| action undo journal | `open-gsd/gsd-core@gsd-undo` 281 (GSD-specific) | below bar |
+
+Skill-authoring knowledge (`skill-creator`, `writing-skills`) is already
+installed locally. The permission manifest in particular cannot be a
+third-party skill: it must be enforced as an intersection with FRIDAY's own
+`PolicyEngine`, which is code in this tree.
+
+## ECC quarantine import (2026-09-19, FR-192 / FR-193)
+
+`third_party/quarantine/ecc/` holds two skills from `affaan-m/ecc` (MIT),
+pinned to commit `QUARANTINE.json:commit` with per-file sha256, state
+`QUARANTINED`. They are outside every skill discovery root (Hermes
+`HERMES_HOME/skills` + `skills.external_dirs`; Claude Code `.claude/skills`)
+and `tests/test_skill_behavior.py::TestQuarantine` proves that plus the
+hash pins plus "no production module imports from it". Not activated.
+
+| Skill | Review finding | FRIDAY disposition |
+|-------|----------------|--------------------|
+| `skill-comply` | Concept is right (supportive/neutral/competing strictness; trace → spec-step grading). Two defects: `grader.py` classifies events with an LLM (haiku) so the verdict is a model's opinion; and a step that failed its temporal check still satisfies later `after_step` deps via the `classified` fallback. `runner.py` persists the operator home path into reports (upstream #2730). | **Clean reimplementation** `friday/skill_behavior.py`: deterministic detectors, failure-is-not-evidence, redacting trace constructors. Import stays reference-only. |
+| `operator-approval-loop` | A prose approval protocol (ask → wait → act). FRIDAY already has the stronger, unforgeable form: `confirmation.Book` binds a nonce to the exact action and timeout ≠ consent (ML-11 VERIFIED). Adding prose on top would be a second approval system. | **REJECTED_WITH_REASON** — duplicate of ML-11; no code taken. |
+
+Dropped from scope by the user (2026-09-19): the F:-drive portable brain
+/ laptop-switching design that appeared in the PRD authoring conversation.
+Not tracked here.

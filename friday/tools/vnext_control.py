@@ -255,3 +255,55 @@ def register(mcp):
             return sp.SkillPermissions(sl.SkillLadder()).record(name, manifest_yaml)
         except Exception as exc:                             # noqa: BLE001
             return {"status": "failed", "error": str(exc)[:500]}
+
+    # -- skill behaviour evaluation (brief §16; ECC skill-comply, native) ----
+
+    @mcp.tool()
+    def skill_behavior_scenarios(skill: str, task: str, competing_pressure: str = "") -> dict:
+        """
+        The three prompts a skill must be judged under: supportive (follow the
+        procedure exactly), neutral (just the task), competing (an explicit
+        instruction to skip the checks). Run the same worker on each, collect
+        the traces, then grade with skill_behavior_grade. A verdict needs all
+        three; the competing one finds skills a worker abandons under pressure.
+        """
+        from friday import skill_behavior as sb
+        return {"status": "succeeded", "skill": skill,
+                "scenarios": [{"id": s.id, "strictness": s.strictness, "prompt": s.prompt}
+                              for s in sb.scenarios(skill, task, competing_pressure=competing_pressure)]}
+
+    @mcp.tool()
+    def skill_behavior_grade(spec_json: str, trace_json: str, report_dir: str = "") -> dict:
+        """
+        Grade whether a worker FOLLOWED a skill, deterministically. `spec_json`
+        is {skill, steps:[{id, description, detector:{tool, arguments_match,
+        output_match, status, after_step, before_step}, required, forbidden}]};
+        `trace_json` is {supportive: <trace>, neutral: <trace>, competing:
+        <trace>} where each trace is a Claude stream-json transcript string
+        or a list of {tool, arguments, status, output}. No model reads the
+        trace; a step that failed never satisfies a later step's dependency;
+        the verdict is INCOMPLETE unless all three scenarios were run. With
+        `report_dir`, a redacted markdown+json report is written there.
+        """
+        try:
+            import json as _json
+            from friday import skill_behavior as sb
+            spec = sb.Spec.from_dict(_json.loads(spec_json))
+            raw = _json.loads(trace_json)
+            traces: dict[str, list[sb.Event]] = {}
+            for key, val in (raw or {}).items():
+                if isinstance(val, str):
+                    traces[key] = sb.events_from_stream_json(val)
+                else:
+                    traces[key] = [sb.Event(order=i, tool=str(e.get("tool", "")),
+                                            arguments=sb._redact(sb._ser(e.get("arguments"))),
+                                            status=str(e.get("status", "")),
+                                            output=sb._redact(sb._ser(e.get("output"))))
+                                   for i, e in enumerate(val or [])]
+            ev = sb.evaluate(spec, traces)
+            out = {"status": "succeeded", **ev.to_dict()}
+            if report_dir:
+                out["report"] = str(sb.write_report(ev, report_dir))
+            return out
+        except Exception as exc:                             # noqa: BLE001
+            return {"status": "failed", "error": str(exc)[:500]}

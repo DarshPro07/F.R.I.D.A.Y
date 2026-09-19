@@ -1,0 +1,144 @@
+{
+  "upstream": "https://github.com/affaan-m/ecc",
+  "commit": "07756cee15788a54506031462794ad645719b028",
+  "license": "MIT",
+  "state": "QUARANTINED",
+  "imported_at": "2026-09-19",
+  "imported_by": "claude-fable-5-1 session (ECC selective import)",
+  "not_installed": [
+    "hooks/",
+    "plugin runtime",
+    "GateGuard",
+    "continuous-learning-v2",
+    "rules/",
+    "commands/",
+    "agents/"
+  ],
+  "files": {
+    "LICENSE": {
+      "git_blob": "b832b6f642312312367c07688dc7426db40a82ed",
+      "sha256": "326146379f01bb137c0a5d3c54770c1aa31076705c8b88a7f6b26a460f6221b2",
+      "bytes": 1071
+    },
+    "operator-approval-loop/SKILL.md": {
+      "git_blob": "5c97fa8381df307236f989afc1c1498bcf622de3",
+      "sha256": "6f79952c1498c2748ea13d74ca665c7508ae72068e014e848dee0754e3d650e5",
+      "bytes": 13126
+    },
+    "operator-approval-loop/references/approval-ledger.sql": {
+      "git_blob": "d56e0d76adb0452955a38ccf243c4e6f067a4de8",
+      "sha256": "511f41e804d7c1f80849a33860ab8d242048c8cebfbf28833ce2d95d26d516cc",
+      "bytes": 14330
+    },
+    "operator-approval-loop/references/approval_claims.py": {
+      "git_blob": "48c464d7ea05039b6c7684a6e50d7381b867f72c",
+      "sha256": "cf30d615cf8fc4e69dbc279952de11cc0df2a6881380cf759ba607f85e9f1505",
+      "bytes": 7629
+    },
+    "skill-comply/SKILL.md": {
+      "git_blob": "303863e302fe9ff340197fc7442a86bacbb7f425",
+      "sha256": "e26cbbc30a32ea8c76c56d09ba9a3a921e82ad6e2360f825ec63d3f8df6b1f5a",
+      "bytes": 2500
+    },
+    "skill-comply/fixtures/compliant_trace.jsonl": {
+      "git_blob": "6e315f1b9cd833bb65513a77c56da01b5b043fa8",
+      "sha256": "1b58f5b9797bddaf14b1835652fccff04f822668b74a50e480edd0634bda81a8",
+      "bytes": 1070
+    },
+    "skill-comply/fixtures/noncompliant_trace.jsonl": {
+      "git_blob": "a0c692695f009c2fc8e623a081ddd11d1307971e",
+      "sha256": "9c3d2564bd32b126cccfd119df55c55f885aeb6ac91fd854d68597eb21d7a432",
+      "bytes": 629
+    },
+    "skill-comply/fixtures/tdd_spec.yaml": {
+      "git_blob": "c1274979527fe7c96cb644a67b62ecc16800fbd5",
+      "sha256": "0bd9ce7e26fef1274240f97a6d86ee3398638e93f29077aa695c98d4095b863a",
+      "bytes": 1266
+    },
+    "skill-comply/prompts/classifier.md": {
+      "git_blob": "7a706c918b29fe185a114287419f5f1f3df48c55",
+      "sha256": "8374ccb93bbb7908b7bb0d41223f8c5c38347c7421014bec3d7d534a71d5842e",
+      "bytes": 1064
+    },
+    "skill-comply/prompts/scenario_generator.md": {
+      "git_blob": "2cd14d9aceac31fd39008c0a2ae6c334b29192f3",
+      "sha256": "ba508c9560dcc5c632bbf916d5f38369b03cb0b216fb8dfdcd6ade8c962952e2",
+      "bytes": 1974
+    },
+    "skill-comply/prompts/spec_generator.md": {
+      "git_blob": "d9fabb7c52fffd043672ad7ab0aad6b6fd042ff0",
+      "sha256": "dd702f91352cde35e394419a307a6498cad369e934c1babb0a4b22e669156c74",
+      "bytes": 1645
+    },
+    "skill-comply/pyproject.toml": {
+      "git_blob": "3584f8262be42014f9294b62b8122e78907acafc",
+      "sha256": "df59c2204d2873c542deb60cecba3add4c9485e1701f4c586e4f7ef92b77655c",
+      "bytes": 360
+    },
+    "skill-comply/scripts/__init__.py": {
+      "git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "skill-comply/scripts/classifier.py": {
+      "git_blob": "2e4207c8237593044bb00afd6829094268221ed3",
+      "sha256": "f9847e0cb5475e81a0b8fd7fa70f802bf653c0867ea0c39b71de13c05763cbc9",
+      "bytes": 2414
+    },
+    "skill-comply/scripts/grader.py": {
+      "git_blob": "516beb18bfccd61cd4c473c44328681ad376c8e0",
+      "sha256": "01ba072b5a5535f98aa71bca30ccde493a501b86e2b95f65af73a74dd8dd1259",
+      "bytes": 4404
+    },
+    "skill-comply/scripts/parser.py": {
+      "git_blob": "0b8169d4f34338b5769408253cfd141c1d45d148",
+      "sha256": "ccb2a27cccd3b4af41e618a7b64c8753b24a8298e6c77e80271fe4f71ca82629",
+      "bytes": 2777
+    },
+    "skill-comply/scripts/report.py": {
+      "git_blob": "88ff4ea72c8439737caa905a12f3635e6cc4469c",
+      "sha256": "fc188fb8c64c5d429e0333e7277a6a3ba87ba7f8eaa33ee4de29673bd37e725f",
+      "bytes": 6470
+    },
+    "skill-comply/scripts/run.py": {
+      "git_blob": "3e4695e517520e294cdcc14af78d4ac77b420c59",
+      "sha256": "9bd9af2a98490d5dbbbb9de9c42be3c883d61a1cf8014c4604eb46380293e223",
+      "bytes": 4294
+    },
+    "skill-comply/scripts/runner.py": {
+      "git_blob": "ffad8447fdb45f02febebdf7de1c81a334eda17c",
+      "sha256": "1901b9084756be518d86ed3f205b8f8f945b772af7b022700d70ad0e7a4eb59f",
+      "bytes": 9114
+    },
+    "skill-comply/scripts/scenario_generator.py": {
+      "git_blob": "db8db26a150b06943520148eacbb977d5aba9ba0",
+      "sha256": "b900df39ea775494d716751b095beb0e01af5b2288caf5afd7207afe197f16f8",
+      "bytes": 1835
+    },
+    "skill-comply/scripts/spec_generator.py": {
+      "git_blob": "3b3661736ab395f3b79f591e01ce0da888ace822",
+      "sha256": "3d22f61dd77c1e1589effe556f58155794e67b9b8f90867ae06f1e59b80756c4",
+      "bytes": 2202
+    },
+    "skill-comply/scripts/utils.py": {
+      "git_blob": "77b9a5c9cd81d8a2c550396d3069bd33aafb7865",
+      "sha256": "7a5b1509ac0785f330314e0b59f57dd495ca83e8111738e30169ed49e85d0d22",
+      "bytes": 411
+    },
+    "skill-comply/tests/test_grader.py": {
+      "git_blob": "a95825266d6bfb12e36b1406934f3f67b85ca481",
+      "sha256": "311007f79f744190b22b3239503891e4900bdc3a822505fce7a881ea059ff1e5",
+      "bytes": 8185
+    },
+    "skill-comply/tests/test_parser.py": {
+      "git_blob": "2145d702fa75a8f46532431b973b1a748aac367e",
+      "sha256": "c56055fd0927d38debb564f48e2b5432a7daaf3ecf8ff7d020bd98af3acd924e",
+      "bytes": 3140
+    },
+    "skill-comply/tests/test_runner.py": {
+      "git_blob": "f8141d184d8661ab6814405eb3c4ac1f94dbadbc",
+      "sha256": "a4b8009cfe9646b77f065c57aa3ac858dc054938c466d2960f43062e798c14f5",
+      "bytes": 12265
+    }
+  }
+}

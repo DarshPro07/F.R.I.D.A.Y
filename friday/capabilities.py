@@ -2613,6 +2613,28 @@ _ALL = (
         execution_scope='agent_runtime',
         side_effect='write',
     ),
+    Capability(
+        id='skill_behavior_grade',
+        intent_examples=(
+            'grade whether the worker actually followed the skill',
+            'check skill compliance across the supportive neutral and competing scenarios',
+        ),
+        negative_examples=('list skill candidates', 'run the tests'),
+        description='Deterministically grade a worker trace against a skill behaviour spec under three prompt strictness levels; no model reads the trace and a failed step never satisfies a later dependency.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+    ),
+    Capability(
+        id='skill_behavior_scenarios',
+        intent_examples=(
+            'give me the supportive neutral and competing prompts for the skill compliance run',
+            'generate the three strictness scenarios to test whether the worker follows the skill',
+        ),
+        negative_examples=('grade the trace', 'list the skills'),
+        description='Produce the three prompt strictness levels (supportive, neutral, competing) a skill must be judged under before its traces are graded.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+    ),
 )
 
 CAPABILITIES: dict[str, Capability] = {cap.id: cap for cap in _ALL}
