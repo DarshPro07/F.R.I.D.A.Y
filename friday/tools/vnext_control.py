@@ -19,6 +19,21 @@ from friday.user_policy import UserPolicy
 logger = logging.getLogger("friday-agent")
 
 
+def _record_state_snapshot(source: str, *, count: int, health: str = "", evidence: str = "",
+                           ttl_s: float = 300.0) -> None:
+    """An authoritative reading of some fleet state, for the STATE-claim
+    audit (`friday.action_evidence`). Never raises: a ledger hiccup must not
+    cost the read that produced the snapshot."""
+    try:
+        import time
+        from friday import action_evidence as AE
+        AE.ledger().snapshot(AE.CapabilityStateSnapshot(
+            source=source, collected_at=time.time(), count=count, health=health,
+            evidence=evidence, ttl_s=ttl_s))
+    except Exception:                                    # noqa: BLE001
+        logger.exception("state snapshot %s not recorded", source)
+
+
 def register(mcp):
     # -- permissions -------------------------------------------------------
 
@@ -187,10 +202,15 @@ def register(mcp):
         """Skill candidates/validated skills (optionally by state:
         CANDIDATE / VALIDATED / NEEDS_REVALIDATION / REJECTED / DEPRECATED)."""
         try:
-            return {"status": "succeeded",
-                    "skills": sl.SkillLadder().listing(state)}
+            skills = sl.SkillLadder().listing(state)
         except Exception as exc:                             # noqa: BLE001
             return {"status": "failed", "error": str(exc)[:500]}
+        # This read IS the authoritative state (D): a spoken "N skills are
+        # VALIDATED" is licensed by it for a few minutes, never by memory.
+        _record_state_snapshot("skills", count=len(skills),
+                               health=",".join(sorted({str(s.get("state", "")) for s in skills}))[:80],
+                               evidence=f"skill_list(state={state!r}) -> {len(skills)} rows")
+        return {"status": "succeeded", "skills": skills}
 
     # -- skill intelligence + self-model -----------------------------------
     #

@@ -157,8 +157,11 @@ def test_an_unbacked_spoken_claim_is_replaced_before_it_is_synthesised():
 
 
 def test_a_spoken_claim_backed_by_a_real_action_is_spoken_unchanged():
-    """The negative case: she DID act, so she may say so."""
-    out = _spoken(("desktop_plan",), ["I have opened the Start Menu ", "for you, sir."])
+    """The negative case: she DID act, so she may say so. `desktop_step` is
+    the acting capability (a plan only proposes - see the test below), and
+    the evidence gate reads the capability, not merely that the tuple is
+    non-empty."""
+    out = _spoken(("desktop_step",), ["I have opened the Start Menu ", "for you, sir."])
     assert "start menu" in out.lower()
     assert "not actually done" not in out.lower()
 

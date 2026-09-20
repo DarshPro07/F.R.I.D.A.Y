@@ -15,6 +15,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
+import uuid
 
 logger = logging.getLogger("friday.voice")
 
@@ -201,7 +203,7 @@ _LAST_PLAN_NONCE = {"nonce": "", "task": ""}
 #: is allowed only when THESE words asked for that kind of action: the model
 #: chains tool calls, and a page or a notebook it just read must not be able
 #: to turn "what is queued?" into "schedule a post" (security review, 2026-09-03).
-_CURRENT_TURN = {"text": ""}
+_CURRENT_TURN = {"text": "", "turn_id": "", "started_at": 0.0}
 _WRITE_SYNONYMS = {
     "schedule": ("schedule", "post", "publish", "queue up", "share"),
     "run": ("run", "start", "execute", "trigger", "launch", "kick off"),
@@ -1055,6 +1057,81 @@ def _honest_about_seeing(answer: str, acted) -> str:
             "and tell you what I see.")
 
 
+def _honest_about_evidence(answer: str) -> str:
+    """The ledger-backed audit, after the three older gates: every claim
+    class (`action_evidence.classify_claims`) against every executor's rows
+    for this turn. This is what catches "I'm still running into the same
+    path restriction" said with no file call (FAILURE_CLAIM), and what lets
+    "Hermes wrote it; the file exists" through when Hermes's tool.complete
+    row says so (the older gates only saw this process's own calls)."""
+    text = (answer or "").strip()
+    if not text:
+        return answer
+    try:
+        from friday import action_evidence as AE
+        led = AE.ledger()
+        evidence = led.evidence_for_turn(_CURRENT_TURN.get("turn_id", ""),
+                                         float(_CURRENT_TURN.get("started_at") or 0.0))
+        snaps = {s: snap for s in ("skills", "capability_families", "providers", "self_model")
+                 if (snap := led.snapshot_for(s)) is not None}
+        verdict = AE.audit_claims(text, evidence, snapshots=snaps)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("evidence audit failed; answer passed unaudited")
+        return answer
+    if verdict.ok:
+        return answer
+    logger.warning("voice: unbacked %s refused: %r (%s)", verdict.first_kind,
+                   verdict.unbacked[0].sentence[:160], "; ".join(verdict.reasons)[:200])
+    return AE.correction_for(verdict).replace("boss", "sir")
+
+
+def _evidence_start(family: str, operation: str, arguments: dict) -> str:
+    try:
+        from friday import action_evidence as AE
+        return AE.ledger().start(executor=AE.FRIDAY_DIRECT, capability="%s_%s" % (family, operation),
+                                 operation=operation, arguments=arguments,
+                                 turn_id=_CURRENT_TURN.get("turn_id", ""))
+    except Exception:                                    # noqa: BLE001
+        logger.exception("evidence ledger start failed for %s/%s", family, operation)
+        return ""
+
+
+def _evidence_finish(evidence_id: str, out: dict) -> None:
+    """Close the row from the capability's own envelope: an `error` key is
+    a FAILED row; a `result` with a verification is a verified SUCCEEDED
+    row; a bare result is SUCCEEDED but unverified (backs an attempt, not
+    a completion)."""
+    if not evidence_id:
+        return
+    try:
+        from friday import action_evidence as AE
+        if not isinstance(out, dict) or "error" in out:
+            AE.ledger().finish(evidence_id, status=AE.FAILED,
+                               result=str((out or {}).get("error", out))[:300])
+            return
+        payload = out.get("result")
+        if isinstance(payload, str) and payload.lstrip().startswith("{"):
+            try:
+                import json as _j
+                payload = _j.loads(payload)
+            except ValueError:
+                pass
+        ref, verified = "", False
+        if isinstance(payload, dict):
+            st = str(payload.get("status", "")).lower()
+            if st in ("failed", "cancelled", "partial"):
+                AE.ledger().finish(evidence_id, status=st, result=str(payload.get("error", ""))[:300])
+                return
+            ver = payload.get("verification")
+            ref = (ver.get("evidence") if isinstance(ver, dict) else str(ver or ""))[:400]
+            verified = bool(ref) and (st == "succeeded" or bool(payload.get("may_claim_completion")))
+        AE.ledger().finish(evidence_id, status=AE.SUCCEEDED, result=str(payload)[:300],
+                           evidence_type="runtime_verification" if verified else "",
+                           evidence_ref=ref, verified=verified)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("evidence ledger finish failed for %s", evidence_id)
+
+
 def _grounded_work_answer(low: str):
     """'What did Hermes finish, and why that model?' is answered from the run
     ledger, never from the conversation - the sibling of the "what's running"
@@ -1384,6 +1461,8 @@ def reply(text, history=None):
 
     _remember_turn("user", text)
     _CURRENT_TURN["text"] = text
+    _CURRENT_TURN["turn_id"] = "ui-%s" % uuid.uuid4().hex[:10]
+    _CURRENT_TURN["started_at"] = time.time()
 
     cmd = _try_command(text)
     if cmd:
@@ -1478,8 +1557,10 @@ def reply(text, history=None):
                 # "reading the screen" rather than a generic "a tool".
                 stage = {"desktop": "screen", "web": "web"}.get(fam, "tool")
                 timer.start(stage)
+                evidence_id = _evidence_start(fam, op, args.get("arguments") or {})
                 out = _run_capability(fam, op, args.get("arguments") or {})
                 timer.stop(stage)
+                _evidence_finish(evidence_id, out)
                 if "result" in out:
                     used.append(fam)
                     acted.append((fam, op))
@@ -1512,6 +1593,7 @@ def reply(text, history=None):
         answer = _honest_about_hermes(answer, used)
         answer = _honest_about_acting(answer, acted, calls_made)
         answer = _honest_about_seeing(answer, acted)
+        answer = _honest_about_evidence(answer)
         message_id = _remember_turn("assistant", answer)
         latency = timer.report()
         return {"reply": answer, "model": name, "message_id": message_id,

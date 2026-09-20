@@ -245,6 +245,17 @@ def self_model_snapshot(run: c.Run, *, tool_count: int | None = None,
         data = snap.to_dict()
     except Exception as exc:  # noqa: BLE001
         return run.record(c.failed(started, f"{type(exc).__name__}: {exc}"))
+    # The snapshot is the authoritative state for provider / family / switch
+    # claims (D): recorded so "every provider route is unprobed" can be
+    # said for a few minutes after this read, and not from memory later.
+    try:
+        from friday.tools.vnext_control import _record_state_snapshot
+        _record_state_snapshot(
+            "self_model", count=len(data.get("families") or data.get("capability_families") or []),
+            health=f"{len(data.get('routes') or [])} routes, {len(data.get('switched_off') or {})} off",
+            evidence=f"self_model.snapshot at {data.get('taken_at')}")
+    except Exception:  # noqa: BLE001 - the read stands even if the note does not
+        pass
     return run.record(c.succeeded(
         started, output=_scoped({"description": snap.describe(), **data}),
         verification=c.Verification(

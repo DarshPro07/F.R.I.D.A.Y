@@ -586,6 +586,109 @@ def _describe_tool(name: str, payload: dict | None) -> str:
     return f"{verb} {target}".strip()
 
 
+# -- the action evidence ledger (G: Hermes writes into the same ledger) -------
+#
+# A Hermes tool call is an ActionEvidence row like any Friday-direct call:
+# `tool.start` opens it (keyed by Hermes's own tool_id so `tool.complete`
+# closes the same row), `tool.complete` closes it with the tool's result.
+# A FILE WRITE is verified by read-back HERE, on this machine, from the
+# path in the tool's arguments - never from the tool saying it wrote. That
+# is what lets Friday truthfully say "the file exists" after Hermes wrote
+# it (room M1 2026-09-20: the completion gate refused exactly that true
+# sentence because Hermes's work was invisible to it) and what stops her
+# saying it when Hermes claimed a write that is not on disk.
+
+_HERMES_WRITE_TOOLS = ("write_file", "patch", "edit_file", "create_file", "Write", "Edit", "MultiEdit",
+                       "NotebookEdit", "apply_patch")
+_HERMES_DELETE_TOOLS = ("delete_file", "remove_file", "rm")
+
+
+def _evidence_ledger():
+    try:
+        from friday import action_evidence as AE
+        return AE, AE.ledger()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("action evidence ledger unavailable")
+        return None, None
+
+
+def _evidence_hermes_start(work_run_id: str, payload: dict | None) -> None:
+    AE, led = _evidence_ledger()
+    if led is None or not work_run_id:
+        return
+    payload = payload or {}
+    name = str(payload.get("name", "")) or "tool"
+    args = payload.get("arguments") or payload.get("args") or {}
+    try:
+        led.start(executor=AE.HERMES, capability=name.split("__")[-1],
+                  arguments=args if isinstance(args, dict) else {},
+                  objective_id=work_run_id,
+                  action_id=f"hermes:{work_run_id}:{payload.get('tool_id', '')}")
+    except Exception:                                    # noqa: BLE001
+        logger.exception("evidence start failed for hermes tool %s", name)
+
+
+def _evidence_hermes_complete(work_run_id: str, payload: dict | None) -> None:
+    AE, led = _evidence_ledger()
+    if led is None or not work_run_id:
+        return
+    payload = payload or {}
+    name = str(payload.get("name", "")) or "tool"
+    short = name.split("__")[-1]
+    args = payload.get("arguments") or payload.get("args") or {}
+    result = payload.get("result")
+    text = result if isinstance(result, str) else json.dumps(result, default=str)
+    action_id = f"hermes:{work_run_id}:{payload.get('tool_id', '')}"
+    failed = False
+    if isinstance(result, dict):
+        failed = bool(result.get("error")) or str(result.get("status", "")).lower() in ("failed", "error")
+    elif isinstance(text, str):
+        failed = text.lstrip().lower().startswith(("error", "failed", "traceback"))
+    verified, ref, kind = False, "", ""
+    path = ""
+    if isinstance(args, dict):
+        path = str(args.get("path") or args.get("file_path") or args.get("file") or "")
+    if path and (short in _HERMES_WRITE_TOOLS or short in _HERMES_DELETE_TOOLS):
+        # The read-back: the disk, not the tool's word.
+        try:
+            exists = os.path.isfile(path)
+            if short in _HERMES_DELETE_TOOLS:
+                verified, ref = (not exists), f"read-back: {path} absent" if not exists else ""
+            else:
+                verified = exists and os.path.getsize(path) >= 0
+                ref = f"read-back: {path} exists ({os.path.getsize(path)} bytes)" if exists else ""
+            kind = "disk_readback" if verified else ""
+            if not verified and not failed:
+                failed = True                    # the tool said it wrote; the disk disagrees
+                text = f"read-back failed: {path} not found; " + text
+        except OSError:
+            pass
+    try:
+        if led.get(action_id) is None:
+            led.start(executor=AE.HERMES, capability=short, arguments=args if isinstance(args, dict) else {},
+                      objective_id=work_run_id, action_id=action_id)
+        led.finish(action_id, status=AE.FAILED if failed else AE.SUCCEEDED, result=str(text)[:300],
+                   evidence_type=kind, evidence_ref=ref, verified=verified)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("evidence finish failed for hermes tool %s", name)
+
+
+def _evidence_hermes_terminal(work_run_id: str, status: str, result: str) -> None:
+    """The run itself as one row: COMPLETE -> succeeded (unverified: a run
+    finishing is not a file existing; the tool rows above carry the
+    read-backs), PARTIAL -> partial, FAILED -> failed."""
+    AE, led = _evidence_ledger()
+    if led is None or not work_run_id:
+        return
+    mapped = {COMPLETE: AE.SUCCEEDED, PARTIAL: AE.PARTIAL, FAILED: AE.FAILED}.get(status, AE.FAILED)
+    try:
+        led.record(executor=AE.HERMES, capability="hermes_work_run", status=mapped,
+                   objective_id=work_run_id, result=result[:300],
+                   action_id=f"hermes:{work_run_id}:run")
+    except Exception:                                    # noqa: BLE001
+        logger.exception("evidence terminal row failed for %s", work_run_id)
+
+
 @functools.lru_cache(maxsize=1)
 def _profile_model_default() -> tuple[str, str]:
     """
@@ -1477,8 +1580,10 @@ class HermesSupervisor:
                 prog["last"] = _describe_tool(name, payload)
                 prog["current"] = prog["last"]   # spoken, so described
                 prog["seq"] += 1
+                _evidence_hermes_start(work_run_id, payload)
             elif kind == "tool.complete":
                 prog["current"] = ""
+                _evidence_hermes_complete(work_run_id, payload)
             elif kind == "message.complete":
                 prog["current"] = ""
                 prog["seq"] += 1
@@ -1522,6 +1627,9 @@ class HermesSupervisor:
                 record = None                       # broker updates the log
             if record is not None:
                 self.log.update(work_run_id, progress=prog, **updates)
+                if updates.get("status") in (COMPLETE, PARTIAL, FAILED):
+                    _evidence_hermes_terminal(work_run_id, updates["status"],
+                                              str(updates.get("result", ""))[:300])
                 # Terminal transition => durable delivery, created here at
                 # the moment of truth (the startup sweep covers crashes
                 # that land between the update above and this insert).

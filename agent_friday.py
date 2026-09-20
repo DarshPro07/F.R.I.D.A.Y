@@ -20,6 +20,7 @@ import os
 import pathlib
 import re
 import time
+import uuid
 
 from dotenv import load_dotenv
 from livekit.agents import JobContext, WorkerOptions, cli
@@ -641,6 +642,36 @@ MIN_SPEECH_CHUNK = int(os.getenv("TTS_MIN_CHUNK_CHARS", "160"))
 MAX_SPEECH_CHUNK = int(os.getenv("TTS_MAX_CHUNK_CHARS", "320"))
 
 
+def _turn_evidence(agent) -> list:
+    """Everything the gate may cite for the agent's current turn: the
+    durable ledger's rows (every executor, this turn or finished since it
+    began) plus the agent's own in-process tuples for any capability the
+    ledger has no row for - the ledger write failing must not turn a true
+    sentence into a refused one. Module-level so a test stand-in that
+    binds only `_refuse_unbacked_claim` still reaches it."""
+    from friday import action_evidence as AE
+    rows: list = []
+    try:
+        rows = AE.ledger().evidence_for_turn(getattr(agent, "_turn_id", "") or "",
+                                             float(getattr(agent, "_turn_started_at", 0.0) or 0.0))
+    except Exception:                                    # noqa: BLE001
+        logger.exception("evidence ledger read failed")
+    fallback = AE.in_process_rows(getattr(agent, "_ran_this_turn", ()) or (),
+                                  getattr(agent, "_acted_this_turn", ()) or (),
+                                  turn_id=getattr(agent, "_turn_id", "") or "")
+    return AE.merge_evidence(rows, fallback)
+
+
+def _state_snapshots() -> dict:
+    try:
+        from friday import action_evidence as AE
+        led = AE.ledger()
+        return {s: snap for s in ("skills", "capability_families", "providers", "self_model")
+                if (snap := led.snapshot_for(s)) is not None}
+    except Exception:                                    # noqa: BLE001
+        return {}
+
+
 def _clean_for_speech(text: str) -> str:
     return _SPEAK_MD.sub("", _SPEAK_URL.sub("", text))
 
@@ -754,6 +785,16 @@ class FridayAgent(Agent):
     #: perception gate: "I'm looking at your screen" needs a look to have
     #: happened, and a look is a read.
     _ran_this_turn: tuple[str, ...] = ()
+    #: The evidence ledger's key for this turn and when it began. Every
+    #: capability call is a row under `_turn_id`; the gate reads those rows
+    #: plus anything ANY executor finished since `_turn_started_at` (a Hermes
+    #: run completing mid-turn is evidence; one that completed during the
+    #: previous turn was already delivered and is not).
+    _turn_id: str = ""
+    _turn_started_at: float = 0.0
+    #: The correction `llm_node` substituted for a refused reply this turn,
+    #: or "" - so the transcript, the audio and the log agree on what was said.
+    _audited_correction: str = ""
 
     def __init__(self, stt, llm, tts) -> None:
         self._toolset = mcp.MCPToolset(
@@ -796,6 +837,68 @@ class FridayAgent(Agent):
             vad=silero.VAD.load(),
             tools=[self._toolset],
         )
+
+    async def llm_node(self, chat_ctx, tools, model_settings):
+        """The claim audit, at the ONE point before the reply forks.
+
+        LiveKit tees the LLM text into two consumers: `tts_node` (audio) and
+        `transcription_node` (the lk.transcription stream - what the room UI
+        renders, what the chat context keeps, what a harness reads). The
+        gate used to live in `tts_node` only, so on 2026-09-20 01:13:38 the
+        AUDIO spoke the correction while the TRANSCRIPT delivered the refused
+        sentence verbatim - "send + audit independently". A user-facing
+        claim must be audited before it reaches any surface, so the audit
+        runs here on the model's own stream and every consumer downstream
+        sees the same, already-audited text.
+
+        Shape: pass chunks through until the first sentence boundary; audit
+        that sentence; if refused, yield the correction as the whole reply
+        and drain the rest (continuing would narrate the same fiction). The
+        first sentence is the check because a claim lives in the opening
+        line and buffering the whole answer would cost time-to-first-word.
+        Tool-call chunks pass through untouched - they are not prose.
+        `tts_node` keeps its own gate as belt-and-braces for text that
+        reaches it by another route (session.say).
+        """
+        buf = ""
+        audited = False
+        refused = False
+        async for chunk in Agent.default.llm_node(self, chat_ctx, tools, model_settings):
+            content = None
+            if isinstance(chunk, str):
+                content = chunk
+            elif getattr(chunk, "delta", None) is not None:
+                content = chunk.delta.content
+                if chunk.delta.tool_calls and content and not audited:
+                    # A chunk carrying BOTH a tool call and prose: the call
+                    # must reach the runtime now, the prose joins the audit.
+                    yield chunk.model_copy(update={"delta": chunk.delta.model_copy(update={"content": None})})
+            if content is None or audited:
+                if not refused:
+                    yield chunk
+                continue
+            buf += content
+            m = re.search(r"[.!?](\s|$)", buf)
+            if not m:
+                continue                              # not a sentence yet; hold
+            audited = True
+            first = buf[:m.end()]
+            correction = self._refuse_unbacked_claim(_clean_for_speech(first))
+            if correction is not None:
+                refused = True
+                self._audited_correction = correction
+                yield correction
+                continue                              # drain the model's stream
+            yield buf                                 # release everything held
+            buf = ""
+        if not audited and buf and not refused:
+            # a reply with no sentence boundary at all: audit what there is
+            correction = self._refuse_unbacked_claim(_clean_for_speech(buf))
+            if correction is not None:
+                self._audited_correction = correction
+                yield correction
+            else:
+                yield buf
 
     async def tts_node(self, text, model_settings):
         """Clean only what is spoken, and hand the TTS whole clauses.
@@ -877,32 +980,121 @@ class FridayAgent(Agent):
         Start Menu for you, sir." The `runs` table was empty. This is the same
         gate on the voice path, where the lie would be spoken aloud.
 
-        `friday.honesty.find_claims` decides what counts as a completion claim;
-        `_acted_this_turn` is the evidence. Returns the correction to speak
-        instead, or None to let the sentence through.
-
         2026-09-19, the owner's master prompt: "Okay, Darsh, I'm looking at
         your screen. STEP 1: PASS - the snapshot shows ... 288 capability
-        families live" with no vision or self-model tool called. Not a
-        completion claim, so the gate above let it through. A perception
-        claim needs the read that would have produced it (`_ran_this_turn`),
-        and the correction names what was not looked at.
+        families live" with no vision or self-model tool called.
+
+        2026-09-20, room M1: "I'm still running into the same path
+        restriction" three turns running with no file tool called in any of
+        them - and, the other way, Hermes's genuine jarvis-hello.py refused
+        because Hermes's work was not in `_acted_this_turn`. So the evidence
+        is now the ledger (`friday.action_evidence`): every executor's rows
+        for this turn plus whatever any executor finished since the turn
+        began, audited per claim class. Returns the correction to speak
+        instead, or None to let the sentence through.
         """
-        from friday import honesty
+        from friday import action_evidence as AE
 
         text = spoken or ""
-        if not self._acted_this_turn and honesty.find_claims(text):
-            logger.warning("voice: unbacked completion claim refused: %r", text[:160])
-            return ("I have not actually done that, boss - I said it without doing "
-                    "it. Nothing was touched. Ask me again and I will carry it out.")
-        unseen = honesty.unbacked_perception(text, self._ran_this_turn)
-        if unseen:
-            logger.warning("voice: unbacked perception claim refused: %r (ran=%s)",
-                           unseen[0][:160], list(self._ran_this_turn))
-            return ("I have not actually looked, boss - I described something I "
-                    "never checked. Nothing was captured. Ask me again and I will "
-                    "take the snapshot first and tell you what it shows.")
-        return None
+        verdict = AE.audit_claims(text, _turn_evidence(self), snapshots=_state_snapshots())
+        if verdict.ok:
+            return None
+        logger.warning("voice: unbacked %s refused: %r (%s)", verdict.first_kind,
+                       verdict.unbacked[0].sentence[:160], "; ".join(verdict.reasons)[:200])
+        return AE.correction_for(verdict)
+
+    # -- the evidence ledger, per turn ---------------------------------------
+
+    def record_tool_evidence(self, event) -> None:
+        """`function_tools_executed` handler: one evidence row per tool call
+        the session executed, whichever way the model reached it. Calls that
+        went through `use_capability` already have a row (opened before the
+        call, with the runtime's verification); those are skipped by name so
+        a capability is not counted twice. Direct MCP calls - the ones that
+        bypass `use_capability` - get their row here, closed from the tool's
+        own output envelope."""
+        try:
+            from friday import action_evidence as AE
+            led = AE.ledger()
+            already = set(self._ran_this_turn)
+            for call, output in event.zipped():
+                name = getattr(call, "name", "") or ""
+                if not name or name in ("use_capability", "search_capabilities",
+                                        "list_capability_areas") or name in already:
+                    continue
+                args = {}
+                try:
+                    raw = getattr(call, "arguments", "") or "{}"
+                    args = json.loads(raw) if isinstance(raw, str) else dict(raw)
+                except (ValueError, TypeError):
+                    args = {}
+                text = getattr(output, "output", "") if output is not None else ""
+                is_error = bool(getattr(output, "is_error", False)) if output is not None else True
+                aid = led.start(executor=AE.MCP, capability=name, arguments=args if isinstance(args, dict) else {},
+                                turn_id=self._turn_id)
+                status, verified, ref = AE.FAILED if is_error else AE.SUCCEEDED, False, ""
+                if not is_error:
+                    try:
+                        payload = json.loads(text) if isinstance(text, str) and text.lstrip().startswith("{") else {}
+                    except ValueError:
+                        payload = {}
+                    if isinstance(payload, dict):
+                        st = str(payload.get("status", "")).lower()
+                        if st in ("failed", "cancelled", "partial"):
+                            status = st
+                        elif st == "succeeded" or payload.get("may_claim_completion"):
+                            ver = payload.get("verification")
+                            ref = (ver.get("evidence") if isinstance(ver, dict) else str(ver or ""))[:400]
+                            verified = bool(ref)
+                led.finish(aid, status=status, result=str(text)[:300],
+                           evidence_type="runtime_verification" if verified else "",
+                           evidence_ref=ref, verified=verified)
+                # The in-process tuples too, so the older gates and the
+                # in-process fallback see direct calls as well.
+                self._ran_this_turn = self._ran_this_turn + (name,)
+                if status == AE.SUCCEEDED and not ownership.is_read_only(name):
+                    self._acted_this_turn = self._acted_this_turn + (name,)
+        except Exception:                                    # noqa: BLE001
+            logger.exception("tool evidence not recorded")
+
+    def _evidence_start(self, capability: str, arguments: dict) -> str:
+        try:
+            from friday import action_evidence as AE
+            return AE.ledger().start(executor=AE.FRIDAY_DIRECT, capability=capability,
+                                     arguments=arguments, turn_id=self._turn_id)
+        except Exception:                                    # noqa: BLE001
+            logger.exception("evidence ledger start failed for %s", capability)
+            return ""
+
+    def _evidence_finish(self, evidence_id: str, *, status: str = "succeeded",
+                         result: str = "") -> None:
+        """Close the row with what the capability said about itself: the
+        runtime's own `status` and `verification` on the result envelope are
+        the read-back, so a FAILED envelope is a FAILED row even though the
+        call returned, and `verified` is true only when the runtime verified."""
+        if not evidence_id:
+            return
+        try:
+            from friday import action_evidence as AE
+            verified, ref, reported = False, "", status
+            if status == "succeeded":
+                try:
+                    payload = json.loads(result) if result.lstrip().startswith("{") else {}
+                except ValueError:
+                    payload = {}
+                if isinstance(payload, dict):
+                    st = str(payload.get("status", "")).lower()
+                    if st in ("failed", "cancelled", "partial"):
+                        reported = st
+                    elif st == "succeeded" or payload.get("may_claim_completion"):
+                        ver = payload.get("verification")
+                        ref = (ver.get("evidence") if isinstance(ver, dict) else str(ver or ""))[:400]
+                        verified = bool(ref)
+            AE.ledger().finish(evidence_id, status=reported, result=result[:300],
+                               evidence_type="runtime_verification" if verified else "",
+                               evidence_ref=ref, verified=verified)
+        except Exception:                                    # noqa: BLE001
+            logger.exception("evidence ledger finish failed for %s", evidence_id)
 
     @function_tool
     async def list_capability_areas(self) -> str:
@@ -1120,14 +1312,22 @@ class FridayAgent(Agent):
         self._keep_group_open(capability)
         self._router.note_used(capability)
         started = time.monotonic()
+        # The evidence row is opened BEFORE the call and closed with what
+        # actually came back, so a capability that raised is a FAILED row
+        # (it backs "I couldn't", never "I did") and one that never returned
+        # stays STARTED (it backs "I tried", nothing more).
+        evidence_id = self._evidence_start(capability, parsed)
         try:
             result = str(await self._call_capability(capability, parsed))
         except Exception as exc:
             # The tool failed. Say so - do not let the model narrate success.
+            self._evidence_finish(evidence_id, status="failed",
+                                  result=f"{type(exc).__name__}: {exc}")
             return json.dumps({
                 "error": f"{capability} failed: {type(exc).__name__}: {exc}",
                 "may_claim_completion": False,
             })
+        self._evidence_finish(evidence_id, result=result)
         # What actually ACTED this turn, for the completion gate in tts_node.
         # Recorded after the call returned without raising: a capability that
         # threw is handled above and never reaches here, so it can never back
@@ -1496,6 +1696,9 @@ class FridayAgent(Agent):
         self._acted_this_turn = ()
         self._ran_this_turn = ()
         self._spoke_this_turn = False
+        self._turn_id = f"turn-{uuid.uuid4().hex[:10]}"
+        self._turn_started_at = time.time()
+        self._audited_correction = ""
         # The owner's words for THIS turn. `use_capability` licenses a
         # Friday-own write against these and nothing else (A-036): a page
         # the model reads mid-turn cannot become his instruction.
@@ -2484,6 +2687,16 @@ async def entrypoint(ctx: JobContext) -> None:
     # speaks for it, but only when a tool actually succeeded first.
     guard = resilience.TurnGuard()
     guard.attach(session)
+
+    # Every tool the model calls, whichever door it used, becomes an evidence
+    # row. `use_capability` records its own calls, but the MCP toolset ALSO
+    # exposes tools directly (files_write, files_read, ...) and a direct call
+    # never passes through `use_capability` - room M1, 2026-09-20 01:13:32:
+    # the model called MCP `files_write` straight, the file landed, and the
+    # completion gate refused "the file exists" because nothing had recorded
+    # the call. The session's function_tools_executed event is the one place
+    # that sees them all.
+    session.on("function_tools_executed", agent.record_tool_evidence)
 
     # The session-side continuity plane: it records each user turn as a durable
     # objective (resume an open one, else start it) and tracks claims, usage

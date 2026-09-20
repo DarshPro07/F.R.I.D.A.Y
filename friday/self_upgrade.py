@@ -68,7 +68,7 @@ KERNEL_PATHS = (
     # the judge
     "friday/self_upgrade.py", "friday/selfdev.py", "friday/selfdev_benchmark.py",
     "friday/toolsets/selfdev.py", "friday/promotion.py", "friday/evaluation.py",
-    "friday/honesty.py", "friday/adversarial.py", "friday/golden.py",
+    "friday/honesty.py", "friday/action_evidence.py", "friday/adversarial.py", "friday/golden.py",
     "friday/reachability.py",
     "docs/golden/", "scripts/golden_corpus.py", "scripts/perf_profile.py",
     # CI security gates

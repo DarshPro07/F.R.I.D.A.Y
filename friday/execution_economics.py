@@ -384,24 +384,6 @@ def _credentialed_providers() -> list[str]:
         return []
 
 
-def _first_model(provider: str, needle: str, catalog: dict[str, list[str]],
-                 prefer: str = "") -> str:
-    """The provider's best catalog id for a family, or "".
-
-    `prefer` (the profile's own default model) wins when it is in the
-    family - "send this to opus" on a profile whose default IS an opus
-    means that opus. Otherwise the highest version number, with previews,
-    lites and free tiers below their plain sibling. Catalog order is NOT
-    preference order (measured: anthropic lists opus-4-8 before opus-5,
-    gemini lists 3.1-pro before 3.6-flash)."""
-    hits = [m for m in catalog.get(provider, []) if _matches(m, needle)]
-    if not hits:
-        return ""
-    if prefer in hits:
-        return prefer
-    return max(hits, key=_version)
-
-
 def model_from_requirements(text: str) -> tuple[str, str, str]:
     """(provider, model, family) the request names, or ("", "", "").
 

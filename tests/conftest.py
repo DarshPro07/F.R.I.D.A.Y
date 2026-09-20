@@ -175,9 +175,16 @@ def _never_the_real_database(tmp_path, monkeypatch):
     # in the boss's data/action_journal*. Same rule, same fixture.
     monkeypatch.setenv("FRIDAY_ACTION_JOURNAL", str(tmp_path / "test-journal.sqlite3"))
     monkeypatch.setattr(files, "_journal", None, raising=False)
+    # The action evidence ledger: every capability call in a test would
+    # otherwise land in the boss's data/action_evidence.sqlite3 and be
+    # citable by the live gate as "something ran this turn".
+    import friday.action_evidence as action_evidence
+    monkeypatch.setattr(action_evidence, "DEFAULT_PATH", tmp_path / "test-evidence.sqlite3")
+    action_evidence.reset_ledger(None)
     yield
     monkeypatch.setattr(memory, "_store", None, raising=False)
     monkeypatch.setattr(files, "_journal", None, raising=False)
+    action_evidence.reset_ledger(None)
 
 
 @pytest.fixture(autouse=True)

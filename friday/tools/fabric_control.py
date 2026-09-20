@@ -45,6 +45,13 @@ def register(mcp):
                    if f["state"] in (fabric.READY, fabric.DEGRADED)]
         blocked = [f for f in families
                    if f["state"] not in (fabric.READY, fabric.DEGRADED)]
+        # This read IS the authoritative fleet state (D): "N families are
+        # live" is licensed by it for a few minutes, never recited from
+        # memory. Room M1 step 11: "14 families, all READY" with no read.
+        from friday.tools.vnext_control import _record_state_snapshot
+        _record_state_snapshot("capability_families", count=len(families),
+                               health=f"{len(working)} working, {len(blocked)} attention",
+                               evidence=f"fabric.family_report() -> {len(families)} families")
         return {
             "families": families,
             "working": working,
