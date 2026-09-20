@@ -137,13 +137,23 @@ def _split_requests(text: str) -> list[str]:
     for index in range(1, len(pieces), 2):
         separator, following = pieces[index], pieces[index + 1] if index + 1 < len(pieces) else ""
         head = merged[-1]
-        if (_WHITESPACE_ONLY_SEPARATOR.match(separator or "")
-                and S._QUESTION.match(head.lstrip(" ,"))):
+        if _WHITESPACE_ONLY_SEPARATOR.match(separator or "") and (
+                S._QUESTION.match(head.lstrip(" ,"))
+                # "undo that write by its action id": a verb-shaped word
+                # right after a determiner is a NOUN ("that write", "the
+                # search", "my last move"), not a second request. Room M1
+                # split it into "undo that" + "write by its action id" and
+                # the second half became a CREATE of nothing.
+                or _ENDS_WITH_DETERMINER.search(head)):
             merged[-1] = f"{head}{separator}{following}"
             continue
         merged.append(separator)
         merged.append(following)
     return merged
+
+_ENDS_WITH_DETERMINER = re.compile(
+    r"\b(?:that|this|the|a|an|my|your|its|his|her|our|their|each|every|last|first|"
+    r"previous|next|same|whole|entire|one|no)\s*$", re.IGNORECASE)
 
 _SEQUENCING = re.compile('\\b(?:then|after that|afterwards)\\b', re.IGNORECASE)
 
@@ -157,6 +167,8 @@ class Segment:
     #: Whether it was joined to the piece before it by a sequencing word
     #: ("then", "after that"), which makes it depend on that piece.
     follows: bool = False
+    #: The exact literals this piece carries (see `friday.literals`).
+    literals: tuple = ()
 
 
 @dataclass
@@ -185,6 +197,14 @@ class Goal:
     #: True when no verb was recognised and READ was assumed: the shape is
     #: weak, and resolution lets a capability's own examples overrule it.
     operation_assumed: bool = False
+    #: Exact literals the owner spoke inside this goal's text (a filename,
+    #: dictated content, a URL, an address, a time, a branch). Immutable:
+    #: `arguments_for` uses them verbatim and never derives a substitute.
+    literals: tuple = ()
+    #: True when the target is not a vocabulary guess: it came from a
+    #: filename the owner spoke or from "it"/"that" pointing at the previous
+    #: goal. Resolution may not let example phrasings overrule it.
+    target_pinned: bool = False
 
 
 @dataclass
@@ -278,11 +298,24 @@ _BARE_VERB = re.compile('^(?:check|open|find|create|read|write|play|pause|stop|r
 
 
 def segments(text: str) -> list[Segment]:
-    """Split a request, say what each piece is, and whether it follows."""
+    """Split a request, say what each piece is, and whether it follows.
+
+    Literals are protected BEFORE the split: a filename has a dot in it,
+    and the splitter reads a dot as the end of a sentence, so
+    "Create jarvis-test.txt containing exactly the words: version one"
+    used to become "Create jarvis-test" + "txt containing ..." and the
+    planner invented a path and content of its own (room M1, 2026-09-20).
+    Each piece gets its literals back verbatim and carries them on the
+    Segment so the goal - and later `arguments_for` - can use them as the
+    owner said them.
+    """
+    from friday import literals as LIT
+
     found: list[Segment] = []
+    protected, mapping = LIT.protect(text or "")
     # The separators are kept (the pattern captures them), so a sequencing
     # word between two pieces can be read before the next piece is.
-    pieces = _split_requests(text or "")
+    pieces = _split_requests(protected)
     follows = False
 
     # A bare verb ("open") followed by a piece that asks for something
@@ -310,6 +343,8 @@ def segments(text: str) -> list[Segment]:
         piece = borrowed.get(index, raw.strip(" ,"))
         if not piece:
             continue
+        literals = LIT.for_segment(piece, mapping)
+        piece = LIT.restore(piece, mapping)
         bare, removed = _strip_vocative(piece)
         if removed and not bare.strip(" ,."):
             found.append(Segment(removed, VOCATIVE))
@@ -327,11 +362,12 @@ def segments(text: str) -> list[Segment]:
             divided = split_off_the_instruction(bare)
             if divided is not None:
                 head, tail, tail_kind = divided
-                found.append(Segment(head, classify_segment(head), follows))
+                found.append(Segment(head, classify_segment(head), follows,
+                                     tuple(l for l in literals if l.value in head)))
                 found.append(Segment(tail, tail_kind))
                 follows = False
                 continue
-        found.append(Segment(bare, kind, follows))
+        found.append(Segment(bare, kind, follows, literals))
         follows = False
     return found
 
@@ -399,15 +435,27 @@ def interpret(text: str) -> Plan:
             continue
 
         depends: tuple[str, ...] = ()
+        pinned = any(l.kind == "path" for l in segment.literals)
         # "read it" after "create a note" is the same thing, later. A pronoun
         # with no target of its own inherits the previous goal's.
         if previous is not None and _REFERS_BACK.search(segment.text):
             if target is None or target == previous.target:
+                if target is None and previous.target:
+                    pinned = True
                 target = previous.target
                 depends = (previous.goal_id,)
         elif previous is not None and segment.follows:
             # "then" makes it a step after the last one, whatever it is about.
             depends = (previous.goal_id,)
+            # "waits for jarvis-drop.txt ... and then reads it": the step
+            # after a FILE step, naming no target of its own, is about that
+            # file. Without this the target is inferred from example
+            # phrasings and "repeats its first line to me" landed on
+            # contract_pending_questions (room M1, step 7).
+            if target is None and previous.target == "FILE" and any(
+                    l.kind == "path" for l in previous.literals):
+                target = "FILE"
+                pinned = True
 
         goal = Goal(
             goal_id=f"g{counter}",
@@ -417,7 +465,19 @@ def interpret(text: str) -> Plan:
             entity=_entity(segment.text),
             depends_on=depends,
             operation_assumed=operation is None,
+            literals=segment.literals,
+            target_pinned=pinned,
         )
+        # "read the file back" after "create jarvis-test.txt": the pronoun
+        # inherits the previous goal's target AND its file literal - already
+        # PLACED ("on my Desktop" was said in the first piece, not this one)
+        # - so the read-back reads the file that was written, not a name
+        # derived from the words "the file back".
+        if (previous is not None and depends and not any(l.kind == "path" for l in goal.literals)):
+            placed = _spoken_path(previous)
+            if placed:
+                from friday import literals as LIT
+                goal.literals = goal.literals + (LIT.LiteralConstraint(LIT.PATH, placed),)
         plan.goals.append(goal)
         previous = goal
 
@@ -507,7 +567,7 @@ def resolve(plan: Plan) -> Plan:
             goal.why = (f"no target named and nothing of shape {goal.operation} "
                         f"fits these words")
             continue
-        if not backer and goal.target:
+        if not backer and goal.target and not goal.target_pinned:
             # A named target, but the shortlist is eight registry-order
             # slots: a capability of that exact shape whose examples fit
             # decisively must still be considered ("which drive is nearly
@@ -515,7 +575,9 @@ def resolve(plan: Plan) -> Plan:
             # noun can point at the wrong target ("screen brightness" ->
             # VISION): when nothing in the noun's shortlist fits the words
             # at all and one capability elsewhere fits decisively, the
-            # words win over the noun.
+            # words win over the noun. Not when the target is PINNED - a
+            # spoken filename or "it" after a file step is not a noun
+            # guess, and example phrasings may not talk it out of the file.
             inferred, other = _target_from_examples(goal.intent, goal.operation)
             if other and other not in found:
                 if inferred == goal.target:
@@ -805,22 +867,60 @@ def arguments_for(goal: Goal) -> dict:
     goal actually knows. A planner that invents arguments produces tasks that
     fail on contact - `apps_open` with no name is not a plan, it is a
     guaranteed failure with a task id.
+
+    A literal the owner spoke wins over anything derived: the path is the
+    filename he said, the content is the words he dictated. `_note_path`
+    (a name derived from the intent) is only for a goal that names no file
+    at all - "make a note about the meeting".
     """
     if not goal.capability:
         return {}
+    from friday import literals as LIT
+
     wanted = parameters_of(goal.capability)
     arguments: dict = {}
+    spoken_path = _spoken_path(goal)
+    spoken_content = LIT.first(goal.literals, LIT.CONTENT)
+    spoken_url = LIT.first(goal.literals, LIT.URL)
     for name, required in wanted.items():
         lowered = name.lower()
-        if lowered in _FROM_ENTITY and goal.entity:
+        if lowered in _FROM_PATH and spoken_path:
+            arguments[name] = spoken_path
+        elif lowered == "url" and spoken_url:
+            arguments[name] = spoken_url
+        elif lowered in _FROM_ENTITY and goal.entity:
             arguments[name] = goal.entity
         elif lowered in _FROM_QUERY:
             arguments[name] = _wanted(goal.intent)
         elif lowered in _FROM_PATH and required:
             arguments[name] = _note_path(goal)
-        elif lowered == "content" and goal.target == "FILE":
+        elif lowered == "content" and spoken_content:
+            arguments[name] = spoken_content
+        elif lowered == "content" and goal.target == "FILE" and not spoken_path:
             arguments[name] = f"Created by Friday for: {goal.intent}"
     return arguments
+
+
+def _spoken_path(goal: Goal) -> str:
+    """The file the owner named, placed where he said it is.
+
+    "jarvis-test.txt on my Desktop" is the Desktop file, not a file of that
+    name relative to wherever the process happens to run - a bare name
+    resolves against cwd, which for the agent is the project root, and the
+    jail would then ALLOW a write into the repository while the owner
+    watches his Desktop for it. A bare name with no spoken place is left
+    bare; an absolute or rooted name is already placed.
+    """
+    from friday import literals as LIT
+    from friday.known_folders import place_in_request
+
+    spoken = LIT.first(goal.literals, LIT.PATH)
+    if not spoken:
+        return ""
+    if re.match(r"^(?:[A-Za-z]:[\\/]|~[\\/]|\.{0,2}[\\/])", spoken) or re.search(r"[\\/]", spoken):
+        return spoken
+    place = place_in_request(goal.intent)
+    return str(place / spoken) if place is not None else spoken
 
 
 def _note_path(goal: Goal) -> str:

@@ -549,8 +549,9 @@ class Router:
         return [self.describe_tool(name) for _, name in scored[:limit]]
 
     def invocable(self, name: str):
-        """The tool object for a name, or None."""
-        return self.all_tools.get(name)
+        """The tool object for a name, or None. A compatibility alias
+        (`capabilities.ALIASES`) reaches its canonical tool."""
+        return self.all_tools.get(name) or self.all_tools.get(capabilities.canonical_id(name))
 
     def note_used(self, name: str) -> None:
         """

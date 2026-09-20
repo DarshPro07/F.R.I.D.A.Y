@@ -399,6 +399,16 @@ _REQUEST_VERBS = {
     'schedule': CREATE,
     'fire': EXECUTE,
     'erase': DELETE,
+    # Room M1 (2026-09-20): "Overwrite jarvis-test.txt with ..." and "undo
+    # that write" were both UNRESOLVED - neither verb was known, so a
+    # request that names its verb and its file became a task nobody
+    # understood. One reading each across objects.
+    'overwrite': UPDATE,
+    'replace': UPDATE,
+    'append': UPDATE,
+    'undo': RECOVERY,
+    'revert': RECOVERY,
+    'wait': READ,
 }
 
 _PHRASAL_VERBS = {
@@ -443,6 +453,12 @@ def for_request(text: str) -> str | None:
              if word not in _FILLER]
     if not words:
         return None
+    # "an objective that waits for the file and then reads it": inside a
+    # subordinate clause the verb is third-person singular. Try the bare
+    # form when the inflected one is unknown - only when the bare form IS
+    # a known verb, so "news" and "windows" stay nouns.
+    if words[0] not in _REQUEST_VERBS and words[0].endswith("s") and words[0][:-1] in _REQUEST_VERBS:
+        words[0] = words[0][:-1]
     for particle in words[1:3]:
         found = _PHRASAL_VERBS.get((words[0], particle))
         if found:
@@ -560,7 +576,15 @@ def target_for_request(text: str) -> str | None:
     Weaker than `for_request` and used as a weight rather than a filter: the
     operation is carried by grammar, the target only by vocabulary, and
     vocabulary is what was unreliable to begin with.
+
+    A filename in the sentence settles it: "jarvis-test.txt on my Desktop"
+    is about a FILE, and the "desktop" that follows is where the file lives,
+    not the display (room M1, 2026-09-20: DISPLAY won and the file goal
+    resolved to nothing).
     """
+    from friday import literals as LIT
+    if any(lit.kind == LIT.PATH for lit in LIT.find(text or "")):
+        return "FILE"
     words = re.findall(r"[a-z]+", (text or "").lower())
     for word in words:
         if word in _TARGET_NOUNS:

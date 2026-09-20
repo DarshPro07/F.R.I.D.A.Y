@@ -662,6 +662,16 @@ def _turn_evidence(agent) -> list:
     return AE.merge_evidence(rows, fallback)
 
 
+def _turn_history(agent) -> list:
+    """Rows older than this turn - offered only to a claim that speaks of an
+    earlier time (`audit_claims(history=)`)."""
+    try:
+        from friday import action_evidence as AE
+        return AE.ledger().evidence_before_turn(float(getattr(agent, "_turn_started_at", 0.0) or 0.0))
+    except Exception:                                    # noqa: BLE001
+        return []
+
+
 def _state_snapshots() -> dict:
     try:
         from friday import action_evidence as AE
@@ -996,7 +1006,15 @@ class FridayAgent(Agent):
         from friday import action_evidence as AE
 
         text = spoken or ""
-        verdict = AE.audit_claims(text, _turn_evidence(self), snapshots=_state_snapshots())
+        try:
+            verdict = AE.audit_claims(text, _turn_evidence(self), snapshots=_state_snapshots(),
+                                      history=_turn_history(self))
+        except Exception:                                # noqa: BLE001
+            # Fail CLOSED (AT-09): the audit crashing must not deliver an
+            # unchecked claim to the audio, the transcript or the chat
+            # context. A sentence with no claim in it still goes out.
+            logger.exception("claim audit failed; holding any claim")
+            return AE.hold_if_claim(text)
         if verdict.ok:
             return None
         logger.warning("voice: unbacked %s refused: %r (%s)", verdict.first_kind,
@@ -1579,7 +1597,10 @@ class FridayAgent(Agent):
         objective is a fact about the store, not an edit to the conversation
         that is already being answered.
         """
-        self._turn_owned_by = ""
+        # A direct file chain that already ran this turn (`act_directly_first`)
+        # keeps ownership: the model reports it and must not redo it.
+        if getattr(self, "_turn_owned_by", "") != "direct":
+            self._turn_owned_by = ""
         try:
             self._intent, self._objective_detail = route_input(user_text)
             self._admitted_run_id = (self._objective_detail
@@ -1609,6 +1630,8 @@ class FridayAgent(Agent):
             self._apply_tools()
             say_the_objective_owns_this(turn_ctx, self._admitted_run_id)
             raise_what_is_still_open(turn_ctx, user_text)
+        elif getattr(self, "_turn_owned_by", "") == "direct":
+            pass  # the chain ran; the system message above is the briefing
         else:
             ask_about_the_idea(turn_ctx, user_text)
 
@@ -1696,6 +1719,7 @@ class FridayAgent(Agent):
         self._acted_this_turn = ()
         self._ran_this_turn = ()
         self._spoke_this_turn = False
+        self._turn_owned_by = ""
         self._turn_id = f"turn-{uuid.uuid4().hex[:10]}"
         self._turn_started_at = time.time()
         self._audited_correction = ""
@@ -1708,9 +1732,65 @@ class FridayAgent(Agent):
         read = await research_first(turn_ctx, text)
         read = await check_what_he_asserted(
             turn_ctx, text, project=project) or read
-        if read:
+        # Bound as a method so a test stand-in that binds only this function
+        # onto a bare stub (tests/test_core01_*, test_autolearn) keeps working:
+        # a stub without the seam simply has no direct action to take.
+        act = getattr(self, "act_directly_first", None)
+        acted = await act(turn_ctx, text) if act is not None else False
+        if read or acted:
             self.stop_re_reading()
         self.prepare_turn(turn_ctx, text)
+
+    async def act_directly_first(self, turn_ctx, text: str) -> bool:
+        """
+        Carry out an exact file chain before the model sees the turn.
+
+        "Create jarvis-test.txt on my Desktop containing exactly the words:
+        version one, then read it back" is deterministic: the file and the
+        words are in the sentence. Room M1 (2026-09-20) sent it through
+        objective admission, whose planner invented a path and content and
+        then refused the model's own correct attempt; the browser path
+        would have asked Gemini to call files/write with the right
+        arguments and hoped. Neither is how an exact order should be
+        carried out.
+
+        `direct_action.run` executes the chain through `CapabilityRuntime`
+        - the same policy, jail, journal and evidence ledger as every other
+        executor - and returns None for anything that is not fully
+        spoken-exact, which then takes its normal route. The result is
+        handed to the model as a system message so it REPORTS what
+        happened (the runtime's words, including a failure's error text)
+        rather than doing the work again; the capabilities are recorded on
+        `_acted_this_turn` / `_ran_this_turn` so the reply audit finds the
+        evidence in-process too.
+        """
+        try:
+            from friday import direct_action
+            if direct_action.plan_for(text) is None:
+                return False
+            done = await asyncio.to_thread(direct_action.run, text, turn_id=self._turn_id)
+        except Exception:                                    # noqa: BLE001
+            logger.exception("direct action failed; answering normally")
+            return False
+        if done is None or not done.steps:
+            return False
+        self._ran_this_turn = self._ran_this_turn + done.capabilities
+        self._acted_this_turn = self._acted_this_turn + tuple(
+            cap for cap in done.capabilities if not ownership.is_read_only(cap))
+        self._already_read = self._already_read + done.capabilities
+        self._turn_owned_by = "direct"
+        verdict = "every step succeeded" if done.ok else "the chain stopped at the first failure"
+        turn_ctx.add_message(
+            role="system",
+            content=(
+                "That request named an exact file, so it has ALREADY been carried "
+                f"out, step by step, before you were asked - {verdict}. Report the "
+                "following in your own voice and do not redo any of it, do not "
+                "call use_capability for it, and do not soften a failure:\n"
+                + "\n".join(f"- {s.capability}: {s.status} - {s.spoken}" for s in done.steps)))
+        logger.info("direct_action.done steps=%d ok=%s capabilities=%s",
+                    len(done.steps), done.ok, list(done.capabilities))
+        return True
 
     async def on_exit(self) -> None:
         await self._learner.aclose()
@@ -2417,6 +2497,16 @@ def admit_objective(user_text: str) -> str | None:
     classification = classify_input(text)
     if classification != "NEW_OBJECTIVE":
         logger.info("objective.rejected reason=classified_as_%s", classification)
+        return None
+
+    # An exact file chain is not an objective. "Create jarvis-test.txt on
+    # my Desktop containing exactly the words: version one, then read it
+    # back" names its file and its words; planning it invented both and the
+    # run then refused the model's correct attempt (room M1, 2026-09-20).
+    # `direct_action` declines anything that is not fully spoken-exact.
+    from friday import direct_action
+    if direct_action.plan_for(text) is not None:
+        logger.info("objective.rejected reason=direct_file_chain")
         return None
 
     # The semantic planner reads goals out of sentence structure. It is the

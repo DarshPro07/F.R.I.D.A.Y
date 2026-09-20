@@ -433,7 +433,7 @@ const MOTION=true;try{localStorage.removeItem("fridayMotion");}catch(e){}   // n
 const TYPEC={hub:"#ffcc66",topic:"#ffaa30",fact:"#dd7700",brain:"#ffaa30",entity:"#ffcc66",conflict:"#ff5533"};
 let STATE={},ORG=null,GRAPH=null,G3=null,VIEW="hud",orbApi=null,tracker=null,LOCKED=true,ENROLLED=false,LIB=null,CAM_OK=true;
 const jget=async(u)=>{const r=await fetch(u);if(r.status===423){onLockedResponse();throw new Error("locked");}if(!r.ok)throw new Error(u+" "+r.status);return r.json();};
-const jpost=async(u,b)=>{const r=await fetch(u,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b||{})});if(r.status===423){onLockedResponse();throw new Error("locked");}if(!r.ok)throw new Error(u+" "+r.status);return r.json();};
+const jpost=async(u,b)=>{const r=await fetch(u,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b||{})});if(r.status===423){onLockedResponse();throw new Error("locked");}if(r.status===409){const d=await r.json().catch(()=>({}));const e=new Error("busy");e.busy=d;throw e;}if(!r.ok)throw new Error(u+" "+r.status);return r.json();};
 function toast(t){const x=$("toast");x.textContent=t;x.classList.add("on");clearTimeout(x._t);x._t=setTimeout(()=>x.classList.remove("on"),2600);}
 function dotFor(s){s=(s||"").toLowerCase();if(["up","healthy","available","ok","ready","online","completed","done","succeeded"].includes(s))return"up";if(["degraded","warn","partial","running","pending","clone_only","waiting_user","queued"].includes(s))return"warn";return"down";}
 const ORB_STATE={listening:"listening",thinking:"thinking",speaking:"speaking",gate:"gate"};
@@ -1168,7 +1168,7 @@ async function askJarvis(text){text=(text||"").trim();if(!text||LOCKED)return;LA
     if(d.latency_note)logAction("slow · "+d.latency_note);
     convAdd("Friday",rep);HIST.push({role:"jarvis",text:rep});speak(rep,d.message_id);if(d.action==="browser.open")toast("Opened in the gated browser: "+(d.status||""));
     if(d.work_run_id)followHermes(d.work_run_id);}
-  catch(e){if(e.message!=="locked"){convAdd("Friday","I could not reach my brain: "+e.message);}idleIsland();}}
+  catch(e){if(e.message==="busy"){/* one turn at a time (D-13): she is still on the last ask; nothing was sent to a model */logAction("still on the last one");toast("Still on the last one - a moment.");idleIsland();return;}if(e.message!=="locked"){convAdd("Friday","I could not reach my brain: "+e.message);}idleIsland();}}
 
 /* Hermes progress, spoken. After a delegation the page follows the run:
    every time the bridge's progress `seq` changes she says the new line

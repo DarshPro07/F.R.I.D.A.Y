@@ -23,12 +23,22 @@ decision the user makes in configuration.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import stat
 from pathlib import Path
 
 from friday.config import DATA_DIR, PROJECT_ROOT
+
+_log = logging.getLogger("friday.fsjail")
+
+
+def _fmt_trace(trace: dict) -> str:
+    """One log line, fixed key order, no content: raw -> expanded -> resolved
+    -> matched root -> decision/reason, then the roots."""
+    keys = ("decision", "reason", "raw", "expanded", "resolved", "matched_root", "roots")
+    return " ".join(f"{k}={trace[k]!r}" for k in keys if k in trace)
 
 #: Windows device names. Opening one is not a file operation at all.
 _RESERVED = frozenset(
@@ -60,7 +70,20 @@ DEFAULT_WORKSPACE = DATA_DIR / "workspace"
 
 
 class JailError(PermissionError):
-    """A path was refused. The message says why, never what it contained."""
+    """A path was refused. `reason` is one of the REASONS below and `trace`
+    carries every stage of the decision (raw / expanded / resolved / roots /
+    matched root) so a refusal can be diagnosed from a log line without
+    the file's content ever being logged (AT-10)."""
+
+    def __init__(self, message: str, *, reason: str = "refused", trace: dict | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.trace = dict(trace or {})
+
+
+#: The typed reasons a path is refused for. Logged, tested, and stable.
+REASONS = ("empty", "null_byte", "ads_colon", "unc_or_device", "reserved_name",
+           "denylisted", "unresolvable", "outside_roots", "root_is_reparse_point")
 
 
 def is_reparse_point(path: Path) -> bool:
@@ -130,6 +153,12 @@ def default_roots() -> tuple[Path, ...]:
     """
     candidates = [PROJECT_ROOT, Path(DEFAULT_WORKSPACE)]
     home = Path.home()
+    # The shell's answer for the three folders the owner names in speech,
+    # so a OneDrive-redirected Desktop is inside the jail and the profile's
+    # bare `Desktop` (if it still exists) is too.
+    from friday.known_folders import known_folder
+    for key in ("documents", "desktop", "downloads"):
+        candidates.append(known_folder(key))
     candidates += [home / name for name in
                    ("Documents", "Desktop", "Downloads", "Projects", "code", "src")]
 
@@ -177,7 +206,8 @@ class FileJail:
                 raise JailError(
                     f"refusing to start: the jail root {root.name!r} is a "
                     "reparse point (junction or symlink), which would move "
-                    "the boundary to wherever it points"
+                    "the boundary to wherever it points",
+                    reason="root_is_reparse_point",
                 )
         self.roots = tuple(r.resolve() for r in wanted)
         for root in self.roots:
@@ -188,22 +218,22 @@ class FileJail:
     @staticmethod
     def _reject_shape(raw: str) -> None:
         if not raw or not raw.strip():
-            raise JailError("empty path")
+            raise JailError("empty path", reason="empty")
         if "\x00" in raw:
-            raise JailError("path contains a null byte")
+            raise JailError("path contains a null byte", reason="null_byte")
         # Alternate Data Streams: "notes.txt:hidden". A drive letter colon at
         # position 1 is legitimate; any other colon on Windows is not.
         tail = raw[2:] if re.match(r"^[a-zA-Z]:[/\\]", raw) else raw
         if os.name == "nt" and ":" in tail:
-            raise JailError("path contains ':' (alternate data stream)")
+            raise JailError("path contains ':' (alternate data stream)", reason="ads_colon")
         if raw.startswith("\\\\"):
-            raise JailError("UNC and device paths are not permitted")
+            raise JailError("UNC and device paths are not permitted", reason="unc_or_device")
 
     @staticmethod
     def _reject_reserved(path: Path) -> None:
         for part in path.parts:
             if part.split(".")[0].lower() in _RESERVED:
-                raise JailError(f"{part!r} is a reserved device name")
+                raise JailError(f"{part!r} is a reserved device name", reason="reserved_name")
 
     @staticmethod
     def _reject_denylisted(path: Path) -> None:
@@ -212,7 +242,8 @@ class FileJail:
             if pattern.search(text):
                 raise JailError(
                     f"refused: {path.name!r} matches a protected pattern "
-                    "(credentials, keys, VCS or environment files)"
+                    "(credentials, keys, VCS or environment files)",
+                    reason="denylisted",
                 )
 
     def _contained(self, path: Path) -> Path:
@@ -221,8 +252,15 @@ class FileJail:
                 return path
         raise JailError(
             f"path is outside the permitted roots. Allowed: "
-            f"{[str(r) for r in self.roots]}"
+            f"{[str(r) for r in self.roots]}",
+            reason="outside_roots",
         )
+
+    def _matched_root(self, path: Path) -> str:
+        for root in self.roots:
+            if path == root or path.is_relative_to(root):
+                return str(root)
+        return ""
 
     # -- entry point --------------------------------------------------------
 
@@ -233,19 +271,39 @@ class FileJail:
         Order matters: resolve() first so symlinks and '..' are collapsed, and
         only then test containment. Testing the literal string first would let
         a symlink inside a root escape it.
+
+        Every decision is traced at INFO on `friday.fsjail` - the raw text,
+        the expanded text, the resolved path, the roots, the matched root and
+        the reason - because a refusal that names only "outside the permitted
+        roots" cannot be diagnosed after the fact (room M1 step 5, 2026-09-20:
+        the offending path was unrecoverable). Content is never logged.
         """
         text = str(raw)
-        self._reject_shape(text)
-
-        candidate = Path(text).expanduser()
+        trace: dict = {"raw": text[:300], "roots": [str(r) for r in self.roots]}
         try:
-            resolved = candidate.resolve()
-        except (OSError, RuntimeError) as exc:  # RuntimeError: symlink loop
-            raise JailError(f"path could not be resolved: {exc}") from exc
-
-        self._reject_reserved(resolved)
-        self._reject_denylisted(resolved)
-        return self._contained(resolved)
+            self._reject_shape(text)
+            # `%USERPROFILE%\Desktop\x` and `$HOME/x` are how the owner and the
+            # shell spell places; a jail that only understood `~` refused them
+            # as "outside the roots" after resolving them relative to the cwd.
+            expanded = os.path.expandvars(text) if ("%" in text or "$" in text) else text
+            trace["expanded"] = expanded[:300]
+            candidate = Path(expanded).expanduser()
+            try:
+                resolved = candidate.resolve()
+            except (OSError, RuntimeError) as exc:  # RuntimeError: symlink loop
+                raise JailError(f"path could not be resolved: {exc}", reason="unresolvable") from exc
+            trace["resolved"] = str(resolved)
+            self._reject_reserved(resolved)
+            self._reject_denylisted(resolved)
+            contained = self._contained(resolved)
+            trace["matched_root"] = self._matched_root(contained)
+            trace["decision"] = "allowed"
+            _log.info("fsjail allow %s", _fmt_trace(trace))
+            return contained
+        except JailError as exc:
+            exc.trace = {**trace, **exc.trace, "decision": "refused", "reason": exc.reason}
+            _log.info("fsjail refuse %s", _fmt_trace(exc.trace))
+            raise
 
     def describe(self) -> dict:
         return {

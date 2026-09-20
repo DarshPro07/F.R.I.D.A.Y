@@ -839,12 +839,23 @@ class ContinuousTaskExecutor:
         expected (the capability + arguments the plan asked for), actual
         (what came back), the verification method the capability
         reported, and pass/fail. Never raises: the ledger is evidence
-        about the run, not a step of it."""
+        about the run, not a step of it.
+
+        The same step is mirrored into the cross-executor action-evidence
+        ledger as an OBJECTIVE_WORKER row (AT-08), so a claim about work an
+        objective did is judged by the same rows as Friday's own and
+        Hermes's - `verified` only when the capability reported a
+        verification with evidence, never from the step merely passing."""
+        verification = ""
+        evidence_ref = ""
         try:
-            verification = ""
             if isinstance(result, dict):
                 v = result.get("verification") or {}
-                verification = str(v.get("method") or "") if isinstance(v, dict) else str(v)
+                if isinstance(v, dict):
+                    verification = str(v.get("method") or "")
+                    evidence_ref = str(v.get("evidence") or "")
+                else:
+                    verification = str(v)
             expected = f"{task.get('capability', '?')}({json.dumps(task.get('arguments') or {}, default=str)[:300]})"
             actual = (reason if reason else json.dumps(result, default=str))[:800]
             self.store.append_objective_evidence(
@@ -853,6 +864,21 @@ class ContinuousTaskExecutor:
                 passed=passed)
         except Exception:  # noqa: BLE001
             logger.debug("evidence ledger write failed", exc_info=True)
+        try:
+            from friday import action_evidence as AE
+            status = AE.SUCCEEDED if passed else AE.FAILED
+            if passed and isinstance(result, dict) and str(result.get("status", "")).lower() == "partial":
+                status = AE.PARTIAL
+            verified = bool(passed and verification and evidence_ref)
+            AE.ledger().record(
+                executor=AE.OBJECTIVE_WORKER, capability=str(task.get("capability") or "?"),
+                status=status, arguments=task.get("arguments") or {},
+                objective_id=run_id, result=(reason or json.dumps(result, default=str))[:300],
+                evidence_type=verification if verified else "",
+                evidence_ref=evidence_ref[:400] if verified else "", verified=verified,
+                action_id=f"objective:{run_id}:{task_id}:{int(task.get('attempts') or 0)}")
+        except Exception:  # noqa: BLE001
+            logger.debug("action evidence row failed for objective task", exc_info=True)
 
     def _park_for_approval(self, run_id: str, task_id: str, task: dict,
                            reason: str) -> None:

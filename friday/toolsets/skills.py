@@ -137,7 +137,19 @@ def skill_declare_permissions(run: c.Run, name: str, manifest_yaml: str, *,
         perms = sp.SkillPermissions(sl.SkillLadder())
         out = perms.record(name, manifest_yaml)
     except KeyError as exc:
-        return run.record(c.failed(started, str(exc)))
+        # The skill has no ladder entry: a manifest cannot be attached to a
+        # skill that was never captured. This is a typed PREREQUISITE, not a
+        # bare failure - the caller (model or objective) is told the exact
+        # step that comes first (M1 step 12: "refuses without saying capture
+        # first").
+        return run.record(started.finish(
+            status=c.NOT_PERMITTED,
+            error=f"PREREQUISITE_REQUIRED: {exc} - capture it first with "
+                  f"skill_capture(name={name!r}, ...), then declare its permissions",
+            output={"error_type": "PREREQUISITE_REQUIRED",
+                    "prerequisite": "skill_capture",
+                    "skill": name,
+                    "next_call": {"capability": "skill_capture", "arguments": {"name": name}}}))
     except Exception as exc:  # noqa: BLE001
         return run.record(c.failed(started, f"{type(exc).__name__}: {exc}"))
     if out.get("status") != "recorded":

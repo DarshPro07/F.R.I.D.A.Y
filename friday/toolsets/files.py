@@ -134,11 +134,16 @@ def _digest(data: bytes) -> str:
 
 
 def _safe(run: c.Run, started: c.ActionResult, raw: str) -> tuple[Path | None, c.ActionResult | None]:
-    """Resolve a path through the jail, or return a FAILED result."""
+    """Resolve a path through the jail, or return a FAILED result.
+
+    The refusal KEEPS the path it refused (as given, not its content) and
+    the typed reason, so the model can say which path and the log can be
+    read afterwards. The full trace is in the jail's own log line."""
     try:
         return jail().resolve(raw), None
     except JailError as exc:
-        return None, run.record(c.failed(started, f"path refused: {exc}"))
+        return None, run.record(c.failed(
+            started, f"path refused ({exc.reason}): {exc} - path given: {str(raw)[:200]!r}"))
 
 
 # --- the action journal (ML-09) ---------------------------------------------

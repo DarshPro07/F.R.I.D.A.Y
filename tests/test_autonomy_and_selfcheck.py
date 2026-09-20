@@ -196,6 +196,38 @@ def test_selfcheck_hands_hermes_a_real_job_when_live(monkeypatch):
     monkeypatch.setattr(V, "_run_hermes", lambda op, args: {"error": "Hermes is not reachable: down"})
     ok, detail = selfcheck._hermes_real_job()
     assert ok is False and "not reachable" in detail
+    # D-17: the governor shedding the worker is the HOST, not the product -
+    # skipped with the reason, never a failed item.
+    monkeypatch.setattr(V, "_run_hermes", lambda op, args: {
+        "error": "CRITICAL pressure: cpu 100%; no new worker started",
+        "error_type": "RESOURCE_PRESSURE", "decision": "SHED", "reason": "CRITICAL pressure: cpu 100%"})
+    ok, detail = selfcheck._hermes_real_job()
+    assert ok is None and "SHED" in detail and "cpu 100%" in detail
+
+
+def test_ui_delegate_types_a_governor_refusal(monkeypatch):
+    """`_run_hermes` turns `governor.Refused` into a typed RESOURCE_PRESSURE
+    error a caller can classify; any other exception stays a plain error."""
+    from friday import governor as G
+    from friday import voice_brain as V
+    from friday.tools import hermes_control as HC
+
+    class Sup:
+        def delegate(self, *a, **k):
+            raise G.Refused(G.Decision(decision="SHED", kind=G.WORKER, reason="CRITICAL pressure: ram 97%",
+                                       pressure="CRITICAL"))
+    monkeypatch.setattr(HC, "supervisor", lambda: Sup())
+    monkeypatch.setitem(V._CURRENT_TURN, "text", "delegate this to hermes: write hello.py")
+    out = V._run_hermes("delegate", {"goal": "write hello.py"})
+    assert out.get("error_type") == "RESOURCE_PRESSURE" and out["decision"] == "SHED"
+    assert "ram 97%" in out["reason"]
+
+    class Sup2:
+        def delegate(self, *a, **k):
+            raise RuntimeError("socket closed")
+    monkeypatch.setattr(HC, "supervisor", lambda: Sup2())
+    out = V._run_hermes("delegate", {"goal": "write hello.py"})
+    assert "error" in out and "error_type" not in out
 
 
 def test_go_according_to_the_prompt_runs_the_selfcheck(monkeypatch):

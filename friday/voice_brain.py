@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 
@@ -187,7 +188,26 @@ def _surface() -> dict[str, set[str]]:
     # Which upstream helpers exist and whether they are up - the same data
     # the control room's Organisation view shows, asked for out loud.
     out["helpers"] = {"list"}
+    _snapshot_surface(out)
     return out
+
+
+def _snapshot_surface(families: dict[str, set[str]]) -> None:
+    """The spoken surface IS a read of the live registry (fabric.registry()
+    plus Friday's own families), so it is recorded as an OBSERVED state
+    snapshot for the STATE-claim audit: "my live capability families
+    include web, clock, memory..." is then backed by the read that
+    produced it, not refused as recited from memory (D-15). Scoped to the
+    UI surface - it says nothing about provider health."""
+    try:
+        import time as _t
+        from friday import action_evidence as AE
+        AE.ledger().snapshot(AE.CapabilityStateSnapshot(
+            source="ui_families", collected_at=_t.time(), count=len(families),
+            health="listed", evidence="families: " + ", ".join(sorted(families))[:360],
+            ttl_s=300.0, scope="ui_surface", authority_level=AE.AUTHORITY_OBSERVED))
+    except Exception:  # noqa: BLE001 - a ledger hiccup must not cost the surface
+        logger.debug("ui_families snapshot not recorded", exc_info=True)
 
 
 _DESKTOP_OPS = {"plan", "step", "stop", "point"}
@@ -410,6 +430,14 @@ def _run_hermes(operation, arguments):
     except AttributeError as exc:
         return {"error": "hermes bridge lacks %s" % exc}
     except Exception as exc:  # noqa: BLE001
+        # A governor refusal is the machine, not the product (D-17): the
+        # worker was not started BECAUSE the host is under pressure. Say so
+        # in a typed shape so a self-check / probe can classify it as
+        # BLOCKED_EXTERNAL rather than a failed delegation.
+        decision = getattr(exc, "decision", None)
+        if decision is not None and getattr(decision, "decision", "") in ("SHED", "QUEUE"):
+            return {"error": str(exc)[:200], "error_type": "RESOURCE_PRESSURE",
+                    "decision": decision.decision, "reason": getattr(decision, "reason", "")[:200]}
         return {"error": str(exc)[:200]}
 
 
@@ -1069,15 +1097,23 @@ def _honest_about_evidence(answer: str) -> str:
         return answer
     try:
         from friday import action_evidence as AE
+    except Exception:                                    # noqa: BLE001 - the module itself is missing
+        logger.exception("evidence audit module unavailable")
+        return answer
+    try:
         led = AE.ledger()
         evidence = led.evidence_for_turn(_CURRENT_TURN.get("turn_id", ""),
                                          float(_CURRENT_TURN.get("started_at") or 0.0))
-        snaps = {s: snap for s in ("skills", "capability_families", "providers", "self_model")
+        snaps = {s: snap for s in ("skills", "capability_families", "providers", "self_model", "ui_families")
                  if (snap := led.snapshot_for(s)) is not None}
-        verdict = AE.audit_claims(text, evidence, snapshots=snaps)
+        history = led.evidence_before_turn(float(_CURRENT_TURN.get("started_at") or 0.0))
+        verdict = AE.audit_claims(text, evidence, snapshots=snaps, history=history)
     except Exception:                                    # noqa: BLE001
-        logger.exception("evidence audit failed; answer passed unaudited")
-        return answer
+        # Fail CLOSED (AT-09): a claim the audit could not check is held,
+        # not delivered as though it had been checked. Small talk passes.
+        logger.exception("evidence audit failed; claims are held, conversation passes")
+        held = AE.hold_if_claim(text)
+        return held.replace("boss", "sir") if held else answer
     if verdict.ok:
         return answer
     logger.warning("voice: unbacked %s refused: %r (%s)", verdict.first_kind,
@@ -1132,6 +1168,25 @@ def _evidence_finish(evidence_id: str, out: dict) -> None:
         logger.exception("evidence ledger finish failed for %s", evidence_id)
 
 
+def _act_directly(text: str):
+    """The browser-path seam for `friday.direct_action`. Returns the reply
+    dict when the request was a direct file chain, else None."""
+    try:
+        from friday import direct_action
+        if direct_action.plan_for(text) is None:
+            return None
+        done = direct_action.run(text, turn_id=_CURRENT_TURN.get("turn_id", ""))
+    except Exception as exc:  # noqa: BLE001 - never lose the turn to the shortcut
+        logger.exception("direct action failed on the UI path: %s", exc)
+        return None
+    if done is None or not done.steps:
+        return None
+    said = done.spoken() or ("Done, sir." if done.ok else "That did not go through, sir.")
+    return {"reply": said, "action": "direct_action", "status": "succeeded" if done.ok else "failed",
+            "used_capabilities": ["files"],
+            "steps": [{"capability": s.capability, "status": s.status} for s in done.steps]}
+
+
 def _grounded_work_answer(low: str):
     """'What did Hermes finish, and why that model?' is answered from the run
     ledger, never from the conversation - the sibling of the "what's running"
@@ -1167,6 +1222,17 @@ def _try_command(text):
     grounded = _grounded_work_answer(low)
     if grounded:
         return grounded
+
+    # An exact file chain - "create jarvis-test.txt on my Desktop with the
+    # words: version one, then read it back" - is carried out here, step by
+    # step through the runtime, and REPORTED in the runtime's own words.
+    # Same seam as the room agent's `act_directly_first`: an order that
+    # names its file and its content is not for a model to reinterpret,
+    # and the browser brain's Gemini has narrated file writes it never
+    # made. Anything not fully spoken-exact returns None and goes on.
+    direct = _act_directly(t)
+    if direct:
+        return direct
 
     # Owner switches. "full autonomy on" = policy.DANGEROUS: no more "say
     # okay". Deterministic on purpose: a mode change is not for a model to
@@ -1458,7 +1524,34 @@ def reply(text, history=None):
     text = (text or "").strip()
     if not text:
         return {"reply": "", "empty": True}
+    # One turn at a time (D-13). `_CURRENT_TURN` is per-process state and
+    # every gate below reads it; two overlapping /api/ask calls used to
+    # share one turn id and interleave their direct-action chains on the
+    # same file (probe B, 2026-09-20 15:02:54). A second ask while one is
+    # in flight is answered `busy` immediately - the page says "still on
+    # the last one" - rather than queued into a stale turn.
+    if not _TURN_LOCK.acquire(blocking=False):
+        return {"reply": "", "busy": True, "since": _CURRENT_TURN.get("started_at") or 0.0,
+                "in_flight": (_CURRENT_TURN.get("text") or "")[:80]}
+    try:
+        return _reply_locked(text, history)
+    finally:
+        _TURN_LOCK.release()
 
+
+def busy() -> dict | None:
+    """The in-flight turn, or None. For /api/ask to answer 409 without a
+    model call."""
+    if _TURN_LOCK.locked():
+        return {"since": _CURRENT_TURN.get("started_at") or 0.0,
+                "in_flight": (_CURRENT_TURN.get("text") or "")[:80]}
+    return None
+
+
+_TURN_LOCK = threading.Lock()
+
+
+def _reply_locked(text, history=None):
     _remember_turn("user", text)
     _CURRENT_TURN["text"] = text
     _CURRENT_TURN["turn_id"] = "ui-%s" % uuid.uuid4().hex[:10]

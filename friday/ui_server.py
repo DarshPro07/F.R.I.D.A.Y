@@ -1060,7 +1060,12 @@ async def api_ask(request):
     text = (data.get("text") or "").strip()
     if not text:
         return JSONResponse({"reply": "", "empty": True})
-    return JSONResponse(await run_in_threadpool(V.reply, text, data.get("history") or []))
+    out = await run_in_threadpool(V.reply, text, data.get("history") or [])
+    if out.get("busy"):
+        # One turn at a time (D-13): the page shows "still on the last one"
+        # and retries; nothing was sent to a model.
+        return JSONResponse(out, status_code=409)
+    return JSONResponse(out)
 
 
 async def api_hermes_progress(request):

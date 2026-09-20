@@ -177,6 +177,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true",
                         help="compare without restarting")
+    parser.add_argument("--worker-mode", default="start", choices=("start", "dev"),
+                        help="LiveKit worker mode. `start` (production) is the default: `dev` "
+                             "runs watchfiles over the tree, which on a large change set overflows "
+                             "the Windows 32767-char env-var limit and crash-loops (AGENTS.md).")
     arguments = parser.parse_args()
 
     if arguments.check:
@@ -192,8 +196,8 @@ def main() -> int:
         print("  server did not come up; see data/logs/server.err.log")
         return 2
 
-    agent = start("agent_friday.py", "dev")
-    print(f"  agent_friday.py pid {agent}")
+    agent = start("agent_friday.py", arguments.worker_mode)
+    print(f"  agent_friday.py pid {agent} ({arguments.worker_mode})")
     time.sleep(6)
     print()
     return check()

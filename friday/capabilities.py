@@ -1848,6 +1848,8 @@ _ALL = (
             'do these steps one after another',
             'run this job in the background',
             'take care of this whole task',
+            'start an objective that waits for a file and then reads it',
+            'start a new objective for this',
         ),
         negative_examples=('continue the song', 'what time is it', 'stop the music'),
     ),
@@ -2715,6 +2717,27 @@ def get(tool_id: str) -> Capability:
     return CAPABILITIES[tool_id]
 
 
+#: Compatibility names -> the ONE canonical capability id. The model has
+#: hallucinated `orchestration_new_objective` for a request to start an
+#: objective (room M1 step 7, 2026-09-20): the words "orchestration" and
+#: "new objective" are how the master prompt talks, and the tool was named
+#: from the noun ("objective_start"). An alias is a spelling, never a second
+#: implementation: every resolver (`by_id`, the router, the runtime) maps
+#: the alias to the canonical id first, and `test_capability_aliases` pins
+#: that no alias shadows a real capability.
+ALIASES: dict[str, str] = {
+    "orchestration_new_objective": "objective_start",
+    "objective_new": "objective_start",
+    "start_objective": "objective_start",
+    "orchestration_status": "objective_status",
+}
+
+
+def canonical_id(tool_id: str) -> str:
+    """The canonical capability id for a name that may be an alias."""
+    return ALIASES.get(tool_id or "", tool_id)
+
+
 def by_id(tool_id: str) -> Capability | None:
     """
     Like `get`, but None for an undeclared tool instead of raising.
@@ -2722,9 +2745,9 @@ def by_id(tool_id: str) -> Capability | None:
     The router asks about every tool the MCP server offers, which is a
     slightly different set from what this file declares - a tool added
     upstream should degrade to "no routing metadata", not take the router
-    down with a KeyError.
+    down with a KeyError. An alias resolves to its canonical capability.
     """
-    return CAPABILITIES.get(tool_id)
+    return CAPABILITIES.get(canonical_id(tool_id))
 
 
 def specialist_for(content: str) -> Capability | None:

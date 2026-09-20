@@ -258,6 +258,11 @@ def _hermes_real_job():
             "current date and time. Do nothing else, touch nothing else.")
     out = V._run_hermes("delegate", {"goal": goal})
     if "error" in out:
+        if out.get("error_type") == "RESOURCE_PRESSURE":
+            # The governor shed the worker: the HOST could not carry it.
+            # Skipped-with-reason (None), not failed - a self-check that
+            # reads the machine's load as a product failure misleads (D-17).
+            return None, f"skipped: {out.get('decision', 'SHED')} by the governor - {out.get('reason', '')[:120]}"
         return False, out["error"][:140]
     info = json.loads(out["result"])
     return info.get("status") == "working", \

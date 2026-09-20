@@ -493,6 +493,11 @@ class ClaudeCodeExecutor:
         output["changed_in"] = where
         output["changed_files"] = changed[:40]
 
+        verdict = self._verdict(started, said, denials, changed, where, output)
+        self._evidence_row(bundle, verdict, changed, where)
+        return verdict
+
+    def _verdict(self, started, said, denials, changed, where, output) -> c.ActionResult:
         if denials:
             return c.partial(
                 started,
@@ -516,6 +521,36 @@ class ClaudeCodeExecutor:
                          + (" ..." if len(changed) > 6 else "")
                          + f"; tools used: {self.progress.summary()}",
             ))
+
+    def _evidence_row(self, bundle: TaskBundle, verdict: c.ActionResult,
+                      changed: list[str], where: str) -> None:
+        """AT-08: the run as CLAUDE_CODE rows in the cross-executor ledger -
+        one per changed file (git's answer, read back from disk here) plus
+        one for the run. Claude's summary is never the evidence; a file
+        that git lists but the disk does not have is recorded FAILED."""
+        try:
+            from friday import action_evidence as AE
+            led = AE.ledger()
+            for rel in changed[:40]:
+                path = os.path.join(where, rel)
+                exists = os.path.exists(path)
+                led.record(
+                    executor=AE.CLAUDE_CODE, capability="claude_code.change",
+                    status=AE.SUCCEEDED if exists else AE.FAILED,
+                    arguments={"path": path}, objective_id=bundle.run_id,
+                    result=f"changed per git status in {where}",
+                    evidence_type="disk_readback" if exists else "",
+                    evidence_ref=f"read-back: {path} exists ({os.path.getsize(path)} bytes)" if exists else "",
+                    verified=exists,
+                    action_id=f"claude:{bundle.run_id}:{rel}")
+            led.record(
+                executor=AE.CLAUDE_CODE, capability="executor.claude_code",
+                status={c.SUCCEEDED: AE.SUCCEEDED, c.PARTIAL: AE.PARTIAL}.get(verdict.status, AE.FAILED),
+                arguments={"workspace": where}, objective_id=bundle.run_id,
+                result=(verdict.error or f"{len(changed)} file(s) changed")[:300],
+                action_id=f"claude:{bundle.run_id}:run")
+        except Exception:  # noqa: BLE001
+            logger.debug("action evidence rows failed for claude run", exc_info=True)
 
     # -- promotion ---------------------------------------------------------
 

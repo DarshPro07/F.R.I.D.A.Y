@@ -351,6 +351,9 @@ class CapabilityRuntime:
     def execute(self, capability_id: str, arguments: dict | None = None, *,
                 run: c.Run | None = None) -> c.ActionResult:
         arguments = dict(arguments or {})
+        # A compatibility alias is a spelling of the canonical id; the run,
+        # the policy check and the evidence row all carry the real name.
+        capability_id = C.canonical_id(capability_id)
         run = run or c.Run.create(f"{capability_id} {arguments}"[:200],
                                   capability=capability_id)
         started = c.started(run.run_id, capability_id)

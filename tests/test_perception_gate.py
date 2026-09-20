@@ -156,8 +156,11 @@ class TestTheBrowserPath:
             assert V._honest_about_seeing(text, []) == text
 
     def test_reply_runs_the_gate(self):
-        """Structural: the gate is on the reply path, not merely defined."""
+        """Structural: the gate is on the reply path, not merely defined.
+        `reply()` is the one-turn-at-a-time wrapper (D-13) around
+        `_reply_locked`, so the path is both bodies together."""
         import inspect
         from friday import voice_brain as V
-        src = inspect.getsource(V.reply)
+        src = inspect.getsource(V.reply) + inspect.getsource(V._reply_locked)
+        assert "_reply_locked(text, history)" in inspect.getsource(V.reply)
         assert "_honest_about_seeing(answer, acted)" in src

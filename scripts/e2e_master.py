@@ -361,6 +361,8 @@ def main() -> int:
     p.add_argument("--audio-ready", type=float, default=12.0)
     p.add_argument("--quiet", type=float, default=15.0)
     p.add_argument("--self-test", action="store_true")
+    p.add_argument("--skip-preflight", action="store_true",
+                   help="do not require the running MCP server to match the tree (INVALID_TEST otherwise)")
     a = p.parse_args()
     if a.self_test:
         return self_test()
@@ -368,6 +370,20 @@ def main() -> int:
         p.error("--out is required for a live run")
     from dotenv import load_dotenv
     load_dotenv()
+    if not a.skip_preflight:
+        # D-16: after a host reboot the launcher brought the MCP server back
+        # on an OLDER build than the tree, and every verdict against it
+        # would have been a verdict about old code. A live run starts by
+        # proving the server IS the tree (`restart_friday.py --check`'s
+        # registry-hash comparison), and refuses otherwise.
+        import subprocess
+        chk = subprocess.run([sys.executable, str(pathlib.Path(__file__).with_name("restart_friday.py")), "--check"],
+                             capture_output=True, text=True, timeout=120)
+        print(chk.stdout.strip())
+        if chk.returncode != 0:
+            print("PREFLIGHT FAILED: the running server does not match the tree - restart, then rerun. "
+                  "(--skip-preflight to record an INVALID_TEST run on purpose)")
+            return 3
     steps = [float(s) for s in a.steps.split(",") if s] if a.steps else sorted(STEPS)
     steps = [int(s) if float(s).is_integer() else s for s in steps]
     return asyncio.run(run(f"friday-e2e-{a.room}", steps, pathlib.Path(a.out), wait=a.wait,

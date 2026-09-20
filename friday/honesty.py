@@ -31,6 +31,10 @@ from friday.contracts import Run
 COMPLETION_PATTERNS = (
     r"\b(created|opened|sent|changed|deleted|printed|built|deployed|completed|learned)\b",
     r"\b(saved|installed|generated|downloaded|wrote|updated|launched|started)\b",
+    # interaction deeds on the desktop / browser: "I clicked submit", "I
+    # typed it in", "I pressed enter", "I submitted the form". Absent until
+    # 2026-09-20, so a click nobody made was never a claim.
+    r"\b(clicked|pressed|tapped|typed|submitted|scrolled|dragged|selected|navigated|undid|reverted|removed|recycled|overwrote|appended|edited|delegated|ran|executed)\b",
     # state assertions: "Spotify is open", "that's done", "it is now live"
     r"\b(?:is|are|it's|that's)\s+(?:now\s+)?"
     r"(?:ready|done|complete|finished|live|open|running|installed|up)\b",

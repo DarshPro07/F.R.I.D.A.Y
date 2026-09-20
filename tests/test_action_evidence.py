@@ -210,7 +210,7 @@ class TestHermesEvidence:
         led.record(executor=AE.HERMES, capability="hermes_work_run", status=AE.SUCCEEDED, objective_id="WR-1")
         v = AE.audit_claims(self.LINE, led.since(0))
         assert not v.ok
-        assert "succeeded without read-back" in v.reasons[0]
+        assert "nothing verified backs it" in v.reasons[0]
 
     def test_a_friday_read_still_does_not_back_a_creation(self, led):
         led.record(executor=AE.FRIDAY_DIRECT, capability="files_read", status=AE.SUCCEEDED, turn_id="t",
