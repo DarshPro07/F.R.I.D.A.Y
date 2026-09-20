@@ -12,6 +12,7 @@ handles on the ledger file itself.
 from __future__ import annotations
 
 import gc
+import os
 import sqlite3
 
 import psutil
@@ -21,9 +22,39 @@ from friday import dbconn
 
 
 def _open_count(path) -> int:
+    """How many handles THIS process holds on `path`.
+
+    psutil's Windows `open_files()` walks every handle in the process and
+    raises AccessDenied when one of them will not answer NtQueryObject -
+    which happened on the windows-latest runner for 5ee9943 (six
+    parametrizations, all `AccessDenied: (pid=6124)`) while the same
+    instrument answered on 342f8fd. That is the instrument failing, not the
+    ledger leaking, so it falls back to a second instrument that cannot be
+    denied: SQLite opens its file without FILE_SHARE_DELETE, so a rename
+    fails with PermissionError exactly when a handle is open. Never a skip -
+    the leak this file exists to catch was real (A-051)."""
     gc.collect()
     target = str(path).lower()
-    return sum(1 for f in psutil.Process().open_files() if f.path.lower() == target)
+    try:
+        return sum(1 for f in psutil.Process().open_files() if f.path.lower() == target)
+    except psutil.AccessDenied:
+        if os.name != "nt":
+            raise
+        return _open_count_by_rename(path)
+
+
+def _open_count_by_rename(path) -> int:
+    """1 when something holds `path` open (Windows share semantics), else 0.
+    Absent file: nothing can hold it."""
+    if not os.path.exists(path):
+        return 0
+    probe = str(path) + ".probe"
+    try:
+        os.rename(path, probe)
+    except PermissionError:
+        return 1
+    os.rename(probe, path)
+    return 0
 
 
 def test_ledger_connection_closes_on_exit_and_commits(tmp_path):
@@ -61,6 +92,24 @@ def test_a_bare_sqlite3_connection_would_have_leaked(tmp_path):
     assert _open_count(db) == 1
     conn.close()
     assert _open_count(db) == 0
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the rename instrument is Windows share semantics")
+def test_the_fallback_instrument_sees_the_leak_too(tmp_path, monkeypatch):
+    """Negative control for the fallback: with psutil denied, the rename
+    probe must still say 1 for an open handle and 0 after close - otherwise
+    a denied psutil would turn every leak into a pass."""
+    def denied(self):
+        raise psutil.AccessDenied(pid=os.getpid())
+    monkeypatch.setattr(psutil.Process, "open_files", denied)
+    db = tmp_path / "bare.sqlite3"
+    conn = sqlite3.connect(db)
+    with conn:
+        conn.execute("CREATE TABLE t (x)")
+    assert _open_count(db) == 1
+    conn.close()
+    assert _open_count(db) == 0
+    assert db.exists()                                   # the probe put the file back
 
 
 @pytest.mark.parametrize("make", [
