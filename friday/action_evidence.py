@@ -55,7 +55,7 @@ import re
 import sqlite3
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace
 from pathlib import Path
 
 from friday import honesty
@@ -403,8 +403,16 @@ _ATTEMPT_RE = re.compile(r"\b(?:i (?:tried|attempted|have tried|had tried)|my (?
 
 #: A state claim about the fleet: N skills/families/providers/routes are
 #: <state>. Needs a fresh authoritative snapshot, never memory.
+#: Number words a spoken figure may use; one table for the STATE-claim shape
+#: and for the figure check against the reading (D-20).
+_NUMBER_WORDS = {"zero": 0, "no": 0, "none": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                 "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+                 "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+                 "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50}
+_NUMBER_WORD_RE = "|".join(w for w in _NUMBER_WORDS if w not in ("no", "none"))
+
 _STATE_RE = re.compile(
-    r"\b(?:(?:\d+|all|every|each|no|none of the|the|both|two|three|four|five|six|seven|eight|nine|ten|"
+    r"\b(?:(?:\d+|all|every|each|no|none of the|the|both|" + _NUMBER_WORD_RE + r"|"
     r"one of|two of|some of|most of|half of|none of)\s+(?:\w+\s+){0,2}?(?:skills?|families|family|capabilit(?:y|ies)|"
     r"providers?|routes?|models?|tools?|objectives?|runs?)\b[^.]{0,80}?\b(?:are|is|remain|remains|sit|sits)\b"
     r"[^.]{0,30}?\b(?:ready|live|available|healthy|degraded|stale|unprobed|validated|candidates?|rejected|"
@@ -415,7 +423,12 @@ _STATE_RE = re.compile(
     # recital of what is live/ready/available (probe B, D-15): a state
     # claim whether or not the word "are" appears.
     r"|\b(?:my|the|our) (?:live|ready|available|active|current)\s+(?:\w+\s+){0,2}?"
-    r"(?:skills?|families|family|capabilit(?:y|ies)|providers?|tools?)\b[^.]{0,20}?\b(?:include|includes|are|cover|span)\b)",
+    r"(?:skills?|families|family|capabilit(?:y|ies)|providers?|tools?)\b[^.]{0,20}?\b(?:include|includes|are|cover|span)\b"
+    # "I have 12 skill families, all of which are currently in a 'REGISTERED'
+    # state" / "I have 14 families, all registered" (probe D, D-20): a
+    # possessive count IS a state claim - it puts a figure on the fleet.
+    r"|\b(?:i have|i've got|i run|i count|there are|we have)\s+(?:\d+|" + _NUMBER_WORD_RE + r")\s+(?:\w+\s+){0,2}?"
+    r"(?:skills?|families|family|capabilit(?:y|ies)|providers?|routes?|models?|tools?|objectives?)\b)",
     re.I)
 
 #: "the camera is switched off / disabled / on" - a switch state Friday
@@ -440,6 +453,56 @@ class Claim:
     #: "yesterday", "last time", "previously") - such a claim may cite rows
     #: older than this turn; a present-tense claim may not.
     historical: bool = False
+    #: For a STATE claim whose number disagrees with the fresh reading: what
+    #: the reading counted, so the correction can say the real figure.
+    expected_count: int | None = None
+
+
+#: "12 skill families", "fourteen families", "all 32 providers" - the figure a
+#: STATE claim puts on a counted noun. A SUBSET figure ("two of my skills
+#: are validated", "one of the providers is down") is not the fleet total
+#: and is never compared with it.
+_COUNTED_NOUN = re.compile(
+    r"\b(\d{1,4}|" + "|".join(_NUMBER_WORDS) + r")\s+(?!of\b)(?:\w+\s+){0,2}?"
+    r"(skills?|families|family|capabilit(?:y|ies)|providers?|routes?|models?|tools?|objectives?|runs?)\b"
+    # "12 skill families": the counted noun is the LAST of the phrase, not the
+    # modifier ("skill") the lazy quantifier would stop at.
+    r"(?!\s+(?:skills?|families|family|capabilit(?:y|ies)|providers?|routes?|models?|tools?|objectives?|runs?)\b)", re.I)
+_SUBSET_FIGURE = re.compile(r"\b(?:\d{1,4}|" + "|".join(_NUMBER_WORDS) + r")\s+of\s+(?:my|the|our|these|those|them)\b", re.I)
+
+#: snapshot source -> the nouns it counts (a "skills" snapshot says nothing
+#: about how many providers there are).
+_SNAPSHOT_NOUNS = {
+    "skills": ("skill", "skills"),
+    "capability_families": ("family", "families", "capability", "capabilities"),
+    "ui_families": ("family", "families", "capability", "capabilities"),
+    "providers": ("provider", "providers"),
+    "self_model": (),
+}
+
+
+def _stated_count(sentence: str) -> int | None:
+    m = _COUNTED_NOUN.search(sentence or "")
+    if not m:
+        return None
+    # "Two of my skills are validated and one is a candidate" names parts,
+    # not the whole; the whole is what a snapshot counts.
+    if _SUBSET_FIGURE.search(sentence[: m.end()]):
+        return None
+    word = m.group(1).lower()
+    return int(word) if word.isdigit() else _NUMBER_WORDS.get(word)
+
+
+def _snapshot_about(snapshot: CapabilityStateSnapshot, sentence: str) -> bool:
+    """Does this snapshot count the noun the sentence puts a number on?"""
+    m = _COUNTED_NOUN.search(sentence or "")
+    if not m:
+        return False
+    noun = m.group(2).lower()
+    nouns = _SNAPSHOT_NOUNS.get(snapshot.source)
+    if nouns is None:                                    # an unknown source: match on its own name
+        return snapshot.source.rstrip("s") in noun or noun.rstrip("s") in snapshot.source
+    return noun in nouns
 
 
 #: Operation words in a claim -> the operation class a backing row must have.
@@ -698,6 +761,19 @@ def audit_claims(text: str, evidence: list[ActionEvidence], *,
         elif claim.kind == STATE_CLAIM:
             fresh = [s for s in snapshots.values() if s.fresh(now) and s.authoritative]
             if fresh:
+                # A fresh reading exists; now the FIGURE must agree with it.
+                # "I have 12 skill families" over a snapshot that counted 14
+                # is a wrong number said with a true-looking source (probe D,
+                # 2026-09-20, D-20). The claim is held only when it names a
+                # number and every fresh snapshot of the same noun disagrees.
+                stated = _stated_count(claim.sentence)
+                same_noun = [s for s in fresh if _snapshot_about(s, claim.sentence)]
+                if stated is not None and same_noun and all(s.count != stated for s in same_noun):
+                    counts = sorted({s.count for s in same_noun})
+                    reasons.append(f"STATE_CLAIM: said {stated}, the fresh reading counted {counts} "
+                                   f"({', '.join(s.source for s in same_noun)})")
+                    unbacked.append(replace(claim, expected_count=counts[0]))
+                    continue
                 cited.extend(f"snapshot:{s.source}@{int(s.collected_at)}" for s in fresh[:3]); continue
             stale = [s.source for s in snapshots.values() if not s.fresh(now)]
             weak = [s.source for s in snapshots.values() if s.fresh(now) and not s.authoritative]
@@ -764,6 +840,12 @@ AUDIT_UNAVAILABLE = ("I can't verify what I was about to tell you, boss - my act
 
 
 def correction_for(verdict: Verdict) -> str:
+    first = verdict.unbacked[0] if verdict.unbacked else None
+    if first is not None and first.kind == STATE_CLAIM and first.expected_count is not None:
+        # The reading exists and disagrees with the figure: say the real one.
+        stated = _stated_count(first.sentence)
+        return (f"Correction, boss - I said {stated}, but the reading I just took counted "
+                f"{first.expected_count}. {first.expected_count} it is; the {stated} was recited, not read.")
     return CORRECTIONS.get(verdict.first_kind, CORRECTIONS[SUCCESS_CLAIM])
 
 

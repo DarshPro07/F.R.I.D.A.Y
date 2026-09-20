@@ -72,3 +72,8 @@ VERIFIED, BLOCKED_EXTERNAL, REJECTED_WITH_REASON.
 - 2026-09-20 15:00-15:09 live probes: `scripts/ui_probe.py` probe B (7 steps, PIN via `--password` mode, CPU 100% from the suite) -> D-13 found; `fabric_probe.py` over all 32 providers (20 READY / 2 DEGRADED / 9 UNAVAILABLE with named causes).
 - 2026-09-20 15:31 run 2 chunk2 killed by "Critical Battery Trigger Met" shutdown; laptop back on AC 15:42.
 - 2026-09-20 15:45-17:10 Phases 1-11 + T1 built and unit-verified (AT-05..13, D-13/D-14/D-15, runner `--resume`); run 3 launched on the full tree.
+- 2026-09-20 16:45 run 3 verdict: 4554 passed / 3 failed, each a single cause (D-18 example phrasing; a structural test reading `reply()` before its wrapper split; the 45 s soak starved by a parallel WSL run - passes alone). Fixed at root, not by loosening.
+- 2026-09-20 16:50 `342f8fd` committed (AT-04..13, T1, D-13..D-18); pushed; Linux WSL run of the new tests 100 passed / 1 skipped.
+- 2026-09-20 16:55 D-16 restart: MCP `server.py` (pythonw could not bind :8000 - stale listener from the 15:31 shutdown; started via `python.exe` with redirected logs), UI `--password`, worker `start`; `restart_friday.py --check` OK.
+- 2026-09-20 16:57 probe C (quiet host): 6/7 steps 6-20 s; `skills_state` 155 s timeout -> D-19 (page LOOK pattern ate "read the"). Fixed in `wantsSight()`; Playwright spec 3 new + 2 existing green.
+- 2026-09-20 17:07 probe D: same prompt 13.5 s but "12 skill families" over a 14-family reading -> D-20 (figure vs reading). Audit compares the number with every fresh snapshot of that noun; `_run_helpers` computes the counts. Probe E: correction spoken with the real figure; probe F: right figure first time.

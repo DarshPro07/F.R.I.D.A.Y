@@ -749,8 +749,16 @@ const SUBJECT=/\b(holding|wearing|outfit|shirt|dress|hair|face|background|behind
    you already know" matched LOOK's "tell me what". The brain routes these to
    files/hermes now, so the page must not intercept them. */
 const CODEWORK=/(\.(py|js|ts|md|json|html|css|txt|yaml|toml|sql|cs|java|go|rs)\b|\b(file|folder|directory|repo|codebase|function|variable|comment|delegate|hermes|refactor|implement|rename|create a|write a|commit|test file)\b)/i;
+/* A question about FRIDAY HERSELF - her skills, families, providers, state,
+   memory, objectives, what she did - is never a look either. "How many skill
+   families do you have ... Read the real state before answering" matched
+   LOOK's "read the" and went to the webcam (probe C, 2026-09-20, D-19): the
+   brain never saw the question and the page hung on a camera it did not
+   have. Self-state questions go to the brain, which reads the real state. */
+const SELFSTATE=/\b(skill|skills|famil(y|ies)|capabilit(y|ies)|provider|providers|objective|objectives|ledger|memory|memories|self[- ]?check|snapshot|state (is|are|of)|what state|your (state|status|health)|running on|which model|did you|what did you|have you)\b/i;
 function wantsSight(text){
   if(CODEWORK.test(text)&&!/\b(screen|camera|webcam|monitor|wearing|holding)\b/i.test(text))return null;
+  if(SELFSTATE.test(text)&&!/\b(screen|camera|webcam|monitor|wearing|holding|my face)\b/i.test(text))return null;
   if(!LOOK.test(text))return null;
   if(SCREEN.test(text))return "screen";
   if(SUBJECT.test(text)||/\b(camera|webcam)\b/i.test(text))return "camera";

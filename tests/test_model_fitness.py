@@ -81,9 +81,21 @@ class TestEvidenceBeatsOpinion:
         assert choice.from_evidence is False
         assert "not enough evidence" in choice.because
 
-    def test_the_fallback_explains_why_it_is_a_fallback(self):
-        choice = executor_router.choose("anything", record=None)
-        assert "evidence" in choice.because or "only executor" in choice.because
+    def test_the_fallback_explains_why_it_is_a_fallback(self, monkeypatch):
+        """Whatever the host has installed, an unmeasured choice says why.
+
+        This used to read the real host: one executor installed here -> "only
+        executor"; two -> "not enough evidence". On a CI runner with NO
+        executor installed `choose` returns the install hint, which is also
+        honest but not a fallback - the test was asserting the host, not the
+        router (red on 342f8fd). Every branch is now pinned explicitly."""
+        monkeypatch.setattr(executor_router, "usable", lambda: ("claude", "codex"))
+        assert "evidence" in executor_router.choose("anything", record=None).because
+        monkeypatch.setattr(executor_router, "usable", lambda: ("claude",))
+        assert "only executor" in executor_router.choose("anything", record=None).because
+        monkeypatch.setattr(executor_router, "usable", lambda: ())
+        nothing = executor_router.choose("anything", record=None)
+        assert nothing.executor == "" and "install one of" in nothing.because
 
 
 class TestExecutionValueIsCostAware:

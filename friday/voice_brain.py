@@ -775,7 +775,39 @@ def _run_helpers(operation, arguments):
     from friday import fabric
     compact = [{"id": p["provider"], "family": p["family"], "state": p["state"]}
               for p in fabric.report()]
-    return {"result": _json.dumps(compact, default=str)[:2500]}
+    _snapshot_helpers(compact)
+    families = sorted({str(p.get("family", "")) for p in compact if p.get("family")})
+    states = {}
+    for p in compact:
+        states[p["state"]] = states.get(p["state"], 0) + 1
+    # The counts are computed HERE, not by the model over a 2 KB list: the
+    # model said "12 families" twice while listing all fourteen (probe D/E,
+    # D-20). The audit catches a wrong figure; this stops it being made.
+    header = {"providers": len(compact), "families": len(families), "family_names": families,
+              "by_state": states}
+    return {"result": _json.dumps({"counts": header, "providers": compact}, default=str)[:3000]}
+
+
+def _snapshot_helpers(compact: list[dict]) -> None:
+    """The helpers listing IS a read of the fabric: record what it counted
+    (providers AND distinct families) as OBSERVED snapshots so a figure the
+    model puts on it ("I have 12 skill families") is checked against the
+    read, not merely backed by the fact that a read happened (D-20)."""
+    try:
+        import time as _t
+        from friday import action_evidence as AE
+        families = sorted({str(p.get("family", "")) for p in compact if p.get("family")})
+        led = AE.ledger()
+        led.snapshot(AE.CapabilityStateSnapshot(
+            source="providers", collected_at=_t.time(), count=len(compact), health="listed",
+            evidence="fabric.report() -> %d providers" % len(compact), ttl_s=300.0,
+            scope="fabric", authority_level=AE.AUTHORITY_OBSERVED))
+        led.snapshot(AE.CapabilityStateSnapshot(
+            source="capability_families", collected_at=_t.time(), count=len(families), health="listed",
+            evidence="fabric.report() families: " + ", ".join(families)[:300], ttl_s=300.0,
+            scope="fabric", authority_level=AE.AUTHORITY_OBSERVED))
+    except Exception:  # noqa: BLE001 - a ledger hiccup must not cost the listing
+        logger.debug("helpers snapshot not recorded", exc_info=True)
 
 
 def _with_health_hint(family: str, error: str) -> str:
