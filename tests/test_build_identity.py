@@ -80,3 +80,23 @@ def test_describe_is_one_readable_line():
     line = B.describe()
     assert '\n' not in line
     assert 'commit' in line and 'registry' in line and 'capabilities' in line
+
+def test_a_packaged_build_reports_the_commit_the_builder_stamped(tmp_path, monkeypatch):
+    """
+    FRIDAY.exe has no git. scripts/build_windows.py writes build_manifest.json
+    beside the package; the identity comes from there, and from git again
+    the moment the manifest is absent (a source checkout).
+    """
+    import json
+
+    stamped = tmp_path / 'build_manifest.json'
+    stamped.write_text(json.dumps({'commit': 'abcdef0123456789', 'commit_short': 'abcdef0',
+                                   'dirty': False}), encoding='utf-8')
+    monkeypatch.setattr(B, '_MANIFEST', stamped)
+    build = B.current(refresh=True)
+    assert build.commit == 'abcdef0'
+    assert build.dirty is False
+    assert build.registry_hash != 'unknown'        # the registry is still this process's own
+
+    monkeypatch.setattr(B, '_MANIFEST', tmp_path / 'absent.json')
+    assert B.current(refresh=True).commit != 'abcdef0'

@@ -39,7 +39,7 @@ friday/                 the package
   capability_router.py  active-tool gating: CORE_TOOLS + enable-able GROUPS
   policy.py             per-call authorization (PolicyEngine)
   confirmation.py       binds a confirmation to one exact action
-  fsjail.py sandbox.py netguard.py sensitive_domains.py   the trust boundaries
+  fsjail.py execution.py netguard.py sensitive_domains.py   the trust boundaries
   evaluation.py honesty.py   completion gates
   planner*.py objectives.py continuity.py   the durable-objective engine
   executors/            coding-agent backends (claude_code, worktrees, brokers)

@@ -12,7 +12,6 @@ description = "deliberate fakes and public material"
 paths = [
   # redaction tests feed literal fake tokens to prove they are scrubbed
   '''tests/test_execution\.py''',
-  '''tests/test_sandbox\.py''',
   '''tests/test_shared_brain\.py''',
   # the browser observation fixture carries a fake `sk-` token so
   # test_observation_is_structured_first_and_secrets_are_redacted can prove

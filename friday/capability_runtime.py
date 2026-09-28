@@ -337,6 +337,17 @@ class CapabilityRuntime:
                                   capability=capability_id)
         started = c.started(run.run_id, capability_id)
 
+        # STOP-001: while the emergency stop is latched nothing new starts,
+        # in this process or any other, whatever asked. The person resumes.
+        from friday import stop
+
+        stopped = stop.latched()
+        if stopped:
+            return run.record(started.finish(
+                status=c.NOT_PERMITTED,
+                error=f"STOPPED: {stopped['reason']} - nothing new starts "
+                      f"until the person resumes"))
+
         capability = C.by_id(capability_id)
         if capability is None:
             raise LookupError(
@@ -350,6 +361,27 @@ class CapabilityRuntime:
         if refusal:
             return run.record(started.finish(
                 status=c.NOT_PERMITTED, error=refusal))
+
+        # The execution envelope (PRD v7 section 43): a durable objective may
+        # do what it was compiled to do, until its envelope expires, and
+        # nothing else - whatever a later step or a model's argument asks.
+        # Decided before any policy question, because a capability outside
+        # the envelope is not something a yes can authorise.
+        envelope = run.envelope
+        if envelope is not None:
+            refusal = envelope.permits(capability_id) or (
+                "this run's envelope has expired" if envelope.expired() else "")
+            if refusal:
+                return run.record(started.finish(
+                    status=c.NOT_PERMITTED, error=f"ENVELOPE: {refusal}"))
+            # JIT-001: the capability as it is now must be the one the plan
+            # was made against; a change in between is revalidated, not run.
+            planned = envelope.capability_hashes.get(capability_id)
+            if planned and planned != fingerprint(capability_id):
+                return run.record(started.finish(
+                    status=c.NOT_PERMITTED,
+                    error=f"JIT: {capability_id} has changed since this objective "
+                          "was planned; it is revalidated before it runs"))
 
         resolution = resolutions().get(capability_id)
         if resolution is None:
@@ -370,30 +402,34 @@ class CapabilityRuntime:
         approved_by = str(arguments.pop("approved_by", "") or "")
         approved_run = ""
         approved = False
-        if approved_by:
-            approved_run = self._approval_on_record(capability_id, arguments, approved_by)
+        if approved_by and run.envelope is not None:
+            approved_run = self._approval_on_record(capability_id, arguments, approved_by,
+                                                    run.envelope.objective_id)
             approved = bool(approved_run)
-        for tool_id in capability.policy_tool_ids():
-            refusal = policy_module.provenance_verdict(tool_id, run.provenance)
-            if refusal is not None:
-                return run.record(started.finish(
-                    status=c.FAILED, error=f"BLOCKED: {refusal.reason}"))
-            if tool_id in policy_module.TOOL_CATEGORIES:
-                verdict = self.engine.decide(tool_id)
-                if not verdict.allowed and not (
-                        approved and verdict.decision == policy_module.ASK):
-                    return run.record(started.finish(
-                        status=c.CANCELLED,
-                        error=f"APPROVAL_REQUIRED: {verdict.reason} "
-                              f"[{verdict.decision}]"))
-                if not verdict.allowed and approved:
-                    from friday import trust as T
-                    T.audit().record(
-                        actor=approved_by, action=tool_id, tier=T.tier_of_tool(tool_id),
-                        decision="APPROVED_ONCE", target=capability_id,
-                        objective_id=approved_run,
-                        detail={"arguments": arguments})
-                break
+        refusal = lineage_refusal(capability_id, run.provenance)
+        if refusal is not None:
+            return run.record(started.finish(
+                status=c.FAILED, error=f"BLOCKED: {refusal.reason}"))
+        # A capability no category covers meets the engine's own rule for an
+        # unknown tool (ASK: unaudited is not allowed). It used to meet no
+        # decision at all, and ran wherever its toolset did not ask the engine
+        # itself (Slice 2 review).
+        ids = capability.policy_tool_ids()
+        judged = next((t for t in ids if t in policy_module.TOOL_CATEGORIES), ids[0])
+        verdict = self.engine.decide(judged)
+        if not verdict.allowed and not (
+                approved and verdict.decision == policy_module.ASK):
+            return run.record(started.finish(
+                status=c.CANCELLED,
+                error=f"APPROVAL_REQUIRED: {verdict.reason} "
+                      f"[{verdict.decision}]"))
+        if not verdict.allowed and approved:
+            from friday import trust as T
+            T.audit().record(
+                actor=approved_by, action=judged, tier=T.tier_of_tool(judged),
+                decision="APPROVED_ONCE", target=capability_id,
+                objective_id=approved_run,
+                detail={"arguments": arguments})
 
         function = resolution.load()
         try:
@@ -419,29 +455,55 @@ class CapabilityRuntime:
         return self._bind(result, run, started, capability_id)
 
     def _approval_on_record(self, capability_id: str, arguments: dict,
-                            approved_by: str) -> str:
-        """The objective run id holding an APPROVED record for exactly this
-        capability + parameters (minus the marker) by this person, else "".
-        Anything a model could write into arguments on its own is not an
-        approval; the record is."""
+                            approved_by: str, objective_id: str) -> str:
+        """`objective_id` when that objective's run - the one this call
+        belongs to - holds an APPROVED record for exactly this capability +
+        parameters (minus the marker) by this person, else "". Anything a
+        model could write into arguments on its own is not an approval; the
+        record is, and only on the run it was given in: another objective,
+        or a call outside any objective, cannot borrow it (V7-D43)."""
+        if not objective_id:
+            return ""
         try:
             from friday.toolsets.objectives import store as objective_store
             db = objective_store()
         except Exception:  # noqa: BLE001
             return ""
+        from datetime import datetime, timezone
+
+        from friday import objectives as O
+
+        run = db.objective_run(objective_id)
+        if run is None:
+            return ""
+        try:
+            approvals = json.loads(run.get("approvals") or "[]")
+        except (TypeError, ValueError):
+            return ""
         wanted = json.dumps(arguments, sort_keys=True, default=str)
-        for run in db.objective_runs(limit=50):
-            try:
-                approvals = json.loads(run.get("approvals") or "[]")
-            except (TypeError, ValueError):
+        now = datetime.now(timezone.utc)
+        current = None
+        for record in approvals:
+            if not (record.get("decision") == "APPROVED"
+                    and record.get("operation") == capability_id
+                    and record.get("decided_by") == approved_by
+                    and json.dumps(record.get("parameters") or {}, sort_keys=True,
+                                   default=str) == wanted):
                 continue
-            for record in approvals:
-                if (record.get("decision") == "APPROVED"
-                        and record.get("operation") == capability_id
-                        and record.get("decided_by") == approved_by
-                        and json.dumps(record.get("parameters") or {}, sort_keys=True,
-                                       default=str) == wanted):
-                    return str(run["run_id"])
+            # A lease on one plan, for a time (APPROVAL-001): a yes given
+            # before the plan changed, after it expired, or with no plan
+            # recorded at all no longer applies, and the run asks again.
+            expires = str(record.get("expires_at") or "")
+            if not expires:
+                continue
+            ends = datetime.fromisoformat(expires)
+            if (ends if ends.tzinfo else ends.replace(tzinfo=timezone.utc)) <= now:
+                continue
+            if current is None:
+                current = O.plan_hash(db, objective_id)
+            if record.get("plan_hash") != current:
+                continue
+            return objective_id
         return ""
 
     def _bind(self, result, run: c.Run, started: c.ActionResult,
@@ -466,6 +528,84 @@ class CapabilityRuntime:
         return result
 
 
+def _function_source(module: str, function: str) -> str:
+    """The source of one top-level function, read from its file without
+    importing it; "" when it cannot be found. Cached per file version."""
+    import importlib.util
+
+    try:
+        spec = importlib.util.find_spec(module)
+    except (ImportError, ValueError):
+        return ""
+    origin = getattr(spec, "origin", None) if spec is not None else None
+    if not origin or not origin.endswith(".py"):
+        return ""
+    path = pathlib.Path(origin)
+    try:
+        stamp = path.stat().st_mtime_ns
+    except OSError:
+        return ""
+    return _source_of(str(path), stamp, function)
+
+
+@functools.lru_cache(maxsize=256)
+def _source_of(path: str, stamp: int, function: str) -> str:
+    text = pathlib.Path(path).read_text(encoding="utf-8")
+    for node in ast.parse(text).body:
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == function):
+            return ast.get_source_segment(text, node) or ""
+    return ""
+
+
+def fingerprint(capability_id: str) -> str:
+    """
+    What a capability is right now, as one value (PRD v7 JIT-001): what it
+    is registered to do - its side effect, where it runs, which policy
+    questions it answers - and the source of the function it resolves to.
+    Recorded in the envelope when a plan is compiled and compared again at
+    execution, so a capability changed in between is refused, not run.
+    """
+    import hashlib
+
+    capability = C.by_id(capability_id)
+    entry = {"id": capability_id}
+    if capability is not None:
+        entry.update(side_effect=capability.side_effect,
+                     execution_scope=capability.execution_scope,
+                     requires_edge=getattr(capability, "requires_edge", False),
+                     policy=list(capability.policy_tool_ids()))
+    resolution = resolutions().get(capability_id)
+    where = [resolution.module, resolution.function] if resolution is not None else []
+    source = _function_source(*where) if resolution is not None else ""
+    payload = json.dumps({"entry": entry, "resolution": where, "source": source},
+                         sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def lineage_refusal(capability_id: str, provenance: str):
+    """
+    Whether where a run came from rules this capability out: the
+    `provenance_verdict` of its policy tool ids, asked in order up to the
+    first one with a category, exactly as `execute` asks it. None when
+    nothing objects.
+
+    The objective executor asks it too, before any port is called: the live
+    agent's port cannot carry the Run, and the runtime behind it then built a
+    default one - the person, attended - so an objective from read material
+    reached a terminal as the person.
+    """
+    capability = C.by_id(capability_id)
+    for tool_id in (capability.policy_tool_ids() if capability is not None
+                    else (capability_id,)):
+        refusal = policy_module.provenance_verdict(tool_id, provenance)
+        if refusal is not None:
+            return refusal
+        if tool_id in policy_module.TOOL_CATEGORIES:
+            return None
+    return None
+
+
 def build_dispatch(*, engine: PolicyEngine | None = None):
     """The async port the objective executor calls.
 
@@ -474,8 +614,11 @@ def build_dispatch(*, engine: PolicyEngine | None = None):
     """
     runtime = CapabilityRuntime(engine=engine)
 
-    async def dispatch(capability_id: str, arguments: dict) -> dict:
-        result = runtime.execute(capability_id, arguments)
+    async def dispatch(capability_id: str, arguments: dict, *,
+                       run: c.Run | None = None) -> dict:
+        # `run` carries the objective's lineage and envelope (TRUST-002);
+        # without it the runtime builds a default one, as a conversation does.
+        result = runtime.execute(capability_id, arguments, run=run)
         if inspect.isawaitable(result):                     # pragma: no cover
             result = await result
         return result.to_dict()

@@ -12,12 +12,18 @@ compilation belongs to `friday/continuous.py`.
 
 from __future__ import annotations
 
+import json
+import logging
 import re
-from dataclasses import dataclass, field
+import secrets
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta, timezone
 
-from friday import dag
+from friday import contracts, dag
 from friday.contracts import new_run_id, now_iso
 from friday.store import Store
+
+logger = logging.getLogger("friday-objectives")
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +154,11 @@ EVENT_RUN_CANCELLED = "run.cancelled"
 EVENT_RUN_PAUSED = "run.paused"
 EVENT_RUN_RESUMED = "run.resumed"
 EVENT_MANUAL_CONTINUE_REQUIRED = "manual_continue.required"
+#: PRD v7 DUR-001: a side-effecting call returned successfully - recorded
+#: before anything else, so recovery never runs it a second time.
+EVENT_SIDE_EFFECT_COMMITTED = "side_effect.committed"
+#: A task completed from its commit record after its executor died.
+EVENT_TASK_RECOVERED = "task.recovered"
 
 UNMAPPED_CAPABILITY = 'objective.unmapped'
 
@@ -157,6 +168,96 @@ _TASK_REF = re.compile(r"\{\{tasks\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)\}\}")
 
 class CompileError(ValueError):
     """The plan cannot become a graph. The message says exactly why."""
+
+
+class LiteralDropped(CompileError):
+    """
+    The plan does not use something the person named - a file, a path, the
+    words they gave (PRD v7 INTENT-001). Refused before anything is written:
+    a run that silently used another name would do what they did not ask.
+    """
+
+
+class ForbiddenByContract(CompileError):
+    """
+    The plan does what the person forbade (PRD v7 BCON-001): an action class
+    they ruled out, or a named thing they protected from one. Refused before
+    anything is written, whoever wrote the plan.
+    """
+
+
+def forbidden_steps(contract, tasks: list[dict]) -> list[str]:
+    """Each planned step the contract's governance rules out, and why."""
+    governance = dict(contract.governance or {})
+    forbidden = set(governance.get("forbidden") or ())
+    protected = dict(governance.get("protected") or {})
+    found = []
+    for spec in tasks:
+        capability = str(spec.get("capability") or "")
+        kind = contracts.action_class(capability)
+        if not kind:
+            continue
+        if kind in forbidden:
+            found.append(f"{capability} ({kind} was forbidden)")
+            continue
+        values = _strings(spec.get("arguments") or {})
+        for name in protected.get(kind, ()):
+            if any(name in value for value in values):
+                found.append(f"{capability} on {name} ({kind} of it was forbidden)")
+    return found
+
+
+def _strings(value) -> list[str]:
+    """Every string inside a task's arguments, however nested."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for item in value.values() for s in _strings(item)]
+    if isinstance(value, (list, tuple)):
+        return [s for item in value for s in _strings(item)]
+    return []
+
+
+def _dropped_literals(contract, tasks: list[dict], known: set) -> list[str]:
+    """The contract's literals no runnable task carries verbatim."""
+    carried = [s for spec in tasks if spec.get("capability") in known
+               for s in _strings(spec.get("arguments") or {})]
+    return [literal for literal in contract.exact_literals
+            if not any(literal in value for value in carried)]
+
+
+class CompositionNeedsConfirmation(CompileError):
+    """
+    The plan's capabilities together could send what they read (PRD v7
+    CAP-002), and the person has not agreed yet. A CompileError on purpose:
+    a caller that does not know how to ask treats it as the refusal it is.
+    """
+
+    def __init__(self, verdict, capabilities) -> None:
+        super().__init__(verdict.reason)
+        self.verdict = verdict
+        self.capabilities = tuple(capabilities)
+
+
+def composition_of(capabilities, *, provenance: str, attended: bool):
+    """policy.composition_verdict over these capabilities' policy tool ids.
+    A capability none of whose ids has a category cannot be judged, and is
+    handed over as unknown rather than left out (Slice 2 review)."""
+    from friday import capabilities as registry
+    from friday import policy
+
+    tools, unknown = [], []
+    for cap in capabilities:
+        found = registry.by_id(cap)
+        if found is None:
+            continue
+        ids = found.policy_tool_ids()
+        if any(tool in policy.TOOL_CATEGORIES for tool in ids):
+            tools.extend(ids)
+        else:
+            unknown.append(found.id)
+    return policy.composition_verdict(tools, provenance=provenance,
+                                      attended=attended, unknown=unknown)
 
 
 # Restored from the .pyc oracle: proven by a LOAD_CONST/STORE_NAME
@@ -364,11 +465,181 @@ def continuity_state(store: Store, run_id: str) -> dict:
     }
 
 
+#: How long a compiled objective's envelope lasts. Objectives are durable -
+#: they survive restarts and wait on people - so this is days, not minutes.
+#: An objective still going when its envelope expires stops acting until the
+#: person re-issues it.
+ENVELOPE_LIFETIME = timedelta(days=7)
+
+
+#: How long a person's yes to one pending action stands (PRD v7
+#: APPROVAL-001). Past it the run asks again.
+APPROVAL_TTL = timedelta(hours=24)
+
+
+def plan_hash(store: Store, run_id: str) -> str:
+    """
+    What the objective will do, as one comparable value: each task's
+    capability, arguments and dependencies, in plan order. An approval is
+    bound to it (APPROVAL-001), so a material change to the plan - a task
+    added, an argument amended - leaves the yes behind. A status change is
+    not a plan change, and the approval marker itself is not part of it.
+    """
+    import hashlib
+
+    rows = []
+    for task in store.objective_tasks(run_id):
+        arguments = {k: v for k, v in dict(task.get("arguments") or {}).items()
+                     if k != "approved_by"}
+        rows.append([task.get("task_id"), task.get("capability"), arguments,
+                     sorted(task.get("dependencies") or [])])
+    return hashlib.sha256(json.dumps(rows, sort_keys=True, default=str)
+                          .encode("utf-8")).hexdigest()
+
+
+def envelope_for(run_id: str, capabilities, *, provenance: str,
+                 attended: bool) -> contracts.Envelope:
+    """
+    The envelope a compiled objective runs inside (PRD v7 section 43).
+
+    Its capabilities are exactly the plan's: an objective may do what it was
+    compiled to do and nothing else. Its roots are the file roots FRIDAY
+    already works within (`fsjail.configured_roots`), and its network is the
+    public web for reading - both stated here so they can be narrowed, not
+    newly granted. Secret aliases are for worker processes; native
+    capabilities reach secrets through the broker under policy.
+    """
+    from friday import capability_runtime, fsjail
+
+    roots = tuple(str(root) for root in fsjail.configured_roots())
+    expires = (datetime.now(timezone.utc) + ENVELOPE_LIFETIME).isoformat(
+        timespec="seconds")
+    return contracts.Envelope(
+        run_id=run_id, objective_id=run_id,
+        provenance=provenance, attended=attended,
+        read_roots=roots, write_roots=roots,
+        network=contracts.NetworkScope(mode=contracts.NET_PUBLIC_WEB_READ,
+                                       objective_id=run_id, expires_at=expires),
+        allowed_capabilities=tuple(sorted(set(capabilities))),
+        expires_at=expires,
+        # JIT-001: what each capability was when this plan was made.
+        capability_hashes={cap: capability_runtime.fingerprint(cap)
+                           for cap in sorted(set(capabilities))})
+
+
+def _admit(envelope: contracts.Envelope, minted: contracts.Envelope) -> None:
+    """
+    A caller may hand compile a narrower envelope than the one compile mints,
+    never a wider one: no capability the plan does not use, no root, host or
+    secret compile would not grant, no later expiry and none left open. Its
+    network grant is compile's to issue, because a grant id handed in could be
+    another objective's live grant.
+    """
+    run_id = minted.run_id
+    if envelope.run_id != run_id:
+        raise contracts.ContractError(
+            f"the envelope belongs to {envelope.run_id}, not {run_id}")
+    if (envelope.provenance, envelope.attended) != (minted.provenance, minted.attended):
+        raise contracts.ContractError(
+            f"{run_id}: the envelope says {envelope.provenance}/attended="
+            f"{envelope.attended}, the caller says {minted.provenance}/"
+            f"attended={minted.attended}")
+    problems = envelope.wider_than(minted)
+    if envelope.network.grant_id:
+        problems.append(f"network grant {envelope.network.grant_id} was not issued here")
+    if problems:
+        raise contracts.ContractError(
+            f"{run_id}: the envelope is wider than its plan allows: " + "; ".join(problems))
+
+
+def _audit_grant(grant_id: str, objective_id: str, decision: str, *,
+                 actor: str = "friday", detail: dict | None = None) -> None:
+    """NET-001: a network grant's issue and revocation are audited (PRD
+    section 44: tokens are objective-bound, auditable and revocable)."""
+    from friday import trust
+
+    trust.audit().record(actor=actor, action="network.grant", tier=trust.R1,
+                         decision=decision, target=grant_id,
+                         objective_id=objective_id, detail=detail or {})
+
+
+def _issue_grant(store: Store, envelope: contracts.Envelope) -> contracts.Envelope:
+    """Back the envelope's network scope with a grant in the store, so any
+    process can revoke it and netguard in every process sees that."""
+    scope = envelope.network
+    if scope.mode == contracts.NET_NONE or scope.grant_id:
+        return envelope
+    grant_id = f"GRANT-{secrets.token_hex(8)}"
+    store.grant_issue(grant_id=grant_id, objective_id=envelope.objective_id,
+                      mode=scope.mode, hosts=scope.hosts,
+                      expires_at=scope.expires_at, now=now_iso())
+    _audit_grant(grant_id, envelope.objective_id, "ISSUED",
+                 detail={"mode": scope.mode, "hosts": list(scope.hosts),
+                         "expires_at": scope.expires_at})
+    return replace(envelope, network=replace(scope, grant_id=grant_id))
+
+
+def revoke_network_grant(store: Store, grant_id: str, *, reason: str,
+                         actor: str = "person") -> bool:
+    """Revoke one objective's network grant. Audited; False if it was not live."""
+    row = store.grant(grant_id)
+    done = store.grant_revoke(grant_id, reason=reason, now=now_iso())
+    if done:
+        _audit_grant(grant_id, (row or {}).get("objective_id", ""), "REVOKED",
+                     actor=actor, detail={"reason": reason})
+    return done
+
+
+def release_network_grant(store: Store, run_id: str, *, reason: str) -> bool:
+    """A finished or cancelled objective keeps no network authority: revoke
+    the grant behind its envelope's scope. False if it had none live."""
+    row = store.objective_run(run_id) or {}
+    try:
+        grant_id = json.loads(row.get("envelope") or "{}").get(
+            "network", {}).get("grant_id", "")
+    except ValueError:
+        logger.exception("objective %s: its stored envelope cannot be read", run_id)
+        return False
+    if not grant_id:
+        return False
+    return revoke_network_grant(store, grant_id, reason=reason, actor="friday")
+
+
+def pause_all_running(store: Store, *, reason: str) -> list[str]:
+    """STOP-001: park every running objective with the reason. PAUSED is the
+    explicit-resume wait, so nothing picks them up again on its own."""
+    paused = []
+    for run in store.objective_runs_in(RUN_RUNNING):
+        store.touch_objective_run(run["run_id"], status=RUN_PAUSED,
+                                  next_wake=None, blocker=f"stopped: {reason}")
+        store.append_objective_event(run["run_id"], EVENT_RUN_PAUSED,
+                                     detail={"reason": f"stopped: {reason}"})
+        paused.append(run["run_id"])
+    return paused
+
+
+def revoke_all_network_grants(store: Store, *, reason: str,
+                              actor: str = "friday") -> int:
+    """Revoke every live network grant at once (STOP-001). Audited per grant."""
+    revoked = store.grants_revoke_all(reason=reason, now=now_iso())
+    for grant_id in revoked:
+        _audit_grant(grant_id, "", "REVOKED", actor=actor, detail={"reason": reason})
+    return len(revoked)
+
+
 def compile_objective(store: Store, *, request: str, tasks: list[dict],
                       manifest: list[dict], objective_summary: str,
-                      run_id: str | None = None) -> dict:
+                      provenance: str, attended: bool,
+                      run_id: str | None = None,
+                      envelope: contracts.Envelope | None = None,
+                      composition_confirmed: bool = False,
+                      contract: contracts.ObjectiveContract | None = None) -> dict:
     """
     Turn an LLM-produced plan into a durable, validated task graph.
+
+    `provenance` and `attended` have no default: where a plan came from and
+    whether anyone is there to answer are the caller's to say, never assumed
+    as the person, attended (Slice 2 review).
 
     Validation is refusal for plans that cannot become a graph: a missing
     dependency, or a cycle fails the compile and names the offender. A task
@@ -437,6 +708,52 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
     _validate_references(compiled, task_ids)
 
     run_id = run_id or new_run_id()
+    known = {m["id"] for m in manifest}
+    # PRD v7 INTENT-001: what the person named is used as named, or the plan
+    # is not compiled - before anything, a grant included, is written.
+    if contract is not None:
+        dropped = _dropped_literals(contract, tasks, known)
+        if dropped:
+            raise LiteralDropped(
+                "the plan does not use what the person named: "
+                + ", ".join(repr(d) for d in dropped))
+        # BCON-001: what the person forbade is not planned, whoever planned.
+        forbidden = forbidden_steps(contract, tasks)
+        if forbidden:
+            raise ForbiddenByContract(
+                "the plan does what the person forbade: " + "; ".join(forbidden))
+    planned = [cap for task in compiled
+               for cap in (task.capability, *(ch.capability for ch in task.children))]
+    # PRD v7 CAP-002: the capability set is judged as a whole, here, before
+    # anything is persisted - the one door every objective comes through.
+    composed = composition_of(planned, provenance=provenance, attended=attended)
+    if composed is not None:
+        from friday import policy
+
+        if composed.decision == policy.DENY:
+            raise CompileError(composed.reason)
+        if not composition_confirmed:
+            raise CompositionNeedsConfirmation(composed, sorted(set(planned)))
+    # PRD v7 SEC-005 / TRUST-002: where this came from, whether anyone is
+    # there to answer, and what it may do travel with the objective, so the
+    # executor never has to assume the person, attended.
+    minted = envelope_for(run_id, [cap for cap in planned if cap in known],
+                          provenance=provenance, attended=attended)
+    ceiling = int((contract.governance or {}).get("max_side_effects") or 0) \
+        if contract is not None else 0
+    if ceiling:
+        # BCON-001: "at most N changes" is the executor's ceiling to hold.
+        minted = replace(minted, max_side_effects=ceiling)
+    if envelope is None:
+        envelope = minted
+    else:
+        # The versions are compile's record of what each capability is now,
+        # not something a caller grants: they are written onto a supplied
+        # envelope, and one that pins a different version is still refused.
+        envelope = replace(envelope, capability_hashes={
+            **minted.capability_hashes, **envelope.capability_hashes})
+        _admit(envelope, minted)
+    envelope = _issue_grant(store, envelope)
     # Stored task ids carry the run id so two runs never share a row, and
     # the plan's own references ({{tasks.t1.output}}, dependency names) are
     # rewritten to the stored ids before anything is persisted.
@@ -446,6 +763,9 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
     store.open_objective_run(
         run_id, request=request, objective_summary=objective_summary,
         status=RUN_RUNNING, next_wake=stamp,
+        provenance=envelope.provenance, attended=envelope.attended,
+        envelope=envelope.to_dict(),
+        contract=None if contract is None else contract.to_dict(),
     )
     # PRD FR-001/FR-002: the objective is classified once, at admission,
     # and the class, risk tier, budgets and required capabilities are
@@ -724,6 +1044,7 @@ def cancel_run(store: Store, *, run_id: str, reason: str,
             "reason": reason,
             "by": executor_id,
         })
+    release_network_grant(store, run_id, reason=f"objective cancelled: {reason}")
     store.append_objective_event(
         run_id, EVENT_RUN_CANCELLED,
         detail={"reason": reason, "by": executor_id})

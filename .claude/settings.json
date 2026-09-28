@@ -11,9 +11,7 @@
       "Bash(git rebase *)",
       "Bash(git reset *)",
       "Bash(git merge *)",
-      "Bash(git cherry-pick *)",
-      "Bash(git config *)",
-      "Bash(rm -rf *)"
+      "Bash(git config *)"
     ]
   },
   "hooks": {

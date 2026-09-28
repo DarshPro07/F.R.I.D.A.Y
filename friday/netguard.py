@@ -191,8 +191,47 @@ def _is_evaluation_fixture(host: str, port) -> bool:
     return _EVALUATION_FIXTURE is not None and (host, int(port or 0)) == _EVALUATION_FIXTURE
 
 
+def _check_scope(host: str, scope, revoked) -> None:
+    """PRD v7 section 44: the run's own network scope, when it has one."""
+    if scope.expired():
+        raise UrlRefused(f"this run's network scope expired at {scope.expires_at}")
+    if scope.grant_id and revoked is not None and revoked(scope.grant_id):
+        raise UrlRefused("this run's network grant was revoked")
+    if not scope.allows(host):
+        raise UrlRefused(f"{host!r} is outside this run's network scope ({scope.mode})")
+
+
+def check_scope(raw: str, scope, revoked=None) -> None:
+    """The scope half of `check` on its own, for a caller - the browser's
+    pre-capture gate - that runs the address rules separately. Raises
+    UrlRefused."""
+    host = (urlsplit((raw or "").strip()).hostname or "").lower()
+    if not host:
+        raise UrlRefused("url has no host")
+    _check_scope(host, scope, revoked)
+
+
+def run_scope(run) -> dict:
+    """
+    The `scope` / `revoked` keywords that hold a run to its envelope's
+    network scope, or nothing for a run without one (a conversation), which
+    keeps the ordinary guard. Revocation is read from the store every time,
+    so a grant revoked in any process is refused in this one.
+    """
+    envelope = getattr(run, "envelope", None)
+    if envelope is None:
+        return {}
+
+    def revoked(grant_id: str) -> bool:
+        from friday.toolsets import memory
+
+        return memory.store().grant_revoked(grant_id)
+
+    return {"scope": envelope.network, "revoked": revoked}
+
+
 def check(raw: str, *, allow_private: bool = False,
-          require_resolution: bool = False) -> dict:
+          require_resolution: bool = False, scope=None, revoked=None) -> dict:
     """
     Is this a URL Friday would be willing to fetch?
 
@@ -202,6 +241,11 @@ def check(raw: str, *, allow_private: bool = False,
     UNRESOLVED is a real, useful answer at validation time: a product feed
     should not fail ingestion because DNS was unreachable for a moment. It is
     **not** an answer `fetch` accepts - see `require_resolution`.
+
+    `scope` (a `contracts.NetworkScope`) and `revoked` (grant id -> bool) hold
+    a durable run to its envelope - see `run_scope`. The scope is decided
+    before any name is resolved, and the address rules below still apply
+    inside it.
     """
     text = (raw or "").strip()
     if not text:
@@ -214,6 +258,8 @@ def check(raw: str, *, allow_private: bool = False,
     host = (parts.hostname or "").lower()
     if not host:
         raise UrlRefused("url has no host")
+    if scope is not None:
+        _check_scope(host, scope, revoked)
     if _is_evaluation_fixture(host, parts.port):
         # Exactly one loopback origin, registered in-process by the Golden
         # Objective runner for the duration of one case (never from the
@@ -273,7 +319,8 @@ def _pinned_request(client, url: str, address: str, host: str, headers: dict):
 
 def fetch(url: str, *, timeout: float = DEFAULT_TIMEOUT,
           max_redirects: int = MAX_REDIRECTS, allow_private: bool = False,
-          max_bytes: int = MAX_BYTES, headers: dict | None = None):
+          max_bytes: int = MAX_BYTES, headers: dict | None = None,
+          scope=None, revoked=None):
     """
     Fetch a URL, validating at the moment of connection and at every redirect.
 
@@ -289,8 +336,10 @@ def fetch(url: str, *, timeout: float = DEFAULT_TIMEOUT,
     current = url
     with httpx.Client(timeout=timeout, follow_redirects=False) as client:
         for hop in range(max_redirects + 1):
+            # Every hop, redirects included, is held to the run's scope.
             verdict = check(current, allow_private=allow_private,
-                            require_resolution=True)
+                            require_resolution=True, scope=scope,
+                            revoked=revoked)
             seen.append(verdict["url"])
             request = _pinned_request(
                 client, verdict["url"], verdict["addresses"][0],

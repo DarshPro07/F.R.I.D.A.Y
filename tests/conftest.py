@@ -125,16 +125,24 @@ def _never_the_real_database(tmp_path, monkeypatch):
     guarantee, and it fails silently by leaving junk behind rather than by
     going red.
 
-    The cached module-level store is cleared too, because it is built once
-    and would otherwise hold a handle to the real file from whichever test
-    touched it first.
+    The cached module-level stores are cleared too, because each is built
+    once and would otherwise hold a handle to the real file from whichever
+    test touched it first - or, worse, to a store an earlier test closed:
+    `toolsets.objectives` kept one after tests/test_core01_red.py closed it,
+    and every later test that looked up an approval on record failed with
+    "Cannot operate on a closed database" whenever the two shared a process.
     """
-    import friday.toolsets.memory as memory
+    import importlib
 
+    caches = [importlib.import_module(f"friday.toolsets.{name}") for name in
+              ("memory", "objectives", "automations", "products", "profile",
+               "reminders")]
     monkeypatch.setenv("ADA_DB", str(tmp_path / "test-store.sqlite3"))
-    monkeypatch.setattr(memory, "_store", None, raising=False)
+    for module in caches:
+        monkeypatch.setattr(module, "_store", None, raising=False)
     yield
-    monkeypatch.setattr(memory, "_store", None, raising=False)
+    for module in caches:
+        monkeypatch.setattr(module, "_store", None, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -176,3 +184,59 @@ def _audit_log_is_per_test(tmp_path):
     yield
     trust.configure_audit(None)
     log.close()
+
+
+@pytest.fixture(autouse=True)
+def _evaluation_record_is_per_test(tmp_path, monkeypatch):
+    """
+    `evaluation.graded` persists every attempt it was not handed a record
+    for, and the development router picks coding agents from that file.
+    Left alone, the suite wrote every row the boss's
+    `data/evaluation/attempts.json` held: 120 attempts by "scripted" on
+    "widget", "greeter" and "feature". A test that wants to read the record
+    uses `evaluation.record_path()` and sees only its own attempts.
+    """
+    from friday import evaluation
+    per_test = tmp_path / "evaluation" / "attempts.json"
+    monkeypatch.setattr(evaluation, "record_path", lambda: per_test)
+    yield
+
+
+#: The state paths the first test saw; every later test must leave them so.
+_state_paths_at_start: tuple | None = None
+
+
+def _state_paths() -> tuple:
+    import importlib
+    config = importlib.import_module("friday.config")
+    store = importlib.import_module("friday.store")
+    return (config.STATE_ROOT, config.DATA_DIR, store.DEFAULT_DB)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    global _state_paths_at_start
+    if _state_paths_at_start is None:
+        _state_paths_at_start = _state_paths()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_teardown(item, nextitem):
+    """
+    A test that reloads `friday.config` must leave it as it found it.
+
+    `tests/test_onboarding.py`'s console reloaded the config on teardown while
+    its FRIDAY_HOME was still set, so every later test in the process saw a
+    DATA_DIR inside a deleted temp directory: `orgplane.control_plane()` could
+    not open its database, and anything else that trusted DATA_DIR wrote into
+    a directory nobody reads. The check runs after every fixture, monkeypatch
+    included, has been torn down, so a patch that is undone is not a leak; the
+    test that leaks errors at teardown, once, and later tests are not blamed.
+    """
+    global _state_paths_at_start
+    result = yield
+    now = _state_paths()
+    if _state_paths_at_start is not None and now != _state_paths_at_start:
+        moved, _state_paths_at_start = _state_paths_at_start, now
+        raise AssertionError(f"{item.nodeid} left the state paths moved: {moved} -> {now}")
+    return result

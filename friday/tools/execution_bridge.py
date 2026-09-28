@@ -211,28 +211,36 @@ def bridge_brain_recall(query: str = "", entity: str = "",
 @mcp.tool()
 def bridge_brain_remember(fact: str, provenance: str,
                           entity: str = "") -> str:
-    """Save ONE durable verified fact to the shared Friday/Hermes brain.
-    Only verified findings with provenance - never execution status,
-    transient detail, or anything secret/banking-shaped (refused before
-    ingestion).
+    """Save ONE durable verified fact to FRIDAY's memory. Only verified
+    findings with provenance - never execution status, transient detail,
+    or anything secret/banking-shaped (refused before ingestion).
+
+    A worker's fact is remembered as read material: it goes through the
+    promotion gate, never into the ledger whose facts FRIDAY is given as
+    rules (V7-D34), whatever `provenance` says.
 
     Args:
         fact: The verified claim, one per call.
         provenance: Where it came from (file:line, WorkRun id, doc).
         entity: Optional scope: friday / hermes / project-<id>.
     """
-    try:
-        from friday.brain import AdmissionRefused, SharedBrainAdapter
+    from friday import contracts as c
+    from friday import memory_promotion as MP
 
-        out = SharedBrainAdapter().remember(fact, provenance=provenance,
-                                            entity=entity)
+    try:
+        decision = MP.promote(MP.Candidate(
+            statement=fact, kind="project_fact",
+            source=f"worker:{(provenance or '')[:200]}",
+            owner=entity or "hermes", scope="project", confidence=0.75,
+            evidence=[provenance] if provenance else [],
+            provenance=c.READ_MATERIAL))
     except Exception as exc:                                 # noqa: BLE001
-        if type(exc).__name__ == "AdmissionRefused":
-            return f"refused: {exc}"
-        return (f"shared brain unreachable ({type(exc).__name__}); the "
-                f"fact was NOT saved - report this rather than claiming "
-                f"it was")
-    return f"{out.get('status')} id={out.get('id')}"
+        return (f"memory unreachable ({type(exc).__name__}); the fact was "
+                f"NOT saved - report this rather than claiming it was")
+    if not decision.accepted:
+        return f"not saved: {decision.reason}"
+    return (f"saved as read material ({decision.reason}); a worker's fact "
+            f"informs, it is never one of FRIDAY's rules")
 
 
 

@@ -6,7 +6,7 @@ paths:
   - "agent_friday.py"
   - "ui/**"
   - "scripts/**"
-alwaysApply: false
+alwaysApply: true
 ---
 # Rule 1: Plan-First Development
 

@@ -5,9 +5,12 @@ e2e-run*.log
 data/e2e-*
 .venv/
 .venv-verify/
+.venv-build/
 __pycache__/
 dist/
 build/
+# `build/` above is PyInstaller's work dir; the build docs are source.
+!docs/build/
 coverage/
 .env
 *.log
@@ -79,6 +82,8 @@ data/workspace/
 *.sqlite3
 # runtime provider/objective state
 data/provider_cooldowns.json
+# the user tier of the skill layer in a source checkout (docs/skills/ARCHITECTURE.md)
+data/skills/
 # benchmark / evaluation / verification outputs (CI artifacts, not source)
 data/golden/
 data/perf/
@@ -107,3 +112,6 @@ Friday.exe*
 # soak runs: the report and samples are release evidence (committed under
 # docs/evidence/soak via scripts/soak.py --evidence); the DBs/logs are not
 data/soak/
+
+# Local engineering-program progress; not product source.
+.slim/deepwork/

@@ -21,6 +21,7 @@ The engine consults: kernel DENY -> user policy (this) -> static default.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -64,6 +65,88 @@ _DEFAULTS = {
     "workspace_access": "CONFIRM",
 }
 
+#: The five names a normal user sees (FR-POL-001). Each still compiles
+#: onto the SAME 16-domain grid above through `compile_level()` - the
+#: slider is a labeled shortcut into this file's one grant path, never a
+#: second policy engine Developer Mode's inspection view could disagree
+#: with.
+LEVELS = (
+    "Advise", "Draft", "Ask Before Acting", "Autonomous Routine Work",
+    "High Autonomy",
+)
+
+#: The four domains FR-POL-003 (consequential actions) keeps behind
+#: CONFIRM no matter how far the slider moves. Spending money, buying a
+#: domain, changing the spend envelope itself and deleting data are not
+#: reversible by re-running anything - "I trust you completely" is a
+#: statement about ordinary reversible work, not about those, so the
+#: consequential-action rule outranks the autonomy slider by design.
+#: `deploy_website` is deliberately NOT in this set: a bad deploy is
+#: reversible by redeploying, so it graduates to AUTO at the top level
+#: instead of staying pinned like the four irreversible ones.
+_CONSEQUENTIAL = frozenset({
+    "spend_money", "buy_domain", "budget_envelope_change", "delete_data",
+})
+
+#: Domains AUTO at each level, each built by adding to the level below -
+#: every level is a STRICT superset of the one before, so monotonicity
+#: ("AUTO at level N stays AUTO above N") and distinctness ("no two
+#: levels collide") are both structural, not something a future edit can
+#: quietly break by picking membership that happens to overlap.
+_ADVISE_AUTO = frozenset({"research"})
+_DRAFT_AUTO = _ADVISE_AUTO | {"file_write", "local_build"}
+_ASK_BEFORE_ACTING_AUTO = frozenset(
+    domain for domain, state in _DEFAULTS.items() if state == "AUTO")
+#: + workspace_access. Using the owner's own computer and browser to
+#: carry out approved ordinary work IS the routine-work tier - it is
+#: what the product spends most of its time doing, and the owner's
+#: recorded direction is that FRIDAY mostly operates in their existing
+#: browser session rather than anything of its own.
+_AUTONOMOUS_ROUTINE_AUTO = _ASK_BEFORE_ACTING_AUTO | {"workspace_access"}
+#: + deploy_website. Publishing a site is a step past routine: reversible
+#: by redeploying, which is why it is delegable at all, but it changes
+#: something the public sees, so it waits for the top position rather
+#: than joining the routine-work tier. By construction this equals
+#: `DOMAINS` minus `_CONSEQUENTIAL` (12 domains); asserted, not just
+#: commented, by
+#: `test_high_autonomy_keeps_exactly_the_four_consequential_on_confirm`.
+_HIGH_AUTONOMY_AUTO = _AUTONOMOUS_ROUTINE_AUTO | {"deploy_website"}
+
+_LEVEL_AUTO = {
+    "Advise": _ADVISE_AUTO,
+    "Draft": _DRAFT_AUTO,
+    "Ask Before Acting": _ASK_BEFORE_ACTING_AUTO,
+    "Autonomous Routine Work": _AUTONOMOUS_ROUTINE_AUTO,
+    "High Autonomy": _HIGH_AUTONOMY_AUTO,
+}
+
+#: Sentinel key for "which level is the slider on" events. Reuses the
+#: same versioned events table as domain grants (one audit trail, not a
+#: second store Developer Mode's inspection could drift from) - never a
+#: real permission domain, so it can never collide with `DOMAINS` or show
+#: up in `snapshot()`.
+_LEVEL_EVENTS_KEY = "_autonomy_level"
+
+
+def compile_level(level: str) -> dict[str, str]:
+    """
+    Compile a named autonomy level (FR-POL-001) into the full per-domain
+    grid `grant()` already understands - a pure lookup table, never a
+    second source of truth Developer Mode's policy inspection could
+    disagree with.
+
+    Raises ValueError on an unrecognized level instead of guessing: a
+    mistyped or future-renamed level must fail loudly, not silently
+    resolve to "whatever CONFIRM means".
+    """
+    if level not in _LEVEL_AUTO:
+        raise ValueError(
+            f"unknown autonomy level {level!r}; choose one of {LEVELS}")
+    auto = _LEVEL_AUTO[level]
+    return {domain: ("AUTO" if domain in auto else "CONFIRM")
+            for domain in DOMAINS}
+
+
 _TABLE = """
 CREATE TABLE IF NOT EXISTS user_policy_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,8 +184,8 @@ class UserPolicy:
 
     def __init__(self, db_path: str | Path | None = None) -> None:
         if db_path is None:
-            from friday.config import DATA_DIR
-            db_path = Path(DATA_DIR) / "ada.sqlite3"
+            from friday.store import DEFAULT_DB
+            db_path = os.getenv("ADA_DB") or DEFAULT_DB
         self._path = str(db_path)
         with self._connect() as db:
             db.execute(_TABLE)
@@ -148,6 +231,36 @@ class UserPolicy:
                 (domain, state, reason, actor, time.time()))
         return {"status": "succeeded", "domain": domain, "state": state}
 
+    def set_level(self, level: str, *, reason: str = "",
+                  actor: str = "user") -> dict:
+        """
+        Apply a named autonomy level (FR-POL-001) THROUGH `grant()` so
+        every domain it changes lands as its OWN audited event, carrying
+        the level in the reason - "why is workspace_access AUTO" must
+        always answer with "the user moved the slider to X", the same
+        way a granular grant answers with the user's own words. Domains
+        already at the target state are left alone: moving the slider
+        one notch does not rewrite sixteen rows of history every time.
+        """
+        target = compile_level(level)  # raises on an unknown level
+        note = f"autonomy level set to {level!r}"
+        if reason:
+            note += f": {reason}"
+        changed = []
+        for domain in DOMAINS:
+            state = target[domain]
+            if self.state_of(domain) == state:
+                continue
+            self.grant(domain, state, reason=note, actor=actor)
+            changed.append(domain)
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO user_policy_events (domain, state, reason,"
+                " actor, created_at) VALUES (?,?,?,?,?)",
+                (_LEVEL_EVENTS_KEY, level, reason, actor, time.time()))
+        return {"status": "succeeded", "level": level,
+                "changed_domains": changed}
+
     # -- reads --------------------------------------------------------------
 
     def state_of(self, domain: str) -> str:
@@ -165,6 +278,28 @@ class UserPolicy:
 
     def snapshot(self) -> dict:
         return {domain: self.state_of(domain) for domain in DOMAINS}
+
+    def level(self) -> str | None:
+        """
+        The last level set through `set_level` (FR-POL-001). Nobody has
+        ever moved the slider - only ad-hoc `grant()` calls exist, or
+        nothing at all - so infer the highest named level whose compiled
+        grid the current snapshot still matches exactly, so Developer
+        Mode always has a label for the generated policy even when it
+        was built by hand. No exact match -> None, rather than lying
+        with a level name the grid does not actually reflect.
+        """
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT state FROM user_policy_events WHERE domain = ?"
+                " ORDER BY id DESC LIMIT 1", (_LEVEL_EVENTS_KEY,)).fetchone()
+        if row:
+            return row["state"]
+        snapshot = self.snapshot()
+        for lvl in reversed(LEVELS):
+            if compile_level(lvl) == snapshot:
+                return lvl
+        return None
 
     def audit_trail(self, domain: str = "", limit: int = 50) -> list[dict]:
         with self._connect() as db:

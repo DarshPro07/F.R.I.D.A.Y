@@ -54,7 +54,9 @@ KERNEL_PATHS = (
     # trust boundaries
     "friday/policy.py", "friday/user_policy.py", "friday/trust.py",
     "friday/confirmation.py", "friday/sensitive_domains.py",
-    "friday/netguard.py", "friday/fsjail.py", "friday/sandbox.py",
+    "friday/netguard.py", "friday/fsjail.py", "friday/execution.py",
+    # the execution envelope's contract: narrow-only lives here
+    "friday/contracts.py",
     "friday/privacy.py", "friday/access.py", "friday/secret_broker.py",
     "friday/vault.py",
     # the owner's words are the licence for a write; provider truth

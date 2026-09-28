@@ -29,6 +29,16 @@ mcp = FastMCP(
 for registrar in (register_all_tools, register_all_prompts, register_all_resources):
     registrar(mcp)
 
-if __name__ == "__main__":
+def main() -> None:
+    """The `friday` console script (pyproject), `python server.py` and the
+    launcher's server role all start here."""
+    # STOP-001: this process honours an emergency stop pressed anywhere.
+    from friday import stop
+
+    stop.watch()
     # Spin up transport adapter
     mcp.run(transport="sse")
+
+
+if __name__ == "__main__":
+    main()

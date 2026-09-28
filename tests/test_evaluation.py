@@ -4,6 +4,10 @@ Deciding from evidence instead of from "Opus is probably best for this".
 The dangerous failure here is a router that swings on one lucky run and looks
 informed while doing it. Most of these tests are about refusing to conclude.
 """
+import logging
+import sys
+from pathlib import Path
+
 import pytest
 
 from friday import evaluation as E
@@ -147,3 +151,82 @@ def test_an_attempt_that_did_not_pass_is_not_passed():
     assert not _attempt("claude", E.FAILED).passed
     assert not _attempt("claude", E.INCONCLUSIVE).passed
     assert _attempt("claude", E.PASSED).passed
+
+
+# --- graded: verify, then record where the router reads -------------------
+
+def _verifier(code: str) -> E.Verifier:
+    return E.Verifier(command=(sys.executable, "-c", code))
+
+
+@pytest.fixture
+def workspace(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    return work
+
+
+def test_the_suite_never_writes_the_live_record():
+    """
+    Every row in the boss's record was a test fixture: 120 attempts by
+    "scripted" on "widget", "greeter" and "feature", appended by each suite
+    run that graded work without a record of its own. The router reads that
+    file, so `conftest._evaluation_record_is_per_test` points it elsewhere.
+    """
+    from friday.config import DATA_DIR
+
+    live = Path(DATA_DIR) / "evaluation" / "attempts.json"
+    assert E.record_path().resolve() != live.resolve()
+
+
+def test_graded_work_is_persisted_where_the_router_reads_it(workspace):
+    """
+    With no record of its own an attempt is still evidence: three passes
+    are enough for `best_for` to name the agent on the next load.
+    """
+    for _ in range(3):
+        E.graded("build", "claude", workspace, _verifier("pass"))
+    record = E.Record.load(E.record_path())
+    assert [a.verdict for a in record.attempts] == [E.PASSED] * 3
+    assert record.best_for("build") == "claude"
+
+
+def test_a_failing_verifier_is_recorded_as_failed(workspace):
+    attempt = E.graded("build", "claude", workspace,
+                       _verifier("import sys; sys.exit(3)"))
+    assert attempt.verdict == E.FAILED and attempt.exit_code == 3
+    assert not attempt.passed
+    scored = E.Record.load(E.record_path()).scored(agent="claude")
+    assert scored["decided"] == 1 and scored["pass_rate"] == 0.0
+
+
+def test_a_verifier_that_cannot_start_is_inconclusive_not_failed(workspace):
+    """
+    A missing interpreter says nothing about the code. Grading it FAILED
+    would drag the agent's pass rate down for a fault of the machine.
+    """
+    attempt = E.graded("build", "claude", workspace, E.Verifier(
+        command=(str(workspace / "no-such-verifier.exe"),)))
+    assert attempt.verdict == E.INCONCLUSIVE and attempt.exit_code == 127
+    scored = E.Record.load(E.record_path()).scored(agent="claude")
+    assert scored["inconclusive"] == 1 and scored["pass_rate"] is None
+
+
+def test_a_caller_held_record_is_not_counted_twice(workspace):
+    """The caller's record is the record; the shared file is not fed too."""
+    record = E.Record()
+    E.graded("build", "claude", workspace, _verifier("pass"), record=record)
+    assert len(record.attempts) == 1
+    assert not E.record_path().exists()
+
+
+def test_an_unwritable_record_does_not_lose_the_attempt(workspace, monkeypatch,
+                                                         caplog):
+    """A full disk or a locked file is logged; the verdict still comes back."""
+    blocker = workspace / "blocker"
+    blocker.write_text("a file where the directory should be", encoding="utf-8")
+    monkeypatch.setattr(E, "record_path", lambda: blocker / "attempts.json")
+    with caplog.at_level(logging.ERROR, logger="friday-agent"):
+        attempt = E.graded("build", "claude", workspace, _verifier("pass"))
+    assert attempt.verdict == E.PASSED
+    assert "could not persist the attempt" in caplog.text

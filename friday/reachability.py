@@ -175,6 +175,18 @@ DECLARED = {
                       "observes every turn from watch_from_the_side"),
     "friday/forge": (FUTURE, "skill authoring, frozen by the product rescue"),
     "friday/forge_runtime": (FUTURE, "same"),
+    "friday/onboarding": (PRODUCTION,
+                          "the owner's interview console: friday.onboarding "
+                          "subcommands are dispatched by argparse "
+                          "(FRIDAY.exe -m friday.onboarding), which the "
+                          "reference walk cannot follow; the doctor's "
+                          "onboarding section reaches the read side "
+                          "statically"),
+    "friday/skills": (PRODUCTION,
+                      "the owner's skills console: friday.skills.cli subcommands "
+                      "are dispatched by argparse (FRIDAY.exe -m friday.skills.cli), "
+                      "which the reference walk cannot follow; the voice/objective "
+                      "seams are tracked in docs/plans/skill-intelligence/00-status.md"),
 }
 
 KNOWN: dict[str, tuple[str, str]] = {
@@ -198,6 +210,10 @@ KNOWN: dict[str, tuple[str, str]] = {
     'broker_for': (
         DEAD,
         "the executor's question channel is never built - a real gap in the development journey, not dead by design",
+    ),
+    '_contract_refusal': (
+        FUTURE,
+        'holds amend_task/append_task to the objective contract (BCON-001, V7-D46); voice wires only skip_task so far',
     ),
     'accept_requirement': (FUTURE, 'Journey D: requirement acceptance and readiness'),
     'Requirement': (FUTURE, 'same'),

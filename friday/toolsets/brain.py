@@ -59,11 +59,13 @@ def remember(run: c.Run, fact: str, *, provenance: str, entity: str = "",
              kind: str = "fact", ttl: str = "",
              engine: PolicyEngine = default_engine) -> c.ActionResult:
     """One durable fact, admission-filtered, provenance required."""
-    from friday.brain import AdmissionRefused
+    from friday.brain import PERSON_ORIGIN, READ_ORIGIN, AdmissionRefused
 
     started = c.started(run.run_id, "brain.remember")
+    # The run's own lineage, not the provenance string, says who is writing.
+    origin = PERSON_ORIGIN if run.provenance == c.PERSON else READ_ORIGIN
     try:
-        out = adapter().remember(fact, provenance=provenance,
+        out = adapter().remember(fact, provenance=provenance, origin=origin,
                                  entity=entity, kind=kind, ttl=ttl)
     except AdmissionRefused as refusal:
         return run.record(c.failed(started, str(refusal)))

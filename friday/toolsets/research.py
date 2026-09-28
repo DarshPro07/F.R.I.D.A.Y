@@ -135,25 +135,39 @@ async def _render(browser: BrowserSession, url: str) -> str:
     return await page.content()
 
 
-async def crawl_one(client: httpx.AsyncClient, url: str, *, max_chars: int,
-                    browser: BrowserSession | None = None) -> dict:
-    """One page, cleaned. Never raises: a failed source is a reported source."""
-    if not _valid(url):
-        return {"url": url, "ok": False, "error": "url must be http(s)"}
-    from friday import breaker
+def _refusal(url: str, net: dict | None = None) -> str:
+    """
+    Why FRIDAY will not fetch this URL, or "" if it will.
+
+    sensitive_domains knows authenticated/financial hosts; it does not know
+    where a name RESOLVES. Research crawls URLs chosen by a search engine or
+    by page content, so without netguard a crafted result can point the
+    crawler at cloud metadata, loopback, or the LAN. `net` holds a durable
+    run to its envelope's network scope as well (NET-001; netguard.run_scope).
+    Every engine asks this, before the fetch and of the page it landed on.
+    """
     from friday import netguard
     from friday import sensitive_domains
     blocked = sensitive_domains.refusal(url)
     if blocked:
-        return {"url": url, "ok": False, "error": blocked}
-    # sensitive_domains knows authenticated/financial hosts; it does not know
-    # where a name RESOLVES. Research crawls URLs chosen by a search engine or
-    # by page content, so without netguard a crafted result can point the
-    # crawler at cloud metadata, loopback, or the LAN.
+        return blocked
     try:
-        netguard.check(url)
+        netguard.check(url, **(net or {}))
     except netguard.UrlRefused as exc:
-        return {"url": url, "ok": False, "error": str(exc)}
+        return str(exc)
+    return ""
+
+
+async def crawl_one(client: httpx.AsyncClient, url: str, *, max_chars: int,
+                    browser: BrowserSession | None = None,
+                    net: dict | None = None) -> dict:
+    """One page, cleaned. Never raises: a failed source is a reported source."""
+    if not _valid(url):
+        return {"url": url, "ok": False, "error": "url must be http(s)"}
+    from friday import breaker
+    refused = _refusal(url, net)
+    if refused:
+        return {"url": url, "ok": False, "error": refused}
     # Research crawls many URLs at once; one dead host must not spend the
     # timeout budget over and over while the boss waits.
     try:
@@ -171,15 +185,11 @@ async def crawl_one(client: httpx.AsyncClient, url: str, *, max_chars: int,
         return {"url": url, "ok": False,
                 "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
     breaker.record_success(url)
-    blocked = sensitive_domains.refusal(final_url)
-    if blocked:
-        return {"url": final_url, "ok": False, "error": blocked}
     # Redirects are the interesting case: a public URL is allowed to answer
     # with a 302 to 169.254.169.254, so the landing URL must be re-checked.
-    try:
-        netguard.check(final_url)
-    except netguard.UrlRefused as exc:
-        return {"url": final_url, "ok": False, "error": str(exc)}
+    refused = _refusal(final_url, net)
+    if refused:
+        return {"url": final_url, "ok": False, "error": refused}
 
     title, text = to_markdown(html, final_url)
     how = "http"
@@ -205,14 +215,38 @@ async def crawl_one(client: httpx.AsyncClient, url: str, *, max_chars: int,
     }
 
 
-async def _crawl_with_crawl4ai(urls: list[str], max_chars: int) -> list[dict]:
-    """The opt-in engine. Imported only when actually selected."""
+async def _crawl_with_crawl4ai(urls: list[str], max_chars: int,
+                               net: dict | None = None) -> list[dict]:
+    """
+    The opt-in engine. Imported only when actually selected.
+
+    It is held to the same guard as the default engine (V7-D14): a URL is
+    refused before crawl4ai sees it, and a page that landed somewhere refused
+    is dropped rather than read. The one residual is a redirect inside the
+    engine's own browser, which is only seen after it has landed.
+    """
+    out: list[dict] = []
+    allowed = []
+    for url in urls:
+        refused = _refusal(url, net)
+        if refused:
+            out.append({"url": url, "ok": False, "engine": "crawl4ai",
+                        "error": refused})
+        else:
+            allowed.append(url)
+    if not allowed:
+        return out
     from crawl4ai import AsyncWebCrawler
 
-    out: list[dict] = []
     async with AsyncWebCrawler(verbose=False) as crawler:
-        results = await crawler.arun_many(urls=urls)
+        results = await crawler.arun_many(urls=allowed)
         for result in results:
+            landed = str(getattr(result, "url", "") or "")
+            refused = _refusal(landed, net) if landed else ""
+            if refused:
+                out.append({"url": landed, "ok": False, "engine": "crawl4ai",
+                            "error": refused})
+                continue
             markdown = str(getattr(result, "markdown", "") or "")
             if not getattr(result, "success", False) or not markdown.strip():
                 out.append({"url": getattr(result, "url", "?"), "ok": False,
@@ -230,17 +264,19 @@ async def _crawl_with_crawl4ai(urls: list[str], max_chars: int) -> list[dict]:
     return out
 
 
-async def crawl_all(urls: list[str], *, max_chars: int, render: bool) -> list[dict]:
-    """Every URL in parallel, with the browser closed again afterwards."""
+async def crawl_all(urls: list[str], *, max_chars: int, render: bool,
+                    net: dict | None = None) -> list[dict]:
+    """Every URL in parallel, with the browser closed again afterwards.
+    `net` holds a durable run to its network scope (netguard.run_scope)."""
     if crawl_engine() == "crawl4ai":
-        return await _crawl_with_crawl4ai(urls, max_chars)
+        return await _crawl_with_crawl4ai(urls, max_chars, net=net)
 
     browser = BrowserSession() if render else None
     try:
         async with httpx.AsyncClient(follow_redirects=True,
                                      timeout=FETCH_TIMEOUT) as client:
             return list(await asyncio.gather(*(
-                crawl_one(client, url, max_chars=max_chars, browser=browser)
+                crawl_one(client, url, max_chars=max_chars, browser=browser, net=net)
                 for url in urls
             )))
     finally:
@@ -435,7 +471,9 @@ async def web_crawl(
         return run.record(c.failed(
             started, f"{len(wanted)} urls is too many for one call; 12 at most"))
 
-    pages = dedupe(await crawl_all(wanted, max_chars=max_chars, render=render))
+    from friday import netguard
+    pages = dedupe(await crawl_all(wanted, max_chars=max_chars, render=render,
+                                   net=netguard.run_scope(run)))
     good = [p for p in pages if p.get("ok")]
     failed = [p for p in pages if not p.get("ok")]
 
@@ -495,6 +533,32 @@ async def web_deep_research(
         return run.record(c.failed(started, "empty question"))
     sources = max(1, min(int(sources or 5), 10))
 
+    from friday import research_cache
+    cached = research_cache.lookup(question)
+    if cached is not None:
+        return run.record(c.succeeded(
+            started,
+            output=_scoped({
+                "question": question, "search_provider": "cache",
+                "considered": len(cached.sources), "read": len(cached.sources),
+                "engine": crawl_engine(),
+                "corpus_chars": sum(len(f) for f in cached.facts),
+                "sources": [
+                    {"url": s.url, "title": s.title, "markdown": fact}
+                    for s, fact in zip(cached.sources, cached.facts)
+                ],
+                "dropped_for_budget": [], "unreadable": [],
+                "cached": True, "freshness": cached.freshness,
+                "fetched_at": cached.fetched_at.isoformat(),
+            }),
+            verification=c.Verification(
+                method="research_cache_hit",
+                evidence=f"served from cache, freshness={cached.freshness}, "
+                         f"fetched {cached.fetched_at.isoformat()}, "
+                         f"{len(cached.sources)} source(s)",
+            ),
+        ))
+
     search = await web_search(run, question, limit=sources * 2, engine=engine)
     if search.status != c.SUCCEEDED:
         return run.record(c.failed(
@@ -504,8 +568,10 @@ async def web_deep_research(
     if not hits:
         return run.record(c.failed(started, "search returned no results to read"))
 
+    from friday import netguard
     pages = dedupe(await crawl_all([h["url"] for h in hits],
-                                   max_chars=max_chars_per_source, render=True))
+                                   max_chars=max_chars_per_source, render=True,
+                                   net=netguard.run_scope(run)))
     kept, dropped = build_corpus(pages, question, budget=budget)
     unreadable = [{"url": p.get("url"), "error": p.get("error")}
                   for p in pages if not p.get("ok")]
@@ -529,6 +595,20 @@ async def web_deep_research(
     if not kept:
         return run.record(c.failed(
             started, f"found {len(hits)} result(s) but none could be read"))
+
+    # Saved for every completed research pass, partial or not: a corpus that
+    # lost half its sources to the budget is still real research, and the
+    # owner's direction is that every web search gets saved so the same
+    # question is not researched twice. There is no synthesis to cache here -
+    # this call hands the corpus to the agent's own model rather than
+    # synthesising it (see the docstring) - so only the source-backed facts
+    # are kept; a future call that does synthesise can save one too.
+    research_cache.save(research_cache.Artifact.create(
+        question,
+        sources=[{"url": p["url"], "title": p.get("title", "")} for p in kept],
+        facts=[p.get("markdown", "") for p in kept],
+        confidence=len(kept) / max(len(hits), 1),
+    ))
 
     note = None
     if dropped or unreadable:

@@ -39,7 +39,7 @@ from pathlib import Path
 from friday import contracts as c
 from friday.fsjail import JailError
 from friday.policy import PolicyEngine, default_engine
-from friday.toolsets.files import jail
+from friday.toolsets.files import resolve_for
 from friday.toolsets.system import APPROVAL_PREFIX
 
 EXECUTION_SCOPE = "local_machine"
@@ -82,8 +82,9 @@ def _scoped(payload: dict) -> dict:
 
 
 def _safe(run: c.Run, started: c.ActionResult, raw: str):
+    # The same resolution files use: FRIDAY's jail, then the run's envelope.
     try:
-        return jail().resolve(raw), None
+        return resolve_for(run, raw), None
     except JailError as exc:
         return None, run.record(c.failed(started, f"path refused: {exc}"))
 

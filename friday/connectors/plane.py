@@ -192,8 +192,8 @@ class ConnectorState:
         import sqlite3
 
         if db_path is None:
-            from friday.config import DATA_DIR
-            db_path = Path(DATA_DIR) / "ada.sqlite3"
+            from friday.store import DEFAULT_DB
+            db_path = os.getenv("ADA_DB") or DEFAULT_DB
         self._path = str(db_path)
         self._sqlite3 = sqlite3
         with self._connect() as db:

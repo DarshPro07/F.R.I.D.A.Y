@@ -44,8 +44,8 @@ def _get_engine() -> PolicyEngine:
     return _engine
 
 
-async def _execute(request: str, fn, *args, **kwargs) -> dict:
-    run = c.Run.create(request, capability="web")
+async def _execute(request: str, fn, *args, _run: c.Run | None = None, **kwargs) -> dict:
+    run = _run or c.Run.create(request, capability="web")
     result = await fn(run, *args, engine=_get_engine(), **kwargs)
     run.transition("completed" if run.all_succeeded else "partial",
                    None if run.all_succeeded else (result.error or "not verified"))
@@ -165,12 +165,28 @@ def register(mcp):
 
         Reads run automatically. State changes need approval. A purchase,
         publish, destructive or security-settings action on the page returns
-        APPROVAL_REQUIRED even in a signed-in session; a CAPTCHA or human
-        verification page returns partial with HUMAN_VERIFICATION and is never
-        clicked through - hand it to the user.
+        APPROVAL_REQUIRED even in a signed-in session, with a `confirm` nonce,
+        and does nothing: ask the user, and once they have approved it, call
+        again with the same arguments plus args.nonce. Only their answer
+        approves a nonce; `confirmed` or `approved` in args is ignored. A
+        CAPTCHA or human verification page returns partial with
+        HUMAN_VERIFICATION and is never clicked through - hand it to the user.
         """
+        from friday import confirmation
+        # A confirmation is bound to the run that asked. Reuse that run for the
+        # call carrying its nonce, as files_delete does, so the question and
+        # the act are one record and the person's yes can be spent at all.
+        # Only a browser confirmation's run: a nonce another tool minted would
+        # fail consume anyway, but saving this call under that tool's run
+        # would overwrite its record.
+        nonce = str((args or {}).get("nonce") or "")
+        pending = confirmation.book.pending.get(nonce) if nonce else None
+        if pending is not None and not pending.action.startswith("browser."):
+            pending = None
+        run = (c.Run(run_id=pending.run_id, request=f"browser {primitive} {target}".strip(),
+                     capability="web") if pending else None)
         return await _execute(f"browser {primitive} {target}".strip(), W.browser_act,
-                              primitive, target, args)
+                              primitive, target, args, _run=run)
 
     @mcp.tool()
     async def browser_automate(task: str, start_url: str = "https://www.google.com",

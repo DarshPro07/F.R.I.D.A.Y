@@ -13,6 +13,7 @@ from friday import capabilities, hermes_health as H
 from friday.continuous import ContinuousTaskExecutor
 from friday.objectives import compile_objective
 from friday.store import Store
+from friday.contracts import PERSON
 
 
 def _signals(**down):
@@ -62,7 +63,7 @@ async def test_connectivity_failure_consults_the_report_and_repairs_the_layer(tm
             bridge_ok['up'] = True
             return True
         return False
-    run = compile_objective(store, request='delegate through the bridge', objective_summary='delegate through the bridge', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'probe'}}], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='delegate through the bridge', objective_summary='delegate through the bridge', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'probe'}}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     executor = ContinuousTaskExecutor(store, port, executor_id='wire', health_probe=probe, health_recover=recover)
     final = await _drive(store, run['run_id'], executor)
     assert repairs == [H.Recovery.RECONNECT_BRIDGE], 'the layer-specific repair was not driven from the report'
@@ -98,7 +99,7 @@ async def test_dead_gateway_with_live_work_reconciles_before_restart(tmp_path):
 
     async def recover(report):
         return False
-    run = compile_objective(store, request='delegate', objective_summary='delegate', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'long job'}}], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='delegate', objective_summary='delegate', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'long job'}}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     executor = ContinuousTaskExecutor(store, port, executor_id='dead', health_probe=probe, health_recover=recover)
     try:
         await executor.start(run['run_id'])
@@ -124,7 +125,7 @@ async def test_failed_recovery_still_retries_and_never_asks_the_user(tmp_path):
 
     async def recover(report):
         return False
-    run = compile_objective(store, request='delegate', objective_summary='delegate', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'probe'}, 'max_attempts': 2}], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='delegate', objective_summary='delegate', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'probe'}, 'max_attempts': 2}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     executor = ContinuousTaskExecutor(store, port, executor_id='hard', health_probe=probe, health_recover=recover)
     final = await _drive(store, run['run_id'], executor)
     assert final['status'] in ('PARTIAL', 'FAILED')
@@ -146,7 +147,7 @@ async def test_executor_without_probe_keeps_the_plain_retry_contract(tmp_path):
         if len(attempts) == 1:
             return {'status': 'not_configured', 'error': 'hermes bridge is not ready'}
         return {'ok': True}
-    run = compile_objective(store, request='delegate', objective_summary='delegate', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'probe'}}], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='delegate', objective_summary='delegate', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'probe'}}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     executor = ContinuousTaskExecutor(store, port, executor_id='plain')
     final = await _drive(store, run['run_id'], executor)
     assert final['status'] == 'COMPLETED'

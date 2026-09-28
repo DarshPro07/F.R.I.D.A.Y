@@ -70,7 +70,9 @@ def test_a_bare_sqlite3_connection_would_have_leaked(tmp_path):
     lambda p: __import__("friday.skill_ladder", fromlist=["SkillLadder"]).SkillLadder(p),
     lambda p: __import__("friday.user_policy", fromlist=["UserPolicy"]).UserPolicy(p),
     lambda p: __import__("friday.orgplane", fromlist=["LocalControlPlane"]).LocalControlPlane(p),
-], ids=["WorkRunLog", "RouteOutcomes", "GatewayTelemetry", "SkillLadder", "UserPolicy", "LocalControlPlane"])
+    lambda p: __import__("friday.skills.registry", fromlist=["SkillRegistry"]).SkillRegistry(p),
+], ids=["WorkRunLog", "RouteOutcomes", "GatewayTelemetry", "SkillLadder", "UserPolicy", "LocalControlPlane",
+        "SkillRegistry"])
 def test_every_per_call_ledger_leaves_no_handle_behind(tmp_path, make):
     db = tmp_path / "ledger.sqlite3"
     ledger = make(db)

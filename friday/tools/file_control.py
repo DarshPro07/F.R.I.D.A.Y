@@ -160,10 +160,13 @@ def register(mcp):
         n = nonce or None
         # A nonce was minted for a specific run; reuse that run so the question
         # and the act are one record, not two, and the confirmation matches.
+        # Only a delete's own confirmation: another tool's nonce would fail
+        # consume anyway, but saving this call under its run would overwrite
+        # that run's record.
         run = None
         if n:
             pend = confirmation.book.pending.get(n)
-            if pend:
+            if pend and pend.action.startswith("files.delete"):
                 run = c.Run(run_id=pend.run_id, request=f"delete {path}", capability="files")
         if run is None:
             run = c.Run.create(f"delete {path}", capability="files")

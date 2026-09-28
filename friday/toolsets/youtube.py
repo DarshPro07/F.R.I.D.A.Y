@@ -42,6 +42,7 @@ a similar name, which is the failure mode that matters here.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -52,6 +53,8 @@ from friday import contracts as c
 from friday.policy import PolicyEngine, default_engine
 from friday.store import FACT, Store
 from friday.toolsets.web import USER_AGENT, _gate
+
+logger = logging.getLogger("friday-agent.youtube")
 
 EXECUTION_SCOPE = "network"
 
@@ -134,9 +137,13 @@ def remember_channel(store: Store, query: str, channel: Channel) -> None:
             CHANNEL_SUBJECT.format(slug=_slug(query)),
             f"{channel.channel_id}|{channel.title}", kind=FACT,
             source=f"resolved from {channel.source}: {channel.url}",
-            scope="possessions")
+            scope="possessions",
+            # The title came from a page or an API, not from the person.
+            trust_class=c.READ_MATERIAL)
     except Exception:
-        pass
+        # A lost cache entry costs one lookup next time; it is not an
+        # error to raise, but it is not silence either.
+        logger.warning("could not remember the channel for %r", query, exc_info=True)
 
 
 async def channel_from_handle(client: httpx.AsyncClient, handle: str) -> Channel | None:

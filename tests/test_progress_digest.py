@@ -1,4 +1,5 @@
-from friday.progress_digest import compose, gather
+from friday.progress_digest import compose, gather, outcome_line, \
+    read_detail_level
 
 
 def _run(**kw):
@@ -114,3 +115,98 @@ def test_caller_must_not_store_next_at_when_no_digest_fired():
             last_digest_at = d.next_at
             fired = True
     assert fired
+
+
+# ---------------------------------------------------------------------------
+# FR-POL-005: user-selectable progress detail. Same facts every time -
+# only how much of them gets said changes.
+# ---------------------------------------------------------------------------
+
+
+def test_balanced_is_the_unset_default():
+    """Not passing `detail` must behave exactly like explicit 'balanced' -
+    the entire suite above depends on this staying true."""
+    runs = [_run()]
+    default = compose(runs, now=200, last_digest_at=0, cadence=180)
+    explicit = compose(runs, now=200, last_digest_at=0, cadence=180,
+                       detail="balanced")
+    assert default.digest == explicit.digest
+
+
+def test_critical_only_drops_process_chatter_but_keeps_the_facts():
+    runs = [_run(current="deploying")]
+    d = compose(runs, now=200, last_digest_at=0, cadence=180,
+               detail="critical-only")
+    assert "read policy.py" in d.digest   # last line: still there
+    assert "deploying" in d.digest        # next action: still there
+    assert "claude-sonnet" not in d.digest  # model chatter: gone
+    assert "did 2 tools" not in d.digest    # tool count: gone
+
+
+def test_detailed_is_a_superset_of_balanced_information():
+    runs = [_run(elapsed_s=42)]
+    balanced = compose(runs, now=200, last_digest_at=0, cadence=180,
+                       detail="balanced").digest
+    detailed = compose(runs, now=200, last_digest_at=0, cadence=180,
+                       detail="detailed").digest
+    assert "did 2 tools" in detailed and "did 2 tools" in balanced
+    assert "42s elapsed" in detailed
+    assert "42s elapsed" not in balanced
+
+
+def test_milestone_detail_levels():
+    runs = [_run(status="COMPLETE", result="fixed the bug", seq=9,
+                 task="patch the rate limiter")]
+    critical = compose(runs, now=5, last_digest_at=0, cadence=180,
+                       detail="critical-only")
+    balanced = compose(runs, now=5, last_digest_at=0, cadence=180,
+                       detail="balanced")
+    detailed = compose(runs, now=5, last_digest_at=0, cadence=180,
+                       detail="detailed")
+    assert critical.milestones[0] == "fixed the bug"
+    assert "claude-sonnet" not in critical.milestones[0]
+    assert "fixed the bug" in balanced.milestones[0]
+    assert "claude-sonnet" in balanced.milestones[0]
+    assert "patch the rate limiter" not in balanced.milestones[0]
+    assert "patch the rate limiter" in detailed.milestones[0]
+    assert "fixed the bug" in detailed.milestones[0]
+
+
+def test_unknown_detail_level_falls_back_to_balanced_not_a_crash():
+    runs = [_run()]
+    d = compose(runs, now=200, last_digest_at=0, cadence=180, detail="yolo")
+    balanced = compose(runs, now=200, last_digest_at=0, cadence=180,
+                       detail="balanced")
+    assert d.digest == balanced.digest
+
+
+def test_outcome_line_detail_levels():
+    record = {"status": "COMPLETE", "task": "ship the release",
+              "result": "shipped", "model": "claude-sonnet",
+              "route_reason": "capacity", "work_run_id": "wr-9"}
+    balanced = outcome_line(record, now=0)
+    critical = outcome_line(record, now=0, detail="critical-only")
+    detailed = outcome_line(record, now=0, detail="detailed")
+    assert "It ran on" in balanced and "shipped" in balanced
+    assert "It ran on" not in critical
+    assert "shipped" in critical
+    assert "It ran on" in detailed
+    assert "wr-9" in detailed and "wr-9" not in balanced
+
+
+def test_read_detail_level_defaults_to_balanced_when_nothing_set(tmp_path):
+    assert read_detail_level(tmp_path) == "balanced"
+
+
+def test_read_detail_level_reads_the_contract(tmp_path):
+    import json
+    (tmp_path / "operating_contract.json").write_text(
+        json.dumps({"progress_detail": "critical-only"}), encoding="utf-8")
+    assert read_detail_level(tmp_path) == "critical-only"
+
+
+def test_read_detail_level_ignores_unknown_value(tmp_path):
+    import json
+    (tmp_path / "operating_contract.json").write_text(
+        json.dumps({"progress_detail": "yolo"}), encoding="utf-8")
+    assert read_detail_level(tmp_path) == "balanced"

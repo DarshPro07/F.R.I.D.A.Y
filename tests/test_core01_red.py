@@ -22,6 +22,7 @@ import pytest
 from friday import capabilities as C
 from friday import objectives as O
 from friday.store import Store
+from friday.contracts import PERSON
 
 
 @pytest.fixture
@@ -294,7 +295,7 @@ def test_red_c_a_failure_does_not_strand_its_siblings(store):
     The run is PARTIAL - some of it worked, and saying otherwise in either
     direction would be false.
     """
-    compiled = O.compile_objective(store, request='five things, one of which fails', objective_summary='failure locality', manifest=[{'id': 'ok'}, {'id': 'boom'}], tasks=[{'capability': 'ok', 'arguments': {'n': 1}}, {'capability': 'boom', 'arguments': {}}, {'capability': 'ok', 'arguments': {'n': 3}}, {'capability': 'ok', 'arguments': {'n': 4}, 'dependencies': ['t2']}, {'capability': 'ok', 'arguments': {'n': 5}}])
+    compiled = O.compile_objective(store, request='five things, one of which fails', objective_summary='failure locality', manifest=[{'id': 'ok'}, {'id': 'boom'}], tasks=[{'capability': 'ok', 'arguments': {'n': 1}}, {'capability': 'boom', 'arguments': {}}, {'capability': 'ok', 'arguments': {'n': 3}}, {'capability': 'ok', 'arguments': {'n': 4}, 'dependencies': ['t2']}, {'capability': 'ok', 'arguments': {'n': 5}}], provenance=PERSON, attended=True)
     run_id = compiled['run_id']
 
     async def call(capability_id, arguments):

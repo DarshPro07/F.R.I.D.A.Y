@@ -27,6 +27,7 @@ explicit org-scale decision reaches it.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -70,8 +71,8 @@ class LocalControlPlane:
 
     def __init__(self, db_path: str | Path | None = None) -> None:
         if db_path is None:
-            from friday.config import DATA_DIR
-            db_path = Path(DATA_DIR) / "ada.sqlite3"
+            from friday.store import DEFAULT_DB
+            db_path = os.getenv("ADA_DB") or DEFAULT_DB
         self._path = str(db_path)
         with self._connect() as db:
             db.executescript(_TABLES)

@@ -26,8 +26,9 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-VAULT = Path(os.getenv("FRIDAY_VAULT",
-                       str(Path(__file__).resolve().parent.parent / "vault")))
+from friday.config import VAULT_DIR as _VAULT_DIR
+
+VAULT = Path(os.getenv("FRIDAY_VAULT", str(_VAULT_DIR)))
 SECTIONS = ("raw", "wiki", "outputs")
 
 _GEN = "<!-- generated-by: friday.vault -->"

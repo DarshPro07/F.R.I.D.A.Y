@@ -44,10 +44,12 @@ of a plausible-looking log line.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 #: When this process started. Module import time is close enough and costs
 #: nothing - the question is "hours or seconds", never milliseconds.
@@ -103,6 +105,20 @@ class Build:
         return True, "same build"
 
 
+#: A packaged build has no git: scripts/build_windows.py stamps the commit
+#: into this file beside the package instead. Absent from a source tree.
+_MANIFEST = Path(__file__).resolve().parent.parent / "build_manifest.json"
+
+
+def _from_manifest() -> dict:
+    """What the build stamped, or {} when this is a source checkout."""
+    try:
+        found = json.loads(_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
 def _git(*arguments: str) -> str:
     try:
         return subprocess.run(
@@ -145,9 +161,17 @@ def current(*, refresh: bool = False) -> Build:
     except Exception:                                       # noqa: BLE001
         count = 0
 
+    stamped = _from_manifest()
+    if stamped.get("commit_short") or stamped.get("commit"):
+        commit = str(stamped.get("commit_short") or stamped["commit"][:7])
+        dirty = bool(stamped.get("dirty"))
+    else:
+        commit = _git("rev-parse", "--short", "HEAD") or "unknown"
+        dirty = bool(_git("status", "--porcelain"))
+
     _CACHED = Build(
-        commit=_git("rev-parse", "--short", "HEAD") or "unknown",
-        dirty=bool(_git("status", "--porcelain")),
+        commit=commit,
+        dirty=dirty,
         registry_hash=registry_hash(),
         capabilities=count,
         started_at=_STARTED,

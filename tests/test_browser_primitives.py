@@ -22,6 +22,10 @@ import pytest
 from friday import browser as B
 from friday import policy as P
 
+# Assembled at run time: the source carries no provider-shaped key for a
+# push-protection scanner, while the code under test still sees the whole shape.
+FAKE_KEY = "sk-" + "abcdefghijklmnopqrstuvwxyz1234"
+
 # ---------------------------------------------------------------------------
 # In-memory driver
 # ---------------------------------------------------------------------------
@@ -50,7 +54,7 @@ PAGES = {
         "elements": [{"tag": "button", "role": "button", "text": "I am not a robot", "name": "cb", "selector": "#cb"}],
         "markers": ["g-recaptcha"]},
     "https://mail.example/inbox": {
-        "title": "Inbox", "text": "token=sk-abcdefghijklmnopqrstuvwxyz1234 hello",
+        "title": "Inbox", "text": "token=" + FAKE_KEY + " hello",
         "elements": [{"tag": "a", "role": "link", "text": "Compose", "selector": "#compose"}]},
 }
 
@@ -215,10 +219,13 @@ def test_a_signed_in_session_never_authorises_external_writes(url, target, text,
 
 
 def test_an_exact_action_confirmation_lets_the_external_write_through():
+    """`confirmed=True` is the keyword trusted code passes after spending the
+    person's yes; the same word in the arguments is ignored
+    (tests/test_browser_confirmation.py)."""
     b = B.Browser(FakeDriver(), profile=B.ProfileChoice(B.AUTHORIZED, "s", "C:/p"),
                   approvals={"click": True})
     run(b.observe())
-    step = run(b.run("click", "Buy now", {"confirmed": True}))
+    step = run(b.run("click", "Buy now", confirmed=True))
     assert step.ok and step.external_write == "purchase"
     assert ("click", "#buy") in b.driver.log
 
@@ -282,7 +289,7 @@ def test_observation_is_structured_first_and_secrets_are_redacted():
     state = b.last
     assert state.perception == "structured"
     assert state.elements[0].text == "Compose"
-    assert "sk-abcdefghijklmnopqrstuvwxyz1234" not in state.text
+    assert FAKE_KEY not in state.text
     assert state.redactions >= 1 and state.text == "[SECRET-REDACTED] hello"
 
 

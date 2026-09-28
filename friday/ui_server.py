@@ -20,6 +20,7 @@ Run:  .venv/Scripts/python.exe scripts/run_ui.py
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import io
 import logging
@@ -862,6 +863,48 @@ async def api_vision_screen(request):
     return JSONResponse(await run_in_threadpool(work))
 
 
+def _skills_state() -> dict:
+    """The skill layer for the control room: every registered skill with
+    its state, scope, tier, version, quality, usage and last verification,
+    plus what is on disk but unregistered and which tasks are contested.
+    Read-only; the console (friday.skills.cli) is where things change."""
+    from friday.skills import contracts as SK
+    from friday.skills import files as SF
+    from friday.skills import router as SR
+    from friday.skills.registry import SkillRegistry
+
+    roots = SF.tier_roots()
+    registry = SkillRegistry()
+    records = registry.list()
+    known = {r.name for r in records}
+    on_disk = [(tier, skill.name) for tier, root in roots.items() for skill in SF.discover(root)]
+    selectable = [r for r in records if r.state in SK.SELECTABLE]
+    _, conflicts = SR.resolve_conflicts([(r, 1.0) for r in selectable if r.task])
+    counts: dict[str, int] = {}
+    for record in records:
+        counts[record.state] = counts.get(record.state, 0) + 1
+    skills = []
+    for record in records:
+        stats = registry.stats(record.name)
+        skills.append({
+            "name": record.name, "description": record.description, "version": record.version,
+            "state": record.state, "scope": record.scope, "tier": record.tier, "risk": record.risk,
+            "trust": record.trust, "source": record.source, "quality": record.quality_score,
+            "usage": record.usage_count, "success_rate": stats["success_rate"],
+            "last_verified": record.last_verified, "dependencies": record.dependencies,
+            "tests": record.tests, "permissions": record.permissions, "publish": record.publish,
+            "path": record.path,
+        })
+    return {"skills": skills, "counts": counts, "tiers": {tier: str(path) for tier, path in roots.items()},
+            "unregistered": sorted(name for _, name in on_disk if name not in known),
+            "conflicts": conflicts}
+
+
+async def api_skills(request):
+    """The skill layer, read-only, for a Skills panel."""
+    return JSONResponse(await run_in_threadpool(_skills_state))
+
+
 async def api_doctor(request):
     """Friday's own check-up: what is healthy, what is not, and what fixes it."""
     return JSONResponse(await run_in_threadpool(_doctor))
@@ -1197,7 +1240,9 @@ async def api_helpers(request):
     return JSONResponse(value)
 
 
-_TTS_DIR = Path(__file__).resolve().parent.parent / "data" / "tts_cache"
+from friday.config import DATA_DIR as _DATA_DIR
+
+_TTS_DIR = _DATA_DIR / "tts_cache"
 
 
 #: One warm HTTP client for Deepgram, so the TLS handshake is paid once, not on
@@ -1490,11 +1535,20 @@ async def api_stt(ws):
             pass
 
 
+@contextlib.asynccontextmanager
+async def _lifespan(app):
+    """The warmer starts when the app is served, not when this module is
+    imported: `app` below is built at import, and a process that only
+    imports the module (the voice agent, the memory graph) must not run a
+    refresher that spawns probes and reads memory every 25 s (V7-D36)."""
+    _start_background_health()
+    yield
+
+
 def create_app():
     # The face gate is middleware: while locked, only "/", /ui/*, /health and
     # /api/auth/* answer; everything else is 423 and written to the access log.
-    _start_background_health()
-    return Starlette(middleware=[Middleware(access.GateMiddleware)], routes=[
+    return Starlette(lifespan=_lifespan, middleware=[Middleware(access.GateMiddleware)], routes=[
         Route("/", index),
         Route("/health", health),
         Route("/api/state", api_state),
@@ -1530,6 +1584,7 @@ def create_app():
         Route("/api/auth/pin/set", api_pin_set, methods=["POST"]),
         Route("/api/auth/pin/verify", api_pin_verify, methods=["POST"]),
         Route("/api/doctor", api_doctor),
+        Route("/api/skills", api_skills),
         Route("/api/deck", api_deck),
         Route("/api/deck/run", api_deck_run, methods=["POST"]),
         Route("/api/harness", api_harness),

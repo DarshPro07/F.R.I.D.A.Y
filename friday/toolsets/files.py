@@ -129,10 +129,40 @@ def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:16]
 
 
-def _safe(run: c.Run, started: c.ActionResult, raw: str) -> tuple[Path | None, c.ActionResult | None]:
-    """Resolve a path through the jail, or return a FAILED result."""
+def _inside(path: Path, root: str) -> bool:
     try:
-        return jail().resolve(raw), None
+        base = Path(root).resolve()
+    except OSError:
+        return False
+    return path == base or path.is_relative_to(base)
+
+
+def resolve_for(run: c.Run, raw: str, *, write: bool = False) -> Path:
+    """
+    Resolve a path for this run, or raise JailError.
+
+    FRIDAY's own jail decides first - the denylist, reparse points, the
+    configured roots. A run with an execution envelope (PRD v7 section 43)
+    is then held to its roots, which can only narrow that: read roots for
+    reading, write roots for anything that changes a file. The check is on
+    the resolved path, so `..` is judged by where it really lands.
+    """
+    path = jail().resolve(raw)
+    envelope = run.envelope
+    if envelope is not None:
+        roots = (envelope.write_roots if write
+                 else envelope.read_roots + envelope.write_roots)
+        if not any(_inside(path, root) for root in roots):
+            raise JailError(f"{raw} is outside this run's envelope "
+                            f"({'write' if write else 'read'})")
+    return path
+
+
+def _safe(run: c.Run, started: c.ActionResult, raw: str, *,
+          write: bool = False) -> tuple[Path | None, c.ActionResult | None]:
+    """Resolve a path for this run, or return a FAILED result."""
+    try:
+        return resolve_for(run, raw, write=write), None
     except JailError as exc:
         return None, run.record(c.failed(started, f"path refused: {exc}"))
 
@@ -446,7 +476,7 @@ def files_create(
         return blocked
     started = c.started(run.run_id, tool_id)
 
-    target, failure = _safe(run, started, path)
+    target, failure = _safe(run, started, path, write=True)
     if failure:
         return failure
     if target.exists():
@@ -467,7 +497,7 @@ def files_write(
         return blocked
     started = c.started(run.run_id, tool_id)
 
-    target, failure = _safe(run, started, path)
+    target, failure = _safe(run, started, path, write=True)
     if failure:
         return failure
     return _write_and_verify(run, started, target, content,
@@ -485,7 +515,7 @@ def files_edit(
         return blocked
     started = c.started(run.run_id, tool_id)
 
-    target, failure = _safe(run, started, path)
+    target, failure = _safe(run, started, path, write=True)
     if failure:
         return failure
     if not target.is_file():
@@ -531,10 +561,10 @@ def _transfer(
         return blocked
     started = c.started(run.run_id, tool_id)
 
-    src, failure = _safe(run, started, source)
+    src, failure = _safe(run, started, source, write=move)
     if failure:
         return failure
-    dst, failure = _safe(run, started, destination)
+    dst, failure = _safe(run, started, destination, write=True)
     if failure:
         return failure
 
@@ -621,7 +651,7 @@ def files_recycle(run: c.Run, path: str, *, engine: PolicyEngine = default_engin
         return blocked
     started = c.started(run.run_id, tool_id)
 
-    target, failure = _safe(run, started, path)
+    target, failure = _safe(run, started, path, write=True)
     if failure:
         return failure
 
@@ -713,7 +743,7 @@ def files_delete(run: c.Run, path: str, *, permanent: bool = False,
         return blocked
     started = c.started(run.run_id, tool_id)
 
-    target, failure = _safe(run, started, path)
+    target, failure = _safe(run, started, path, write=True)
     if failure:
         return run.record(c.started(run.run_id, tool_id).finish(
             status=c.CANCELLED,

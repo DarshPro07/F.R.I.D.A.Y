@@ -30,6 +30,7 @@ import pytest
 from friday.continuous import ContinuousTaskExecutor, FailureClassifier
 from friday.objectives import FailureKind, TaskStatus, compile_objective
 from friday.store import Store
+from friday.contracts import PERSON
 
 
 class FlakyRegistry:
@@ -84,7 +85,7 @@ def compile_graph(store, registry, tasks: list[dict]) -> dict:
         tasks=tasks,
         manifest=[{"id": f"cap{i}", "description": f"cap {i}"}
                   for i in range(1, len(tasks) + 1)],
-        objective_summary="probe",
+        objective_summary="probe", provenance=PERSON, attended=True
     )
 
 
@@ -283,7 +284,7 @@ async def test_an_unplaceable_clause_is_named_not_the_marker(store, registry, ex
     """
     from friday.continuous import speak
     from friday.objectives import UNMAPPED_CAPABILITY
-    run = compile_objective(store, request='flurb the wibble, then check the computer', objective_summary='flurb the wibble, then check the computer', tasks=[{'capability': UNMAPPED_CAPABILITY, 'arguments': {'clause': 'flurb the wibble'}}, {'capability': 'cap2', 'arguments': {}}], manifest=[{'id': 'cap2'}])
+    run = compile_objective(store, request='flurb the wibble, then check the computer', objective_summary='flurb the wibble, then check the computer', tasks=[{'capability': UNMAPPED_CAPABILITY, 'arguments': {'clause': 'flurb the wibble'}}, {'capability': 'cap2', 'arguments': {}}], manifest=[{'id': 'cap2'}], provenance=PERSON, attended=True)
     await executor.start(run['run_id'])
     task = by_plan_id(store, run['run_id'])['t1']
     assert task['status'] == TaskStatus.FAILED
@@ -297,6 +298,6 @@ async def test_an_unplaceable_clause_is_named_not_the_marker(store, registry, ex
 @pytest.mark.asyncio
 async def test_a_genuinely_unknown_capability_still_says_so(store, registry, executor):
     """The marker is a special case, not a licence to stop naming tools."""
-    run = compile_objective(store, request='probe', objective_summary='probe', tasks=[{'capability': 'magic_super_tool', 'arguments': {}}], manifest=[{'id': 'cap1'}])
+    run = compile_objective(store, request='probe', objective_summary='probe', tasks=[{'capability': 'magic_super_tool', 'arguments': {}}], manifest=[{'id': 'cap1'}], provenance=PERSON, attended=True)
     task = by_plan_id(store, run['run_id'])['t1']
     assert 'magic_super_tool' in task['evidence']

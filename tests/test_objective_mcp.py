@@ -22,8 +22,9 @@ from friday.store import Store
 from friday.tools import objective_control
 from friday.toolsets import objectives as OT
 ROOT = Path(__file__).resolve().parent.parent
-PYTHON = ROOT / '.venv' / 'Scripts' / 'python.exe'
-PYTHON = str(PYTHON if PYTHON.exists() else sys.executable)
+#: The suite's own interpreter: the live .venv belongs to the running agent
+#: (AGENTS.md; V7-D41).
+PYTHON = sys.executable
 TOOLS = ('objective_start', 'objective_status', 'objective_list', 'objective_pause', 'objective_resume', 'objective_cancel', 'objective_history')
 
 

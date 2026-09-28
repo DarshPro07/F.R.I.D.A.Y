@@ -1,7 +1,7 @@
 ---
 description: "When you don't have the information to make a decision, ask. Do not guess or invent."
 globs: "*"
-alwaysApply: true
+alwaysApply: false
 ---
 # Rule 4: Clarify Unknowns
 

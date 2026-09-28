@@ -23,6 +23,7 @@ ledger. It never silently trims work.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -140,22 +141,52 @@ def measure(store, run_id: str, *, telemetry=None, work_log=None,
     return spend
 
 
+def _envelope_of(run: dict):
+    """The run's execution envelope (PRD v7 section 43), None when it has
+    none, and why it cannot be read when it is there but unreadable."""
+    raw = run.get("envelope")
+    if not raw:
+        return None, ""
+    from friday import contracts
+
+    try:
+        return contracts.Envelope.from_dict(json.loads(raw)), ""
+    except (ValueError, KeyError, TypeError) as exc:
+        return None, f"the run's execution envelope cannot be read ({type(exc).__name__})"
+
+
 def check(store, run_id: str, *, next_capability: str = "", next_task_id: str | None = None,
           telemetry=None, work_log=None, now: datetime | None = None) -> Verdict:
-    """May the run make one more call? Decided from recorded spend."""
+    """May the run make one more call? Decided from recorded spend.
+
+    The run's execution envelope only tightens this: its token and tool-call
+    limits lower the ceilings, never raise them, and once it has expired
+    nothing more runs until the person re-issues it."""
     run = store.objective_run(run_id) or {}
     limits = CLASS_LIMITS.get(str(run.get("task_class") or ""), _DEFAULT_LIMITS)
     spend = measure(store, run_id, telemetry=telemetry, work_log=work_log, now=now)
 
+    envelope, unreadable = _envelope_of(run)
+    if unreadable:
+        return Verdict(False, "envelope", unreadable, spend, 0)
+    if envelope is not None and envelope.expired(now):
+        return Verdict(False, "envelope_expiry",
+                       f"the execution envelope expired at {envelope.expires_at}; "
+                       f"the person re-issues it", spend, 0)
     ceiling = int(run.get("cost_budget_tokens") or 0)
+    if envelope is not None and envelope.token_limit:
+        ceiling = min(ceiling, envelope.token_limit) if ceiling else envelope.token_limit
     if ceiling and spend.tokens >= ceiling:
         return Verdict(False, "tokens", f"{spend.tokens} tokens spent of a {ceiling} ceiling", spend, ceiling)
     wall = int(run.get("time_budget_s") or 0)
     if wall and spend.wall_s >= wall:
         return Verdict(False, "wall_time", f"{spend.wall_s:.0f}s elapsed of a {wall}s budget", spend, wall)
-    if spend.tool_calls >= limits["max_tool_calls"]:
-        return Verdict(False, "tool_calls", f"{spend.tool_calls} tool calls of {limits['max_tool_calls']} allowed",
-                       spend, limits["max_tool_calls"])
+    max_calls = limits["max_tool_calls"]
+    if envelope is not None and envelope.tool_call_limit:
+        max_calls = min(max_calls, envelope.tool_call_limit)
+    if spend.tool_calls >= max_calls:
+        return Verdict(False, "tool_calls", f"{spend.tool_calls} tool calls of {max_calls} allowed",
+                       spend, max_calls)
     if next_capability in WORKER_CAPABILITIES and spend.workers >= limits["max_workers"]:
         # The task about to run may itself be one of the counted workers
         # (a retry); only a NEW delegation is refused.

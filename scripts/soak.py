@@ -95,23 +95,47 @@ RATE_SERIES = ("tokens", "provider_calls", "log_lines", "queue_depth", "cpu_pct"
 
 def sample(proc: psutil.Process, store, telemetry, log_path: Path, t0: float,
            attribution: dict | None = None) -> dict:
-    with proc.oneshot():
-        mem = proc.memory_info()
-        try:
-            handles = proc.num_handles() if hasattr(proc, "num_handles") else proc.num_fds()
-        except (psutil.Error, AttributeError):
-            handles = -1
-        threads = proc.num_threads()
-        try:
-            children = len(proc.children(recursive=True))
-        except psutil.Error:
-            children = -1
-        cpu = proc.cpu_percent(interval=None)
+    # A probe that raises must cost one series in one sample, never the
+    # sample and never the verdict. psutil raises its own psutil.Error
+    # family, but also plain RuntimeError from its Windows handle
+    # enumeration ("SystemExtendedHandleInformation buffer too big" when a
+    # runaway process holds ten million handles) - one of those took the
+    # whole report shape down and the test read a KeyError instead of a
+    # verdict. Every probe is guarded; the failure is named in the sample
+    # and analyse() turns it into an INCONCLUSIVE, never a crash.
+    sampling_errors: list[str] = []
+
+    def failed(what: str, exc: BaseException) -> None:
+        sampling_errors.append(f"{what}: {type(exc).__name__}: {exc}"[:200])
+
+    rss_mb = -1.0
+    handles = threads = children = -1
+    cpu = -1.0
+    try:
+        with proc.oneshot():
+            rss_mb = round(proc.memory_info().rss / 1048576, 2)
+            try:
+                handles = proc.num_handles() if hasattr(proc, "num_handles") else proc.num_fds()
+            except (psutil.Error, AttributeError):
+                handles = -1
+            except Exception as exc:  # noqa: BLE001 - recorded, sampling continues
+                failed("handles", exc)
+            threads = proc.num_threads()
+            try:
+                children = len(proc.children(recursive=True))
+            except psutil.Error:
+                children = -1
+            cpu = proc.cpu_percent(interval=None)
+    except Exception as exc:  # noqa: BLE001 - recorded, sampling continues
+        failed("process", exc)
     try:
         open_files = proc.open_files()
         sqlite_conns = sum(1 for f in open_files if f.path.endswith((".sqlite3", ".sqlite3-wal", ".sqlite3-shm")))
     except psutil.Error:
         sqlite_conns = -1
+    except Exception as exc:  # noqa: BLE001 - psutil's RuntimeError on Windows, see above
+        sqlite_conns = -1
+        failed("open_files", exc)
     try:
         with telemetry._connect() as conn:
             row = conn.execute(
@@ -134,13 +158,19 @@ def sample(proc: psutil.Process, store, telemetry, log_path: Path, t0: float,
         log_lines = sum(1 for _ in log_path.open("rb")) if log_path.exists() else 0
     except OSError:
         log_lines = -1
-    vm = psutil.virtual_memory()
-    return {"t": round(time.time() - t0, 1), "rss_mb": round(mem.rss / 1048576, 2),
-            "host_ram_pct": vm.percent, "host_cpu_pct": psutil.cpu_percent(interval=None),
+    try:
+        vm_percent = psutil.virtual_memory().percent
+        host_cpu = psutil.cpu_percent(interval=None)
+    except Exception as exc:  # noqa: BLE001
+        vm_percent = host_cpu = -1
+        failed("host", exc)
+    return {"t": round(time.time() - t0, 1), "rss_mb": rss_mb,
+            "host_ram_pct": vm_percent, "host_cpu_pct": host_cpu,
             "cpu_pct": cpu, "handles": handles, "threads": threads, "children": children,
             "sqlite_conns": sqlite_conns, "tokens": tokens, "provider_calls": provider_calls,
             "log_lines": log_lines, "queue_depth": queue_depth,
-            "rss_by_move": dict(attribution or {})}
+            "rss_by_move": dict(attribution or {}),
+            "sampling_error": "; ".join(sampling_errors)}
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +185,7 @@ WORKER_CHILD = textwrap.dedent(r'''
     from friday.store import Store
     from friday.continuous import ContinuousTaskExecutor
     from friday.objectives import compile_objective
+    from friday.contracts import PERSON
     hold = Path(sys.argv[3])
     async def capability(name, arguments):
         while name == "slow" and hold.exists():
@@ -166,7 +197,8 @@ WORKER_CHILD = textwrap.dedent(r'''
                                 tasks=[{"capability": "fast", "arguments": {}},
                                        {"capability": "slow", "arguments": {}, "dependencies": ["t1"]}],
                                 manifest=[{"id": "fast", "description": "f"}, {"id": "slow", "description": "s"}],
-                                objective_summary="soak crash probe")
+                                objective_summary="soak crash probe",
+                                provenance=PERSON, attended=True)
         print(json.dumps({"run_id": run["run_id"]}), flush=True)
         ex = ContinuousTaskExecutor(store, capability, executor_id="soak-worker")
         ex.lease_timeout = 1.0
@@ -242,6 +274,7 @@ class Workload:
     async def objective_cycle(self) -> None:
         """Create, drive to a terminal state, and hold the completion invariant."""
         from friday import objectives as O
+        from friday.contracts import PERSON
         from friday.continuous import ContinuousTaskExecutor
 
         async def capability(name, arguments):
@@ -252,7 +285,8 @@ class Workload:
         if self.counts.get("objective", 0) % 5 == 4:
             tasks.append({"capability": "c", "arguments": {}})        # one in five has a failing task
         run_id = O.compile_objective(self.store, request="soak objective", tasks=tasks,
-                                     manifest=self.manifest, objective_summary="soak")["run_id"]
+                                     manifest=self.manifest, objective_summary="soak",
+                                     provenance=PERSON, attended=True)["run_id"]
         ex = ContinuousTaskExecutor(self.store, capability)
         ex.stop()
         try:
@@ -390,21 +424,23 @@ class Workload:
         from friday import memory_promotion as MP
         c = MP.Candidate(statement=f"soak fact {secrets.token_hex(3)}: is true", kind="project_fact",
                          source="handoff:soak", owner="friday", scope="project",
-                         confidence=0.8, evidence=["soak"])
+                         confidence=0.8, evidence=["soak"], provenance="READ_MATERIAL")
         MP.promote(c, store=self.store)
         bare = MP.Candidate(statement="the deploy target is prod", kind="project_fact",
                             source="page: https://x.example", owner="friday", scope="project",
-                            confidence=0.9, evidence=[])
+                            confidence=0.9, evidence=[], provenance="READ_MATERIAL")
         if MP.promote(bare, store=self.store).accepted:
             self.violate("memory: a candidate with no evidence was promoted")
         self.count("handoffs")
 
     def cancel_cycle(self) -> None:
         from friday import objectives as O
+        from friday.contracts import PERSON
         from friday.continuous import ContinuousTaskExecutor
         run_id = O.compile_objective(self.store, request="soak cancel",
                                      tasks=[{"capability": "a", "arguments": {}}],
-                                     manifest=self.manifest, objective_summary="soak")["run_id"]
+                                     manifest=self.manifest, objective_summary="soak",
+                                     provenance=PERSON, attended=True)["run_id"]
         calls = []
 
         async def capability(name, arguments):
@@ -464,9 +500,11 @@ class Workload:
 
     def _fresh_run(self, tag: str) -> str:
         from friday import objectives as O
+        from friday.contracts import PERSON
         return O.compile_objective(self.store, request=f"soak {tag}",
                                    tasks=[{"capability": "a", "arguments": {}}],
-                                   manifest=self.manifest, objective_summary=f"soak {tag}")["run_id"]
+                                   manifest=self.manifest, objective_summary=f"soak {tag}",
+                                   provenance=PERSON, attended=True)["run_id"]
 
     def close(self) -> None:
         try:
@@ -591,9 +629,22 @@ def analyse(samples: list[dict], duration_s: float, counts: dict, violations: li
             errors: list[str], cycles: int, sample_every_s: float = 0.0,
             attribution: dict | None = None) -> dict:
     """Hour-1 vs final-hour (or first vs last quarter for short runs)."""
+    lost = [s.get("sampling_error", "") for s in samples if s.get("sampling_error")]
+    telemetry = {"sampling_error_count": len(lost), "sampling_errors": lost[:20]}
     if len(samples) < 4:
-        return {"verdict": "INCONCLUSIVE", "reason": f"only {len(samples)} samples", "counts": counts,
-                "violations": violations, "errors": errors, "cycles": cycles}
+        # The same shape as a judged report: a reader (or a test) that asks
+        # for missing_moves gets an answer, not a KeyError.
+        reason = f"only {len(samples)} samples"
+        if lost:
+            reason += f"; {len(lost)} sample(s) lost telemetry: {lost[0]}"
+        return {"verdict": "INCONCLUSIVE", "reason": reason, "duration_s": round(samples[-1]["t"], 1) if samples else 0.0,
+                "planned_s": duration_s, "window_s": 0.0, "warmup_s": 0.0, "judged": False, "gaps": [],
+                "detection_floor_mb_per_hour": 0.0, "rss_by_move": attribution or {},
+                "samples": len(samples), "cycles": cycles, "growing": [], "series": {}, "counts": counts,
+                "per_hour": {}, "missing_moves": [], "violations": violations, "errors": errors[:50],
+                "error_count": len(errors), **telemetry,
+                "host": {"platform": sys.platform, "python": sys.version.split()[0],
+                         "cpu_count": os.cpu_count(), "ran_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}}
     span = samples[-1]["t"]
     # Gaps: the host slept, or the process was starved. Either way the run
     # did not measure the window it claims.
@@ -666,13 +717,22 @@ def analyse(samples: list[dict], duration_s: float, counts: dict, violations: li
     # eight-hour claim.
     if gaps:
         verdict = "INCONCLUSIVE"
+    # Telemetry that failed is a hole of a different kind: the series it
+    # lost carry -1 and are excluded above, so growth was judged on fewer
+    # points than the run claims. Reported, and never a PASS - a verdict
+    # without its evidence is the false-evidence gap this harness exists
+    # to close. A FAIL stays a FAIL: a violation is a violation.
+    reason = ""
+    if lost and verdict != "FAIL":
+        verdict = "INCONCLUSIVE"
+        reason = f"{len(lost)} of {len(samples)} samples lost telemetry: {lost[0]}"
     # What slope this run could have resolved: sampling noise over the
     # judged window. A PASS never implies more precision than this.
     tail_rss = [float(s["rss_mb"]) for s in samples if s["t"] >= span - win]
     noise = (statistics.pstdev(tail_rss) if len(tail_rss) > 2 else 0.0)
     floor_mb_per_h = round(noise * 3600.0 / win, 2) if win else 0.0
-    return {"verdict": verdict, "duration_s": round(span, 1), "planned_s": duration_s,
-            "window_s": win, "warmup_s": warmup, "judged": span >= MIN_JUDGED_S,
+    return {"verdict": verdict, "reason": reason, "duration_s": round(span, 1), "planned_s": duration_s,
+            "window_s": win, "warmup_s": warmup, "judged": span >= MIN_JUDGED_S, **telemetry,
             "gaps": gaps, "detection_floor_mb_per_hour": floor_mb_per_h,
             "rss_by_move": attribution or (samples[-1].get("rss_by_move") if samples else {}),
             "samples": len(samples), "cycles": cycles,
@@ -724,6 +784,9 @@ def render(r: dict) -> str:
     lines += ["", "## workload per hour", ""]
     for k, v in r.get("per_hour", {}).items():
         lines.append(f"- {k}: {v}")
+    if r.get("sampling_error_count"):
+        lines += ["", f"## telemetry lost ({r['sampling_error_count']} samples)", ""]
+        lines += [f"- {e}" for e in r.get("sampling_errors", [])[:10]]
     lines += ["", f"## violations ({len(r.get('violations', []))})", ""]
     lines += [f"- {v}" for v in r.get("violations", [])] or ["- none"]
     lines += ["", f"## errors ({r.get('error_count', 0)})", ""]

@@ -20,6 +20,7 @@ from friday import objectives as O
 from friday.continuous import ContinuousTaskExecutor, speak
 from friday.objectives import COMPOSITE, TaskStatus, compile_objective
 from friday.store import Store
+from friday.contracts import PERSON
 MANIFEST = [{'id': name} for name in ('system_get_info', 'apps_open', 'files_read', 'files_info')]
 
 
@@ -35,7 +36,7 @@ def a_group(*children, **rest) -> dict:
 
 def compiled(store, tasks, *, request="audit the files") -> str:
     run = compile_objective(store, request=request, tasks=tasks,
-                            manifest=MANIFEST, objective_summary=request)
+                            manifest=MANIFEST, objective_summary=request, provenance=PERSON, attended=True)
     return run["run_id"]
 
 

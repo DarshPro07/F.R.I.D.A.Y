@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sqlite3
 import threading
@@ -31,7 +32,9 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from friday.contracts import ActionResult, Artifact, Run, Verification, now_iso
+from friday.config import DATA_DIR
+from friday.contracts import (PERSON, READ_MATERIAL, ActionResult, Artifact, Run,
+                              Verification, now_iso)
 
 
 class CompletionRefused(RuntimeError):
@@ -141,7 +144,7 @@ OBJECTIVE_DELIVERY_TTL_S = 21600
 #: Every detached process has this shape - scheduled tasks, the reminder fire
 #: script, anything launched by the OS rather than from a shell - so the fix
 #: belongs here rather than in each caller. ADA_DB still overrides it.
-DEFAULT_DB = Path(__file__).resolve().parent.parent / "data" / "ada.sqlite3"
+DEFAULT_DB = DATA_DIR / "ada.sqlite3"
 
 #: How long a connection waits for another process's write lock before
 #: giving up (audit A-038). Ten seconds covers a checkpoint or a slow
@@ -155,6 +158,10 @@ PREFERENCE = "PREFERENCE"
 PATTERN = "PATTERN"
 INFERENCE = "INFERENCE"
 MEMORY_KINDS = (FACT, PREFERENCE, PATTERN, INFERENCE)
+
+#: Where a memory came from (PRD v7 MEM-002): `contracts.PERSON` and
+#: `contracts.READ_MATERIAL`, the run lineage the rest of FRIDAY carries.
+TRUST_CLASSES = (PERSON, READ_MATERIAL)
 
 # PRD v3.1 FR-016 memory classes. `kind` above says how much to trust a
 # record (fact vs inference); `memory_type` says what KIND OF THING it is
@@ -920,12 +927,84 @@ CREATE TABLE IF NOT EXISTS pending_power (
 );
 CREATE INDEX IF NOT EXISTS idx_pending_power_outcome
     ON pending_power(outcome, requested_at);
+
+-- The tenant registry (FR-PRV-002, invariant 6). One install can hold a
+-- user, a company, several brands, or an agency's clients, and private state
+-- must not cross between them.
+--
+-- `active` marks the workspace a process adopts when nothing else says
+-- otherwise; exactly one row carries 1, enforced by set_active_workspace
+-- rather than by a constraint, because switching is two writes and a partial
+-- unique index would reject the intermediate state.
+--
+-- Every install has a `default` row: it is where every memory written before
+-- this table existed belongs. Backfilling those rows to an invented owner
+-- would be a lie, and leaving them unowned would make them readable from
+-- every workspace, which is the leak this table exists to prevent.
+CREATE TABLE IF NOT EXISTS workspaces (
+    id          TEXT PRIMARY KEY,
+    label       TEXT NOT NULL DEFAULT '',
+    kind        TEXT NOT NULL DEFAULT 'user',
+    created_at  TEXT NOT NULL,
+    active      INTEGER NOT NULL DEFAULT 0,
+    detail      TEXT NOT NULL DEFAULT '{}'
+);
+
+-- PRD v7 (V7-D08): the confirmations every FRIDAY process shares, so the
+-- person's yes - given where the person is - reaches the process that asked.
+-- `asker` is that process instance: only it may spend the yes, so a restart
+-- voids everything asked before it. Only the fingerprint of the action is
+-- kept; the arguments, which can carry what was typed into a form, are not.
+-- PRD v7 STOP-001: the emergency stop, one row, in the store every FRIDAY
+-- process shares. While it is latched nothing new starts anywhere; it stays
+-- latched across restarts until the person resumes.
+CREATE TABLE IF NOT EXISTS stop_latch (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    reason      TEXT NOT NULL,
+    actor       TEXT NOT NULL,
+    latched_at  TEXT NOT NULL
+);
+
+-- PRD v7 NET-001: the network grant behind each objective's scope. Issued at
+-- compile, revoked by the person or by STOP, read by netguard in whichever
+-- process acts. A grant this table has never seen is treated as revoked.
+CREATE TABLE IF NOT EXISTS network_grants (
+    grant_id       TEXT PRIMARY KEY,
+    objective_id   TEXT NOT NULL,
+    mode           TEXT NOT NULL,
+    hosts          TEXT NOT NULL DEFAULT '[]',
+    expires_at     TEXT NOT NULL DEFAULT '',
+    issued_at      TEXT NOT NULL,
+    revoked_at     TEXT,
+    revoked_reason TEXT
+);
+
+CREATE TABLE IF NOT EXISTS confirmations (
+    nonce        TEXT PRIMARY KEY,
+    asker        TEXT NOT NULL,
+    run_id       TEXT NOT NULL,
+    action       TEXT NOT NULL,
+    target       TEXT NOT NULL,
+    fingerprint  TEXT NOT NULL,
+    question     TEXT NOT NULL,
+    state        TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    expires_at   TEXT NOT NULL,
+    answered_by  TEXT,
+    answered_at  TEXT,
+    spent_at     TEXT
+);
 """
 
 
 class Store:
-    def __init__(self, path: Path | str = DEFAULT_DB) -> None:
-        self.path = Path(path)
+    def __init__(self, path: Path | str | None = None) -> None:
+        # No path means the configured database (ADA_DB), else the default.
+        # A bare `Store()` used to mean the live data/ada.sqlite3 whatever
+        # ADA_DB said, so every caller that made one reached the owner's data
+        # past the tests' own database (V7-D17).
+        self.path = Path(path if path is not None
+                         else (os.getenv("ADA_DB") or DEFAULT_DB))
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
         raw = sqlite3.connect(str(self.path), check_same_thread=False,
@@ -972,6 +1051,20 @@ class Store:
     #: added separately - the alternative is a fresh database, and losing what
     #: Friday has learned to gain a column is not a trade worth making.
     _ADDED_COLUMNS = (
+        # PRD v7 SEC-005 / TRUST-002: where an objective came from, whether a
+        # person is there to answer, and the envelope it runs inside. NULL on
+        # rows written before envelopes existed; such a run waits for the
+        # person instead of running under an assumed scope.
+        ("objective_runs", "provenance", "TEXT"),
+        ("objective_runs", "attended", "INTEGER"),
+        ("objective_runs", "envelope", "TEXT"),
+        # PRD v7 INTENT-001: the objective contract the intent compiler read
+        # from the request. NULL on runs compiled before it, or from explicit
+        # task lists with no request to read.
+        ("objective_runs", "contract", "TEXT"),
+        # Who wrote a schedule: its firings carry this. NULL on schedules
+        # written before it existed, which then fire as untrusted.
+        ("schedules", "provenance", "TEXT"),
         # How many separate times this has been observed. Confidence alone
         # cannot tell "said once, emphatically" from "said five times".
         ("memories", "evidence_count", "INTEGER NOT NULL DEFAULT 1"),
@@ -1045,7 +1138,38 @@ class Store:
         ("memories", "retention_policy", "TEXT NOT NULL DEFAULT 'durable'"),
         ("memories", "last_retrieved_at", "TEXT"),
         ("memories", "importance", "REAL NOT NULL DEFAULT 0.5"),
+        # PRD v7 MEM-002: where a memory came from - the person (PERSON) or
+        # something read (READ_MATERIAL). '' is a row written before this, or
+        # by a path that does not classify; read material may not overrule it.
+        ("memories", "trust_class", "TEXT NOT NULL DEFAULT ''"),
+        # FR-PRV-002 / invariant 6: the tenant boundary. Every private-state
+        # table named in workspace.SCOPED carries the owning workspace, and
+        # the default is `default` - the one workspace a single-tenant
+        # install always was, so existing rows keep being readable by the
+        # install that wrote them and by nobody else.
+        #
+        # The column is added to every scoped table, but only the tables
+        # whose reads are filtered below (memories, observations) are
+        # *enforced* today; the rest are stamped so their owner is
+        # attributable and their reads can be filtered without a second
+        # migration. tests/test_workspace_isolation.py asserts which is
+        # which, so the difference cannot quietly become a claim.
+        *(
+            (table, "workspace_id", "TEXT NOT NULL DEFAULT 'default'")
+            for table in (
+                "memories", "observations", "utterances", "conversations",
+                "messages", "contacts", "projects", "project_decisions",
+                "requirements", "open_questions", "objective_runs",
+                "forged_skills", "product_records", "product_runs",
+                "automations", "schedules", "reminders",
+            )
+        ),
     )
+
+    #: Sources the read-material producers wrote before `trust_class` existed
+    #: (a worker's handoff, a skill's facts, a worker's bridge write, a channel
+    #: resolved from a page). All are set by code, never by the text itself.
+    _READ_SOURCES = ("handoff:%", "skill:%", "worker:%", "resolved from %")
 
     def _migrate(self) -> None:
         self._retire_superseded_shadow_table()
@@ -1055,6 +1179,13 @@ class Store:
             if column not in existing:
                 self._conn.execute(
                     f"ALTER TABLE {table} ADD COLUMN {column} {spec}")
+                if (table, column) == ("memories", "trust_class"):
+                    # Once, as the column arrives: what those producers wrote
+                    # before is read material too (Slice 3 review).
+                    self._conn.execute(
+                        "UPDATE memories SET trust_class=? WHERE trust_class='' AND ("
+                        + " OR ".join("source LIKE ?" for _ in self._READ_SOURCES) + ")",
+                        (READ_MATERIAL, *self._READ_SOURCES))
         # Rows written before last_confirmed existed were confirmed when they
         # were created; leaving them NULL would read as "never confirmed".
         self._conn.execute(
@@ -1129,6 +1260,95 @@ class Store:
             except Exception:
                 self._conn.rollback()
                 raise
+
+    # -- workspaces (FR-PRV-002) --------------------------------------------
+
+    def register_workspace(self, workspace_id: str, *, label: str = "",
+                           kind: str = "user", detail: dict | None = None,
+                           make_active: bool = False) -> str:
+        """Register a tenant. Idempotent: registering an existing id updates
+        its label/kind rather than raising, so onboarding can be re-run.
+
+        The id is validated by `workspace.valid_id` because it becomes a
+        directory name for secrets, skills and browser profiles - an id that
+        cannot be a safe path component is not an id.
+        """
+        from friday import workspace as W
+        W.valid_id(workspace_id)
+        if kind not in W.KINDS:
+            raise ValueError(f"unknown workspace kind {kind!r}; known: {list(W.KINDS)}")
+        payload = json.dumps(detail or {})
+        with self._tx() as conn:
+            existing = conn.execute("SELECT id FROM workspaces WHERE id=?",
+                                    (workspace_id,)).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE workspaces SET label=?, kind=?, detail=? WHERE id=?",
+                    (label, kind, payload, workspace_id))
+            else:
+                conn.execute(
+                    "INSERT INTO workspaces (id, label, kind, created_at, active, detail) "
+                    "VALUES (?,?,?,?,0,?)",
+                    (workspace_id, label, kind, now_iso(), payload))
+        if make_active:
+            self.set_active_workspace(workspace_id)
+        return workspace_id
+
+    def workspaces(self) -> list[dict]:
+        """Every registered tenant, oldest first. `default` is included even
+        on an install that never registered anything - see
+        `ensure_default_workspace`."""
+        return [dict(r) for r in self._conn.execute(
+            "SELECT * FROM workspaces ORDER BY created_at, id")]
+
+    def ensure_default_workspace(self) -> str:
+        """Make sure the workspace that owns pre-boundary rows is registered
+        and active. Called by first run and by anything that needs the
+        registry to be non-empty; safe to call repeatedly."""
+        from friday.workspace import DEFAULT_ID
+        rows = self._conn.execute("SELECT id, active FROM workspaces").fetchall()
+        if not any(r["id"] == DEFAULT_ID for r in rows):
+            self.register_workspace(DEFAULT_ID, label="This computer",
+                                    kind="user")
+        if not any(r["active"] for r in rows):
+            self.set_active_workspace(DEFAULT_ID)
+        return DEFAULT_ID
+
+    def active_workspace(self) -> str | None:
+        """The workspace a process adopts when nothing else says otherwise,
+        or None when the registry is empty. None rather than `default` so
+        `workspace.current()` can tell "not set up yet" from "set to the
+        default", which are different facts."""
+        row = self._conn.execute(
+            "SELECT id FROM workspaces WHERE active=1 LIMIT 1").fetchone()
+        return str(row["id"]) if row else None
+
+    def set_active_workspace(self, workspace_id: str) -> str:
+        """Switch the active workspace. Refuses an unregistered id: adopting
+        a workspace that does not exist would read private state under a key
+        nothing owns, and an empty result reads as "nothing here" when the
+        truth is "wrong key"."""
+        from friday.workspace import UnknownWorkspace, valid_id
+        valid_id(workspace_id)
+        with self._tx() as conn:
+            known = conn.execute("SELECT id FROM workspaces WHERE id=?",
+                                 (workspace_id,)).fetchone()
+            if not known:
+                raise UnknownWorkspace(
+                    f"workspace {workspace_id!r} is not registered; "
+                    "register_workspace() first")
+            conn.execute("UPDATE workspaces SET active=0 WHERE active=1")
+            conn.execute("UPDATE workspaces SET active=1 WHERE id=?",
+                         (workspace_id,))
+        return workspace_id
+
+    @staticmethod
+    def _workspace(workspace_id: str | None) -> str:
+        """The workspace a private-state call runs under: what it was given,
+        or the process's current one. One place, so no call site invents its
+        own default."""
+        from friday.workspace import resolve
+        return resolve(workspace_id)
 
     # -- runs ---------------------------------------------------------------
 
@@ -1210,7 +1430,8 @@ class Store:
         observation_id: int | None = None,
         memory_type: str = "semantic", project_scope: str = "",
         source_ref: str = "", importance: float = 0.5,
-        retention_policy: str = "",
+        retention_policy: str = "", workspace_id: str | None = None,
+        trust_class: str = "",
     ) -> int:
         """
         Store a memory. `kind` and `source` are required - an unattributed
@@ -1228,7 +1449,19 @@ class Store:
         old row is marked superseded AND the new row carries `supersedes_id`
         pointing at it - the link the UI needs to explain "this replaced
         that" rather than just "that is gone".
+
+        `workspace_id` (FR-PRV-002) defaults to the process's current
+        workspace. Supersession is scoped to it as well: a write in one
+        workspace must not retire another workspace's belief about the same
+        subject, which is the subtle half of the boundary - the read filter
+        stops A *seeing* B, and this stops A *overwriting* B.
+
+        `trust_class` (PRD v7 MEM-002) is where it came from: the person
+        (`contracts.PERSON`) or something read (`contracts.READ_MATERIAL`);
+        '' for a path that does not classify. `memory_promotion` sets it.
         """
+        if trust_class not in ("", *TRUST_CLASSES):
+            raise ValueError(f"unknown trust class {trust_class!r}")
         if kind not in MEMORY_KINDS:
             raise ValueError(f"unknown memory kind {kind!r}; known: {list(MEMORY_KINDS)}")
         if memory_type not in MEMORY_TYPES:
@@ -1240,6 +1473,7 @@ class Store:
         if evidence_count < 1:
             raise ValueError(f"evidence_count must be at least 1, got {evidence_count}")
         retention = retention_policy or MEMORY_RETENTION[memory_type]
+        owner = self._workspace(workspace_id)
 
         stamp = now_iso()
         with self._tx() as conn:
@@ -1247,36 +1481,46 @@ class Store:
             if supersede:
                 prior = conn.execute(
                     "SELECT id FROM memories WHERE subject=? AND kind=? AND superseded=0 "
-                    "AND project_scope=? ORDER BY id DESC LIMIT 1",
-                    (subject, kind, project_scope)).fetchone()
+                    "AND project_scope=? AND workspace_id=? ORDER BY id DESC LIMIT 1",
+                    (subject, kind, project_scope, owner)).fetchone()
                 superseded_id = int(prior[0]) if prior else None
                 # Older rows are marked, never deleted - history stays auditable.
                 conn.execute(
                     "UPDATE memories SET superseded=1 WHERE subject=? AND kind=? "
-                    "AND superseded=0 AND project_scope=?",
-                    (subject, kind, project_scope),
+                    "AND superseded=0 AND project_scope=? AND workspace_id=?",
+                    (subject, kind, project_scope, owner),
                 )
             cur = conn.execute(
                 "INSERT INTO memories (subject, value, kind, scope, source, confidence, "
                 "run_id, created_at, evidence_count, last_confirmed, observation_id, "
                 "memory_type, project_scope, source_ref, supersedes_id, "
-                "retention_policy, importance) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "retention_policy, importance, workspace_id, trust_class) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (subject, value, kind, scope, source, confidence, run_id, stamp,
                  evidence_count, stamp, observation_id, memory_type, project_scope,
-                 source_ref, superseded_id, retention, importance),
+                 source_ref, superseded_id, retention, importance, owner,
+                 trust_class),
             )
             return int(cur.lastrowid)
 
     def recall_scoped(self, subject: str = "", *, project_scope: str = "",
                       needle: str = "", memory_types: tuple[str, ...] = (),
-                      limit: int = 20, touch: bool = True) -> list[dict]:
+                      limit: int = 20, touch: bool = True,
+                      workspace_id: str | None = None) -> list[dict]:
         """FR-017 scoped retrieval. A record is visible when it is global
         (project_scope '') or belongs to the requested project. Another
         project's records are never returned, whatever the query matches.
-        `touch` stamps `last_retrieved_at` on what was returned (9.5)."""
-        sql = "SELECT * FROM memories WHERE superseded=0 AND (project_scope='' OR project_scope=?)"
-        params: list = [project_scope]
+        `touch` stamps `last_retrieved_at` on what was returned (9.5).
+
+        FR-PRV-002: the workspace filter is not optional and has no "global"
+        escape the way project_scope does. A project is a compartment inside
+        one tenant's memory; a workspace is a different tenant, and there is
+        no such thing as a fact that belongs to all of them.
+        """
+        owner = self._workspace(workspace_id)
+        sql = ("SELECT * FROM memories WHERE superseded=0 AND workspace_id=? "
+               "AND (project_scope='' OR project_scope=?)")
+        params: list = [owner, project_scope]
         if subject:
             sql += " AND subject=?"
             params.append(subject)
@@ -1297,15 +1541,25 @@ class Store:
                     [now_iso()] + [r["id"] for r in rows])
         return rows
 
-    def memory_provenance(self, memory_id: int) -> dict | None:
+    def memory_provenance(self, memory_id: int,
+                          workspace_id: str | None = None) -> dict | None:
         """FR-018: where a remembered fact came from and whether it is
         current - the record, what it superseded, what superseded it, and
-        any open contradiction on its subject."""
+        any open contradiction on its subject.
+
+        FR-PRV-002: a row belonging to another workspace RAISES
+        `CrossWorkspaceRefused` rather than returning None. Returning None
+        would be indistinguishable from "no such memory", which turns a
+        boundary violation into a lookup miss and lets a caller enumerate
+        ids until something comes back. An id is not a capability.
+        """
         row = self._conn.execute("SELECT * FROM memories WHERE id=?",
                                  (memory_id,)).fetchone()
         if row is None:
             return None
         record = dict(row)
+        from friday.workspace import guard
+        guard(workspace_id, str(record.get("workspace_id") or "default"))
         successor = self._conn.execute(
             "SELECT id, value, source, created_at FROM memories WHERE supersedes_id=? "
             "ORDER BY id DESC LIMIT 1", (memory_id,)).fetchone()
@@ -1333,48 +1587,71 @@ class Store:
         }
 
     def export_memories(self, *, project_scope: str | None = None,
-                        include_superseded: bool = False) -> list[dict]:
+                        include_superseded: bool = False,
+                        workspace_id: str | None = None,
+                        every_workspace: bool = False) -> list[dict]:
         """FR-019/FR-066: the owner's durable memory as plain records, for
-        export or inspection. Scoped when a project is named."""
-        sql = "SELECT * FROM memories"
+        export or inspection. Scoped when a project is named.
+
+        `every_workspace=True` is the one deliberate hole in the boundary and
+        it is spelled out at the call site rather than reachable by omission:
+        a whole-install backup (FR-BKP-001) has to read every tenant. It is
+        never the default, and no tool a model can call passes it.
+        """
         clauses, params = [], []
+        if not every_workspace:
+            clauses.append("workspace_id=?")
+            params.append(self._workspace(workspace_id))
         if not include_superseded:
             clauses.append("superseded=0")
         if project_scope is not None:
             clauses.append("(project_scope='' OR project_scope=?)")
             params.append(project_scope)
+        sql = "SELECT * FROM memories"
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY id"
         return [dict(r) for r in self._conn.execute(sql, params)]
 
-    def expire_memories(self, *, retention_policy: str, run_id: str | None = None) -> int:
+    def expire_memories(self, *, retention_policy: str, run_id: str | None = None,
+                        workspace_id: str | None = None) -> int:
         """Lifecycle (FR-016): retire working/session-scoped records when
         their objective or session ends. Marked superseded, never deleted -
-        the audit trail stays."""
-        sql = "UPDATE memories SET superseded=1 WHERE superseded=0 AND retention_policy=?"
-        params: list = [retention_policy]
+        the audit trail stays. Scoped: one workspace's session ending must
+        not retire another's working memory."""
+        sql = ("UPDATE memories SET superseded=1 WHERE superseded=0 "
+               "AND retention_policy=? AND workspace_id=?")
+        params: list = [retention_policy, self._workspace(workspace_id)]
         if run_id is not None:
             sql += " AND run_id=?"
             params.append(run_id)
         with self._tx() as conn:
             return conn.execute(sql, params).rowcount
 
-    def recall(self, subject: str, *, include_superseded: bool = False) -> list[dict]:
-        sql = "SELECT * FROM memories WHERE subject=?"
+    def recall(self, subject: str, *, include_superseded: bool = False,
+               workspace_id: str | None = None) -> list[dict]:
+        owner = self._workspace(workspace_id)
+        sql = "SELECT * FROM memories WHERE subject=? AND workspace_id=?"
         if not include_superseded:
             sql += " AND superseded=0"
         sql += " ORDER BY created_at DESC"
-        return [dict(r) for r in self._conn.execute(sql, (subject,))]
+        return [dict(r) for r in self._conn.execute(sql, (subject, owner))]
 
-    def search_memories(self, needle: str, limit: int = 20) -> list[dict]:
+    def search_memories(self, needle: str, limit: int = 20,
+                        workspace_id: str | None = None) -> list[dict]:
+        """Free-text search. The workspace filter comes first in the WHERE
+        clause on purpose: this is the query a curious model is most likely
+        to reach for, and a substring search that crossed the boundary would
+        be the widest possible leak."""
+        owner = self._workspace(workspace_id)
         return [dict(r) for r in self._conn.execute(
-            "SELECT * FROM memories WHERE superseded=0 AND "
+            "SELECT * FROM memories WHERE workspace_id=? AND superseded=0 AND "
             "(subject LIKE ? OR value LIKE ?) ORDER BY created_at DESC LIMIT ?",
-            (f"%{needle}%", f"%{needle}%", limit),
+            (owner, f"%{needle}%", f"%{needle}%", limit),
         )]
 
-    def supersede(self, subject: str, *, kind: str | None = None) -> int:
+    def supersede(self, subject: str, *, kind: str | None = None,
+                  workspace_id: str | None = None) -> int:
         """
         Mark a subject's active rows superseded, across kinds by default.
 
@@ -1383,19 +1660,24 @@ class Store:
         because they are different claims. The profile layer needs one active
         belief per subject, so it calls this before replacing one.
         """
-        sql = "UPDATE memories SET superseded=1 WHERE subject=? AND superseded=0"
-        params: list = [subject]
+        sql = ("UPDATE memories SET superseded=1 WHERE subject=? AND superseded=0 "
+               "AND workspace_id=?")
+        params: list = [subject, self._workspace(workspace_id)]
         if kind is not None:
             sql += " AND kind=?"
             params.append(kind)
         with self._tx() as conn:
             return conn.execute(sql, params).rowcount
 
-    def forget(self, subject: str) -> int:
+    def forget(self, subject: str, *, workspace_id: str | None = None) -> int:
+        """Retire a subject's active rows in this workspace only. Forgetting
+        in one tenant must not forget for another - a shared subject name
+        like "pricing policy" is exactly the collision that would."""
         with self._tx() as conn:
             cur = conn.execute(
-                "UPDATE memories SET superseded=1 WHERE subject=? AND superseded=0",
-                (subject,),
+                "UPDATE memories SET superseded=1 WHERE subject=? AND superseded=0 "
+                "AND workspace_id=?",
+                (subject, self._workspace(workspace_id)),
             )
             return cur.rowcount
 
@@ -1835,16 +2117,27 @@ class Store:
         self, *, dimension: str, subject: str, value: str, kind: str,
         confidence: float, evidence: str, conversation_id: str | None = None,
         run_id: str | None = None, status: str = "pending",
+        workspace_id: str | None = None,
     ) -> int:
+        """An observed episode, with the quote it came from.
+
+        Scoped to a workspace (FR-PRV-002) because promotion reads these to
+        decide what becomes a durable memory: an unscoped observation would
+        let one tenant's overheard detail be promoted into another tenant's
+        facts, which is the boundary breached one step earlier than the
+        memory table.
+        """
         if not evidence.strip():
             raise ValueError("an observation must carry the quote it came from")
         with self._tx() as conn:
             cur = conn.execute(
                 "INSERT INTO observations (conversation_id, run_id, dimension, "
-                "subject, value, kind, confidence, evidence, status, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "subject, value, kind, confidence, evidence, status, created_at, "
+                "workspace_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (conversation_id, run_id, dimension, subject, value, kind,
-                 confidence, evidence, status, now_iso()),
+                 confidence, evidence, status, now_iso(),
+                 self._workspace(workspace_id)),
             )
             return int(cur.lastrowid)
 
@@ -1861,8 +2154,9 @@ class Store:
     def observations(
         self, *, dimension: str | None = None, subject: str | None = None,
         status: str | None = None, limit: int = 100,
+        workspace_id: str | None = None,
     ) -> list[dict]:
-        clauses, params = [], []
+        clauses, params = ["workspace_id=?"], [self._workspace(workspace_id)]
         if dimension:
             clauses.append("dimension=?")
             params.append(dimension)
@@ -1872,7 +2166,7 @@ class Store:
         if status:
             clauses.append("status=?")
             params.append(status)
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        where = f"WHERE {' AND '.join(clauses)}"
         params.append(limit)
         return [dict(r) for r in self._conn.execute(
             f"SELECT * FROM observations {where} ORDER BY created_at DESC LIMIT ?",
@@ -2055,21 +2349,26 @@ class Store:
     def save_schedule(self, name: str, *, objective: str, tasks: list, trigger: dict,
                       budgets: dict, permissions: list, delivery: str, condition: dict,
                       description: str = "", task_name: str | None = None,
-                      enabled: bool = True) -> None:
+                      enabled: bool = True, provenance: str | None = None) -> None:
+        """Write a schedule. `provenance` is who wrote it (TRUST-002): a new
+        author's replaces the old one's, because the content is now theirs;
+        a re-save that names none keeps what is recorded."""
         with self._tx() as conn:
             conn.execute(
                 "INSERT INTO schedules (name, description, objective, tasks, trigger, budgets, "
-                "  permissions, delivery, condition, enabled, task_name, created_at, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "  permissions, delivery, condition, enabled, task_name, created_at, updated_at, "
+                "  provenance) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(name) DO UPDATE SET description=excluded.description, "
                 "  objective=excluded.objective, tasks=excluded.tasks, trigger=excluded.trigger, "
                 "  budgets=excluded.budgets, permissions=excluded.permissions, "
                 "  delivery=excluded.delivery, condition=excluded.condition, "
                 "  enabled=excluded.enabled, task_name=excluded.task_name, "
-                "  updated_at=excluded.updated_at",
+                "  updated_at=excluded.updated_at, "
+                "  provenance=COALESCE(excluded.provenance, schedules.provenance)",
                 (name, description, objective, json.dumps(tasks), json.dumps(trigger),
                  json.dumps(budgets), json.dumps(permissions), delivery, json.dumps(condition),
-                 1 if enabled else 0, task_name, now_iso(), now_iso()))
+                 1 if enabled else 0, task_name, now_iso(), now_iso(), provenance))
 
     @staticmethod
     def _schedule(row) -> dict:
@@ -2093,6 +2392,127 @@ class Store:
     def delete_schedule(self, name: str) -> bool:
         with self._tx() as conn:
             return conn.execute("DELETE FROM schedules WHERE name=?", (name,)).rowcount > 0
+
+    # -- the emergency stop (PRD v7 STOP-001) ---------------------------------
+
+    def stop_latch(self, *, reason: str, actor: str, now: str) -> bool:
+        """Latch the stop. False if it was already latched (the first reason stays)."""
+        with self._tx() as conn:
+            return conn.execute(
+                "INSERT OR IGNORE INTO stop_latch (id, reason, actor, latched_at) "
+                "VALUES (1, ?, ?, ?)", (reason, actor, now)).rowcount == 1
+
+    def stop_latched(self) -> dict | None:
+        row = self._conn.execute("SELECT * FROM stop_latch WHERE id=1").fetchone()
+        return dict(row) if row else None
+
+    def stop_clear(self) -> bool:
+        with self._tx() as conn:
+            return conn.execute("DELETE FROM stop_latch WHERE id=1").rowcount == 1
+
+    # -- network grants (PRD v7 NET-001) --------------------------------------
+
+    def grant_issue(self, *, grant_id: str, objective_id: str, mode: str,
+                    hosts: tuple[str, ...], expires_at: str, now: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO network_grants (grant_id, objective_id, mode, hosts, "
+                "expires_at, issued_at) VALUES (?,?,?,?,?,?)",
+                (grant_id, objective_id, mode, json.dumps(list(hosts)),
+                 expires_at, now))
+
+    def grant(self, grant_id: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM network_grants WHERE grant_id=?", (grant_id,)).fetchone()
+        return dict(row) if row else None
+
+    def grant_revoked(self, grant_id: str) -> bool:
+        """Revoked, or never issued: either way it licenses nothing."""
+        row = self.grant(grant_id)
+        return row is None or row["revoked_at"] is not None
+
+    def grant_revoke(self, grant_id: str, *, reason: str, now: str) -> bool:
+        with self._tx() as conn:
+            return conn.execute(
+                "UPDATE network_grants SET revoked_at=?, revoked_reason=? "
+                "WHERE grant_id=? AND revoked_at IS NULL",
+                (now, reason, grant_id)).rowcount == 1
+
+    def grants_revoke_all(self, *, reason: str, now: str) -> list[str]:
+        """Revoke every live grant; returns the ids that were live."""
+        with self._tx() as conn:
+            live = [row["grant_id"] for row in conn.execute(
+                "SELECT grant_id FROM network_grants WHERE revoked_at IS NULL")]
+            conn.execute(
+                "UPDATE network_grants SET revoked_at=?, revoked_reason=? "
+                "WHERE revoked_at IS NULL", (now, reason))
+        return live
+
+    # -- confirmations (PRD v7, V7-D08) ---------------------------------------
+    # Each state change is one conditional UPDATE, and the row count decides:
+    # two processes answering or spending the same yes cannot both succeed.
+
+    def confirmation_record(self, *, nonce: str, asker: str, run_id: str,
+                            action: str, target: str, fingerprint: str,
+                            question: str, state: str, created_at: str,
+                            expires_at: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO confirmations (nonce, asker, run_id, action, target, "
+                "fingerprint, question, state, created_at, expires_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (nonce, asker, run_id, action, target, fingerprint, question,
+                 state, created_at, expires_at))
+
+    def confirmation(self, nonce: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM confirmations WHERE nonce=?", (nonce,)).fetchone()
+        return dict(row) if row else None
+
+    def confirmations(self, *, state: str | None = None) -> list[dict]:
+        if state is None:
+            rows = self._conn.execute(
+                "SELECT * FROM confirmations ORDER BY expires_at")
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM confirmations WHERE state=? ORDER BY expires_at",
+                (state,))
+        return [dict(row) for row in rows]
+
+    def confirmation_approve(self, nonce: str, *, answered_by: str, now: str) -> bool:
+        """PENDING and unexpired -> APPROVED. True only for the answer that
+        changed the row."""
+        with self._tx() as conn:
+            return conn.execute(
+                "UPDATE confirmations SET state='APPROVED', answered_by=?, "
+                "answered_at=? WHERE nonce=? AND state='PENDING' AND expires_at > ?",
+                (answered_by, now, nonce, now)).rowcount == 1
+
+    def confirmation_refuse(self, nonce: str, *, answered_by: str, now: str) -> bool:
+        """Anything not yet spent -> REFUSED. A no is final."""
+        with self._tx() as conn:
+            return conn.execute(
+                "UPDATE confirmations SET state='REFUSED', answered_by=?, "
+                "answered_at=? WHERE nonce=? AND state IN ('PENDING', 'APPROVED')",
+                (answered_by, now, nonce)).rowcount == 1
+
+    def confirmation_spend(self, nonce: str, *, asker: str, fingerprint: str,
+                           now: str) -> bool:
+        """APPROVED, asked by this process instance, for exactly this action,
+        and unexpired -> CONSUMED. True for exactly one spender."""
+        with self._tx() as conn:
+            return conn.execute(
+                "UPDATE confirmations SET state='CONSUMED', spent_at=? "
+                "WHERE nonce=? AND state='APPROVED' AND asker=? "
+                "AND fingerprint=? AND expires_at > ?",
+                (now, nonce, asker, fingerprint, now)).rowcount == 1
+
+    def confirmations_forget(self, *, now: str) -> int:
+        """Drop what can no longer be used. Returns how many went."""
+        with self._tx() as conn:
+            return conn.execute(
+                "DELETE FROM confirmations WHERE expires_at <= ? "
+                "OR state IN ('CONSUMED', 'REFUSED', 'EXPIRED')", (now,)).rowcount
 
     def start_schedule_run(self, firing_id: str, name: str, fired_by: str) -> None:
         with self._tx() as conn:
@@ -2219,7 +2639,9 @@ class Store:
     def product_runs(self, limit: int = 20) -> list[dict]:
         return [dict(r) for r in self._conn.execute(
             "SELECT run_id, source, status, total_records, started_at, "
-            "finished_at FROM product_runs ORDER BY started_at DESC LIMIT ?",
+            # rowid breaks a tie: two runs can share a start time on a
+            # coarse clock, and the one written last is the newer (V7-D37).
+            "finished_at FROM product_runs ORDER BY started_at DESC, rowid DESC LIMIT ?",
             (limit,))]
 
     # -- forged skills ------------------------------------------------------
@@ -2382,6 +2804,8 @@ class Store:
         lease_executor_id: str | None = None, lease_generation: int = 0,
         lease_expiry: str | None = None, next_wake: str | None = None,
         manual_continue_count: int = 0,
+        provenance: str | None = None, attended: bool | None = None,
+        envelope: dict | None = None, contract: dict | None = None,
     ) -> None:
         """
         Record an objective run before anything executes.
@@ -2391,14 +2815,20 @@ class Store:
         wrote is a run nobody can recover. Re-opening an existing run_id
         (a restart reconciling a run it already created) refreshes the row
         while preserving `created_at`.
+
+        Lineage and the envelope are written once: a re-open keeps what the
+        run was compiled with, so a restart cannot swap in a wider scope. It
+        may fill them where they are missing - a run from before envelopes
+        that the person resumes.
         """
         stamp = now_iso()
         with self._tx() as conn:
             conn.execute(
                 "INSERT INTO objective_runs (run_id, request, objective_summary, "
                 "status, lease_executor_id, lease_generation, lease_expiry, "
-                "next_wake, manual_continue_count, created_at, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+                "next_wake, manual_continue_count, created_at, updated_at, "
+                "provenance, attended, envelope, contract) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(run_id) DO UPDATE SET "
                 "request=excluded.request, "
                 "objective_summary=excluded.objective_summary, "
@@ -2408,10 +2838,17 @@ class Store:
                 "lease_expiry=excluded.lease_expiry, "
                 "next_wake=excluded.next_wake, "
                 "manual_continue_count=excluded.manual_continue_count, "
-                "updated_at=excluded.updated_at",
+                "updated_at=excluded.updated_at, "
+                "provenance=COALESCE(objective_runs.provenance, excluded.provenance), "
+                "attended=COALESCE(objective_runs.attended, excluded.attended), "
+                "envelope=COALESCE(objective_runs.envelope, excluded.envelope), "
+                "contract=COALESCE(objective_runs.contract, excluded.contract)",
                 (run_id, request, objective_summary, status, lease_executor_id,
                  lease_generation, lease_expiry, next_wake,
-                 manual_continue_count, stamp, stamp),
+                 manual_continue_count, stamp, stamp, provenance,
+                 None if attended is None else int(attended),
+                 None if envelope is None else json.dumps(envelope),
+                 None if contract is None else json.dumps(contract)),
             )
 
     def objective_run(self, run_id: str) -> dict | None:
@@ -2424,6 +2861,12 @@ class Store:
         if got.get("summary"):
             got["summary"] = json.loads(got["summary"])
         return got
+
+    def objective_runs_in(self, status: str) -> list[dict]:
+        """Every objective run in one status, however many there are."""
+        return [dict(r) for r in self._conn.execute(
+            "SELECT * FROM objective_runs WHERE status=? ORDER BY updated_at",
+            (status,))]
 
     def objective_runs(self, limit: int = 10) -> list[dict]:
         return [dict(r) for r in self._conn.execute(
@@ -2506,13 +2949,16 @@ class Store:
     def append_objective_approval(self, run_id: str, *, operation: str,
                                   target: str, parameters: dict | None,
                                   decision: str, decided_by: str,
-                                  nonce: str = "", expires_at: str = "") -> int:
+                                  nonce: str = "", expires_at: str = "",
+                                  plan_hash: str = "", graph_version: int = 0) -> int:
         """FR-060 exact-action approval record bound to operation, target,
-        parameters, objective and expiry."""
+        parameters, objective and expiry - and, since APPROVAL-001, to the
+        plan it was given for (`plan_hash`, `graph_version`)."""
         return self._append_objective_json(run_id, "approvals", {
             "operation": operation, "target": target,
             "parameters": dict(parameters or {}), "decision": decision,
-            "decided_by": decided_by, "nonce": nonce, "expires_at": expires_at})
+            "decided_by": decided_by, "nonce": nonce, "expires_at": expires_at,
+            "plan_hash": plan_hash, "graph_version": graph_version})
 
     def objective_ledger(self, run_id: str) -> dict | None:
         """The PRD 9.2 Objective shape, assembled from the durable rows:
@@ -2765,6 +3211,23 @@ class Store:
                  json.dumps(detail, default=str) if detail else None, now_iso()),
             )
             return int(cur.lastrowid)
+
+    def recent_objective_events(self, run_id: str, limit: int = 500) -> list[dict]:
+        """The newest `limit` events of a run, oldest first. `objective_events`
+        reads from the start, which on a long run misses the recent ones."""
+        rows = []
+        for row in self._conn.execute(
+            "SELECT * FROM (SELECT * FROM objective_events WHERE run_id=? "
+            "ORDER BY id DESC LIMIT ?) ORDER BY id", (run_id, limit),
+        ):
+            got = dict(row)
+            if got.get("detail"):
+                try:
+                    got["detail"] = json.loads(got["detail"])
+                except json.JSONDecodeError:
+                    pass
+            rows.append(got)
+        return rows
 
     def objective_events(self, run_id: str, limit: int = 1000) -> list[dict]:
         rows = []

@@ -22,8 +22,9 @@ from friday.toolsets import memory as M
 from friday.toolsets.system import needs_approval
 
 ROOT = Path(__file__).resolve().parent.parent
-PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
-PYTHON = str(PYTHON if PYTHON.exists() else sys.executable)
+#: The suite's own interpreter: the live .venv belongs to the running agent
+#: (AGENTS.md; V7-D41).
+PYTHON = sys.executable
 
 
 @pytest.fixture

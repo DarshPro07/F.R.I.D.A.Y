@@ -47,6 +47,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
+from friday import contracts
 from friday import objectives as O
 from friday.store import Store
 
@@ -130,6 +131,26 @@ _STOPWORDS = frozenset({
 def _words(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", (text or "").lower())
             if w not in _STOPWORDS and len(w) > 2}
+
+
+def _contract_refusal(store: Store, run_id: str, capability: str,
+                      arguments: dict) -> str:
+    """Why the objective's contract rules this step out, else "" (BCON-001).
+    An edited plan is held to the contract the compiled plan was: a step the
+    person forbade is refused whoever proposes it and whenever. A contract
+    that cannot be read refuses rather than letting the step through."""
+    raw = (store.objective_run(run_id) or {}).get("contract")
+    if not raw:
+        return ""
+    try:
+        contract = contracts.ObjectiveContract.from_dict(json.loads(raw))
+    except (TypeError, ValueError, KeyError):
+        return "this objective's contract cannot be read, so the change is not made"
+    found = O.forbidden_steps(contract, [{"capability": capability,
+                                          "arguments": arguments}])
+    if not found:
+        return ""
+    return "the objective's contract rules this out: " + "; ".join(found)
 
 
 def find_task(store: Store, run_id: str, description: str) -> dict | None:
@@ -244,6 +265,9 @@ def amend_task(store: Store, run_id: str, description: str,
                     f"with", task_id=task["task_id"], old_state=status)
 
     updated = {**(task["arguments"] or {}), **changes}
+    refusal = _contract_refusal(store, run_id, task["capability"], updated)
+    if refusal:
+        return Edit(REFUSED, refusal, task_id=task["task_id"], old_state=status)
     version = _record(store, run_id, task_id=task["task_id"], action="amend",
                       old_state=status, new_state=status,
                       reason=f"changed {sorted(changes)}",
@@ -279,6 +303,10 @@ def append_task(store: Store, run_id: str, capability: str,
     if run is None or run["status"] in O.RUN_TERMINAL:
         return Edit(REFUSED,
                     "that run is over - this would be a new objective")
+
+    refusal = _contract_refusal(store, run_id, capability, arguments or {})
+    if refusal:
+        return Edit(REFUSED, refusal)
 
     tasks = store.objective_tasks(run_id)
     outstanding = tuple(t["task_id"] for t in tasks

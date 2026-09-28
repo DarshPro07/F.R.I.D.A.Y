@@ -54,6 +54,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -61,6 +62,8 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 from pathlib import Path, PurePosixPath, PureWindowsPath
+
+from friday import contracts
 
 logger = logging.getLogger("friday-agent")
 
@@ -126,26 +129,42 @@ ALLOWLIST = "ALLOWLIST"
 ALLOW_ALL = "ALLOW_ALL"
 
 
-@dataclass(frozen=True)
-class Limits:
-    """
-    What one sandboxed run may consume.
+#: What one run may consume. The type is the execution envelope's (PRD v7
+#: section 43), so it lives with the shared contracts; enforcing it is this
+#: module's job.
+Limits = contracts.Limits
 
-    Defaults are sized for a coding agent on a developer machine, not for a
-    build farm. They are deliberately low enough that a runaway is stopped
-    while the machine is still usable - the whole point is that Friday's
-    voice loop keeps answering while a development run misbehaves.
-    """
 
-    #: Kernel-enforced ceiling for the whole tree, not per process.
-    memory_mb: int = 4096
-    #: Active processes in the job at once; a fork bomb hits this first.
-    processes: int = 64
-    #: Wall clock for one command. The executor has its own for the run; this
-    #: one is what stops `npm test` hanging on a prompt for an hour.
-    seconds: float = 1800.0
-    #: The largest single artifact `export` will copy out.
-    artifact_bytes: int = 64 * 1024 * 1024
+#: A name shaped like a secret never crosses to a worker, whoever asks for it.
+_SECRET_SHAPED = re.compile(r"KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH", re.IGNORECASE)
+
+
+def worker_environment(name: str, *, passthrough=(), prefixes=()) -> dict[str, str]:
+    """
+    The environment any worker process FRIDAY starts gets, on any backend.
+
+    An allowlist, not a denylist. A denylist is a list of the secrets
+    somebody remembered, and this repository adds providers faster than
+    anyone updates such a list - so the default is that a variable does not
+    cross, and `KEPT` names the few that must (the profile paths included, so
+    a coding CLI still finds its own login). A worker's own configuration
+    crosses too - the names a launch asks for, or a tool's own namespace
+    (`prefixes`, e.g. CLAUDE_CODE_) - unless the name is shaped like a
+    secret. HOST keeps a worker's reach; it never kept FRIDAY's own secrets
+    out of its shell until this (V7-D18).
+    """
+    env = {key: os.environ[key] for key in KEPT if key in os.environ}
+    wanted = set(passthrough)
+    for key, value in os.environ.items():
+        if ((key in wanted or any(key.startswith(p) for p in prefixes))
+                and not _SECRET_SHAPED.search(key)):
+            env[key] = value
+    # Belt and braces: nothing in SCRUBBED gets through even if it were ever
+    # added to KEPT by mistake.
+    for key in SCRUBBED:
+        env.pop(key, None)
+    env["FRIDAY_EXECUTION_ENV"] = name
+    return env
 
 
 @dataclass(frozen=True)
@@ -422,12 +441,7 @@ class NativeExecutionEnvironment:
         anyone updates such a list - so the default is that a variable does
         not cross the boundary, and `KEPT` names the few that must.
         """
-        env = {name: os.environ[name] for name in KEPT if name in os.environ}
-        # Belt and braces: nothing in SCRUBBED gets through even if it were
-        # ever added to KEPT by mistake.
-        for name in SCRUBBED:
-            env.pop(name, None)
-        env["FRIDAY_EXECUTION_ENV"] = self.name
+        env = worker_environment(self.name)
         env["FRIDAY_EXECUTION_EGRESS"] = self.egress.mode
         if self.egress.mode == DENY_ALL:
             # No firewall rule is written here (that needs an administrator);

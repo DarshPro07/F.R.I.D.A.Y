@@ -750,6 +750,13 @@ def _with_health_hint(family: str, error: str) -> str:
 def _run_capability(family, operation, arguments):
     """Execute one read-only capability call. Never raises; returns a dict the
     model can read, and refuses anything outside the read-only allowlist."""
+    # STOP-001: while the emergency stop is latched, nothing new starts here
+    # either - this is the text brain's one door to its tools.
+    from friday import stop as _stop
+
+    stopped = _stop.refusal()
+    if stopped:
+        return stopped
     surface = _surface()
     allowed = surface.get(family)
     if allowed is None:
@@ -1323,6 +1330,22 @@ def reply(text, history=None):
     _remember_turn("user", text)
     _CURRENT_TURN["text"] = text
 
+    # STOP-001: the emergency stop and its release are the person's words,
+    # acted on here before anything else - no command parser, no model.
+    from friday import stop as _stop
+
+    if _stop.is_stop_phrase(text):
+        _stop.emergency_stop(f"said in the control room: {text}", actor="person")
+        said = "Stopped, sir. Nothing new starts until you say 'resume everything'."
+        return {"reply": said, "action": "friday.stop",
+                "message_id": _remember_turn("assistant", said)}
+    if _stop.is_resume_phrase(text):
+        resumed = _stop.resume(actor="person")
+        said = ("Resumed, sir. Anything that was running is parked; resume it when "
+                "you want it back." if resumed else "Nothing was stopped, sir.")
+        return {"reply": said, "action": "friday.resume",
+                "message_id": _remember_turn("assistant", said)}
+
     cmd = _try_command(text)
     if cmd:
         cmd["message_id"] = _remember_turn("assistant", cmd.get("reply", ""))
@@ -1348,6 +1371,22 @@ def reply(text, history=None):
     # bare "ok" three questions later must not spend a stashed nonce (review,
     # 2026-09-03). A new plan in this turn stashes a new one.
     _LAST_PLAN_NONCE.update(nonce="", task="")
+
+    # A yes or no settles a pending confirmation from ANY FRIDAY process -
+    # the MCP process asking about a browser purchase or a permanent delete,
+    # answered here because the person answers where the person is. This
+    # runs deterministically, before the model ever sees the words (PRD v7,
+    # V7-D08 step 4b): the model cannot be trusted to notice an answer it
+    # was not the one to ask for.
+    from friday import approval as _approval
+    from friday import confirmation as _conf
+    approval_verdict, approval_note = _approval.settle(_conf.book, text)
+    if approval_verdict is None and approval_note:
+        # More than one thing is waiting: ask which, and do not touch the
+        # model with an answer that has not been matched to a question yet.
+        message_id = _remember_turn("assistant", approval_note)
+        return {"reply": approval_note, "action": "approval.ambiguous",
+                "message_id": message_id}
 
     cfg = _model()
     if cfg is None:
@@ -1379,6 +1418,8 @@ def reply(text, history=None):
         ctx = _memory_context(text)
         timer.stop("memory")
         user = text if not ctx else "%s\n\n(from your memory: %s)" % (text, ctx)
+        if approval_verdict is not None and approval_note:
+            user = "%s\n\n[%s]" % (user, approval_note)
         contents.append(types.Content(role="user", parts=[types.Part(text=user)]))
         # Thinking is billed out of max_output_tokens, so leaving it on cost
         # twice: seconds of latency before a word arrives, and a reply that ran

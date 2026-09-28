@@ -126,7 +126,11 @@ def _gateway_calls(run_id: str) -> list[dict]:
 def _audit_rows(run_id: str) -> list[dict]:
     try:
         from friday import trust as T
-        return T.audit().query(objective_id=run_id, limit=500)
+        # The log answers newest first; a trace is told oldest first. Audit
+        # times are to the second, and the timeline's sort keeps ties in the
+        # order given, so without this a grant revoked in the same second it
+        # was issued read as revoked before it existed.
+        return list(reversed(T.audit().query(objective_id=run_id, limit=500)))
     except Exception as exc:  # noqa: BLE001
         return [{"error": f"audit log unavailable: {exc}"}]
 

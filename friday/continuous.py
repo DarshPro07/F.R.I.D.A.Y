@@ -32,7 +32,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
 
 from friday import contracts as c
@@ -40,6 +40,7 @@ from friday import objective_budget as budget_module
 
 from friday.contracts import now_iso
 from friday import objectives as O
+from friday import trajectory
 from friday.store import Store
 
 logger = logging.getLogger("friday-continuous")
@@ -99,6 +100,22 @@ class FailedToAcquire(RuntimeError):
 
 
 CapabilityPort = Callable[[str, dict], Awaitable[dict]]
+
+#: Why a run from before execution envelopes does not run (PRD v7 SEC-005).
+NO_ENVELOPE_BLOCKER = (
+    "no execution envelope: this objective was written before envelopes, or "
+    "its envelope cannot be read, so it waits for the person to re-issue it "
+    "rather than running under an assumed scope")
+
+
+def _takes_run(port) -> bool:
+    """Whether a capability port accepts the task's Run as `run=`."""
+    import inspect
+
+    try:
+        return "run" in inspect.signature(port).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 #: How long to leave a provider alone after it says it cannot answer.
@@ -265,6 +282,20 @@ def _pending_worker_id(task: dict) -> str:
             if isinstance(result, dict) else "")
 
 
+def _committed_result(store, run_id: str, task_id: str):
+    """The result a side-effecting call on this task's latest attempt
+    committed (DUR-001), or None if that attempt committed nothing."""
+    events = [e for e in store.recent_objective_events(run_id, limit=2000)
+              if e.get("task_id") == task_id]
+    started = max((i for i, e in enumerate(events)
+                   if e.get("event") == O.EVENT_TASK_STARTED), default=-1)
+    for event in reversed(events[started + 1:]):
+        if event.get("event") == O.EVENT_SIDE_EFFECT_COMMITTED:
+            detail = event.get("detail") if isinstance(event.get("detail"), dict) else {}
+            return detail.get("result")
+    return None
+
+
 def _worker_status(observed: dict) -> tuple[str, dict]:
     """Normalise hermes_status and direct test shapes."""
     if not isinstance(observed, dict):
@@ -328,6 +359,10 @@ class ContinuousTaskExecutor:
                  health_probe=None, health_recover=None) -> None:
         self.store = store
         self.call_capability = call_capability
+        #: Whether the port can carry each task's Run (lineage and envelope,
+        #: TRUST-002). Both production ports can; a port that cannot - a test
+        #: fake - still sees the envelope enforced here before dispatch.
+        self._port_takes_run = _takes_run(call_capability)
         self.executor_id = executor_id or f"exec-{os.getpid()}"
         self.lease_timeout = DEFAULT_LEASE_TIMEOUT
         self.portion_budget = DEFAULT_PORTION_BUDGET
@@ -499,6 +534,8 @@ class ContinuousTaskExecutor:
                 if not ready:
                     self._settle_without_work(run_id)
                     return
+                if self._trajectory_pauses(run_id):
+                    return
 
                 done = await self._execute_tasks(
                     run_id, ready, self.portion_budget - executed)
@@ -608,12 +645,41 @@ class ContinuousTaskExecutor:
 
     async def _execute_task(self, run_id: str, task: dict) -> None:
         task_id = task["task_id"]
+        # STOP-001: a latched emergency stop parks the run before anything is
+        # dispatched, whichever process the stop was pressed in - a worker
+        # poll included, since a poll that finds the gateway STOP killed would
+        # ask recovery to restart it. The WorkRun id stays on the task, so the
+        # person's resume reconciles that same run.
+        stopped = self.store.stop_latched()
+        if stopped:
+            self.store.touch_objective_run(
+                run_id, status=O.RunStatus.PAUSED, next_wake=None,
+                blocker=f"stopped: {stopped['reason']}")
+            self.store.append_objective_event(
+                run_id, O.EVENT_RUN_PAUSED, task_id=task_id,
+                detail={"reason": f"stopped: {stopped['reason']}"})
+            return
+
         # Submit-first Hermes work has already been dispatched. Re-entering a
         # due WAITING task reconciles that SAME WorkRun; it never calls the
         # mutating delegate a second time.
         worker_id = _pending_worker_id(task)
         if worker_id:
             await self._reconcile_worker(run_id, task, worker_id)
+            return
+
+        # PRD v7 SEC-005 / TRUST-002: each task runs as the objective's own
+        # lineage, inside the envelope it was compiled with. A run with no
+        # readable envelope is parked for the person - fail closed - before
+        # any budget is charged or anything is dispatched.
+        task_run = self._task_run(run_id, task)
+        if task_run is None:
+            self.store.touch_objective_run(
+                run_id, status=O.RunStatus.PAUSED, next_wake=None,
+                blocker=NO_ENVELOPE_BLOCKER)
+            self.store.append_objective_event(
+                run_id, O.EVENT_RUN_PAUSED, task_id=task_id,
+                detail={"reason": "no execution envelope"})
             return
 
         # Audit A-022: the budget is checked against RECORDED spend before
@@ -659,7 +725,7 @@ class ContinuousTaskExecutor:
             # hint nobody reads is a blind retry with better bookkeeping.
             arguments = {**arguments, "strategy_hint": hint}
         try:
-            result = await self.call_capability(task["capability"], arguments)
+            result = await self._dispatch(task["capability"], arguments, task_run)
         except Exception as exc:
             kind = FailureClassifier.classify(exc)
             max_attempts = self._max_attempts_for(task)
@@ -759,6 +825,15 @@ class ContinuousTaskExecutor:
             self._fail_task(run_id, task_id, kind, reason)
             return
 
+        if trajectory._side_effecting(str(task.get("capability") or "")):
+            # DUR-001: the first thing written once a side effect has
+            # happened. If this process dies before the task is marked done,
+            # recovery reads this and completes the task instead of doing the
+            # side effect a second time (V7-D42).
+            self.store.append_objective_event(
+                run_id, O.EVENT_SIDE_EFFECT_COMMITTED, task_id=task_id,
+                detail={"attempt": attempt, "capability": task.get("capability"),
+                        "result": result})
         self.store.update_objective_task(
             task_id, status=O.TaskStatus.SUCCEEDED,
             result=result, evidence=json.dumps(result, default=str),
@@ -824,6 +899,40 @@ class ContinuousTaskExecutor:
                     run_id, task_id)
         self.release(run_id)
 
+    def _trajectory_pauses(self, run_id: str) -> bool:
+        """
+        PRD v7 TRAJ-001: before more work, is the run still going somewhere?
+        A run failing across tasks, failing everywhere for one cause, piling
+        up policy refusals, spending far ahead of its progress or re-running
+        a step with side effects is paused and the person asked: carry on,
+        change the plan, or cancel. Resuming starts a new window.
+        """
+        try:
+            assessment = trajectory.for_run(self.store, run_id)
+        except Exception:                                    # noqa: BLE001
+            # The budget still holds every hard ceiling; a check that could
+            # not read the run is reported, not a reason to stop it.
+            logger.exception("objective %s: the trajectory check failed", run_id)
+            return False
+        if assessment.verdict == trajectory.ON_TRACK:
+            return False
+        reasons = "; ".join(assessment.reasons)
+        self.store.touch_objective_run(
+            run_id, status=O.RunStatus.PAUSED, next_wake=None,
+            blocker=f"trajectory: {reasons}"[:500])
+        self.store.append_objective_event(
+            run_id, trajectory.EVENT_FLAGGED,
+            detail={"verdict": assessment.verdict, "reasons": list(assessment.reasons),
+                    "signals": assessment.signals})
+        self.store.create_objective_delivery(
+            run_id,
+            f"Boss, this objective has stopped going anywhere useful: {reasons}. "
+            "Say carry on, change the plan, or cancel it.")
+        logger.warning("objective.trajectory_paused run_id=%s verdict=%s reasons=%s",
+                       run_id, assessment.verdict, reasons)
+        self.release(run_id)
+        return True
+
     def _park_for_auth(self, run_id: str, task_id: str, kind: str,
                        reason: str) -> None:
         """Auth boundary: park the run, tell the boss ONCE, await verify."""
@@ -868,6 +977,14 @@ class ContinuousTaskExecutor:
         """
         if self.health_probe is None:
             return reason
+        stopped = self.store.stop_latched()
+        if stopped:
+            # STOP-001: the stop may be what took the layer down, and its
+            # repair is a restart; recovering would undo the stop.
+            self.store.append_objective_event(
+                run_id, "connectivity.not_repaired", task_id=task_id,
+                detail={"reason": f"stopped: {stopped['reason']}"})
+            return f"{reason} [not repaired: stopped]"
         workers = self._live_worker_ids(run_id)
         try:
             try:
@@ -906,6 +1023,61 @@ class ContinuousTaskExecutor:
         state = "repaired" if repaired else "repair did not take"
         return (f"{reason} [layer {report.failed_layer}; recovery "
                 f"{report.recovery.value}; {state}]")
+
+    def _task_run(self, run_id: str, task: dict) -> c.Run | None:
+        """The Run a task executes as, rebuilt from what its objective was
+        compiled with. None when there is no readable envelope."""
+        row = self.store.objective_run(run_id) or {}
+        raw = row.get("envelope")
+        if not raw:
+            return None
+        try:
+            envelope = c.Envelope.from_dict(json.loads(raw))
+        except (ValueError, KeyError, TypeError):
+            logger.exception("objective %s: its stored envelope cannot be read",
+                             run_id)
+            return None
+        return c.Run(run_id=c.new_run_id(),
+                     request=str(row.get("request") or "")[:240],
+                     capability=task["capability"],
+                     provenance=envelope.provenance,
+                     attended=envelope.attended, envelope=envelope)
+
+    async def _dispatch(self, capability_id: str, arguments: dict,
+                        run: c.Run) -> dict:
+        """Call the port as this task's Run, after holding it to the envelope
+        and to its lineage here. The capability runtime checks again; a port
+        that carries the Run is not trusted to, and one that cannot carry it
+        never sees it - so neither check can depend on the port."""
+        envelope = run.envelope
+        refusal = envelope.permits(capability_id) or (
+            "this run's envelope has expired" if envelope.expired() else "")
+        if refusal:
+            return run.record(c.started(run.run_id, capability_id).finish(
+                status=c.NOT_PERMITTED, error=f"ENVELOPE: {refusal}")).to_dict()
+        from friday.capability_runtime import lineage_refusal
+
+        blocked = lineage_refusal(capability_id, run.provenance)
+        if blocked is not None:
+            return run.record(c.started(run.run_id, capability_id).finish(
+                status=c.FAILED, error=f"BLOCKED: {blocked.reason}")).to_dict()
+        # BCON-001: "at most N changes" holds for the whole objective. The
+        # change after the Nth is refused here, before any port sees it. A
+        # change still running on its worker counts: it has not finished, but
+        # it is being made.
+        ceiling = envelope.max_side_effects
+        if ceiling and trajectory._side_effecting(capability_id):
+            made = sum(1 for task in self.store.objective_tasks(envelope.objective_id)
+                       if (task["status"] == O.TaskStatus.SUCCEEDED or _pending_worker_id(task))
+                       and trajectory._side_effecting(str(task.get("capability") or "")))
+            if made >= ceiling:
+                return run.record(c.started(run.run_id, capability_id).finish(
+                    status=c.FAILED,
+                    error=f"BLOCKED: the person allowed at most {ceiling} changes for "
+                          f"this objective and {made} have been made or are in progress")).to_dict()
+        if self._port_takes_run:
+            return await self.call_capability(capability_id, arguments, run=run)
+        return await self.call_capability(capability_id, arguments)
 
     async def _reconcile_worker(self, run_id: str, task: dict,
                                 worker_id: str) -> None:
@@ -1320,6 +1492,8 @@ class ContinuousTaskExecutor:
             summary["checks_skipped"] = sum(
                 1 for t in leaves if t["status"] == O.TaskStatus.SKIPPED)
         self.store.finish_objective_run(run_id, status=status, summary=summary)
+        # A finished objective keeps no network authority (NET-001).
+        O.release_network_grant(self.store, run_id, reason=f"objective {status}")
         self.store.append_objective_event(
             run_id, event,
             detail={"summary": summary, "executor_id": self.executor_id})
@@ -1404,6 +1578,8 @@ class ContinuousTaskExecutor:
             )
             self.store.append_objective_event(
                 run_id, O.EVENT_RUN_CANCELLED, detail={"reason": reason})
+            O.release_network_grant(self.store, run_id,
+                                    reason=f"objective cancelled: {reason}")
             return True
         finally:
             self.release(run_id)
@@ -1457,11 +1633,21 @@ def resume_after_approval(store: Store, run_id: str, *, decided_by: str,
         return False
     if target and target != actual_target:
         return False
+    # A lease on this plan (APPROVAL-001): bound to what the objective would
+    # do at this moment, and to a time after which the person is asked again.
+    from friday import modification
+
     store.append_objective_approval(
         run_id, operation=str(task.get("capability") or ""), target=actual_target,
-        parameters=arguments, decision="APPROVED", decided_by=decided_by)
-    # The approval travels with the call: the capability runtime honours
-    # `confirmed=True` for one action bound to these exact arguments.
+        parameters=arguments, decision="APPROVED", decided_by=decided_by,
+        expires_at=(datetime.now(timezone.utc) + O.APPROVAL_TTL).isoformat(),
+        plan_hash=O.plan_hash(store, run_id),
+        graph_version=modification.graph_version(store, run_id))
+    # The approval travels with the call as `approved_by`, and the capability
+    # runtime honours it only when the APPROVED record written above matches
+    # this capability and these exact arguments (`_approval_on_record`). It
+    # answers an ASK; a CONFIRM, such as a browser external write, still needs
+    # its own exact-action confirmation.
     if not store.update_objective_task_if(
             task["task_id"], expect=(O.TaskStatus.WAITING,),
             status=O.TaskStatus.READY, failure_kind="",
@@ -1648,6 +1834,25 @@ class RunWatchdog:
             run_id, O.EVENT_WATCHDOG_ORPHANED,
             detail={"watchdog": self.executor.executor_id})
         for task in store.objective_tasks(run_id):
+            committed = (_committed_result(store, run_id, task["task_id"])
+                         if task["status"] == O.TaskStatus.RUNNING else None)
+            if committed is not None:
+                # DUR-001: its side effect happened before the executor died.
+                # Completed from the commit record; never run again (V7-D42).
+                store.update_objective_task(
+                    task["task_id"], status=O.TaskStatus.SUCCEEDED,
+                    result=committed, evidence=json.dumps(committed, default=str),
+                    finished_at=now_iso())
+                store.append_objective_event(
+                    run_id, O.EVENT_TASK_RECOVERED, task_id=task["task_id"],
+                    detail={"from": O.EVENT_SIDE_EFFECT_COMMITTED,
+                            "watchdog": self.executor.executor_id})
+                store.append_objective_event(
+                    run_id, O.EVENT_TASK_SUCCEEDED, task_id=task["task_id"],
+                    detail={"recovered": True})
+                self.executor._ledger_evidence(run_id, task["task_id"], task,
+                                               committed, passed=True)
+                continue
             if task["status"] in (O.TaskStatus.RUNNING, O.TaskStatus.WAITING):
                 store.update_objective_task(
                     task["task_id"], status=O.TaskStatus.INTERRUPTED,

@@ -122,3 +122,49 @@ def answer(book: CF.Book, said: str, *, run_id: str = "") -> CF.Verdict:
         False,
         f"{said.strip()!r} is neither a yes nor a no, so nothing was "
         f"approved")
+
+
+def settle(book: CF.Book, said: str) -> tuple[CF.Verdict | None, str]:
+    """
+    The deterministic front door: settle a pending confirmation from
+    whatever `said` reached first - voice, the UI, any FRIDAY process -
+    before a model ever sees the words (PRD v7, V7-D08 step 4b).
+
+    Returns `(None, "")` when there was nothing to settle: the words were
+    neither yes nor no, or nothing is waiting. Otherwise returns the verdict
+    plus a short note for the model to carry into this turn:
+
+    - approved: says what was approved and hands back the nonce, so the
+      model's next tool call is a continuation, not a new question.
+    - refused: says what was refused, so the model does not retry it.
+    - ambiguous: nothing is approved; the note is a question naming every
+      confirmation still waiting, because guessing which one "yes" meant is
+      exactly wrong here.
+    """
+    is_yes, is_no = reads_as_yes(said), reads_as_no(said)
+    if not is_yes and not is_no:
+        return None, ""
+
+    waiting = awaiting(book)
+    if len(waiting) > 1:
+        try:
+            answer(book, said)
+        except Ambiguous as exc:
+            questions = "; ".join(c.question for c in exc.pending)
+            return None, f"Which one do you mean - {questions}?"
+        return None, ""
+    if not waiting:
+        return None, ""
+
+    confirmation = waiting[0]
+    verdict = answer(book, said)
+    if is_yes and verdict.ok:
+        return verdict, (
+            f"The person approved {confirmation.action} on "
+            f"{confirmation.target}. Call the same tool again with "
+            f"nonce={confirmation.nonce} to carry it out.")
+    if is_no:
+        return verdict, (
+            f"The person refused {confirmation.action} on "
+            f"{confirmation.target}; do not retry it.")
+    return None, ""

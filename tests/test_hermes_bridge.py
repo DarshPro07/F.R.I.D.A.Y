@@ -111,6 +111,53 @@ def test_steer_reaches_the_running_session(tmp_path, monkeypatch):
         supervisor.stop()
 
 
+class _ClosedBetweenTwoLines:
+    """A pipe that stop() closes while its reader is between two lines: the
+    next read finds a closed file, not the EOF stop() promised."""
+
+    def __init__(self, on_read):
+        self.on_read = on_read
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.on_read()
+        raise ValueError('I/O operation on closed file.')
+
+
+class _Pipes:
+    def __init__(self, stdout=None, stderr=None):
+        self.stdout, self.stderr = stdout, stderr
+
+
+def test_a_reader_ends_quietly_when_stop_closes_its_pipe(tmp_path):
+    """Both readers died with 'I/O operation on closed file' whenever stop()
+    closed a pipe between two lines: an unhandled exception on every such
+    orderly shutdown (seen in the suite as hermes-gateway-reader)."""
+    supervisor = hb.HermesSupervisor(log=hb.WorkRunLog(tmp_path / 'b.sqlite3'), profile='')
+
+    def stop_releases_the_process():
+        supervisor._proc = None                  # what stop() does before closing
+
+    supervisor._proc = _Pipes(stdout=_ClosedBetweenTwoLines(stop_releases_the_process))
+    supervisor._read_loop()
+    supervisor._proc = _Pipes(stderr=_ClosedBetweenTwoLines(stop_releases_the_process))
+    supervisor._drain_stderr()
+
+
+def test_a_closed_pipe_on_a_process_still_ours_is_raised(tmp_path):
+    """The closure is EOF only when stop() released the process; while the
+    process is still ours, a closed pipe is a fault and is not hidden."""
+    supervisor = hb.HermesSupervisor(log=hb.WorkRunLog(tmp_path / 'b.sqlite3'), profile='')
+    supervisor._proc = _Pipes(stdout=_ClosedBetweenTwoLines(lambda: None),
+                              stderr=_ClosedBetweenTwoLines(lambda: None))
+    with pytest.raises(ValueError, match='closed file'):
+        supervisor._read_loop()
+    with pytest.raises(ValueError, match='closed file'):
+        supervisor._drain_stderr()
+
+
 def test_interrupt_marks_partial(tmp_path, monkeypatch):
     supervisor = make(tmp_path, monkeypatch, flags={'FAKE_HERMES_HANG': '1'})
     try:

@@ -174,3 +174,18 @@ def test_port_flag_runners_work(store, capsys):
     out = capsys.readouterr().out
     assert "check the system" in out
     assert '"status": "succeeded"' in out
+
+@pytest.mark.asyncio
+async def test_a_run_record_that_cannot_be_saved_is_logged_not_dropped(store, monkeypatch, caplog):
+    """The capability has already run, so the result still returns (raising
+    here could make the executor repeat a side effect), but a lost run
+    record is an error in the log, never silence."""
+    def refuse(run):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(store, "save_run", refuse)
+    dispatch = build_dispatch()
+    with caplog.at_level("ERROR", logger="friday-agent.objective_cli"):
+        result = await dispatch("system_get_info", {})
+    assert result["status"] == "succeeded"
+    assert any("could not save" in r.getMessage() and r.exc_info for r in caplog.records)

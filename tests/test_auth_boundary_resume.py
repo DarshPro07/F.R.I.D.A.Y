@@ -17,6 +17,7 @@ from friday import objectives as O
 from friday.continuous import ContinuousTaskExecutor
 from friday.objectives import compile_objective
 from friday.store import Store
+from friday.contracts import PERSON
 AUTH_ERROR = "agent init failed: No Anthropic credentials found. authenticate with 'claude /login'."
 
 
@@ -43,7 +44,7 @@ async def test_provider_auth_parks_the_run_instead_of_failing_it(tmp_path):
                 return {'status': 'FAILED', 'error': AUTH_ERROR}
             return {'status': 'COMPLETE', 'result': 'one line, boss'}
         return {'ok': True}
-    run = compile_objective(store, request='delegate work that needs claude', objective_summary='delegate work that needs claude', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'answer'}}], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='delegate work that needs claude', objective_summary='delegate work that needs claude', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'answer'}}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     executor = ContinuousTaskExecutor(store, port, executor_id='park')
     try:
         await executor.start(run['run_id'])
@@ -73,7 +74,7 @@ async def test_genuine_user_cancellation_still_fails_terminally(tmp_path):
 
     async def port(capability, arguments):
         return {'status': 'cancelled', 'error': 'the boss declined the confirmation'}
-    run = compile_objective(store, request='do a thing', objective_summary='do a thing', tasks=[{'capability': 'system_get_info', 'arguments': {}}], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='do a thing', objective_summary='do a thing', tasks=[{'capability': 'system_get_info', 'arguments': {}}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     executor = ContinuousTaskExecutor(store, port, executor_id='cancel')
     try:
         await executor.start(run['run_id'])

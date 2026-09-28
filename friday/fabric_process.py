@@ -34,7 +34,9 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-LOG_DIR = ROOT / "logs" / "fabric"
+from friday.config import LOGS_DIR as _LOGS_DIR
+
+LOG_DIR = _LOGS_DIR / "fabric"
 
 STARTING = "STARTING"
 READY = "READY"
@@ -350,6 +352,16 @@ def running() -> dict[str, dict]:
 def stop_all() -> None:
     for provider_id in list(_CHILDREN):
         stop(provider_id)
+
+
+def _register_stop_hook() -> None:
+    """STOP-001: an emergency stop ends every provider this process started."""
+    from friday import stop
+
+    stop.register_hook("fabric", lambda reason: stop_all())
+
+
+_register_stop_hook()
 
 
 def reap_orphans(markers: dict[str, str]) -> list[int]:

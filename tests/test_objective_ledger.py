@@ -21,6 +21,7 @@ import pytest
 from friday import objectives as O
 from friday.continuous import ContinuousTaskExecutor
 from friday.store import Store
+from friday.contracts import PERSON
 
 
 class Registry:
@@ -40,7 +41,7 @@ MANIFEST = [{"id": c, "description": c} for c in ("a", "b", "boom")]
 
 def compile_(store: Store, request: str, tasks: list[dict]) -> str:
     return O.compile_objective(store, request=request, tasks=tasks,
-                               manifest=MANIFEST, objective_summary=request)["run_id"]
+                               manifest=MANIFEST, objective_summary=request, provenance=PERSON, attended=True)["run_id"]
 
 
 # -- FR-001 / FR-002 -------------------------------------------------------

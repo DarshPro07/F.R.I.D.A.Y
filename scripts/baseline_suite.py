@@ -33,13 +33,22 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _default_python() -> str:
+    """`.venv-verify` when it exists, otherwise the interpreter running this
+    script. Never the live `.venv`: the running agent uses it (AGENTS.md), and
+    falling back to it when `.venv-verify` was missing is how a suite run
+    reached the live environment (V7-D31)."""
     for candidate in (ROOT / ".venv-verify" / "Scripts" / "python.exe",
-                      ROOT / ".venv-verify" / "bin" / "python",
-                      ROOT / ".venv" / "Scripts" / "python.exe",
-                      ROOT / ".venv" / "bin" / "python"):
+                      ROOT / ".venv-verify" / "bin" / "python"):
         if candidate.exists():
             return str(candidate)
     return sys.executable
+
+
+def _is_live_venv(python: str) -> bool:
+    try:
+        return Path(python).resolve().is_relative_to((ROOT / ".venv").resolve())
+    except OSError:
+        return False
 
 
 def _commit() -> str:
@@ -105,6 +114,11 @@ def main(argv=None) -> int:
     ap.add_argument("--chunk-timeout", type=int, default=3600, help="per-chunk wall-clock ceiling")
     ap.add_argument("--marker", default="not live and not slow")
     args = ap.parse_args(argv)
+    if _is_live_venv(args.python):
+        print(f"refused: {args.python} is in the live .venv, which the running agent "
+              f"uses; run the suite from .venv-verify or another isolated environment",
+              file=sys.stderr)
+        return 2
 
     out = (ROOT / args.out) if not Path(args.out).is_absolute() else Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

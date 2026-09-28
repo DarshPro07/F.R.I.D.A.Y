@@ -371,7 +371,9 @@ def desktop_plan(run: c.Run, task: str, *,
         # run that asked, so desktop_step's fingerprint check still binds it -
         # and forbidden() was applied to every step above and is re-checked
         # at the moment each one acts. Only the waiting is gone.
-        confirmation.book.approve(pending.nonce)
+        # The record says who answered: the owner's standing autonomy, not a
+        # yes given live.
+        confirmation.book.approve(pending.nonce, answered_by="autonomy:DANGEROUS")
         return run.record(started.finish(
             status=c.OBSERVED,
             output=_scoped({
@@ -631,3 +633,20 @@ def desktop_stop(run: c.Run, *, engine: PolicyEngine = default_engine) -> c.Acti
             evidence="ABORT is set and the approved plans were dropped; the "
                      "next step refuses before it acts"),
     ))
+
+
+def _stop_takeover(reason: str) -> None:
+    """STOP-001: the emergency stop ends a takeover the way `desktop_stop`
+    does - the next step refuses before it acts, and no approved plan is
+    left to resume."""
+    ABORT.set()
+    _PLANS.clear()
+
+
+def _register_stop_hook() -> None:
+    from friday import stop
+
+    stop.register_hook("desktop", _stop_takeover)
+
+
+_register_stop_hook()

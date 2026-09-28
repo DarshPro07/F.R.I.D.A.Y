@@ -26,6 +26,10 @@ from friday import provider_health as PH
 
 from friday import model_gateway as mg
 
+# Assembled at run time: the source carries no provider-shaped key for a
+# push-protection scanner, while the code under test still sees the whole shape.
+FAKE_KEY = "sk-" + "abcdefghijklmnopqrstuvwx"
+
 FAKE = str(Path(__file__).parent / "fake_model_gateway_worker.py")
 
 
@@ -379,6 +383,62 @@ def test_local_only_privacy_policy_refuses_cloud_routes(tmp_path, clean_env):
     try:
         res = gw.infer(request(privacy_policy="local_only"))
         assert res.status == "failed" and res.entitlement_state == "NO_ROUTE"
+    finally:
+        gw.close()
+
+
+# -- FR-PRV-001 data classification at the egress seam --------------------
+
+
+def test_secret_shaped_content_is_refused_and_never_sent(tmp_path, clean_env):
+    """Negative control: the raw secret must appear nowhere in what would
+    have been sent - asserted on the echoed payload, not on the verdict."""
+    clean_env.setenv("FAKE_GW_ECHO", "1")
+    gw = make(tmp_path)
+    secret = "api_key: " + FAKE_KEY
+    try:
+        res = gw.infer(request(text=secret))
+        assert res.status == "failed"
+        assert res.entitlement_state == "DATA_CLASS_REFUSED"
+        assert res.data_class == mg.data_class.SECRET
+        # No provider call ever succeeded, so no echoed response exists at
+        # all - the strongest form of "never sent": nothing came back.
+        assert res.response == ""
+        assert secret not in " ".join(res.warnings)
+        assert all(secret not in str(a) for a in res.attempts)
+    finally:
+        gw.close()
+
+
+def test_customer_pii_is_sent_redacted(tmp_path, clean_env):
+    """Negative control: the sent text (echoed back reversed by the fake
+    worker) must no longer contain the raw card number."""
+    clean_env.setenv("FAKE_GW_ECHO", "1")
+    gw = make(tmp_path)
+    card = "4111 1111 1111 1111"
+    try:
+        res = gw.infer(request(text=f"card {card} on file"))
+        assert res.status == "ok"
+        assert res.data_class == mg.data_class.CUSTOMER_PII
+        assert res.redactions >= 1
+        sent_back = res.response[::-1]           # undo the fake worker's echo
+        assert card not in sent_back
+        assert "[REDACTED-CARD]" in sent_back
+    finally:
+        gw.close()
+
+
+def test_secret_shaped_content_still_reaches_a_local_route(tmp_path, clean_env):
+    """Requirement 1 is "unroutable to disallowed cloud providers", not
+    "unroutable at all": a genuinely local route still gets the raw text."""
+    clean_env.setenv("FAKE_GW_ECHO", "1")
+    gw = make(tmp_path, tiers={mg.TIER_FAST: ("ollama", "fake-local")})
+    secret = "api_key: " + FAKE_KEY
+    try:
+        res = gw.infer(request(text=secret))
+        assert res.status == "ok"
+        assert res.provider == "ollama"
+        assert res.response[::-1] == secret
     finally:
         gw.close()
 

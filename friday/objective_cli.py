@@ -26,6 +26,7 @@ import argparse
 import asyncio
 import inspect
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -37,6 +38,8 @@ from friday.continuous import ContinuousTaskExecutor
 from friday.policy import PolicyEngine
 from friday.store import DEFAULT_DB, Store
 from friday.toolsets import objectives as OT
+
+logger = logging.getLogger("friday-agent.objective_cli")
 
 _NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
 
@@ -72,8 +75,10 @@ def build_dispatch(*, engine: PolicyEngine | None = None):
     runtime = capability_runtime.CapabilityRuntime(engine=engine)
     control = OT.capability_port()
 
-    async def dispatch(capability_id: str, arguments: dict) -> dict:
-        run = c.Run.create(
+    async def dispatch(capability_id: str, arguments: dict, *,
+                       run: c.Run | None = None) -> dict:
+        # `run` carries the objective's lineage and envelope (TRUST-002).
+        run = run or c.Run.create(
             json.dumps(arguments, default=str)[:240], capability=capability_id)
 
         if capability_id in control:
@@ -92,10 +97,14 @@ def build_dispatch(*, engine: PolicyEngine | None = None):
 
         run.transition("completed" if run.all_succeeded else "partial",
                        None if run.all_succeeded else (result.error or "not verified"))
+        # The capability has already run, so its result goes back either
+        # way: raising here could make the executor repeat a side effect.
+        # A record that could not be kept is an error, never silence.
         try:
             OT.store().save_run(run)
-        except Exception:
-            pass
+        except Exception:                                   # noqa: BLE001
+            logger.exception("could not save the record of %s (%s)",
+                             run.run_id, capability_id)
         return result.to_dict()
 
     return dispatch
@@ -120,7 +129,9 @@ async def _drive(objective: str) -> None:
     try:
         created = O.compile_objective(
             store, request=objective, tasks=_plan(objective),
-            manifest=capabilities.as_dicts(), objective_summary=objective)
+            manifest=capabilities.as_dicts(), objective_summary=objective,
+            # Typed at a terminal by the person, who is there to answer.
+            provenance=c.PERSON, attended=True)
         run_id = created["run_id"]
     except O.CompileError as exc:
         print(f"compile error: {exc}")

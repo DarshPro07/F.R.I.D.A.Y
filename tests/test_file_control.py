@@ -50,3 +50,29 @@ def test_files_delete_schema_and_original_run_nonce_contract(tmp_path, monkeypat
     store.close()
     confirmation.reset()
     F.reset_jail(None)
+
+def test_another_tools_nonce_does_not_borrow_that_tools_run(tmp_path, monkeypatch):
+    """A nonce minted by a different tool (here a browser external write) is
+    refused by consume anyway; the wrapper must also not save this call under
+    that tool's run id, or it would overwrite the other run's record."""
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    target = workspace / 'keep.txt'
+    target.write_text('fixture', encoding='utf-8')
+    F.reset_jail(FileJail(roots=(workspace,)))
+    monkeypatch.setattr(F, 'ARTIFACTS_DIR', workspace / 'artifacts')
+    store = Store(tmp_path / 'adapter.sqlite3')
+    monkeypatch.setattr(FC, '_store', store)
+    monkeypatch.setattr(FC, '_engine', PolicyEngine(autonomy=FULL))
+    confirmation.reset()
+    foreign = confirmation.book.ask('run-browser-1', 'browser.automate', 'Buy now', 'Buy?')
+    confirmation.book.approve(foreign.nonce)
+    mcp = FakeMCP()
+    FC.register(mcp)
+    out = mcp.tools['files_delete'](str(target), permanent=True, nonce=foreign.nonce)
+    assert out['run_id'] != 'run-browser-1'
+    assert out['may_claim_completion'] is False
+    assert target.exists()
+    store.close()
+    confirmation.reset()
+    F.reset_jail(None)

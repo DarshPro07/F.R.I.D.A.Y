@@ -165,6 +165,16 @@ def stop_all() -> int:
     return len(_previews)
 
 
+def _register_stop_hook() -> None:
+    """STOP-001: an emergency stop ends every preview this process started."""
+    from friday import stop
+
+    stop.register_hook("workbench", lambda reason: stop_all())
+
+
+_register_stop_hook()
+
+
 # ---------------------------------------------------------------------------
 # Validation - said to work before he is told it works
 # ---------------------------------------------------------------------------

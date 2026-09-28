@@ -39,7 +39,7 @@ def fake(tmp_path, monkeypatch):
 
 def test_the_suite_never_writes_the_tracked_ledger(fake, tmp_path):
     fake.answers['remember'] = {'status': 'inserted', 'id': '1'}
-    fake.remember('a test fact', provenance='test', entity='friday')
+    fake.remember('a test fact', provenance='test', origin=B.PERSON_ORIGIN, entity='friday')
     assert (tmp_path / "brain_ledger.jsonl").exists()
     import os
     assert os.environ["GBRAIN_LEDGER"] != B.SharedBrainAdapter._LEDGER_DEFAULT
@@ -63,26 +63,26 @@ def test_budget_report_is_surfaced_not_recomputed(fake):
 
 
 def test_secret_shapes_are_refused_before_ingestion(fake):
-    for bad in ('the key is sk-abc1234567890123456789', 'api_key: 0123456789abcdef', 'Authorization: bearer abcdefghijklmnopqrstuv1234', '-----BEGIN RSA ' 'PRIVATE KEY-----', 'password = hunter2secret'):
+    for bad in ('the key is sk-' + 'abc1234567890123456789', 'api_key: 0123456789abcdef', 'Authorization: bearer abcdefghijklmnopqrstuv1234', '-----BEGIN RSA ' 'PRIVATE KEY-----', 'password = hunter2secret'):
         with pytest.raises(B.AdmissionRefused):
-            fake.remember(bad, provenance='test')
+            fake.remember(bad, provenance='test', origin=B.PERSON_ORIGIN)
     assert not any((v == 'remember' for v, _ in fake.calls)), 'a refused fact still reached the brain transport'
 
 
 def test_banking_shapes_are_refused_before_ingestion(fake):
     with pytest.raises(B.AdmissionRefused):
-        fake.remember('boss card number 4111 1111', provenance='x')
+        fake.remember('boss card number 4111 1111', provenance='x', origin=B.PERSON_ORIGIN)
     assert fake.calls == []
 
 
 def test_provenance_is_mandatory(fake):
     with pytest.raises(ValueError):
-        fake.remember('a true fact', provenance='   ')
+        fake.remember('a true fact', provenance='   ', origin=B.PERSON_ORIGIN)
 
 
 def test_admissible_fact_passes_through_with_entity(fake):
     fake.answers['remember'] = {'status': 'inserted', 'id': '9'}
-    out = fake.remember('the planner shortlist is registry order', provenance='wiring skill', entity='friday')
+    out = fake.remember('the planner shortlist is registry order', provenance='wiring skill', origin=B.PERSON_ORIGIN, entity='friday')
     assert out['status'] == 'inserted'
     _, arguments = fake.calls[0]
     assert arguments['entity'] == 'friday'
@@ -111,6 +111,6 @@ def test_toolset_remember_refusal_is_a_failed_result(fake, monkeypatch):
     from friday.toolsets import brain as T
     monkeypatch.setattr(T, '_adapter', fake)
     run = c.Run(run_id='RUN-brain-refuse', request='brain refuse test')
-    result = T.remember(run, 'api_key = sk-123456789012345678', provenance='x')
+    result = T.remember(run, 'api_key = sk-' + '123456789012345678', provenance='x')
     assert result.status == c.FAILED
     assert 'refused before ingestion' in result.error

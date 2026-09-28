@@ -200,25 +200,41 @@ class Bench:
         from friday.toolsets import memory as M
         from friday.toolsets import objectives as OT
         from friday import trust as T
-        self.store = Store(str(self.db_path))
-        self._restore.append((OT, "store", OT.store))
-        OT.store = lambda: self.store
-        self._restore.append((M, "store", M.store))
-        M.store = lambda: self.store
-        jail = fsjail.FileJail(roots=(self.files,))
-        self._restore.append(("jail", F.reset_jail, F.jail()))
-        F.reset_jail(jail)
+        try:
+            self.store = Store(str(self.db_path))
+            self._restore.append((OT, "store", OT.store))
+            OT.store = lambda: self.store
+            self._restore.append((M, "store", M.store))
+            M.store = lambda: self.store
+            jail = fsjail.FileJail(roots=(self.files,))
+            self._restore.append(("jail", F.reset_jail, F.jail()))
+            F.reset_jail(jail)
+            # The roots an objective's envelope is minted with are the bench's
+            # too, so the envelope and the jail agree about where a case may write.
+            self._restore.append((fsjail, "configured_roots", fsjail.configured_roots))
+            fsjail.configured_roots = lambda: [self.files]
+            audit = T.AuditLog(self.workdir / "audit.sqlite3")
+        except BaseException:
+            # A bench that cannot start leaves nothing pointed at itself.
+            self._undo()
+            if getattr(self, "store", None) is not None:
+                self.store.close()
+            raise
         self._audit_restore = T._AUDIT
-        T._AUDIT = T.AuditLog(self.workdir / "audit.sqlite3")
+        T._AUDIT = audit
         return self
 
-    def __exit__(self, *exc):
-        from friday import trust as T
-        for item in self._restore:
+    def _undo(self) -> None:
+        for item in reversed(self._restore):
             if item[0] == "jail":
                 item[1](item[2])
             else:
                 setattr(item[0], item[1], item[2])
+        self._restore.clear()
+
+    def __exit__(self, *exc):
+        from friday import trust as T
+        self._undo()
         try:
             T._AUDIT.close()
         except Exception as exc:  # noqa: BLE001
@@ -314,7 +330,9 @@ async def _run_case(case: Case, bench: Bench, web: _Web | None, *,
         manifest = manifest + [{"id": t["capability"], "description": "golden"}
                                for t in tasks if t.get("capability") not in known]
         created = O.compile_objective(bench.store, request=objective, tasks=tasks,
-                                      manifest=manifest, objective_summary=objective)
+                                      manifest=manifest, objective_summary=objective,
+                                      # The corpus replays the person's own requests.
+                                      provenance=c.PERSON, attended=True)
         out.run_id = created["run_id"]
         bench.store.touch_objective_run(out.run_id, source_channel="golden")
         executor = ContinuousTaskExecutor(bench.store, dispatch, executor_id=f"golden-{case.id}")
@@ -639,7 +657,10 @@ def golden_dispatch(bench: "Bench", *, autonomy: str = ""):
         real = build_dispatch()
     state = {"flaky_failures": 0}
 
-    async def dispatch(capability_id: str, arguments: dict) -> dict:
+    async def dispatch(capability_id: str, arguments: dict, *, run=None) -> dict:
+        # The Run carries the objective's envelope to the runtime, as the
+        # production ports do; without it an approval has no objective to
+        # belong to and is not honoured (V7-D43).
         if capability_id == "golden_flaky":
             if state["flaky_failures"] < int(arguments.get("fail_times", 1)):
                 state["flaky_failures"] += 1
@@ -648,7 +669,7 @@ def golden_dispatch(bench: "Bench", *, autonomy: str = ""):
                     "verification": {"method": "golden", "evidence": "succeeded after retry"}}
         if capability_id == "golden_broken":
             raise RuntimeError("golden structural failure")
-        return await real(capability_id, arguments)
+        return await real(capability_id, arguments, run=run)
     return dispatch
 
 
@@ -686,7 +707,8 @@ def run(cases: list[Case], *, workdir: Path, dispatch_factory=None,
 def main(argv: list[str] | None = None) -> int:
     import argparse
     parser = argparse.ArgumentParser(description="Run the Golden Objective suite.")
-    parser.add_argument("--out", default=str(ROOT / "data" / "golden" / "latest.json"))
+    from friday.config import DATA_DIR
+    parser.add_argument("--out", default=str(DATA_DIR / "golden" / "latest.json"))
     parser.add_argument("--category", default="")
     parser.add_argument("--id", default="")
     parser.add_argument("--repetitions", type=int, default=1)

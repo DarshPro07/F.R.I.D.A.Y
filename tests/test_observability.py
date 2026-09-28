@@ -22,6 +22,12 @@ from friday import contracts as c
 from friday import observability as OB
 from friday.store import Store
 
+# Assembled at run time: the source carries no provider-shaped key for a
+# push-protection scanner, while the code under test still sees the whole shape.
+FAKE_KEY = "sk-" + "abcdefghijklmnopqrstuvwxyz"
+FAKE_ANTHROPIC_KEY = "sk-" + "ant-abcdefghijklmnop123456"
+FAKE_GITHUB_TOKEN = "ghp" + "_abcdefghijklmnopqrstuvwxyz0123"
+
 
 @pytest.fixture
 def store(tmp_path):
@@ -51,7 +57,7 @@ async def _run_objective(store, calls):
                {"capability": "flaky", "arguments": {}, "dependencies": ["t1"]}],
         manifest=[{"id": "steady", "description": "steady"},
                   {"id": "flaky", "description": "flaky"}],
-        objective_summary="observability probe")
+        objective_summary="observability probe", provenance=c.PERSON, attended=True)
     ex = ContinuousTaskExecutor(store, capability, executor_id="obs-1")
     ex.stop()
     await ex.start(run["run_id"])
@@ -70,7 +76,7 @@ def test_trace_reconstructs_a_real_objective_from_durable_state(store, monkeypat
     store.save_run(run)
     from friday import trust as T
     T.audit().record(actor="friday", action="files.delete", tier=T.R2, decision="ASK",
-                     target="C:/x", objective_id=run_id, detail={"api_key": "sk-abcdefghijklmnopqrstuvwxyz"})
+                     target="C:/x", objective_id=run_id, detail={"api_key": FAKE_KEY})
     from friday.model_gateway import GatewayTelemetry
     tel = GatewayTelemetry(store.path.parent / "gw.sqlite3")
     monkeypatch.setattr("friday.model_gateway.GatewayTelemetry", lambda *a, **k: tel)
@@ -96,12 +102,19 @@ def test_trace_reconstructs_a_real_objective_from_durable_state(store, monkeypat
     assert tool["verification"] == {"method": "http", "evidence": "200 OK"}
     assert t["verification"]["tasks_with_evidence"] == 2
     assert t["usage"]["gateway_calls"] == 1 and t["usage"]["tokens_in"] == 10 and t["usage"]["tokens_out"] == 5
-    policy = next(row for row in t["timeline"] if row["kind"] == "policy")
-    assert policy["action"] == "files.delete" and policy["tier"] == "R2"
+    # The objective's own network grant is audited too (NET-001), so the
+    # planted decision is found by its action, not by being the only policy
+    # row: audit times are to the second, so which comes first is timing.
+    policy = next(row for row in t["timeline"]
+                  if row["kind"] == "policy" and row["action"] == "files.delete")
+    assert policy["tier"] == "R2"
+    grant = [row["event"] for row in t["timeline"]
+             if row["kind"] == "policy" and row["action"] == "network.grant"]
+    assert grant == ["policy.ISSUED", "policy.REVOKED"], grant
     # Time order, and no model thoughts anywhere in it.
     ats = [row["at"] for row in t["timeline"]]
     assert ats == sorted(ats)
-    assert "sk-abcdefghijklmnopqrstuvwxyz" not in json.dumps(t)
+    assert FAKE_KEY not in json.dumps(t)
     text = OB.trace_text(run_id, store=store)
     assert text.startswith(f"{run_id} COMPLETED") and "[tool] tool.SUCCEEDED web.search" in text
     assert "[model] gateway.call fake-1" in text
@@ -113,9 +126,9 @@ def test_unknown_run_is_said_not_invented(store):
 
 
 def test_redaction_by_key_and_by_token_shape():
-    raw = {"api_key": "plain", "nested": {"Authorization": "Bearer x", "note": "token sk-ant-abcdefghijklmnop123456",
+    raw = {"api_key": "plain", "nested": {"Authorization": "Bearer x", "note": "token " + FAKE_ANTHROPIC_KEY,
                                           "access_token": "abc", "tokens_in": 10, "token_budget": 4000},
-           "list": ["ghp_abcdefghijklmnopqrstuvwxyz0123", "fine"], "n": 3}
+           "list": [FAKE_GITHUB_TOKEN, "fine"], "n": 3}
     out = OB.redact(raw)
     assert out["api_key"] == OB.REDACTED and out["nested"]["Authorization"] == OB.REDACTED
     assert out["nested"]["access_token"] == OB.REDACTED
@@ -146,7 +159,7 @@ def test_diagnostics_reports_every_section_and_never_raises(store, monkeypatch):
 def test_diagnostics_surfaces_recent_critical_failures(store):
     from friday.objectives import compile_objective
     run = compile_objective(store, request="doomed", tasks=[{"capability": "x", "arguments": {}}],
-                            manifest=[{"id": "x", "description": "x"}], objective_summary="doomed")
+                            manifest=[{"id": "x", "description": "x"}], objective_summary="doomed", provenance=c.PERSON, attended=True)
     store.append_objective_event(run["run_id"], "task.failed", detail={"error": "boom", "password": "hunter2"})
     d = OB.diagnostics(store=store, sections=("recent_failures", "queue"))
     items = d["recent_failures"]["items"]

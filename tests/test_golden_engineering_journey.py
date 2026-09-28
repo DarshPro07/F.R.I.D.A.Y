@@ -24,6 +24,7 @@ from friday.executors import hermes as hermes_exec
 from friday.executors.claude_code import TaskBundle as DevBundle
 from friday.objectives import TaskStatus, compile_objective
 from friday.store import Store
+from friday.contracts import PERSON
 
 FAKE_GATEWAY = str(Path(__file__).parent / "fake_hermes_gateway.py")
 GOAL = "Implement a new caching feature and add tests for it"
@@ -64,7 +65,7 @@ async def test_golden_engineering_journey(tmp_path, monkeypatch):
         store, request=GOAL,
         tasks=[{"capability": "development", "arguments": {"goal": GOAL}}],
         manifest=[{"id": "development", "description": "do dev work"}],
-        objective_summary="golden journey")
+        objective_summary="golden journey", provenance=PERSON, attended=True)
     tasks = store.objective_tasks(run["run_id"])
     assert len(tasks) == 1 and tasks[0]["capability"] == "development"
 
@@ -127,10 +128,12 @@ async def test_golden_engineering_journey(tmp_path, monkeypatch):
     # ---- 5: memory_promotion - evidence-backed lands, a guess is rejected
     good = MP.Candidate(statement="the cache TTL is 300s", kind="project_fact",
                         source="handoff", owner="dev", scope="project",
-                        confidence=0.9, evidence=["tests pass: test_cache.py"])
+                        confidence=0.9, evidence=["tests pass: test_cache.py"],
+                        provenance="READ_MATERIAL")
     guess = MP.Candidate(statement="the cache TTL is probably 60s",
                          kind="project_fact", source="handoff", owner="dev",
-                         scope="project", confidence=0.3, evidence=[])
+                         scope="project", confidence=0.3, evidence=[],
+                         provenance="READ_MATERIAL")
     d_good = MP.promote(good, store=store)
     d_guess = MP.promote(guess, store=store)
     # Decision has no `.action` - the field is `.target`

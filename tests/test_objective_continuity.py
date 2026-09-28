@@ -22,6 +22,7 @@ from friday.objectives import (
     compile_objective,
 )
 from friday.store import Store
+from friday.contracts import PERSON
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -154,7 +155,7 @@ async def test_single_message_runs_to_completed(store, executor, caps):
                 "then summarise",
         tasks=demo_tasks(),
         manifest=manifest(),
-        objective_summary="demo objective",
+        objective_summary="demo objective", provenance=PERSON, attended=True
     )
 
     won = await executor.start(run["run_id"])
@@ -196,7 +197,7 @@ async def test_tool_boundary_schedules_continuation(store, executor, caps):
     """A budget boundary mid-graph must not strand the run."""
     run = compile_objective(
         store, request="boundary test", tasks=demo_tasks(),
-        manifest=manifest(), objective_summary="boundary test",
+        manifest=manifest(), objective_summary="boundary test", provenance=PERSON, attended=True
     )
 
     # Portion budget of 2: only two tasks may run per wake.
@@ -228,7 +229,7 @@ async def test_no_user_message_ever_sent_to_capabilities(store, executor, caps):
     """The harness asserts progression never arrives as a user message."""
     run = compile_objective(
         store, request="no-continue probe", tasks=demo_tasks(),
-        manifest=manifest(), objective_summary="probe",
+        manifest=manifest(), objective_summary="probe", provenance=PERSON, attended=True
     )
     assert run["manual_continue_count"] == 0
     await executor.start(run["run_id"])

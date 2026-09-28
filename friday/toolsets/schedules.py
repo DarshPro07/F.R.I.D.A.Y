@@ -351,9 +351,15 @@ def evaluate_condition(condition: dict, tasks: list[dict]) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 async def fire(name: str, *, store: Store, dispatch, fired_by: str = "schedule",
-               engine: PolicyEngine | None = None, wait_s: float = 900.0) -> dict:
+               engine: PolicyEngine | None = None, wait_s: float = 900.0,
+               provenance: str = c.PERSON) -> dict:
     """Compile the schedule's objective, run it through the real engine,
-    evaluate the condition, deliver (or suppress), record everything."""
+    evaluate the condition, deliver (or suppress), record everything.
+
+    `provenance` is the firing request's own. The run takes the less trusted
+    of it and the schedule's author (TRUST-002): the person's schedule fired
+    because a page said so is still read material acting, and a schedule
+    written before authors were recorded is treated as untrusted."""
     from friday import capabilities
     from friday import objectives as O
     from friday.continuous import ContinuousTaskExecutor
@@ -388,10 +394,14 @@ async def fire(name: str, *, store: Store, dispatch, fired_by: str = "schedule",
         manifest = manifest + [{"id": t["capability"], "description": "declared by the schedule"}
                                for t in tasks if t.get("capability") not in known]
     outcome = {"firing_id": firing_id, "name": name, "fired_by": fired_by}
+    trusted = row.get("provenance") == c.PERSON and provenance == c.PERSON
     try:
         created = O.compile_objective(
             store, request=row["objective"], tasks=tasks,
-            manifest=manifest, objective_summary=row["objective"])
+            manifest=manifest, objective_summary=row["objective"],
+            provenance=c.PERSON if trusted else c.READ_MATERIAL,
+            # Only a firing somebody asked for has somebody there.
+            attended=fired_by == "hand")
         run_id = created["run_id"]
         store.touch_objective_run(
             run_id, source_channel=f"schedule:{name}",
@@ -522,7 +532,8 @@ def schedules_create(run: c.Run, name: str, objective: str, trigger: str, *,
             return run.record(c.failed(started, str(exc)))
     db.save_schedule(name, objective=objective.strip(), tasks=explicit, trigger=wanted,
                      budgets=budget, permissions=perms, delivery=channel, condition=cond,
-                     description=description, task_name=task_name)
+                     description=description, task_name=task_name,
+                     provenance=run.provenance)
     if task_name:
         method, evidence = "schtasks_query", f"task {task_name!r} confirmed registered via schtasks /Query"
     else:
@@ -557,7 +568,8 @@ async def schedules_run(run: c.Run, name: str, *, engine: PolicyEngine = default
     started = c.started(run.run_id, tool_id)
     from friday.objective_cli import build_dispatch
     try:
-        outcome = await fire(name, store=store(), dispatch=build_dispatch(), fired_by="hand")
+        outcome = await fire(name, store=store(), dispatch=build_dispatch(), fired_by="hand",
+                             provenance=run.provenance)
     except ScheduleError as exc:
         return run.record(c.failed(started, str(exc)))
     if outcome.get("status") == "ERROR":

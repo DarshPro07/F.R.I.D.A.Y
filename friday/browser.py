@@ -118,6 +118,15 @@ PROFILE_KINDS = (ISOLATED, AUTHORIZED)
 #: action whatever the primitive's own category says.
 EXTERNAL_WRITE_POLICY = "EXTERNAL_WRITE_CONFIRM"
 
+#: Argument keys that would carry authority if a caller could set them. A
+#: step's arguments come from the model, and through the model from whatever
+#: page it last read, so none of these is honoured from `args`: session
+#: approval is the loop's own `approvals`, set by the runtime once the policy
+#: engine has allowed the primitive, and an external write's exact-action
+#: confirmation is the keyword `confirmed=True`, which only trusted code
+#: passes after spending the person's yes (`friday.toolsets.web.browser_act`).
+AUTHORITY_KEYS = frozenset({"confirmed", "approved", "nonce"})
+
 
 @dataclass(frozen=True)
 class ProfileChoice:
@@ -129,11 +138,29 @@ class ProfileChoice:
 
 
 def choose_profile(*, worker: str, authorized_by_approval: bool,
-                   authorized_dir: str = "") -> ProfileChoice:
+                   authorized_dir: str = "",
+                   workspace_id: str | None = None) -> ProfileChoice:
     """A worker runs ISOLATED unless the objective's approval explicitly
     named the authorized profile. Friday's own foreground session may use
-    AUTHORIZED; the cookies never leave that context either way."""
+    AUTHORIZED; the cookies never leave that context either way.
+
+    FR-PRV-002 adds a second boundary on top of the approval one: an
+    authorized profile directory belongs to the workspace whose approval
+    named it, and `workspace_id` records that on the choice. A signed-in
+    session is private state that happens to live in a browser rather than
+    in the database, so "brand A's approval unlocked this profile" must not
+    read as "any workspace may use it". A caller that hands a directory
+    approved by one workspace to another gets ISOLATED and the reason says
+    why - refused, not silently honoured.
+    """
+    from friday.workspace import resolve
+    owner = resolve(workspace_id)
     if authorized_by_approval and authorized_dir:
+        if not owns_profile_dir(authorized_dir, owner):
+            return ProfileChoice(
+                ISOLATED,
+                f"the approved profile directory belongs to another workspace, "
+                f"not {owner!r}; isolated instead (FR-PRV-002)")
         return ProfileChoice(AUTHORIZED, f"approval named the signed-in profile for {worker}",
                              authorized_dir)
     if authorized_by_approval and not authorized_dir:
@@ -141,6 +168,43 @@ def choose_profile(*, worker: str, authorized_by_approval: bool,
                                        "profile directory is configured; isolated instead")
     return ProfileChoice(ISOLATED, f"{worker} gets an ephemeral context: no cookies, "
                                    f"no signed-in state (FR-033)")
+
+
+def workspace_profile_dir(workspace_id: str | None = None) -> Path:
+    """The dedicated FRIDAY Chrome profile directory for a workspace.
+
+    FR-BRW-002 allows a dedicated profile; FR-PRV-002 forbids sharing one
+    across workspaces. Every workspace sits at the same depth under
+    `browser/workspaces/`, including `default`: a layout where one tenant
+    lives at the root is how a later "just read the browser directory"
+    shortcut reads the first tenant's cookies.
+    """
+    from friday.config import STATE_ROOT
+    from friday.workspace import resolve
+    return STATE_ROOT / "browser" / "workspaces" / resolve(workspace_id)
+
+
+def owns_profile_dir(directory: str, workspace_id: str | None = None) -> bool:
+    """True when `directory` is this workspace's own profile, or a profile
+    outside FRIDAY's managed tree entirely.
+
+    The second case is deliberate: the user's real Chrome profile is theirs,
+    not a workspace's, and the owner's recorded direction is that FRIDAY
+    mostly works in it. What this refuses is one workspace reaching into the
+    dedicated profile FRIDAY created for another - the case the user never
+    approved because they never saw it.
+    """
+    from friday.config import STATE_ROOT
+    from friday.workspace import resolve
+    owner = resolve(workspace_id)
+    try:
+        candidate = Path(directory).resolve()
+        managed = (STATE_ROOT / "browser" / "workspaces").resolve()
+    except OSError:
+        return False
+    if not candidate.is_relative_to(managed):
+        return True                       # not a FRIDAY-managed profile
+    return candidate.is_relative_to((managed / owner))
 
 
 # ---------------------------------------------------------------------------
@@ -540,18 +604,27 @@ class Browser:
     # -- plan (policy) -----------------------------------------------------
 
     def plan(self, primitive: str, target: str = "", args: dict | None = None,
-             *, state: PageState | None = None) -> Step:
+             *, state: PageState | None = None, confirmed: bool = False,
+             net: dict | None = None) -> Step:
         """Classify one intended primitive against the CURRENT page. Raises
-        Refused/Handoff; returns the Step with its policy decided."""
+        Refused/Handoff; returns the Step with its policy decided.
+
+        `confirmed` is the exact-action confirmation for an external write.
+        It is a keyword rather than an argument so that nothing a model or a
+        page writes into `args` can supply it (AUTHORITY_KEYS are dropped
+        from the step's arguments, and never read)."""
         if primitive not in PRIMITIVES:
             raise Refused(Step(primitive, target), f"unknown primitive {primitive!r}")
         category, changes_state = PRIMITIVES[primitive]
-        step = Step(primitive=primitive, target=target, args=dict(args or {}),
+        arguments = {key: value for key, value in (args or {}).items()
+                     if key not in AUTHORITY_KEYS}
+        step = Step(primitive=primitive, target=target, args=arguments,
                     policy=category, before=state or self.last)
         state = step.before
 
         if primitive in (OPEN, NAVIGATE):
-            verdict = bc.classify_url(str(step.args.get("url", target)))
+            # `net`: a durable run's network scope (NET-001; netguard.run_scope).
+            verdict = bc.classify_url(str(step.args.get("url", target)), net=net)
             if verdict.decision in (bc.BLOCK_SENSITIVE, bc.BLOCK_NETWORK):
                 raise Refused(step, verdict.reason)
             if verdict.decision == bc.AUTH_HANDOFF:
@@ -578,10 +651,10 @@ class Browser:
                 # FR-034: session != authorization. Exact-action CONFIRM class,
                 # named as such in the record.
                 step.policy = EXTERNAL_WRITE_POLICY
-                if not step.args.get("confirmed"):
+                if not confirmed:
                     raise Refused(step, f"{step.external_write} action needs an exact-action "
                                         f"confirmation; being signed in does not authorise it")
-            elif not self.approvals.get(primitive) and not step.args.get("approved"):
+            elif not self.approvals.get(primitive):
                 raise Refused(step, f"{primitive} changes page state ({category}); "
                                     f"not approved for this session")
         return step
@@ -696,11 +769,13 @@ class Browser:
         return step
 
     async def run(self, primitive: str, target: str = "", args: dict | None = None,
-                  *, timeout_ms: int = 30000) -> Step:
-        """observe (if needed) -> plan -> act -> observe -> verify."""
+                  *, timeout_ms: int = 30000, confirmed: bool = False,
+                  net: dict | None = None) -> Step:
+        """observe (if needed) -> plan -> act -> observe -> verify.
+        `confirmed`: see `plan` - trusted callers only."""
         if self.last is None and primitive not in (OPEN, NAVIGATE, TABS):
             await self.observe()
-        step = self.plan(primitive, target, args)
+        step = self.plan(primitive, target, args, confirmed=confirmed, net=net)
         return await self.act(step, timeout_ms=timeout_ms)
 
     def transcript(self) -> list[dict]:

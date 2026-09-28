@@ -32,10 +32,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from friday import contracts as c
 from friday import (codegraph, evaluation, execution, executor_router,
                     hermes_team, product, promotion, roles)
 
@@ -199,9 +201,16 @@ class DevelopmentRun:
                       network: bool = True, timeout: float = 1800.0,
                       verifier: evaluation.Verifier | None = None,
                       iteration_budget: int = 3,
+                      envelope: c.Envelope | None = None,
                       **kwargs):
         """
         Run the coding agent inside the boundary.
+
+        With an execution `envelope` (the objective's, PRD v7 SEC-005) the
+        coding agent is a sub-worker and gets a child envelope derived with
+        `narrow()`: this run's `allowed_paths` become its write roots, and a
+        path wider than the parent's is refused, not clipped. The Hermes team
+        path cannot carry an envelope, so under one it is not taken.
 
         `executor` must expose `execute(bundle, timeout=...)` returning an
         ActionResult. That is the existing contract, unchanged - this does
@@ -247,8 +256,22 @@ class DevelopmentRun:
             assumptions=self._assumptions())
         self.run_id = bundle.run_id
 
+        held: dict = {}
+        if envelope is not None:
+            writes = tuple(os.path.normpath(os.path.join(self.root, path))
+                           for path in allowed_paths) or envelope.write_roots
+            try:
+                held["envelope"] = envelope.narrow(
+                    run_id=bundle.run_id, cwd=self.root, write_roots=writes)
+            except c.ContractError as exc:
+                self.stage = FAILED
+                self.error = f"ENVELOPE: {exc}"
+                logger.warning("development run %s refused: %s",
+                               bundle.run_id, self.error)
+                return None
+
         try:
-            team_profiles = hermes_team.plan_team(
+            team_profiles = () if held else hermes_team.plan_team(
                 self.goal, files=len(self.graph.fingerprints) if self.graph else 0)
             if team_profiles:
                 result = await asyncio.to_thread(
@@ -259,7 +282,8 @@ class DevelopmentRun:
                 # kanban unavailable or refused: fall back to the single-
                 # profile path below, same as `execution_economics` route
                 # HERMES_SINGLE.
-            result = await executor.execute(bundle, timeout=timeout, **kwargs)
+            result = await executor.execute(bundle, timeout=timeout,
+                                            **held, **kwargs)
             self.stage = EXECUTED
             return result
         except Exception as exc:                            # noqa: BLE001

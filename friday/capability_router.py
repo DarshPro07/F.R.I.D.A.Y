@@ -27,9 +27,11 @@ at once.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 
+from friday import action_path
 from friday import capabilities
 from friday import semantics
 
@@ -535,7 +537,12 @@ class Router:
                 scored = plausible
 
         scored.sort(key=lambda pair: (-pair[0], pair[1]))
-        return [self.describe_tool(name) for _, name in scored[:limit]]
+        # What is offered is decided by the score alone; among what is
+        # offered, a tie goes to the more direct action path (PRD v7 §48),
+        # so the order says which to try first without changing what is found.
+        shown = sorted(scored[:limit],
+                       key=lambda pair: (-pair[0], action_path.order_key(pair[1]), pair[1]))
+        return [self.describe_tool(name) for _, name in shown]
 
     def invocable(self, name: str):
         """The tool object for a name, or None."""
@@ -554,3 +561,61 @@ class Router:
         if meta is None or group is None or meta.operation_kind != "START":
             return
         self.started.setdefault(group, []).append(name)
+
+
+# ---------------------------------------------------------------------------
+# Progressive disclosure, measured (PRD v7 §19.3, §82, CTX-002)
+# ---------------------------------------------------------------------------
+#
+# L0 is the catalogue: one line per group, in the prompt from the start.
+# L1 is a search result: what a capability does and the arguments it takes.
+# L2 is a tool's full schema. The model holds the core tools' L2 and the L0
+# catalogue, reaches the long tail through one L1 search, and calls a
+# long-tail tool by name with the arguments L1 gave it, so that tool's L2
+# never enters the context at all.
+
+
+def _chars(value) -> int:
+    return len(json.dumps(value, sort_keys=True, default=str))
+
+
+def intent_cases(router: Router) -> list[tuple[str, str]]:
+    """(request, capability) for every long-tail capability the registry
+    gives an intent example for: the benchmark's requests, in the words each
+    capability says it is asked for."""
+    active = set(router.active_names())
+    cases = []
+    for name in sorted(router.all_tools):
+        meta = capabilities.by_id(name)
+        if name in active or meta is None or not meta.intent_examples:
+            continue
+        cases.append((meta.intent_examples[0], name))
+    return cases
+
+
+def disclosure_report(router: Router, cases, *, limit: int = 6) -> dict:
+    """
+    What each request costs in schema characters under progressive
+    disclosure, against the all-tools baseline of every tool's full schema,
+    and whether its one search found the capability it needed.
+
+    A request's cost is the starting surface (the active tools' schemas and
+    the catalogue) plus the search result as the model receives it.
+    """
+    baseline = sum(_chars(router._schema_of(name)) for name in router.all_tools)
+    start = (sum(_chars(router._schema_of(name)) for name in router.active_names())
+             + len(catalogue()))
+    rows = []
+    for request, needed in cases:
+        found = router.search(request, limit=limit)
+        spent = start + _chars({"found": len(found), "capabilities": found})
+        rows.append({"request": request, "needed": needed,
+                     "found": any(match["capability"] == needed for match in found),
+                     "spent_chars": spent,
+                     "reduction": round(1 - spent / baseline, 4) if baseline else 0.0})
+    return {"tools": len(router.all_tools), "baseline_chars": baseline,
+            "starting_chars": start,
+            "starting_reduction": round(1 - start / baseline, 4) if baseline else 0.0,
+            "cases": len(rows), "found": sum(1 for row in rows if row["found"]),
+            "worst_reduction": min((row["reduction"] for row in rows), default=0.0),
+            "rows": rows}

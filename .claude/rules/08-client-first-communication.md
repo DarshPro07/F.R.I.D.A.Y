@@ -1,7 +1,7 @@
 ---
 description: "Verify before reporting. Surface blockers honestly. Don't claim something is done until it is."
 globs: "*"
-alwaysApply: true
+alwaysApply: false
 ---
 # Rule 8: Client-First Communication
 

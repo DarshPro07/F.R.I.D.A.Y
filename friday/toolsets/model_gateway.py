@@ -47,6 +47,29 @@ def model_providers(run: c.Run, *, engine: PolicyEngine = default_engine) -> c.A
                       f"{len(unavailable)} unavailable: {', '.join(unavailable[:6]) or 'none'}"))))
 
 
+def _objective_facts(objective_id: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """(binding, recorded): the critical facts of the objective a call works
+    for (CTX-003's set) - what the person gave, and what tools and the plan
+    recorded, which is data - or neither when it names no objective the store
+    holds. An objective that came from read material has nothing the person
+    gave, so all of it is recorded. An objective whose record cannot be read
+    raises (a ContractError is a ValueError), so the call fails rather than
+    running without its constraints."""
+    if not objective_id:
+        return (), ()
+    from friday import compaction
+    from friday.toolsets.objectives import store as objective_store
+
+    db = objective_store()
+    try:
+        facts = compaction.for_objective(db, objective_id)
+    except LookupError:
+        return (), ()
+    person = (db.objective_run(objective_id) or {}).get("provenance") == c.PERSON
+    binding = facts.binding() if person else ()
+    return binding, tuple(line for line in facts.lines() if line not in binding)
+
+
 def model_infer(run: c.Run, prompt: str, *, task_class: str = mg.STANDARD,
                 quality_tier: str = "", objective_id: str = "",
                 system: str = "", escalate: bool = False,
@@ -55,10 +78,15 @@ def model_infer(run: c.Run, prompt: str, *, task_class: str = mg.STANDARD,
     is the attribution key when the task graph supplies it."""
     started = c.started(run.run_id, "model.infer")
     try:
+        # CTX-001: the call gets a compiled working set; a step of an
+        # objective carries that objective's critical facts as data.
+        binding, recorded = _objective_facts(objective_id)
+        working_set = mg.compile_working_set(system=system, user=prompt,
+                                             pinned=binding, state=recorded)
         request = mg.ModelGatewayRequest(
             objective_id=objective_id or run.run_id,
             task_class=task_class or mg.STANDARD,
-            context_package=mg.compile_context(system=system, user=prompt),
+            context_package=working_set.messages,
             preferred_quality_tier=quality_tier or "", escalate=bool(escalate))
         result = mg.gateway().infer(request)
     except (mg.BudgetExceeded, mg.GrowthStopped) as exc:
@@ -75,7 +103,8 @@ def model_infer(run: c.Run, prompt: str, *, task_class: str = mg.STANDARD,
                 "model": result.model, "input_tokens": result.input_tokens,
                 "output_tokens": result.output_tokens,
                 "latency_ms": result.latency_ms, "boundary": result.boundary,
-                "failover_count": result.failover_count, "call_id": result.call_id},
+                "failover_count": result.failover_count, "call_id": result.call_id,
+                "context": working_set.telemetry()},
         verification=c.Verification(
             method="gateway_telemetry_row",
             evidence=f"gateway_calls#{result.call_id} {result.provider}/{result.model} "

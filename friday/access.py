@@ -32,9 +32,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from friday.config import DATA_DIR
+
 ROOT = Path(__file__).resolve().parent.parent
-OWNER_PATH = Path(os.getenv("FRIDAY_OWNER_FACE", str(ROOT / "data" / "owner_face.json")))
-LOG_PATH = Path(os.getenv("FRIDAY_ACCESS_LOG", str(ROOT / "data" / "access_log.jsonl")))
+OWNER_PATH = Path(os.getenv("FRIDAY_OWNER_FACE", str(DATA_DIR / "owner_face.json")))
+LOG_PATH = Path(os.getenv("FRIDAY_ACCESS_LOG", str(DATA_DIR / "access_log.jsonl")))
 THRESHOLD = float(os.getenv("FRIDAY_FACE_THRESHOLD", "0.5"))   # face-api euclidean; 0.6 is lenient
 SESSION_HOURS = float(os.getenv("FRIDAY_SESSION_HOURS", "12"))
 COOKIE = "friday_session"
@@ -42,7 +44,7 @@ GATE_ENABLED = os.getenv("FRIDAY_FACE_GATE", "1") != "0"
 DESCRIPTOR_LEN = 128
 MAX_DESCRIPTORS = int(os.getenv("FRIDAY_FACE_MAX", "64"))   # a wide sample of the owner: angles, light, glasses
 OPEN_PREFIXES = ("/health", "/ui/", "/api/auth/", "/api/camera")
-PIN_PATH = Path(os.getenv("FRIDAY_OWNER_PIN", str(ROOT / "data" / "owner_pin.json")))
+PIN_PATH = Path(os.getenv("FRIDAY_OWNER_PIN", str(DATA_DIR / "owner_pin.json")))
 AUTH_MODE = os.getenv("FRIDAY_AUTH_MODE", "face").lower()    # "face" | "pin" (--password)
 PIN_ITERATIONS = 240_000
 PIN_MAX_TRIES = 5
@@ -286,7 +288,7 @@ REPLAY_WINDOW_S = float(os.getenv("FRIDAY_REPLAY_WINDOW_S", "300"))
 #: second time. The file is tiny (only unexpired nonces), rewritten under
 #: the lock on every accept, and loaded once at import so the first check
 #: after a restart already knows what the previous process consumed.
-NONCES_PATH = Path(os.getenv("FRIDAY_REPLAY_NONCES", str(ROOT / "data" / "consumed_nonces.json")))
+NONCES_PATH = Path(os.getenv("FRIDAY_REPLAY_NONCES", str(DATA_DIR / "consumed_nonces.json")))
 _seen_nonces: dict[str, float] = {}          # nonce -> expiry
 
 

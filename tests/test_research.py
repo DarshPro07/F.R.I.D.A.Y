@@ -182,6 +182,66 @@ def test_researching_nothing_fails():
     assert result.status == c.FAILED
 
 
+def test_a_fresh_cache_hit_answers_without_touching_the_network(monkeypatch, tmp_path):
+    """
+    FR-MEM-005's seam: web_deep_research consults research_cache before it
+    searches or crawls anything. Proven the same way the guards above prove
+    "no request was made" - by making web_search and crawl_all raise if
+    reached at all, so a network call anywhere in this path fails the test.
+    """
+    from friday import research_cache
+
+    monkeypatch.setattr(research_cache, "DB_PATH", tmp_path / "artifacts.sqlite3")
+
+    async def must_not_be_called(*_a, **_kw):
+        raise AssertionError("a cache hit still reached the network")
+
+    monkeypatch.setattr(R, "web_search", must_not_be_called)
+    monkeypatch.setattr(R, "crawl_all", must_not_be_called)
+
+    question = "what is the capital of France"
+    research_cache.save(research_cache.Artifact.create(
+        question,
+        sources=[{"url": "https://a.example/paris", "title": "Paris"}],
+        facts=["Paris is the capital of France."],
+        freshness=research_cache.STABLE,
+    ))
+
+    result = asyncio.run(R.web_deep_research(run_for(), question))
+    assert result.status == c.SUCCEEDED
+    assert result.output["cached"] is True
+    assert result.output["sources"][0]["url"] == "https://a.example/paris"
+
+
+def test_a_cache_miss_falls_through_to_the_normal_search(monkeypatch, tmp_path):
+    """
+    The other half of the seam: nothing cached means the old path runs.
+
+    web_search is replaced rather than left to the environment's real
+    providers - whether a real search happens to succeed or fail here
+    depends on network access and credentials this test must not depend on.
+    What it proves is narrower and offline: a cache miss reaches web_search
+    at all, with the right question, instead of a phantom hit.
+    """
+    from friday import research_cache
+
+    monkeypatch.setattr(research_cache, "DB_PATH", tmp_path / "artifacts.sqlite3")
+
+    seen = {}
+
+    async def fake_search(run, query, *, limit=8, engine=None):
+        seen["query"] = query
+        started = c.started(run.run_id, "web.search")
+        return run.record(c.failed(started, "no provider configured in this test"))
+
+    monkeypatch.setattr(R, "web_search", fake_search)
+
+    result = asyncio.run(R.web_deep_research(run_for(), "a question never cached before"))
+    assert seen.get("query") == "a question never cached before"
+    assert result.status == c.FAILED
+    assert "could not search" in (result.error or "")
+
+
 def test_answering_nothing_fails():
     result = asyncio.run(R.web_answer(run_for(), ""))
     assert result.status == c.FAILED

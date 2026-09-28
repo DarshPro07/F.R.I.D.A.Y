@@ -20,6 +20,7 @@ from friday import capabilities, ownership
 from friday.continuous import ContinuousTaskExecutor
 from friday.objectives import CompileError, compile_objective
 from friday.store import Store
+from friday.contracts import PERSON
 CONTROL_CAPABILITIES = {'objective_cancel', 'objective_history', 'objective_resume', 'objective_start', 'objective_pause', 'objective_status', 'objective_list'}
 
 
@@ -36,7 +37,7 @@ def test_planner_never_places_objective_control_inside_its_own_graph():
 def test_compiler_refuses_control_plane_tasks_even_if_planner_regresses():
     store = Store(':memory:')
     with pytest.raises(CompileError, match='control-plane'):
-        compile_objective(store, request='recursive', objective_summary='recursive', tasks=[{'capability': 'objective_start', 'arguments': {}}], manifest=capabilities.as_dicts())
+        compile_objective(store, request='recursive', objective_summary='recursive', tasks=[{'capability': 'objective_start', 'arguments': {}}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
 
 
 @pytest.mark.asyncio
@@ -54,7 +55,7 @@ async def test_submit_first_worker_is_reconciled_without_duplicate_delegation():
         if capability == 'hermes_status':
             return next(statuses)
         raise AssertionError(capability)
-    run = compile_objective(store, request='inspect', objective_summary='inspect', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'inspect safely'}}], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='inspect', objective_summary='inspect', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'inspect safely'}}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     executor = ContinuousTaskExecutor(store, port, executor_id='rc11')
     executor.portion_budget = 1
     try:
@@ -78,7 +79,7 @@ def test_active_objective_claim_does_not_expire_by_wall_clock(monkeypatch):
     """Long objectives lost duplicate protection after CLAIM_SECONDS even
     though their durable run was still RUNNING."""
     store = Store(':memory:')
-    run = compile_objective(store, request='long', objective_summary='long', tasks=[{'capability': 'files_create', 'arguments': {'path': 'x', 'content': 'x'}}], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='long', objective_summary='long', tasks=[{'capability': 'files_create', 'arguments': {'path': 'x', 'content': 'x'}}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     old = (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat()
     store._conn.execute('UPDATE objective_runs SET created_at = ?, updated_at = ? WHERE run_id = ?', (old, old, run['run_id']))
     store._conn.commit()
@@ -90,7 +91,7 @@ def test_conversational_continue_after_terminal_partial_is_counted():
     """The old metric counted only objective_resume. The real regression was
     a plain `continue` after the objective had prematurely gone PARTIAL."""
     store = Store(':memory:')
-    run = compile_objective(store, request='failed objective', objective_summary='failed objective', tasks=[{'capability': 'objective.unmapped', 'arguments': {'clause': 'something impossible'}}], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='failed objective', objective_summary='failed objective', tasks=[{'capability': 'objective.unmapped', 'arguments': {'clause': 'something impossible'}}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     store.finish_objective_run(run['run_id'], status='PARTIAL', summary={'failed': 1})
     counted = agent_friday.record_manual_continue_if_continuity_failed('continue', db=store)
     assert counted is True
@@ -112,7 +113,8 @@ async def test_live_agent_objective_engine_uses_its_connected_mcp_port(monkeypat
     monkeypatch.setattr(agent_friday, 'ContinuousTaskExecutor', FakeExecutor)
     monkeypatch.setattr(agent_friday.objective_cli, '_db', lambda: fake_store)
 
-    async def local_dispatch(capability, arguments):
+    async def local_dispatch(capability, arguments, *, run=None):
+        # The real objective_cli port takes the task's Run; so does this one.
         return {'status': 'NOT_CONFIGURED', 'via': 'local'}
     monkeypatch.setattr(agent_friday.objective_cli, 'build_dispatch', lambda: local_dispatch)
 
@@ -142,7 +144,7 @@ async def test_objective_completion_creates_exactly_once_delivery():
 
     async def port(capability, arguments):
         return {'ok': True, 'step': capability}
-    run = compile_objective(store, request='five safe steps', objective_summary='five safe steps', tasks=[{'capability': 'system_battery', 'arguments': {}}], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='five safe steps', objective_summary='five safe steps', tasks=[{'capability': 'system_battery', 'arguments': {}}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     executor = ContinuousTaskExecutor(store, port, executor_id='deliver')
     try:
         await executor.start(run['run_id'])
@@ -162,7 +164,7 @@ async def test_objective_completion_creates_exactly_once_delivery():
 def test_continuity_state_projects_required_parent_cursor_fields():
     from friday.objectives import continuity_state
     store = Store(':memory:')
-    run = compile_objective(store, request='inspect then report', objective_summary='inspect then report', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'inspect'}}, {'capability': 'system_battery', 'arguments': {}, 'dependencies': ['t1']}], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='inspect then report', objective_summary='inspect then report', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'inspect'}}, {'capability': 'system_battery', 'arguments': {}, 'dependencies': ['t1']}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     first = store.objective_tasks(run['run_id'])[0]
     store.update_objective_task(first['task_id'], status='WAITING', attempts=1, result={'work_run_id': 'hermes-cursor1'})
     state = continuity_state(store, run['run_id'])
@@ -200,7 +202,7 @@ async def test_c1_finished_objective_reaches_the_user_with_no_model_call(monkeyp
 
     async def port(capability, arguments):
         return {'ok': True, 'capability': capability}
-    run = compile_objective(store, request='run the five step preflight', objective_summary='run the five step preflight', tasks=[{'capability': name, 'arguments': {}} for name in ('system_get_info', 'system_battery', 'system_disks', 'get_current_time', 'system_network')], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='run the five step preflight', objective_summary='run the five step preflight', tasks=[{'capability': name, 'arguments': {}} for name in ('system_get_info', 'system_battery', 'system_disks', 'get_current_time', 'system_network')], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     executor = ContinuousTaskExecutor(store, port, executor_id='c1')
     try:
         await executor.start(run['run_id'])
@@ -240,7 +242,7 @@ async def test_c3_a_recoverable_connectivity_fault_does_not_end_the_run(tmp_path
                 return {'status': 'not_configured', 'error': 'hermes bridge is not ready'}
             return {'ok': True, 'work': 'done after reconnect'}
         return {'ok': True, 'capability': capability}
-    run = compile_objective(store, request='delegate then report', objective_summary='delegate then report', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'probe'}}, {'capability': 'system_battery', 'arguments': {}, 'dependencies': ['t1']}], manifest=capabilities.as_dicts())
+    run = compile_objective(store, request='delegate then report', objective_summary='delegate then report', tasks=[{'capability': 'hermes_delegate', 'arguments': {'goal': 'probe'}}, {'capability': 'system_battery', 'arguments': {}, 'dependencies': ['t1']}], manifest=capabilities.as_dicts(), provenance=PERSON, attended=True)
     executor = ContinuousTaskExecutor(store, port, executor_id='c3')
     try:
         await executor.start(run['run_id'])

@@ -67,10 +67,12 @@ def register(mcp):
         (those are refused before ingestion). kind: fact | event |
         preference | commitment | belief. Optional ttl like '30d'.
         """
-        from friday.brain import AdmissionRefused
+        from friday.brain import PERSON_ORIGIN, AdmissionRefused
 
         try:
+            # Conversation acts for the person (its own lineage is V7-D28).
             out = brain().remember(fact, provenance=provenance,
+                                   origin=PERSON_ORIGIN,
                                    entity=entity, kind=kind, ttl=ttl)
         except AdmissionRefused as refusal:
             return {"status": "refused", "reason": str(refusal)}

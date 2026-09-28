@@ -283,7 +283,8 @@ async def web_fetch(
     # http://169.254.169.254/... or http://127.0.0.1:8000/sse is served happily
     # and hands back cloud credentials or this machine's own control plane.
     try:
-        netguard.check(url)
+        # A durable run is also held to its envelope's network scope (NET-001).
+        netguard.check(url, **netguard.run_scope(run))
     except netguard.UrlRefused as exc:
         return run.record(c.failed(started, str(exc)))
     # A host that is already failing is not worth another 25s wait: fail fast
@@ -312,7 +313,7 @@ async def web_fetch(
     # Same reasoning for the resolve-time guard: checking only the URL we sent
     # leaves an open-redirect path straight to the metadata endpoint.
     try:
-        netguard.check(str(response.url))
+        netguard.check(str(response.url), **netguard.run_scope(run))
     except netguard.UrlRefused as exc:
         return run.record(c.failed(started, str(exc)))
 
@@ -525,11 +526,21 @@ async def browser_act(
     Policy: read primitives are `browser.<primitive>` (BROWSER_CONTROL);
     state-changing ones are BROWSER_AUTOMATION and ask. An external write
     (purchase / publish / destructive / security settings) detected on the
-    page needs an exact-action confirmation nonce in `args["nonce"]`, and a
+    page needs an exact-action confirmation: the first call asks through
+    `friday.confirmation`, returns APPROVAL_REQUIRED with a `confirm` nonce
+    and does nothing; once the person has approved it, the same call with
+    `args["nonce"]` spends it on exactly that action, on that page, once. A
     human-verification page is a handoff: the result is PARTIAL with the
     reason and nothing is clicked.
+
+    Authority never arrives in `args`. They come from the model, and through
+    the model from whatever page it last read, so `confirmed` and `approved`
+    are dropped, and a nonce is only a handle naming which question was
+    answered - `Book.consume` refuses one the person's answer did not
+    approve (PRD v7 TRUST-001, SEC-004; FR-034).
     """
     from friday import browser as B
+    from friday import confirmation
     from friday import policy as P
 
     primitive = (primitive or "").strip().lower()
@@ -545,6 +556,9 @@ async def browser_act(
         return blocked
     started = c.started(run.run_id, tool_id)
     args = dict(args or {})
+    nonce = str(args.pop("nonce", "") or "")
+    for key in B.AUTHORITY_KEYS:
+        args.pop(key, None)
 
     try:
         loop = await _loop_browser()
@@ -552,13 +566,45 @@ async def browser_act(
         return run.record(c.failed(started, f"browser could not start: {exc}"))
     # The policy engine has already said AUTO/approved for this call, so the
     # loop's own session approval for this primitive is satisfied. An
-    # external write (FR-034) is different: it returns APPROVAL_REQUIRED with
-    # the exact action, and the control room's approve path re-issues this
-    # same call with `confirmed=True` after the person's yes
-    # (`friday.control.approve` -> `call_approved`, one nonce, one use).
+    # external write (FR-034) is different: a signed-in, approved session
+    # does not authorise it, and only a confirmation the person spent on this
+    # exact action does.
     loop.approvals[primitive] = True
     try:
-        step = await loop.run(primitive, target, args, timeout_ms=timeout_ms)
+        try:
+            step = await loop.run(primitive, target, args, timeout_ms=timeout_ms,
+                                  net=netguard.run_scope(run))
+        except B.Refused as exc:
+            if not exc.step.external_write:
+                raise
+            kind = exc.step.external_write
+            page = exc.step.before.url if exc.step.before else ""
+            # The yes is bound to the page and the kind of write as well as
+            # the action, target and arguments: "Continue" on a checkout and
+            # "Continue" on a security page are different questions.
+            bound = {**args, "page": page, "external_write": kind}
+            refused = {"external_write": kind, "action": f"browser.{primitive}",
+                       "target": target, "step": exc.step.to_dict()}
+            if not nonce:
+                where = urlparse(page).netloc or page
+                pending = confirmation.book.ask(
+                    run.run_id, tool_id, target,
+                    f"Allow this {kind} on {where}: {primitive} {target!r}?",
+                    arguments=bound)
+                return run.record(c.partial(
+                    started, f"{APPROVAL_PREFIX}: {exc}",
+                    output=_scoped({**refused, "confirm": pending.to_dict()},
+                                   BROWSER_SCOPE)))
+            spent = confirmation.book.consume(
+                nonce, run_id=run.run_id, action=tool_id, target=target,
+                arguments=bound)
+            if not spent.ok:
+                return run.record(started.finish(
+                    status=c.CANCELLED,
+                    error=f"{APPROVAL_PREFIX}: {spent.reason}",
+                    output=_scoped({**refused, "confirm": None}, BROWSER_SCOPE)))
+            step = await loop.run(primitive, target, args, timeout_ms=timeout_ms,
+                                  confirmed=True, net=netguard.run_scope(run))
     except B.Handoff as exc:
         state = loop.last
         return run.record(c.partial(
@@ -566,12 +612,6 @@ async def browser_act(
             output=_scoped({"url": state.url if state else "", "handoff": str(exc),
                             "step": exc.step.to_dict()}, BROWSER_SCOPE)))
     except B.Refused as exc:
-        if exc.step.external_write:
-            return run.record(c.partial(
-                started, f"{APPROVAL_PREFIX}: {exc}",
-                output=_scoped({"external_write": exc.step.external_write,
-                                "action": f"browser.{primitive}", "target": target,
-                                "step": exc.step.to_dict()}, BROWSER_SCOPE)))
         return run.record(c.failed(started, str(exc)))
 
     payload = {"step": step.to_dict(), "page": loop.last.to_dict() if loop.last else None}

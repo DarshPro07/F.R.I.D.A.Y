@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 
 _logger = logging.getLogger("friday.progress")
 
@@ -22,6 +23,44 @@ _logger = logging.getLogger("friday.progress")
 from friday.hermes_bridge import TERMINAL  # one definition, never two
 
 MAX_DIGEST_RUNS = 3
+
+#: User-selectable progress detail (FR-POL-005). Never changes WHAT a run
+#: reports as fact - only how much of it gets said out loud. BALANCED is
+#: today's exact wording, so an unset preference changes nothing.
+DETAIL_LEVELS = ("detailed", "balanced", "critical-only")
+DEFAULT_DETAIL = "balanced"
+
+
+def _normalize_detail(detail: str | None) -> str:
+    """An unset or unrecognized level narrates at BALANCED - the same way
+    a malformed run narrates nothing rather than raising. A bad
+    preference must never turn a digest loop into a crash loop."""
+    return detail if detail in DETAIL_LEVELS else DEFAULT_DETAIL
+
+
+def read_detail_level(home: str | Path | None = None) -> str:
+    """
+    The user's progress-detail preference, straight from the operating
+    contract file - a bare file read, not a FirstRunContract/UserPolicy
+    construction. This exists to be called from a loop that polls every
+    few seconds; `progress_detail` is not permission-shaped, so it has no
+    reason to open a policy database just to answer "how much to say".
+
+    `home` overrides the contract's directory the same way
+    `UserPolicy`/`FirstRunContract` do, for tests; production omits it
+    and reads the real data dir. A missing file, missing key, or a
+    stale/unknown value all fall back to BALANCED - never a crash.
+    """
+    if home is None:
+        from friday.config import DATA_DIR
+        home = DATA_DIR
+    try:
+        import json as _json
+        raw = _json.loads((Path(home) / "operating_contract.json")
+                          .read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - unreadable prefs narrate at default
+        return DEFAULT_DETAIL
+    return _normalize_detail(raw.get("progress_detail"))
 
 
 @dataclass
@@ -37,21 +76,36 @@ def _model_reason(run: dict) -> str:
     return f"{model} ({reason})"
 
 
-def _milestone_line(run: dict) -> str:
+def _milestone_line(run: dict, detail: str = DEFAULT_DETAIL) -> str:
     summary = (run.get("result") or run.get("line") or
                "finished with no summary").strip().replace("\n", " ")[:200]
-    return f"{summary} - on {_model_reason(run)}"
+    if detail == "critical-only":
+        return summary
+    line = f"{summary} - on {_model_reason(run)}"
+    if detail == "detailed":
+        task = " ".join(str(run.get("task") or "").split())[:140]
+        if task:
+            line = f"{task}: {line}"
+    return line
 
 
-def _digest_line(run: dict) -> str:
+def _digest_line(run: dict, detail: str = DEFAULT_DETAIL) -> str:
     last = (run.get("line") or "starting").strip()
     current = run.get("current") or (
         "first tool" if not run.get("tools") else "wrapping up")
-    return (f"did {run.get('tools', 0)} tools, last: {last}, "
+    if detail == "critical-only":
+        # Critical-only is the blocker/next-action pair with the process
+        # chatter (tool count, model, route reason) stripped out.
+        return f"last: {last}, next: {current}"
+    line = (f"did {run.get('tools', 0)} tools, last: {last}, "
             f"on {_model_reason(run)}, next: {current}")
+    if detail == "detailed" and run.get("elapsed_s"):
+        line += f", {int(run['elapsed_s'])}s elapsed"
+    return line
 
 
-def outcome_line(record: dict, *, now: float | None = None) -> str:
+def outcome_line(record: dict, *, now: float | None = None,
+                  detail: str = DEFAULT_DETAIL) -> str:
     """One spoken sentence for a finished run, from its durable record only.
 
     A run closed by the orphan sweep (failure_kind LOST) is said as lost in
@@ -59,10 +113,15 @@ def outcome_line(record: dict, *, now: float | None = None) -> str:
     from the owner (re-send it, versus read why it failed). The handoff
     summary is preferred over the raw result; the model and route reason
     close the sentence because "why that model" is half of the question.
+
+    `detail` (FR-POL-005) trims or extends the same facts - critical-only
+    drops the closing "which model" clause, detailed adds the run id -
+    it never changes what happened, only how much of it is said.
     """
     import json as _json
     import time as _time
 
+    detail = _normalize_detail(detail)
     status = record.get("status", "")
     lost = record.get("failure_kind") == "LOST"
     if lost:
@@ -93,11 +152,16 @@ def outcome_line(record: dict, *, now: float | None = None) -> str:
     line = f"Hermes {head}{when}: {task}."
     if summary:
         line += f" Outcome: {summary}" + ("" if summary.endswith(".") else ".")
-    return line + f" It ran on {_model_reason(record)}."
+    if detail == "critical-only":
+        return line
+    line += f" It ran on {_model_reason(record)}."
+    if detail == "detailed" and record.get("work_run_id"):
+        line += f" (run {record['work_run_id']})"
+    return line
 
 
 def compose(runs, objectives=None, *, now, last_digest_at=0.0,
-            cadence=180) -> Digest:
+            cadence=180, detail: str = DEFAULT_DETAIL) -> Digest:
     """
     `runs`: flat dicts, each a work run merged with its live progress (see
     `gather()`). `objectives` is accepted for continuity-snapshot milestones
@@ -105,7 +169,14 @@ def compose(runs, objectives=None, *, now, last_digest_at=0.0,
     # ponytail: objectives unused until continuity emits its own events.
     Dedupes by (work_run_id, seq) inside this one call. Never raises - a
     malformed run is skipped, not a crash.
+
+    `detail` (FR-POL-005) is the user-selected verbosity - detailed,
+    balanced or critical-only - normalized defensively so an unset or
+    stale value narrates at BALANCED (today's exact wording) instead of
+    raising. It changes how much of a run's own facts are said, never
+    what those facts are: nothing here is fabricated at any level.
     """
+    detail = _normalize_detail(detail)
     seen = set()
     milestones: list[str] = []
     lines: list[str] = []
@@ -120,9 +191,9 @@ def compose(runs, objectives=None, *, now, last_digest_at=0.0,
             seen.add(key)
             status = run.get("status", "")
             if status in TERMINAL:
-                milestones.append(_milestone_line(run))
+                milestones.append(_milestone_line(run, detail))
             else:
-                lines.append(_digest_line(run))
+                lines.append(_digest_line(run, detail))
         except Exception:  # noqa: BLE001 - a bad row narrates nothing, ever
             continue
 
@@ -164,6 +235,12 @@ def gather(sup, *, terminal_window_s: float = 600.0) -> list:
         sup.log.sweep_orphans()
     except Exception as exc:  # noqa: BLE001 - narrate the old way, never crash
         _logger.warning("progress: orphan sweep failed: %s", exc)
+    try:
+        # A task whose objective's envelope has ended is stopped here too,
+        # so that stop does not depend on its timer (PRD v7 SEC-005).
+        sup.expire_overdue()
+    except Exception as exc:  # noqa: BLE001 - narrate the old way, never crash
+        _logger.warning("progress: expiry sweep failed: %s", exc)
     try:
         rows = list(sup.log.active())
     except Exception:  # noqa: BLE001

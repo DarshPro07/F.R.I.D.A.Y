@@ -1,0 +1,118 @@
+"""
+Authority is checked again at the moment of action (PRD v7 JIT-001).
+
+A plan is made against the capabilities as they were then. If one of them
+changes before it runs - its code, or what it is registered to do - the run
+does not carry on with something nobody planned for: the call is refused at
+execution and the change named, until the objective is revalidated.
+"""
+from __future__ import annotations
+
+import dataclasses
+import json
+
+import pytest
+
+from friday import capabilities as C
+from friday import capability_runtime as CR
+from friday import contracts as c
+from friday import objectives as O
+from friday import policy as PO
+from friday.store import Store
+
+
+@pytest.fixture
+def compiled(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    created = O.compile_objective(
+        store, request="check the system", objective_summary="check the system",
+        tasks=[{"capability": "system_get_info", "arguments": {}}],
+        manifest=[{"id": "system_get_info", "description": "info"}],
+        provenance=c.PERSON, attended=True)
+    raw = json.loads(store.objective_run(created["run_id"])["envelope"])
+    return store, created["run_id"], c.Envelope.from_dict(raw)
+
+
+def _run_under(envelope):
+    return c.Run(run_id=c.new_run_id(), request="x", provenance=envelope.provenance,
+                 attended=envelope.attended, envelope=envelope)
+
+
+def test_the_plan_records_what_each_capability_was(compiled):
+    _, _, envelope = compiled
+    assert envelope.capability_hashes == {"system_get_info": CR.fingerprint("system_get_info")}
+
+
+def test_an_unchanged_capability_runs(compiled):
+    _, _, envelope = compiled
+    result = CR.CapabilityRuntime(engine=PO.PolicyEngine(autonomy=PO.FULL)).execute(
+        "system_get_info", {}, run=_run_under(envelope))
+    assert result.status == c.SUCCEEDED, result.error
+
+
+def test_a_capability_changed_since_the_plan_is_refused_at_execution(compiled):
+    _, _, envelope = compiled
+    planned_against_another_version = dataclasses.replace(
+        envelope, capability_hashes={"system_get_info": "0" * 64})
+    result = CR.CapabilityRuntime(engine=PO.PolicyEngine(autonomy=PO.FULL)).execute(
+        "system_get_info", {}, run=_run_under(planned_against_another_version))
+    assert result.status == c.NOT_PERMITTED
+    assert result.error.startswith("JIT:") and "system_get_info" in result.error
+
+
+def test_the_fingerprint_follows_what_the_capability_is_registered_to_do(monkeypatch):
+    before = CR.fingerprint("system_get_info")
+    original = C.by_id("system_get_info")
+    changed = dataclasses.replace(original, side_effect="external_action")
+    monkeypatch.setattr(C, "by_id", lambda cid: changed if cid == "system_get_info" else original)
+    assert CR.fingerprint("system_get_info") != before
+
+
+def test_the_fingerprint_follows_the_code_it_runs(monkeypatch):
+    before = CR.fingerprint("system_get_info")
+    monkeypatch.setattr(CR, "_function_source",
+                        lambda module, function: "def system_get_info(run): return 'else'")
+    assert CR.fingerprint("system_get_info") != before
+
+
+def test_a_narrower_envelope_cannot_swap_a_capability_version(compiled):
+    _, _, envelope = compiled
+    with pytest.raises(c.ContractError, match="version"):
+        envelope.narrow(capability_hashes={"system_get_info": "f" * 64})
+
+
+def test_a_narrower_envelope_cannot_drop_a_capability_version(compiled):
+    """Dropping a planned version would switch the check at the moment of
+    action off for that capability; a child may pin more, never fewer."""
+    _, _, envelope = compiled
+    with pytest.raises(c.ContractError, match="version"):
+        envelope.narrow(capability_hashes={})
+
+
+def test_a_stored_envelope_keeps_the_versions():
+    envelope = O.envelope_for("RUN-jit", ["system_get_info"], provenance=c.PERSON,
+                              attended=True)
+    assert envelope.capability_hashes, "compile recorded no versions"
+    assert c.Envelope.from_dict(json.loads(json.dumps(envelope.to_dict()))) == envelope
+
+
+def test_compile_records_the_versions_on_an_envelope_it_is_handed(tmp_path):
+    """A caller cannot know what each capability is now; compile writes the
+    versions itself, and an envelope that pins a different one is refused."""
+    store = Store(tmp_path / "ada.sqlite3")
+
+    def compile_with(run_id, hashes):
+        envelope = dataclasses.replace(
+            O.envelope_for(run_id, ["system_get_info"], provenance=c.PERSON, attended=True),
+            capability_hashes=hashes)
+        return O.compile_objective(
+            store, request="check the system", objective_summary="check the system",
+            tasks=[{"capability": "system_get_info", "arguments": {}}],
+            manifest=[{"id": "system_get_info", "description": "info"}],
+            provenance=c.PERSON, attended=True, run_id=run_id, envelope=envelope)
+
+    run_id = compile_with("OBJ-JIT-1", {})["run_id"]
+    stored = c.Envelope.from_dict(json.loads(store.objective_run(run_id)["envelope"]))
+    assert stored.capability_hashes == {"system_get_info": CR.fingerprint("system_get_info")}
+    with pytest.raises(c.ContractError, match="version"):
+        compile_with("OBJ-JIT-2", {"system_get_info": "f" * 64})

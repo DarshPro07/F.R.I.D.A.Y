@@ -44,6 +44,7 @@ CHILD = textwrap.dedent(r'''
     executor_id = sys.argv[5]
     from friday.store import Store
     from friday.continuous import ContinuousTaskExecutor, RunWatchdog
+    from friday.contracts import PERSON
     from friday.objectives import compile_objective
 
     async def capability(name, arguments):
@@ -68,7 +69,7 @@ CHILD = textwrap.dedent(r'''
                 manifest=[{"id": "fast", "description": "fast"},
                           {"id": "slow", "description": "slow"},
                           {"id": "after", "description": "after"}],
-                objective_summary="chaos probe")
+                objective_summary="chaos probe", provenance=PERSON, attended=True)
             run_id = run["run_id"]
             print(json.dumps({"run_id": run_id}), flush=True)
             ex = ContinuousTaskExecutor(store, capability, executor_id=executor_id)

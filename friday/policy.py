@@ -214,6 +214,16 @@ DESTRUCTIVE = frozenset({
     DESKTOP_CONTROL, DESKTOP_CREDENTIAL_ENTRY,
 })
 
+#: Everything an objective that came from something Friday read may never
+#: reach (PRD v7 TRUST-002: "untrusted-to-shell path requires gate"). The
+#: destructive set above, plus command execution: Hermes delegation hands a
+#: worker terminals and file edits, and capability_use, the connectors and
+#: self-development promotion run code with the person's session. A page that
+#: says "run this" is steering a terminal, and that is not a question a
+#: confirmation could make safe either. It was AUTO under the default
+#: autonomy and invisible only while the durable path dropped lineage.
+UNREACHABLE_FROM_READ_MATERIAL = DESTRUCTIVE | frozenset({COMMAND_EXECUTION})
+
 
 def provenance_verdict(tool_id: str, provenance: str) -> Verdict | None:
     """
@@ -237,7 +247,7 @@ def provenance_verdict(tool_id: str, provenance: str) -> Verdict | None:
     if provenance == "PERSON":
         return None
     category = TOOL_CATEGORIES.get(tool_id)
-    if category is None or category not in DESTRUCTIVE:
+    if category is None or category not in UNREACHABLE_FROM_READ_MATERIAL:
         return None
     return Verdict(
         tool_id, category, DENY,
@@ -277,7 +287,9 @@ AUTONOMY_MODES = (FULL, GUARDED, DANGEROUS)
 
 #: The spoken choice ("full autonomy on") outlives the process through this
 #: file; ADA_AUTONOMY is the fallback for a fresh checkout. data/ is runtime state.
-AUTONOMY_FILE = Path(__file__).resolve().parent.parent / "data" / "autonomy.json"
+from friday.config import DATA_DIR as _DATA_DIR
+
+AUTONOMY_FILE = _DATA_DIR / "autonomy.json"
 
 
 def current_autonomy() -> str:
@@ -590,7 +602,93 @@ TOOL_CATEGORIES: dict[str, str] = {
     'secrets.read': SECRET_READ,
     'secrets.list': SECRET_READ,
     'env.read_secret': SECRET_READ,
+    # V7-D15: seven capabilities had no category, and a capability whose tool
+    # ids have none never meets the engine at all - it ran ungated.
+    # open_in_browser acts in the person's own signed-in profile, with their
+    # logins: that is acting on their desktop session, not FRIDAY's browser.
+    'open_in_browser': DESKTOP_CONTROL,
+    'open.in_browser': DESKTOP_CONTROL,
+    # Reloading capabilities loads code from the fabric adapters.
+    'capability_reload': COMMAND_EXECUTION,
+    'capability.reload': COMMAND_EXECUTION,
+    'browser_profiles': READ_LOCAL_SAFE,
+    'browser.profiles': READ_LOCAL_SAFE,
+    'product_runs': READ_LOCAL_SAFE,
+    'product.runs': READ_LOCAL_SAFE,
+    'profile_open_conflicts': MEMORY_READ,
+    'profile.open_conflicts': MEMORY_READ,
+    'profile_learn_from_turn': MEMORY_WRITE,
+    'profile.learn_from_turn': MEMORY_WRITE,
+    'profile_resolve_conflict': MEMORY_WRITE,
+    'profile.resolve_conflict': MEMORY_WRITE,
 }
+
+# ---------------------------------------------------------------------------
+# Composition (PRD v7 CAP-002)
+#
+# Reading the person's private data is fine and sending somewhere the run
+# chooses is fine; an objective that can do both can send what it reads. That
+# is the exfiltration shape, so the whole capability set is judged once, when
+# the objective is compiled. Every category has a class, so a new one cannot
+# slip past the judgement unclassified (tests/test_composition.py).
+# ---------------------------------------------------------------------------
+
+#: Categories whose every tool reads the person's own content.
+PRIVATE_READ = frozenset({MEMORY_READ, SCREEN_CAPTURE, CAMERA_CAPTURE,
+                          SECRET_READ, SCREEN_POINT})
+#: Categories whose tools reach a destination the run chooses: the web, a
+#: browser, a terminal, or the person's desktop and keyboard.
+ARBITRARY_SEND = frozenset({WEB_SEARCH, BROWSER_AUTOMATION, BROWSER_CONTROL,
+                            COMMAND_EXECUTION, DESKTOP_CONTROL,
+                            DESKTOP_CREDENTIAL_ENTRY})
+#: Everything else: local effects, the machine describing itself, control.
+COMPOSITION_NEUTRAL = frozenset({
+    READ_LOCAL_SAFE, SAFE_APP_OPEN, MEDIA_CONTROL, DEVICE_SETTING,
+    CLIPBOARD_WRITE, FILE_WRITE, DELETE, MEMORY_WRITE, REMINDER,
+    OBJECTIVE_CONTROL, GRACEFUL_PROCESS_CLOSE, FORCE_PROCESS_TERMINATION,
+    SESSION_LOCK, SLEEP, HIBERNATE, SHUTDOWN, RESTART, FORCED_SHUTDOWN,
+    POWER_CANCEL, SYSTEM_CRITICAL_PROCESS_TERMINATION, POWER_ACTION,
+})
+#: READ_LOCAL_SAFE is mostly the machine describing itself. These tools in it
+#: read the person's own content, so they count as private reads.
+PRIVATE_READ_TOOLS = frozenset({
+    "files.read", "files.search", "files.list", "files.info",
+    "documents.extract", "documents.inspect", "clipboard.read",
+    "brain_recall", "brain_entity", "reminders.list", "windows.list",
+    "identity.profiles", "browser.profiles", "browser_profiles",
+})
+
+
+def composition_verdict(tool_ids, *, provenance: str, attended: bool,
+                        unknown=()) -> Verdict | None:
+    """
+    Whether this capability set, taken together, needs more than each piece.
+
+    None when it does not. Otherwise DENY when the objective came from read
+    material (the attack itself; asking would be theatre) or nobody is there
+    to agree, and CONFIRM for the person, attended. Like `provenance_verdict`
+    this can only narrow: it never grants anything.
+
+    `unknown` names capabilities no policy category covers. What cannot be
+    judged is assumed able to both read and send, rather than left out, which
+    is how an uncategorised sender used to escape this check.
+    """
+    tools = [t for t in tool_ids if t in TOOL_CATEGORIES]
+    reads = sorted({t for t in tools if TOOL_CATEGORIES[t] in PRIVATE_READ
+                    or t in PRIVATE_READ_TOOLS} | set(unknown))
+    sends = sorted({t for t in tools if TOOL_CATEGORIES[t] in ARBITRARY_SEND}
+                   | set(unknown))
+    if not reads or not sends:
+        return None
+    why = (f"this run could send what it reads: it reads with "
+           f"{', '.join(reads[:3])} and can send with {', '.join(sends[:3])}")
+    if provenance != "PERSON":
+        return Verdict("objective.composition", "COMPOSITION", DENY,
+                       f"{why}, and it came from something Friday read")
+    if not attended:
+        return Verdict("objective.composition", "COMPOSITION", DENY,
+                       f"{why}, and nobody is there to agree")
+    return Verdict("objective.composition", "COMPOSITION", CONFIRM, why)
 
 UNKNOWN_TOOL_DECISION = ASK
 

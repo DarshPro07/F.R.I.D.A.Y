@@ -66,8 +66,18 @@ logger = logging.getLogger("friday-agent.executors.cli")
 #: mode, CLI's own spelling.
 DEFAULT_PERMISSION_MODE = "manual"
 
+#: The CLI's own configuration namespace, which crosses to the worker (the
+#: Git Bash path on Windows, for one). Never a secret-shaped name.
+CLI_CONFIG_PREFIXES = ("CLAUDE_CODE_", "CLAUDE_CONFIG_DIR")
+
 #: Never. Not as a fallback, not with a flag, not when a task is stuck.
 FORBIDDEN_MODES = frozenset({"bypassPermissions"})
+
+#: The longest stream-json line read whole. Each event is one line, and the
+#: first lists every tool, skill, plugin and MCP server the CLI loaded;
+#: asyncio's default 64 KiB reader limit ended every run on a machine with
+#: many of them (V7-D35).
+STREAM_LINE_LIMIT = 32 * 1024 * 1024
 
 CLAUDE_BIN = os.getenv("ADA_CLAUDE_BIN", "claude")
 
@@ -136,6 +146,16 @@ class Launch:
     strict_mcp: bool = True
     model: str | None = None
     settings: dict = field(default_factory=lambda: {"disableAllHooks": True})
+    #: Extra environment variables this launch needs to cross to the worker
+    #: (never secret-shaped ones; see `execution.worker_environment`).
+    env_passthrough: tuple[str, ...] = ()
+    #: Working directories beyond `cwd` (`--add-dir`): an envelope's other
+    #: roots. The CLI reads inside its working directories without asking.
+    add_dirs: tuple[str, ...] = ()
+    #: How strongly each part of an execution envelope holds for this launch
+    #: (`brokers.ENFORCED` / `brokers.ADVISORY`); empty with no envelope.
+    #: Reported, never rendered: it describes the launch, it is not a flag.
+    strength: dict = field(default_factory=dict)
 
     def argv(self) -> list[str]:
         # The refusal comes first, deliberately. Whether bypassing permissions
@@ -171,6 +191,8 @@ class Launch:
                 argv.append("--strict-mcp-config")
         # Variadic flags go last, and the prompt never joins them on the
         # command line - see the module docstring. It is written to stdin.
+        if self.add_dirs:
+            argv += ["--add-dir", *self.add_dirs]
         if self.allowed_tools:
             argv += ["--allowedTools", *self.allowed_tools]
         if self.disallowed_tools:
@@ -264,17 +286,31 @@ class Run:
         argv = self.launch.argv()
         logger.info("claude: %s%s", " ".join(argv[1:8]),
                     f" [sandbox {self.sandbox.name}]" if self.sandbox else "")
+        # HOST or SANDBOX, the worker gets the allowlisted environment - never
+        # FRIDAY's own secrets (V7-D18). HOST keeps its reach, not the keys.
+        from friday import execution
+
         self.process = await asyncio.create_subprocess_exec(
             *argv, cwd=self.launch.cwd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=self.sandbox.environment() if self.sandbox else None,
+            limit=STREAM_LINE_LIMIT,
+            env=(self.sandbox.environment() if self.sandbox
+                 else execution.worker_environment(
+                     "claude-host", passthrough=self.launch.env_passthrough,
+                     prefixes=CLI_CONFIG_PREFIXES)),
         )
         if self.sandbox is not None:
             # Adopted into the job object before anything else happens, so
             # that whatever the CLI spawns is bounded and ends with the run.
             self.sandbox.job.adopt(self.process.pid)
+        # STOP-001: an emergency stop kills this worker and its children by
+        # PID, whatever it is doing. Disowned when it exits, so a reused PID
+        # is never mistaken for it.
+        from friday import stop
+
+        stop.own_process(self.process.pid)
         assert self.process.stdin is not None
         self.process.stdin.write(self.launch.prompt.encode("utf-8"))
         await self.process.stdin.drain()
@@ -306,6 +342,9 @@ class Run:
                 yield event
 
         await self.process.wait()
+        from friday import stop
+
+        stop.disown_process(self.process.pid)
 
     async def cancel(self) -> bool:
         """Stop the run and everything it started. Returns whether it was up."""
@@ -334,6 +373,10 @@ class Run:
             await asyncio.wait_for(self.process.wait(), timeout=15)
         except asyncio.TimeoutError:
             logger.warning("claude did not exit after being killed")
+        else:
+            from friday import stop
+
+            stop.disown_process(pid)
         return True
 
 

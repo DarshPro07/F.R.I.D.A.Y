@@ -27,6 +27,7 @@ from friday.store import Store
 
 import agent_friday
 from friday.objectives import RUN_TERMINAL
+from friday.contracts import PERSON
 
 
 class FakeCapabilities:
@@ -126,7 +127,7 @@ async def test_agent_engine_drives_a_real_run_to_completed(monkeypatch,
     created = compile_objective(
         engine.store, request="check the system",
         tasks=[{"capability": "system_get_info", "arguments": {}}],
-        manifest=manifest(), objective_summary="check the system",
+        manifest=manifest(), objective_summary="check the system", provenance=PERSON, attended=True
     )
     run_id = created["run_id"]
 
@@ -148,7 +149,7 @@ async def test_agent_engine_drives_a_real_run_to_completed(monkeypatch,
 async def test_two_executors_never_double_drive(store, caps):
     run = compile_objective(
         store, request="race probe", tasks=chain_tasks(),
-        manifest=manifest(), objective_summary="race probe",
+        manifest=manifest(), objective_summary="race probe", provenance=PERSON, attended=True
     )
     run_id = run["run_id"]
 
@@ -183,7 +184,7 @@ async def test_stopped_executor_does_not_drive_and_new_one_resumes(
         store, caps):
     run = compile_objective(
         store, request="stop probe", tasks=chain_tasks(),
-        manifest=manifest(), objective_summary="stop probe",
+        manifest=manifest(), objective_summary="stop probe", provenance=PERSON, attended=True
     )
     run_id = run["run_id"]
 

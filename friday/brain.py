@@ -84,6 +84,27 @@ UNTRUSTED_PROVENANCE = re.compile(
     r"(\s*[:\-/(\s]|\s*$)", re.I)
 
 
+#: Who is writing to the ledger (V7-D34). The ledger's facts come back to
+#: FRIDAY as rules, so only the person and FRIDAY herself write there
+#: directly; a worker, or a run that began from read material, is refused
+#: here and goes through `memory_promotion.promote` as read material, which
+#: lands in memory marked as read and never as a rule. Decided by the caller
+#: from what it knows about itself (the exec bridge serves only workers),
+#: never from the provenance string a writer supplies.
+PERSON_ORIGIN = "person"
+FRIDAY_ORIGIN = "friday"
+WORKER_ORIGIN = "worker"
+READ_ORIGIN = "read_material"
+ORIGINS = (PERSON_ORIGIN, FRIDAY_ORIGIN, WORKER_ORIGIN, READ_ORIGIN)
+#: Origins whose writes the adapter refuses.
+UNRULED_ORIGINS = frozenset({WORKER_ORIGIN, READ_ORIGIN})
+#: The only origins whose ledger entries FRIDAY is given as rules. An entry
+#: that does not say who wrote it predates origins, when a worker could write
+#: the ledger (V7-D34), so it is not one; the person restores an entry they
+#: stand behind by marking it "origin": "person".
+RULING_ORIGINS = frozenset({PERSON_ORIGIN, FRIDAY_ORIGIN})
+
+
 def _untrusted_provenance(provenance: str) -> str | None:
     """Why this provenance cannot write directly, or None if it may."""
     if UNTRUSTED_PROVENANCE.match(provenance or ""):
@@ -235,11 +256,19 @@ class SharedBrainAdapter:
             dropped_count=int(answer.get("dropped_count") or 0),
             degraded=str(answer.get("search_degraded") or ""))
 
-    def remember(self, fact: str, *, provenance: str, entity: str = "",
-                 kind: str = "fact", ttl: str = "") -> dict:
+    def remember(self, fact: str, *, provenance: str, origin: str,
+                 entity: str = "", kind: str = "fact", ttl: str = "") -> dict:
         """Admission-filtered write. Refuses secrets/banking BEFORE the
         brain ever sees the text - insertion count for refused content
-        is structurally zero."""
+        is structurally zero. `origin` is who is writing (`ORIGINS`); a
+        worker or read material is refused before anything is written."""
+        if origin not in ORIGINS:
+            raise ValueError(f"unknown origin {origin!r}; known: {list(ORIGINS)}")
+        if origin in UNRULED_ORIGINS:
+            raise AdmissionRefused(
+                f"refused before ingestion: a {origin.replace('_', ' ')} fact goes "
+                "through the promotion gate (memory_promotion.promote) as read "
+                "material, never straight into the ledger, whatever its provenance")
         reason = _sensitive(fact)
         if reason:
             raise AdmissionRefused(
@@ -265,7 +294,7 @@ class SharedBrainAdapter:
         # from (replay_ledger). Runtime-only state stays in runtime DBs.
         if out.get("status") == "inserted":
             self._ledger_append({
-                "fact": fact, "provenance": provenance[:500],
+                "fact": fact, "provenance": provenance[:500], "origin": origin,
                 "entity": entity, "kind": kind, "ttl": ttl,
                 "fact_id": out.get("id"),
                 "recorded_at": __import__("datetime").datetime.now(

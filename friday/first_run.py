@@ -1,6 +1,6 @@
 """First-run operating contract (Phase 9; R14 / build-pack 10).
 
-Nine adaptive questions, persisted as versioned policy. Rules:
+Ten adaptive questions, persisted as versioned policy. Rules:
 
 - NOT a questionnaire prison: any question whose answer is already
   derivable from context is skipped, and everything can be changed
@@ -19,8 +19,11 @@ from pathlib import Path
 
 from friday.user_policy import UserPolicy
 
-#: The nine contract questions (build-pack 10). `field` is where the
+#: The ten contract questions (build-pack 10). `field` is where the
 #: answer lives; `domain` links to UserPolicy where applicable.
+#: `progress_detail` (FR-POL-005) has no `domain` on purpose - it is a
+#: plain preference for the contract file, not a permission delegation,
+#: so it never touches UserPolicy's audited grant trail.
 QUESTIONS = (
     {"id": "name", "field": "call_me",
      "ask": "What should I call you?"},
@@ -47,6 +50,9 @@ QUESTIONS = (
     {"id": "learning", "field": "global_learning_consent",
      "ask": "May de-identified successful procedures improve shared "
             "skills? (yes / no)"},
+    {"id": "progress", "field": "progress_detail",
+     "ask": "How much progress detail do you want while I work? "
+            "(detailed / balanced / critical-only)"},
 )
 
 

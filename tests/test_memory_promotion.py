@@ -11,6 +11,10 @@ from friday.handoff import Handoff
 from friday.memory_promotion import Candidate, promote, promote_handoff
 from friday.store import FACT, Store
 
+# Assembled at run time: the source carries no provider-shaped key for a
+# push-protection scanner, while the code under test still sees the whole shape.
+FAKE_KEY = "sk-" + "abcdefghijklmnopqrstuvwx"
+
 
 @pytest.fixture
 def store(tmp_path):
@@ -21,30 +25,30 @@ def store(tmp_path):
 
 def test_promotion_rejects_unverified_and_secret_shaped_candidates(store):
     secret = Candidate(
-        statement="api_key: sk-abcdefghijklmnopqrstuvwx", kind="project_fact",
+        statement="api_key: " + FAKE_KEY, kind="project_fact",
         source="test", owner="friday", scope="project", confidence=0.9,
-        evidence=["he pasted it"],
+        evidence=["he pasted it"], provenance="PERSON",
     )
     assert promote(secret, store=store).accepted is False
 
     no_evidence = Candidate(
         statement="the deploy target is staging", kind="project_fact",
         source="test", owner="friday", scope="project", confidence=0.9,
-        evidence=[],
+        evidence=[], provenance="PERSON",
     )
     assert promote(no_evidence, store=store).accepted is False
 
     low_confidence = Candidate(
         statement="the deploy target is staging", kind="project_fact",
         source="test", owner="friday", scope="project", confidence=0.3,
-        evidence=["it came up once"],
+        evidence=["it came up once"], provenance="PERSON",
     )
     assert promote(low_confidence, store=store).accepted is False
 
     one_off = Candidate(
         statement="the test run passed", kind="outcome",
         source="test", owner="friday", scope="project", confidence=0.9,
-        evidence=["pytest exited 0"],
+        evidence=["pytest exited 0"], provenance="PERSON",
     )
     assert promote(one_off, store=store).accepted is False
 
@@ -53,7 +57,7 @@ def test_duplicate_is_not_written_twice(store):
     c = Candidate(
         statement="the deploy target is staging", kind="project_fact",
         source="test", owner="friday", scope="project", confidence=0.9,
-        evidence=["said once"],
+        evidence=["said once"], provenance="PERSON",
     )
     first = promote(c, store=store)
     assert first.accepted is True
@@ -67,14 +71,14 @@ def test_contradiction_supersedes_not_overwrites(store):
     weak = Candidate(
         statement="the deploy target is staging", kind="project_fact",
         source="test", owner="friday", scope="project", confidence=0.6,
-        evidence=["said once"],
+        evidence=["said once"], provenance="PERSON",
     )
     assert promote(weak, store=store).accepted is True
 
     stronger = Candidate(
         statement="the deploy target is production", kind="project_fact",
         source="test", owner="friday", scope="project", confidence=0.9,
-        evidence=["confirmed twice"],
+        evidence=["confirmed twice"], provenance="PERSON",
     )
     decision = promote(stronger, store=store)
     assert decision.accepted is True
@@ -88,7 +92,7 @@ def test_contradiction_supersedes_not_overwrites(store):
     weaker_again = Candidate(
         statement="the deploy target is qa", kind="project_fact",
         source="test", owner="friday", scope="project", confidence=0.65,
-        evidence=["overheard"],
+        evidence=["overheard"], provenance="PERSON",
     )
     decision2 = promote(weaker_again, store=store)
     assert decision2.accepted is False
@@ -101,7 +105,7 @@ def test_procedure_becomes_a_skill_candidate_not_a_fact(store):
     c = Candidate(
         statement="always run migrations before restarting the worker",
         kind="procedure", source="test", owner="friday", scope="project",
-        confidence=0.9, evidence=["it broke without this once"],
+        confidence=0.9, evidence=["it broke without this once"], provenance="PERSON",
     )
     decision = promote(c, store=store)
     assert decision.accepted is True

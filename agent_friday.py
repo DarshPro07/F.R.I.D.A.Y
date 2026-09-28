@@ -23,7 +23,7 @@ import time
 
 from dotenv import load_dotenv
 from livekit.agents import JobContext, WorkerOptions, cli
-from livekit.agents.llm import function_tool, mcp
+from livekit.agents.llm import StopResponse, function_tool, mcp
 from livekit.agents.voice import Agent, AgentSession
 from livekit.plugins import silero
 
@@ -35,7 +35,7 @@ try:
 except Exception:  # noqa: BLE001
     _turn_detector_plugin = None
 
-from friday import autolearn, capabilities, capability_router, objective_cli, ownership, providers, resilience, turn_timing, write_licence
+from friday import autolearn, capabilities, capability_router, mcp_firewall, objective_cli, ownership, providers, resilience, turn_timing, write_licence
 from friday.continuous import ContinuousTaskExecutor
 
 
@@ -47,7 +47,9 @@ load_dotenv()
 
 logger = logging.getLogger("friday-agent")
 logger.setLevel(logging.INFO)
-LOG_FILE = pathlib.Path(__file__).parent / "data" / "logs" / "friday.log"
+from friday.config import DATA_DIR as _DATA_DIR
+
+LOG_FILE = _DATA_DIR / "logs" / "friday.log"
 
 
 def _log_to_its_own_file() -> None:
@@ -725,6 +727,9 @@ class FridayAgent(Agent):
     #: Capabilities that ACTED this turn, for the completion gate in
     #: `tts_node`. Reset per turn alongside `_already_read`.
     _acted_this_turn: tuple[str, ...] = ()
+    #: Why the tool server's tools are withheld while the MCP firewall has it
+    #: suspended (MCP-001); "" otherwise.
+    _tools_suspended: str = ""
 
     def __init__(self, stt, llm, tts) -> None:
         self._toolset = mcp.MCPToolset(
@@ -877,6 +882,8 @@ class FridayAgent(Agent):
         search_capabilities for the exact tool.
         """
         areas = []
+        if self._tools_suspended:
+            return json.dumps(self._suspended_notice())
         if self._tools_offline or not self._router.all_tools:
             return json.dumps({
                 "error": "mcp_unavailable",
@@ -932,6 +939,9 @@ class FridayAgent(Agent):
         """
         matches = self._router.search(query, limit=6)
         families = _family_hints(query)
+        if self._tools_suspended:
+            logger.error("search_capabilities while the MCP server is suspended: %r", query)
+            return json.dumps(self._suspended_notice())
         if self._tools_offline or not self._router.all_tools:
             # The truth, so the model reports an outage instead of inventing a
             # reason a specific capability is missing.
@@ -1156,25 +1166,10 @@ class FridayAgent(Agent):
         server's own driver or a CLI child - whoever acquires first drives.
         """
         if self._objective_engine is None:
-            # Capability calls from the driver go through the MCP dispatch
-            # first, and fall back to the agent's own router only when the
-            # server cannot carry the capability at all (an adapter gap), so
-            # a durable run never bypasses the policy the server enforces.
-            local_dispatch = objective_cli.build_dispatch()
-
-            def _adapter_gap(result) -> bool:
-                return (isinstance(result, dict)
-                        and str(result.get("status") or "").lower()
-                        in ("not_configured", "unsupported"))
-
-            async def call_capability(capability: str, arguments: dict):
-                result = await local_dispatch(capability, arguments)
-                if _adapter_gap(result):
-                    router = getattr(self, "_router", None)
-                    if router is not None and router.invocable(capability):
-                        return await self._call_capability(capability,
-                                                           arguments)
-                return result
+            call_capability = objective_port(
+                objective_cli.build_dispatch(),
+                router_of=lambda: getattr(self, "_router", None),
+                call_via_router=self._call_capability)
 
             from friday import hermes_health as hh
 
@@ -1272,6 +1267,21 @@ class FridayAgent(Agent):
             # A reply with the tools still on the table beats no reply.
             logger.exception("could not withhold the tools; the turn goes on")
 
+    def _suspended_notice(self) -> dict:
+        """What to say while the MCP firewall withholds the tool server's
+        tools (MCP-001): the truth, which is a safety stop, not an outage."""
+        return {
+            "error": "mcp_suspended",
+            "found": 0,
+            "say_this": "My tool server changed since it was approved, boss, so "
+                        "I've switched its tools off until it's rechecked - a "
+                        "safety stop on my side.",
+            "do_not": "Do not say a particular capability is missing, and do "
+                      "not act from memory; the owner revalidates the server "
+                      "first.",
+            "why": self._tools_suspended[:300],
+        }
+
     async def _narrow_tools(self) -> None:
         """
         After MCP setup, hide everything the core set does not need.
@@ -1294,6 +1304,17 @@ class FridayAgent(Agent):
             logger.error(
                 "MCP exposed no tools - every capability is unavailable. "
                 "Is the server up at %s?", mcp_sse_url())
+            return
+
+        # MCP-001: a tool server FRIDAY does not run itself is held to what
+        # was pinned; a change nobody asked for withholds all of its tools.
+        tools, self._tools_suspended = mcp_firewall.admitted_tools(mcp_sse_url(), tools)
+        if self._tools_suspended:
+            self._tools_offline = True
+            self._router.load([])
+            self._apply_tools()
+            logger.error("MCP server %s is suspended by the firewall: %s",
+                         mcp_sse_url(), self._tools_suspended)
             return
 
         if self._tools_offline:
@@ -1442,6 +1463,14 @@ class FridayAgent(Agent):
         self._already_read = ()
         self._acted_this_turn = ()
         self._spoke_this_turn = False
+        if await stop_or_resume(
+                text,
+                say=lambda note: self.session.say(note, allow_interruptions=False),
+                interrupt=lambda: self.session.interrupt()):
+            raise StopResponse()
+        await settle_what_he_answered(
+            turn_ctx, text,
+            say=lambda note: self.session.say(note, allow_interruptions=True))
         # The owner's words for THIS turn. `use_capability` licenses a
         # Friday-own write against these and nothing else (A-036): a page
         # the model reads mid-turn cannot become his instruction.
@@ -1454,6 +1483,12 @@ class FridayAgent(Agent):
         if read:
             self.stop_re_reading()
         self.prepare_turn(turn_ctx, text)
+
+    async def _settle_pending_confirmation(self, turn_ctx, text: str) -> None:
+        """The agent's own voice for `settle_what_he_answered`."""
+        await settle_what_he_answered(
+            turn_ctx, text,
+            say=lambda note: self.session.say(note, allow_interruptions=True))
 
     async def on_exit(self) -> None:
         await self._learner.aclose()
@@ -1528,6 +1563,54 @@ class FridayAgent(Agent):
 # ---------------------------------------------------------------------------
 # LiveKit entry point
 # ---------------------------------------------------------------------------
+
+
+#: MCP tools the router fallback tells which objective is calling, so the
+#: server can hold the call to that objective's stored execution envelope
+#: (`hermes_control._objective_envelope`). The router hands back a tool with
+#: no schema to ask, so this is a list, kept beside the port that uses it.
+RUN_BOUND_TOOLS = frozenset({"hermes_delegate"})
+
+
+def objective_port(local_dispatch, *, router_of, call_via_router):
+    """
+    The port the agent's objective engine calls.
+
+    Capability calls go through the server-side dispatch first, carrying the
+    task's Run - its lineage and envelope, which the runtime enforces from it
+    (file roots, network scope) - and fall back to the agent's own router
+    only when the server cannot carry the capability at all (an adapter gap),
+    so a durable run never bypasses the policy the server enforces. This
+    port used to take no `run`, so every task reached the runtime as a
+    default Run: the person, attended, with no envelope (Slice 2).
+
+    The router fallback is an MCP tool call, which carries no Run; the
+    executor has already held the task to its envelope and lineage before
+    this port is called. A run-bound tool is told the task's own objective
+    id, which replaces any the plan's arguments carried, so the server holds
+    it to that objective's stored envelope (Slice 2 step 8).
+    """
+    def _adapter_gap(result) -> bool:
+        return (isinstance(result, dict)
+                and str(result.get("status") or "").lower()
+                in ("not_configured", "unsupported"))
+
+    async def call_capability(capability: str, arguments: dict, *, run=None):
+        result = await local_dispatch(capability, arguments, run=run)
+        if _adapter_gap(result):
+            router = router_of()
+            if router is not None and router.invocable(capability):
+                if capability in RUN_BOUND_TOOLS:
+                    arguments = {k: v for k, v in arguments.items()
+                                 if k != "objective_run_id"}
+                    envelope = getattr(run, "envelope", None)
+                    if envelope is not None:
+                        arguments["objective_run_id"] = (
+                            envelope.objective_id or envelope.run_id)
+                return await call_via_router(capability, arguments)
+        return result
+
+    return call_capability
 
 
 def text_input_callback(agent: "FridayAgent"):
@@ -1786,6 +1869,51 @@ async def check_what_he_asserted(turn_ctx, user_text: str, *,
     except Exception:                                        # noqa: BLE001
         logger.exception("could not put the findings in front of the model")
         return False
+
+
+async def stop_or_resume(text: str, *, say, interrupt) -> bool:
+    """
+    STOP-001: the spoken emergency stop and its release, acted on before any
+    model hears the turn - the model does not get to refuse STOP. True when
+    the turn was one of them, and the caller ends the turn there.
+    """
+    from friday import stop
+
+    if stop.is_stop_phrase(text):
+        stop.emergency_stop(f"spoken: {text}", actor="person")
+        try:
+            # PRD section 53: stop FRIDAY's own speech and generation too.
+            interrupt()
+        except Exception:                                   # noqa: BLE001 - logged; the stop stands
+            logger.exception("the stop could not interrupt speech")
+        await say("Stopped, sir. Nothing new starts until you say 'resume everything'.")
+        return True
+    if stop.is_resume_phrase(text):
+        resumed = stop.resume(actor="person")
+        await say("Resumed, sir." if resumed else "Nothing was stopped, sir.")
+        return True
+    return False
+
+
+async def settle_what_he_answered(turn_ctx, text: str, *, say) -> None:
+    """
+    A yes or no settles a pending confirmation from ANY FRIDAY process,
+    deterministically, before the model sees the words (PRD v7, V7-D08
+    step 4b). Mirrors `voice_brain.reply`'s use of the same helper - the
+    person answers where the person is, which is rarely the process that
+    asked. `say` speaks, and is only called when there is something to ask.
+    """
+    from friday import approval, confirmation as CF
+
+    verdict, note = approval.settle(CF.book, text)
+    if verdict is None and note:
+        # More than one thing is waiting: ask which, and stop here - an
+        # unmatched yes must not reach the model as if it were an ordinary
+        # answer.
+        await say(note)
+        raise StopResponse()
+    if verdict is not None and note:
+        turn_ctx.add_message(role="system", content=note)
 
 
 async def research_first(turn_ctx, user_text: str) -> bool:
@@ -2401,6 +2529,10 @@ async def speak_progress_digests(session, sup=None, state=None) -> dict:
 
 
 async def entrypoint(ctx: JobContext) -> None:
+    # STOP-001: this process honours an emergency stop pressed anywhere.
+    from friday import stop
+
+    stop.watch()
     settle_power_requests()
     config = session_config()
     logger.info(

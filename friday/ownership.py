@@ -225,6 +225,14 @@ def _bound_arguments(function, call_args, call_kwargs) -> dict | None:
         return None
 
 
+def _stopped() -> dict | None:
+    """STOP-001: while the emergency stop is latched, every conversational
+    tool answers with the refusal instead of acting."""
+    from friday import stop
+
+    return stop.refusal()
+
+
 def guard(mcp):
     """
     Wrap an MCP server so every tool it registers checks for a claim first.
@@ -248,6 +256,9 @@ def guard(mcp):
                 capability_id = function.__name__
                 if inspect.iscoroutinefunction(function):
                     async def guarded(*call_args, **call_kwargs):
+                        stopped = _stopped()
+                        if stopped:
+                            return stopped
                         owner = claimed_by(
                             capability_id,
                             arguments=_bound_arguments(
@@ -257,6 +268,9 @@ def guard(mcp):
                         return await function(*call_args, **call_kwargs)
                 else:
                     def guarded(*call_args, **call_kwargs):
+                        stopped = _stopped()
+                        if stopped:
+                            return stopped
                         owner = claimed_by(
                             capability_id,
                             arguments=_bound_arguments(

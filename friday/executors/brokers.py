@@ -43,9 +43,15 @@ import json
 
 import logging
 
+import os
+
 import re
 
 from dataclasses import dataclass, field
+
+from pathlib import Path, PurePosixPath
+
+from friday import contracts as c
 
 from friday.store import FACT, PREFERENCE, Store
 
@@ -130,6 +136,162 @@ def profile_for(intent: str) -> Profile:
             "update", "change", "create")):
         return BUILD
     return EXPLORE
+
+
+# ---------------------------------------------------------------------------
+# A profile held to one run's execution envelope (PRD v7 SEC-005)
+# ---------------------------------------------------------------------------
+
+#: The strength vocabulary and the refusal are shared with every worker type,
+#: so they live with the envelope in `contracts`.
+ENFORCED = c.ENFORCED
+ADVISORY = c.ADVISORY
+OutsideEnvelope = c.OutsideEnvelope
+
+#: The CLI refuses any call no rule allows, rather than waiting on a prompt
+#: nobody can answer - so the allow list below is the whole of what it may do.
+ENVELOPE_PERMISSION_MODE = "dontAsk"
+
+#: File readers need no rule inside the working directories, and a bare rule
+#: for one matches every path on the machine, so under an envelope they get
+#: none: the envelope's roots become the working directories instead.
+FILE_READERS: tuple[str, ...] = ('Read', 'Glob', 'Grep', 'NotebookRead')
+
+WEB_TOOLS: tuple[str, ...] = ('WebFetch', 'WebSearch')
+
+SHELLS: tuple[str, ...] = ('Bash', 'PowerShell')
+
+
+@dataclass(frozen=True)
+class Terms:
+    """What the CLI is told, compiled from a profile and an envelope."""
+
+    allowed: tuple[str, ...]
+    disallowed: tuple[str, ...]
+    add_dirs: tuple[str, ...]
+    permissions: dict
+    strength: dict
+
+
+def rule_path(path: str, *, resolve: bool = True) -> str:
+    """
+    An absolute path as the CLI's permission rules spell it: `//` anchors at
+    the filesystem root (a single `/` would anchor at the settings file), and
+    on Windows `C:\\x` is matched as `/c/x`. `resolve=False` keeps a link's
+    own spelling rather than its target's.
+    """
+    real = Path(path).resolve() if resolve else Path(os.path.abspath(path))
+    if real.drive:
+        rest = PurePosixPath(*real.parts[1:]).as_posix() if len(real.parts) > 1 else ""
+        return f"//{real.drive[0].lower()}" + (f"/{rest}" if rest else "")
+    return "/" + real.as_posix().rstrip("/")
+
+
+def _network_path(path: str) -> bool:
+    """A UNC path. Resolving one can contact the host it names, and the CLI
+    does not take one as a working directory."""
+    return str(path).startswith(("\\\\", "//"))
+
+
+def _web_rules(pattern: str) -> tuple[str, ...]:
+    """`.example.com` names the domain and everything under it."""
+    if pattern.startswith("."):
+        return (f"WebFetch(domain:{pattern[1:]})", f"WebFetch(domain:*{pattern})")
+    return (f"WebFetch(domain:{pattern})",)
+
+
+def within_envelope(profile: Profile, envelope: c.Envelope,
+                    workspace: str) -> Terms:
+    """
+    `profile`, narrowed to `envelope`, for a CLI started in `workspace`.
+
+    Only ever narrower than the profile: a tool the profile does not give is
+    never added, and nothing the task itself says (its paths, its
+    constraints) is read here, so a plan cannot widen what its run may do.
+    Refuses outright - no launch - when the envelope has expired or the
+    workspace is outside it.
+    """
+    if envelope.expired():
+        raise OutsideEnvelope("this run's envelope has expired")
+    remote = [p for p in (workspace, *envelope.read_roots, *envelope.write_roots)
+              if _network_path(p)]
+    if remote:
+        raise OutsideEnvelope(
+            f"a network path cannot be a working directory here: {remote[0]}")
+    if not envelope.reads(workspace):
+        raise OutsideEnvelope(
+            f"the workspace {workspace} is outside this run's envelope")
+    writes = any(tool in WRITE_TOOLS for tool in profile.allowed)
+    if writes and not envelope.writes(workspace):
+        raise OutsideEnvelope(
+            f"a run that writes needs its workspace {workspace} inside a "
+            "write root of its envelope")
+
+    allowed = [tool for tool in profile.allowed
+               if tool not in FILE_READERS + WRITE_TOOLS + WEB_TOOLS]
+    disallowed = list(profile.disallowed)
+
+    # Read material may not reach a terminal (TRUST-002). The runtime refuses
+    # the capability first; the launch holds the same line on its own.
+    if envelope.provenance == c.READ_MATERIAL:
+        allowed = [tool for tool in allowed
+                   if not tool.startswith(tuple(f"{s}(" for s in SHELLS))]
+        disallowed += SHELLS
+
+    if writes:
+        # Both spellings of a linked root: the CLI checks a link and its
+        # target, and an allow rule that matches only one of them asks.
+        allowed += [f"Edit({spelling}/**)"
+                    for root in dict.fromkeys(envelope.write_roots) if root
+                    for spelling in dict.fromkeys(
+                        (rule_path(root, resolve=False), rule_path(root)))]
+    else:
+        disallowed += WRITE_TOOLS
+
+    # The network scope, written into the CLI's own fetch rules. An expired
+    # scope is no scope. SECURITY_TARGETS stays with `target_guard`, which
+    # the CLI's fetch does not consult, so it gives the CLI no web at all.
+    scope = envelope.network
+    mode = c.NET_NONE if scope.expired() else scope.mode
+    web = [tool for tool in profile.allowed if tool in WEB_TOOLS]
+    if mode == c.NET_PUBLIC_WEB_READ:
+        allowed += web
+    elif mode in c.HOSTED_MODES and mode != c.NET_SECURITY_TARGETS:
+        if "WebFetch" in web:
+            allowed += [rule for host in scope.hosts for rule in _web_rules(host)]
+        disallowed.append("WebSearch")
+    else:
+        disallowed += WEB_TOOLS
+
+    here = Path(workspace).resolve()
+    add_dirs = []
+    for root in dict.fromkeys(envelope.read_roots + envelope.write_roots):
+        if not root:
+            continue
+        real = Path(root).resolve()
+        if real == here or real.is_relative_to(here):
+            continue
+        add_dirs.append(str(real))
+
+    shell = any(tool.startswith(tuple(f"{s}(" for s in SHELLS)) for tool in allowed)
+    return Terms(
+        allowed=tuple(dict.fromkeys(allowed)),
+        disallowed=tuple(dict.fromkeys(disallowed)),
+        add_dirs=tuple(dict.fromkeys(add_dirs)),
+        permissions={"blockReadsOutsideWorkingDirectories": True},
+        strength={
+            "tools": ENFORCED,
+            "expiry": ENFORCED,
+            # The CLI's own file tools are held to the roots; a command it
+            # may run (a test suite) opens files itself.
+            "file_roots": ADVISORY if shell else ENFORCED,
+            # A subprocess's own connections are not the CLI's fetch rules,
+            # and on the host nothing below the CLI holds them.
+            "network": ADVISORY,
+            # The executor stops the run at the first call past the limit;
+            # that call may already have started.
+            "tool_calls": ADVISORY,
+        })
 
 
 def denials_from(result: dict) -> list[dict]:
@@ -312,6 +474,11 @@ class QuestionBroker:
                 continue
             for row in rows:
                 if row["kind"] != FACT or row.get("superseded"):
+                    continue
+                # Something read is not something he stated: a page's "fact"
+                # settling where code gets pushed is the poisoning MEM-003
+                # names.
+                if row.get("trust_class") == c.READ_MATERIAL:
                     continue
                 seen.setdefault(f"{row['subject']}={row['value']}", row)
 

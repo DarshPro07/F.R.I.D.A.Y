@@ -96,11 +96,54 @@ def test_the_active_surface_is_a_fraction_of_the_whole():
     active = {t.name for t in tools if t.name in set(router.active_names())}
     starting = [t for t in tools if t.name in active]
 
-    full, reduced = payload(tools), payload(starting)
-    assert reduced < full * 0.45, (
-        f"starting payload {reduced} is not much smaller than {full}"
+    # PRD v7 §82: at least 80% less tool schema than showing every tool, with
+    # the group catalogue the prompt carries counted in.
+    full, reduced = payload(tools), payload(starting) + len(R.catalogue())
+    assert reduced <= full * 0.20, (
+        f"starting payload {reduced} is more than a fifth of {full}"
     )
     assert len(starting) < len(tools) / 2
+
+
+def test_a_tie_in_search_goes_to_the_more_direct_path():
+    """§48: two capabilities that match a request equally well are offered
+    most direct path first - here an HTTP read before a browser read."""
+    router = R.Router()
+    router.load([SchemaTool("browser_zqxreadpage", "zqx summary of a thing"),
+                 SchemaTool("web_zqxreadpage", "zqx summary of a thing")])
+    found = [m["capability"] for m in router.search("zqxreadpage thing")]
+    assert found[:2] == ["web_zqxreadpage", "browser_zqxreadpage"], found
+
+
+def test_the_path_order_never_changes_what_is_offered():
+    """Seven equal matches, six places: the path order may put the browser
+    tool last, but must not push it out - which tools are offered is the
+    score's decision alone."""
+    router = R.Router()
+    router.load([SchemaTool("browser_zqxreadpage", "zqx summary of a thing")]
+                + [SchemaTool(f"web_zqxreadpage_{s}", "zqx summary of a thing") for s in "abcdef"])
+    found = [m["capability"] for m in router.search("zqxreadpage thing", limit=6)]
+    assert found[-1] == "browser_zqxreadpage", found
+    assert len(found) == 6
+
+
+def test_every_long_tail_request_stays_within_the_catalogue_target(searchable):
+    """CTX-002: the model reaches a tool it cannot see through one search,
+    whose result (L1) is all it adds; no request may cost more than a fifth
+    of showing every tool, and the search must find what was needed. The
+    requests are each long-tail capability's own declared intent example."""
+    cases = R.intent_cases(searchable)
+    assert len(cases) >= 100, len(cases)
+    report = R.disclosure_report(searchable, cases)
+    # The measure itself must not flatter: the baseline is every tool's
+    # schema as loaded, and each request pays for the search result it adds.
+    assert report["baseline_chars"] == sum(
+        len(json.dumps(tool.info.raw_schema, sort_keys=True))
+        for tool in searchable.all_tools.values())
+    assert all(row["spent_chars"] > report["starting_chars"] for row in report["rows"])
+    assert report["worst_reduction"] >= 0.80, report["worst_reduction"]
+    missed = [row for row in report["rows"] if not row["found"]]
+    assert not missed, missed[:5]
 
 
 # ---------------------------------------------------------------------------

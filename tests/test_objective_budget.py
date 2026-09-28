@@ -20,6 +20,7 @@ from friday.continuous import ContinuousTaskExecutor
 from friday.model_gateway import GatewayTelemetry
 from friday.objectives import compile_objective
 from friday.store import Store
+from friday.contracts import PERSON
 
 
 class Caps:
@@ -37,7 +38,7 @@ MANIFEST = [{"id": "system_get_info", "description": "cpu"},
 
 def _run(store, tasks):
     return compile_objective(store, request="budget probe", tasks=tasks,
-                             manifest=MANIFEST, objective_summary="budget probe")["run_id"]
+                             manifest=MANIFEST, objective_summary="budget probe", provenance=PERSON, attended=True)["run_id"]
 
 
 async def _drive(store, caps, run_id, seconds=3.0):

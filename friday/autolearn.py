@@ -183,6 +183,7 @@ class AutoLearner:
         unnoticed. Accepted candidates change nothing here; rejections are
         logged for visibility.
         """
+        from friday.contracts import PERSON
         from friday.memory_promotion import Candidate, promote
 
         for item in stored:
@@ -194,6 +195,8 @@ class AutoLearner:
                 statement=f"{subject}: {value}", kind="project_fact",
                 source="autolearn", owner="friday", scope="user",
                 confidence=0.9, evidence=[user_text],
+                # The person's own turn: what the profile system wrote from it.
+                provenance=PERSON,
             )
             decision = promote(candidate)
             if not decision.accepted:

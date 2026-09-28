@@ -22,9 +22,12 @@ success must first say how they checked.
 
 from __future__ import annotations
 
+import os
+import re
 import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from datetime import datetime, timezone
+from pathlib import PurePath
 
 # --- statuses --------------------------------------------------------------
 
@@ -377,12 +380,22 @@ class Run:
     #: positioned to answer. Recorded once, at the only moment anybody
     #: actually knows, and carried unchanged.
     provenance: str = PERSON
+    #: The execution envelope this action runs inside (PRD v7 section 43),
+    #: when it belongs to a durable objective. The capability runtime refuses
+    #: a capability outside it, or after it expires.
+    envelope: "Envelope | None" = None
 
     def __post_init__(self) -> None:
         if self.state not in RUN_STATES:
             raise ContractError(f"unknown run state {self.state!r}")
         if self.provenance not in PROVENANCES:
             raise ContractError(f"unknown provenance {self.provenance!r}")
+        if self.envelope is not None and (
+                self.envelope.provenance, self.envelope.attended) != (
+                self.provenance, self.attended):
+            raise ContractError(
+                f"{self.run_id}: the run and its envelope disagree about "
+                "where it came from or who is there")
 
     @classmethod
     def create(cls, request: str, capability: str | None = None, *,
@@ -433,3 +446,429 @@ class Run:
     @property
     def all_succeeded(self) -> bool:
         return bool(self.results) and not self.unverified
+
+
+# --- execution envelopes (PRD v7 sections 43-44) ----------------------------
+#
+# The scope one run works inside, fixed by FRIDAY's policy before it starts
+# and held outside model context. A worker cannot widen its own envelope:
+# there is no widen, only `narrow`, and a wider scope is a new envelope that
+# policy mints. Enforcement lives with each service that acts - the
+# capability runtime, the coding CLI's launch, the fabric, netguard - and
+# these are the types they share.
+
+@dataclass(frozen=True)
+class Limits:
+    """
+    What one run may consume.
+
+    Defaults are sized for a coding agent on a developer machine, not for a
+    build farm. They are deliberately low enough that a runaway is stopped
+    while the machine is still usable - the whole point is that Friday's
+    voice loop keeps answering while a development run misbehaves.
+    """
+
+    #: Kernel-enforced ceiling for the whole tree, not per process.
+    memory_mb: int = 4096
+    #: Active processes in the job at once; a fork bomb hits this first.
+    processes: int = 64
+    #: Wall clock for one command. The executor has its own for the run; this
+    #: one is what stops `npm test` hanging on a prompt for an hour.
+    seconds: float = 1800.0
+    #: The largest single artifact `export` will copy out.
+    artifact_bytes: int = 64 * 1024 * 1024
+
+
+NET_NONE = "NONE"
+NET_PUBLIC_WEB_READ = "PUBLIC_WEB_READ"
+NET_SELECTED_HOSTS = "SELECTED_HOSTS"
+NET_PROVIDER_ENDPOINTS = "PROVIDER_ENDPOINTS"
+NET_AUTHENTICATED_SERVICES = "AUTHENTICATED_SERVICES"
+NET_SECURITY_TARGETS = "SECURITY_TARGETS"
+NETWORK_MODES = (NET_NONE, NET_PUBLIC_WEB_READ, NET_SELECTED_HOSTS,
+                 NET_PROVIDER_ENDPOINTS, NET_AUTHENTICATED_SERVICES,
+                 NET_SECURITY_TARGETS)
+#: Modes that name their hosts; each needs at least one.
+HOSTED_MODES = (NET_SELECTED_HOSTS, NET_PROVIDER_ENDPOINTS,
+                NET_AUTHENTICATED_SERVICES, NET_SECURITY_TARGETS)
+
+#: An `allowed_capabilities` entry meaning "anything not blocked". Explicit
+#: on purpose: an empty allowlist allows nothing.
+ANY_CAPABILITY = "*"
+
+#: How strongly a part of an envelope holds for one worker (PRD v7 section
+#: 43: reported, not assumed). ENFORCED: the worker, its launcher or FRIDAY
+#: refuses what is outside it. ADVISORY: the worker is told, and something it
+#: may legitimately do (a test suite, a gateway's own tools) is not held to it.
+ENFORCED = "ENFORCED"
+ADVISORY = "ADVISORY"
+
+
+class OutsideEnvelope(Exception):
+    """A run's envelope does not allow this launch or delegation at all."""
+
+
+def _parse_utc(stamp: str) -> datetime | None:
+    if not stamp:
+        return None
+    parsed = datetime.fromisoformat(stamp)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _host_matches(host: str, pattern: str) -> bool:
+    """`.example.com` names the domain and everything under it."""
+    host = (host or "").strip().lower().rstrip(".")
+    pattern = (pattern or "").strip().lower().rstrip(".")
+    if pattern.startswith("."):
+        return host == pattern[1:] or host.endswith(pattern)
+    return bool(host) and host == pattern
+
+
+def _pattern_within(child: str, parent: str) -> bool:
+    """A child host pattern is no wider than its parent's."""
+    child = (child or "").strip().lower().rstrip(".")
+    parent = (parent or "").strip().lower().rstrip(".")
+    if child.startswith("."):
+        # A whole domain fits only under a domain that covers it.
+        return parent.startswith(".") and _host_matches(child[1:], parent)
+    return _host_matches(child, parent)
+
+
+def _under(path: str, root: str) -> bool:
+    """Lexical containment. The real path is resolved again where the path
+    is used (fsjail); this only decides what an envelope may name."""
+    if not path or not root:
+        return False
+    child = PurePath(os.path.normpath(path))
+    parent = PurePath(os.path.normpath(root))
+    return child == parent or child.is_relative_to(parent)
+
+
+def _inside_any(path: str, roots: tuple[str, ...]) -> bool:
+    """`_under` on resolved paths, for a place about to be used rather than
+    named: a link or `..` is judged by where it really lands."""
+    if not path:
+        return False
+    real = os.path.realpath(path)
+    return any(_under(real, os.path.realpath(root)) for root in roots if root)
+
+
+def _later(child: str, parent: str) -> bool:
+    """Whether a child expiry outlives its parent's. No expiry is forever."""
+    ends = _parse_utc(parent)
+    if ends is None:
+        return False
+    child_ends = _parse_utc(child)
+    return child_ends is None or child_ends > ends
+
+
+@dataclass(frozen=True)
+class NetworkScope:
+    """
+    Where a run may connect (PRD section 44). Objective-bound and expiring;
+    revocable through its grant in the store, which netguard consults.
+    """
+
+    mode: str = NET_NONE
+    hosts: tuple[str, ...] = ()
+    objective_id: str = ""
+    expires_at: str = ""
+    #: The store grant that can revoke this scope; "" until one is issued.
+    grant_id: str = ""
+
+    def __post_init__(self) -> None:
+        if self.mode not in NETWORK_MODES:
+            raise ContractError(f"unknown network mode {self.mode!r}")
+        if self.mode in HOSTED_MODES and not self.hosts:
+            raise ContractError(
+                f"{self.mode} names no hosts; say {NET_NONE} if that is meant")
+
+    def expired(self, now: datetime | None = None) -> bool:
+        ends = _parse_utc(self.expires_at)
+        return ends is not None and (now or datetime.now(timezone.utc)) >= ends
+
+    def allows(self, host: str, now: datetime | None = None) -> bool:
+        """This scope's own answer. Private, loopback and metadata addresses
+        stay netguard's to refuse whatever this says; revocation is the
+        store's."""
+        if self.mode == NET_NONE or not host or self.expired(now):
+            return False
+        if self.mode == NET_PUBLIC_WEB_READ:
+            return True
+        return any(_host_matches(host, pattern) for pattern in self.hosts)
+
+    def wider_than(self, parent: "NetworkScope") -> list[str]:
+        """What this scope allows that `parent` does not."""
+        if self.mode == NET_NONE:
+            return []
+        if self.mode != parent.mode:
+            return [f"network mode {parent.mode} -> {self.mode}"]
+        problems = [f"network host {host}" for host in self.hosts
+                    if not any(_pattern_within(host, p) for p in parent.hosts)]
+        if _later(self.expires_at, parent.expires_at):
+            problems.append("network expiry")
+        if parent.objective_id and self.objective_id != parent.objective_id:
+            problems.append("network objective")
+        return problems
+
+
+@dataclass(frozen=True)
+class Envelope:
+    """The deterministic scope of one run (PRD section 43)."""
+
+    run_id: str
+    objective_id: str = ""
+    issuer: str = "friday-policy"
+    provenance: str = PERSON
+    attended: bool = True
+    cwd: str = ""
+    read_roots: tuple[str, ...] = ()
+    write_roots: tuple[str, ...] = ()
+    network: NetworkScope = field(default_factory=NetworkScope)
+    #: Secret aliases the run may have resolved for it - never the values.
+    secrets: tuple[str, ...] = ()
+    allowed_capabilities: tuple[str, ...] = ()
+    blocked_capabilities: tuple[str, ...] = ()
+    limits: Limits = field(default_factory=Limits)
+    #: 0 means no ceiling of its own; the objective's budget still applies.
+    token_limit: int = 0
+    tool_call_limit: int = 0
+    expires_at: str = ""
+    #: capability id -> what it was when the plan was made (PRD v7 JIT-001,
+    #: `capability_runtime.fingerprint`). A capability that has changed since
+    #: is refused at execution. Empty on envelopes from before it.
+    capability_hashes: dict = field(default_factory=dict, hash=False)
+    #: At most this many changes (write or external-action calls) for the
+    #: whole objective (BCON-001); 0 is no ceiling of its own.
+    max_side_effects: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.run_id:
+            raise ContractError("an envelope belongs to one run")
+        if self.provenance not in PROVENANCES:
+            raise ContractError(f"unknown provenance {self.provenance!r}")
+
+    def expired(self, now: datetime | None = None) -> bool:
+        ends = _parse_utc(self.expires_at)
+        return ends is not None and (now or datetime.now(timezone.utc)) >= ends
+
+    def seconds_left(self, now: datetime | None = None) -> float | None:
+        """Until the envelope expires; None when it names no expiry."""
+        ends = _parse_utc(self.expires_at)
+        if ends is None:
+            return None
+        return (ends - (now or datetime.now(timezone.utc))).total_seconds()
+
+    def reads(self, path: str) -> bool:
+        """Whether `path` lies inside a read or a write root, on real paths."""
+        return _inside_any(path, self.read_roots + self.write_roots)
+
+    def writes(self, path: str) -> bool:
+        """Whether `path` lies inside a write root, on real paths."""
+        return _inside_any(path, self.write_roots)
+
+    def permits(self, capability_id: str) -> str:
+        """Empty when the capability is inside the envelope, otherwise why not."""
+        if capability_id in self.blocked_capabilities:
+            return f"{capability_id} is blocked for this run"
+        if (ANY_CAPABILITY not in self.allowed_capabilities
+                and capability_id not in self.allowed_capabilities):
+            return f"{capability_id} is outside this run's envelope"
+        return ""
+
+    # -- narrow, never widen ---------------------------------------------
+
+    def narrow(self, **changes) -> "Envelope":
+        """
+        A tighter envelope, for a sub-worker or a later step. Every change
+        must fit inside what this envelope already allows; anything wider
+        raises rather than being quietly clipped, because a clipped request
+        is a request somebody thought they had.
+        """
+        known = {f.name for f in fields(Envelope)}
+        unknown = sorted(set(changes) - known)
+        if unknown:
+            raise ContractError(f"an envelope has no field {unknown}")
+        child = replace(self, **changes)
+        problems = child.wider_than(self)
+        if problems:
+            raise ContractError(
+                f"{child.run_id} would be wider than {self.run_id}: "
+                + "; ".join(problems))
+        return child
+
+    def wider_than(self, parent: "Envelope") -> list[str]:
+        """What this envelope allows that `parent` does not; empty when it fits."""
+        problems = []
+        if self.objective_id != parent.objective_id:
+            problems.append("objective")
+        if self.issuer != parent.issuer:
+            problems.append("issuer")
+        if self.provenance != parent.provenance and self.provenance != READ_MATERIAL:
+            problems.append(f"provenance {parent.provenance} -> {self.provenance}")
+        if self.attended and not parent.attended:
+            problems.append("attended")
+        readable = parent.read_roots + parent.write_roots
+        if self.cwd != parent.cwd and not any(_under(self.cwd, r) for r in readable):
+            problems.append(f"cwd {self.cwd}")
+        problems += [f"read root {r}" for r in self.read_roots
+                     if not any(_under(r, p) for p in readable)]
+        problems += [f"write root {r}" for r in self.write_roots
+                     if not any(_under(r, p) for p in parent.write_roots)]
+        problems += self.network.wider_than(parent.network)
+        problems += [f"secret {s}" for s in self.secrets
+                     if s not in parent.secrets]
+        if ANY_CAPABILITY not in parent.allowed_capabilities:
+            problems += [f"capability {cap}" for cap in self.allowed_capabilities
+                         if cap not in parent.allowed_capabilities]
+        problems += [f"unblocked {cap}" for cap in parent.blocked_capabilities
+                     if cap not in self.blocked_capabilities]
+        for name in ("memory_mb", "processes", "seconds", "artifact_bytes"):
+            if getattr(self.limits, name) > getattr(parent.limits, name):
+                problems.append(f"limit {name}")
+        for name in ("token_limit", "tool_call_limit", "max_side_effects"):
+            mine, theirs = getattr(self, name), getattr(parent, name)
+            if theirs and (mine == 0 or mine > theirs):
+                problems.append(name)
+        if _later(self.expires_at, parent.expires_at):
+            problems.append("expiry")
+        # A planned version may be kept, never dropped or swapped: without it
+        # the check at the moment of action (JIT-001) is off for that
+        # capability (V7-D44). A child may pin more than its parent did.
+        problems += [f"capability version {cap}"
+                     for cap, fingerprint in parent.capability_hashes.items()
+                     if self.capability_hashes.get(cap) != fingerprint]
+        return problems
+
+    # -- the stored form -------------------------------------------------
+
+    def to_dict(self) -> dict:
+        return {
+            "run_id": self.run_id, "objective_id": self.objective_id,
+            "issuer": self.issuer, "provenance": self.provenance,
+            "attended": self.attended, "cwd": self.cwd,
+            "read_roots": list(self.read_roots),
+            "write_roots": list(self.write_roots),
+            "network": {"mode": self.network.mode,
+                        "hosts": list(self.network.hosts),
+                        "objective_id": self.network.objective_id,
+                        "expires_at": self.network.expires_at,
+                        "grant_id": self.network.grant_id},
+            "secrets": list(self.secrets),
+            "allowed_capabilities": list(self.allowed_capabilities),
+            "blocked_capabilities": list(self.blocked_capabilities),
+            "limits": {"memory_mb": self.limits.memory_mb,
+                       "processes": self.limits.processes,
+                       "seconds": self.limits.seconds,
+                       "artifact_bytes": self.limits.artifact_bytes},
+            "token_limit": self.token_limit,
+            "tool_call_limit": self.tool_call_limit,
+            "expires_at": self.expires_at,
+            "capability_hashes": dict(self.capability_hashes),
+            "max_side_effects": self.max_side_effects,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "Envelope":
+        """
+        The stored form, read strictly. `to_dict` writes the lineage and the
+        expiry, so a row without them is not an envelope FRIDAY issued, and
+        reading it with the most trusting defaults - the person, attended,
+        forever - is how it would be trusted anyway (Slice 2 review). Raises
+        ContractError, which every reader treats as no envelope: fail closed.
+        """
+        missing = [key for key in ("run_id", "provenance", "attended", "expires_at")
+                   if key not in raw]
+        if missing:
+            raise ContractError(f"a stored envelope must say {', '.join(missing)}")
+        if not isinstance(raw["attended"], bool):
+            raise ContractError("a stored envelope's attended is true or false")
+        if not raw["expires_at"]:
+            raise ContractError("a stored envelope must expire")
+        network = dict(raw.get("network") or {})
+        network["hosts"] = tuple(network.get("hosts") or ())
+        scope = NetworkScope(**network)
+        if scope.mode != NET_NONE and not scope.expires_at:
+            raise ContractError(f"a stored {scope.mode} network scope must expire")
+        return cls(
+            run_id=raw["run_id"], objective_id=raw.get("objective_id", ""),
+            issuer=raw.get("issuer", "friday-policy"),
+            provenance=raw["provenance"],
+            attended=raw["attended"], cwd=raw.get("cwd", ""),
+            read_roots=tuple(raw.get("read_roots") or ()),
+            write_roots=tuple(raw.get("write_roots") or ()),
+            network=scope,
+            secrets=tuple(raw.get("secrets") or ()),
+            allowed_capabilities=tuple(raw.get("allowed_capabilities") or ()),
+            blocked_capabilities=tuple(raw.get("blocked_capabilities") or ()),
+            limits=Limits(**(raw.get("limits") or {})),
+            token_limit=int(raw.get("token_limit", 0)),
+            tool_call_limit=int(raw.get("tool_call_limit", 0)),
+            expires_at=raw["expires_at"],
+            capability_hashes=dict(raw.get("capability_hashes") or {}),
+            max_side_effects=int(raw.get("max_side_effects", 0)),
+        )
+
+
+#: Kinds of action a person forbids or limits (PRD v7 BCON-001), by the words
+#: that name them - in a request ("do not delete anything") and in a
+#: capability's id (`files_delete`, `email_send`).
+ACTION_CLASSES = {
+    "delete": ("delete", "erase", "remove", "recycle", "purge", "empty", "wipe"),
+    "send": ("send", "share", "publish", "post", "email", "message", "reply"),
+    "spend": ("buy", "purchase", "pay", "spend", "order"),
+    "power": ("shutdown", "restart", "reboot", "shut"),
+}
+
+
+def action_class(words: str) -> str:
+    """The action class a verb or a capability id names, or ""."""
+    tokens = [w for w in re.split(r"[^a-z]+", (words or "").lower()) if w]
+    for name, vocabulary in ACTION_CLASSES.items():
+        if any(token in vocabulary for token in tokens):
+            return name
+    return ""
+
+
+@dataclass(frozen=True)
+class ObjectiveContract:
+    """
+    What the person asked for, as the intent compiler read it (PRD v7 §10.3,
+    §11): the outcome, why they want it, what must and must not happen, how
+    to speak while working, and the exact words and names they gave. Kept
+    beside the task graph so the run is held to the request, not to a
+    paraphrase of it.
+    """
+
+    goal: str
+    purpose: tuple[str, ...] = ()
+    hard_constraints: tuple[str, ...] = ()
+    preferences: tuple[str, ...] = ()
+    #: Names, paths and words the person gave, which the plan uses verbatim.
+    exact_literals: tuple[str, ...] = ()
+    #: What done means, as the compiler derived it from the goals.
+    success_criteria: tuple[str, ...] = ()
+    assumptions: tuple[str, ...] = ()
+    open_questions: tuple[str, ...] = ()
+    #: What is enforced, not only recorded (BCON-001): "forbidden" action
+    #: classes, "protected" names per class, "max_side_effects".
+    governance: dict = field(default_factory=dict, hash=False)
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        if not (self.goal or "").strip():
+            raise ContractError("an objective contract states its goal")
+
+    def to_dict(self) -> dict:
+        return {f.name: (list(getattr(self, f.name))
+                         if isinstance(getattr(self, f.name), tuple)
+                         else getattr(self, f.name)) for f in fields(self)}
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "ObjectiveContract":
+        known = {f.name for f in fields(cls)}
+        unknown = sorted(set(raw) - known)
+        if unknown:
+            raise ContractError(f"an objective contract has no field {unknown}")
+        return cls(**{name: (tuple(value) if isinstance(value, list) else value)
+                      for name, value in raw.items()})

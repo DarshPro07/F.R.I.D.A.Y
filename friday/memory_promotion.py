@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from friday import contracts as c
 from friday.brain import _sensitive
 from friday.store import FACT, PREFERENCE, Store
 
@@ -26,6 +27,11 @@ ONE_OFF_KINDS = frozenset({"outcome"})
 
 PROCEDURE_KIND = "procedure"
 DECISION_KIND = "decision"
+PREFERENCE_KIND = "preference"
+
+#: Scopes FRIDAY is shown as what the person wants and who they are
+#: (`memory_stack.preferences`). Read material is never filed under them.
+PERSON_SCOPES = frozenset({"preferences", "wants", "goals", "identity"})
 
 #: `memories` table kinds a candidate kind maps onto. `decision` and
 #: `procedure` are handled separately - they don't live in `memories`.
@@ -35,7 +41,9 @@ KIND_TO_STORE_KIND = {
     "relation": FACT,
 }
 
-SKILL_CANDIDATES_DIR = Path(__file__).resolve().parent.parent / "data" / "skills_candidates"
+from friday.config import DATA_DIR as _DATA_DIR
+
+SKILL_CANDIDATES_DIR = _DATA_DIR / "skills_candidates"
 
 
 @dataclass(frozen=True)
@@ -46,10 +54,16 @@ class Candidate:
     owner: str
     scope: str
     confidence: float
+    #: Where it came from (PRD v7 MEM-002): `contracts.PERSON`, or
+    #: `contracts.READ_MATERIAL` for anything a page, a message, a tool or a
+    #: worker said. Required: every producer decides, none is defaulted.
+    provenance: str
     evidence: list[str] = field(default_factory=list)
     observed_at: str = ""
 
     def __post_init__(self) -> None:
+        if self.provenance not in c.PROVENANCES:
+            raise ValueError(f"unknown provenance {self.provenance!r}")
         if not self.observed_at:
             object.__setattr__(
                 self, "observed_at", datetime.now(timezone.utc).isoformat()
@@ -94,6 +108,18 @@ def promote(candidate: Candidate, *, store: Store | None = None) -> Decision:
         )
     if candidate.kind in ONE_OFF_KINDS:
         return Decision(False, "refused: one-off task state, not durable")
+    read = candidate.provenance == c.READ_MATERIAL
+    if read:
+        # Read material may be remembered, never with the person's voice.
+        if candidate.kind == PREFERENCE_KIND:
+            return Decision(False, "refused: read material cannot set a preference; "
+                                   "that is the person's to state")
+        if candidate.kind == DECISION_KIND:
+            return Decision(False, "refused: read material cannot record a decision; "
+                                   "a decision settles a worker's questions for the person")
+        if candidate.scope in PERSON_SCOPES:
+            return Decision(False, f"refused: read material cannot be filed under "
+                                   f"{candidate.scope}; that speaks for the person")
 
     if candidate.kind == PROCEDURE_KIND:
         return _to_skill_candidate(candidate)
@@ -117,7 +143,25 @@ def promote(candidate: Candidate, *, store: Store | None = None) -> Decision:
 
     if same_kind:
         current = same_kind[0]
-        stronger = candidate.confidence > float(current["confidence"])
+        # Superseding retires every active row on this subject and kind, so
+        # every one of them is checked, not only the newest (Slice 3 review).
+        theirs = next((row for row in same_kind
+                       if row.get("trust_class") != c.READ_MATERIAL), None)
+        if read and theirs is not None:
+            # Confidence is the writer's own claim; it does not let something
+            # read overrule what the person said (or a row that predates
+            # trust classes). Both stay, the disagreement is flagged.
+            store.add_contradiction(
+                subject=subject, existing_value=theirs["value"],
+                existing_kind=theirs["kind"], new_value=candidate.statement,
+                new_kind=store_kind, resolution="pending")
+            return Decision(False, "contradiction: read material cannot overrule "
+                                   "what the person said; kept theirs, flagged",
+                            target="rejected")
+        # What the person says replaces something read, whatever confidence
+        # the read one claimed.
+        stronger = candidate.confidence > float(current["confidence"]) or (
+            not read and current.get("trust_class") == c.READ_MATERIAL)
         store.add_contradiction(
             subject=subject,
             existing_value=current["value"],
@@ -134,6 +178,7 @@ def promote(candidate: Candidate, *, store: Store | None = None) -> Decision:
         store.remember(
             subject, candidate.statement, kind=store_kind, source=candidate.source,
             scope=candidate.scope, confidence=candidate.confidence, supersede=True,
+            trust_class=candidate.provenance,
         )
         return Decision(
             True, "accepted: superseded a weaker contradicting fact",
@@ -143,6 +188,7 @@ def promote(candidate: Candidate, *, store: Store | None = None) -> Decision:
     store.remember(
         subject, candidate.statement, kind=store_kind, source=candidate.source,
         scope=candidate.scope, confidence=candidate.confidence, supersede=False,
+        trust_class=candidate.provenance,
     )
     return Decision(True, "accepted", target="memory")
 
@@ -178,14 +224,14 @@ def promote_handoff(handoff, *, store: Store | None = None) -> list[Decision]:
         candidate = Candidate(
             statement=text, kind="project_fact", source=f"handoff:{handoff.task_id}",
             owner=handoff.agent or "friday", scope="project", confidence=0.75,
-            evidence=[handoff.summary or text],
+            evidence=[handoff.summary or text], provenance=c.READ_MATERIAL,
         )
         decisions.append(promote(candidate, store=store))
     for text in handoff.skill_candidates:
         candidate = Candidate(
             statement=text, kind=PROCEDURE_KIND, source=f"handoff:{handoff.task_id}",
             owner=handoff.agent or "friday", scope="project", confidence=0.75,
-            evidence=[handoff.summary or text],
+            evidence=[handoff.summary or text], provenance=c.READ_MATERIAL,
         )
         decisions.append(promote(candidate, store=store))
     return decisions

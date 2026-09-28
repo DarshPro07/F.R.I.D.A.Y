@@ -25,6 +25,7 @@ import base64
 import json
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -49,15 +50,68 @@ def _safe_alias(alias: str) -> str:
     return alias
 
 
-class SecretBroker:
-    """Alias -> encrypted secret, with model-facing metadata only."""
+def _migrate_legacy_secrets(target: Path) -> list[str]:
+    """Move a pre-workspace install's key and store into `target`.
 
-    def __init__(self, home: Path | str | None = None) -> None:
-        self.home = Path(home or _DEFAULT_HOME)
+    Returns what was moved, for the doctor. Idempotent and conservative: it
+    refuses to overwrite anything already in `target`, because a half-moved
+    key pair would leave secrets that decrypt with neither key.
+    """
+    legacy_key = _DEFAULT_HOME / "broker.key"
+    legacy_store = _DEFAULT_HOME / "secrets.enc.json"
+    if not legacy_key.exists() and not legacy_store.exists():
+        return []
+    if (target / "broker.key").exists() or (target / "secrets.enc.json").exists():
+        return []
+    target.mkdir(parents=True, exist_ok=True)
+    moved = []
+    for source in (legacy_key, legacy_store):
+        if source.exists():
+            # shutil.move, not Path.replace: the state root and the user
+            # profile can be on different drives, and rename across drives
+            # is WinError 17 (the same defect the launcher hit migrating
+            # .env - see docs/product/EXE_AND_SKILL_SYSTEM_LEDGER.md).
+            shutil.move(str(source), str(target / source.name))
+            moved.append(source.name)
+    return moved
+
+
+class SecretBroker:
+    """Alias -> encrypted secret, with model-facing metadata only.
+
+    Per workspace (FR-PRV-002: "secrets are namespaced per workspace/user").
+    Each workspace gets its own directory holding its own Fernet key and its
+    own encrypted store, so reading another workspace's secrets needs that
+    workspace's key file and not merely its name. This is the one place the
+    PRD's word "cryptographically" is literally true of the separation.
+    """
+
+    def __init__(self, home: Path | str | None = None,
+                 workspace_id: str | None = None) -> None:
+        self.home = Path(home) if home else self.home_for(workspace_id)
         self.home.mkdir(parents=True, exist_ok=True)
         self._key_path = self.home / "broker.key"
         self._store_path = self.home / "secrets.enc.json"
         self._fernet = self._load_fernet()
+
+    @staticmethod
+    def home_for(workspace_id: str | None = None) -> Path:
+        """`<base>/workspaces/<id>`, migrating a pre-boundary install once.
+
+        An install that stored secrets before workspaces existed has them at
+        `<base>/broker.key` and `<base>/secrets.enc.json`. Simply changing
+        the default path would make those secrets invisible - the owner's
+        stored credentials would appear to have vanished, which is a
+        regression dressed as a security improvement. So the legacy pair is
+        moved into the `default` workspace the first time that workspace is
+        opened, and only when the destination is still empty.
+        """
+        from friday.workspace import DEFAULT_ID, resolve
+        owner = resolve(workspace_id)
+        target = _DEFAULT_HOME / "workspaces" / owner
+        if owner == DEFAULT_ID:
+            _migrate_legacy_secrets(target)
+        return target
 
     # -- crypto ------------------------------------------------------------
 

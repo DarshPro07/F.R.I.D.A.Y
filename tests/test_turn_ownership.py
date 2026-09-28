@@ -34,6 +34,7 @@ import pytest
 from friday import objectives as O
 from friday import ownership
 from friday.store import Store
+from friday.contracts import PERSON
 COMPOUND = 'Friday, check my computer, open Paint, find one current technology story, and finish the complete job without me saying continue.'
 WHAT_THE_REPLY_DID = ['system_resource_usage', 'system_list_processes', 'apps_open', 'web_search']
 
@@ -227,8 +228,8 @@ def test_a_second_objective_gets_its_own_task_graph(tmp_path):
     store = Store(tmp_path / 'two.sqlite3')
     manifest = caps.as_dicts()
     specs = [{'capability': 'system_get_info', 'arguments': {}, 'dependencies': []}, {'capability': 'apps_open', 'arguments': {'name': 'Paint'}, 'dependencies': []}]
-    first = O.compile_objective(store, request='one', tasks=specs, manifest=manifest, objective_summary='one')
-    second = O.compile_objective(store, request='two', tasks=specs, manifest=manifest, objective_summary='two')
+    first = O.compile_objective(store, request='one', tasks=specs, manifest=manifest, objective_summary='one', provenance=PERSON, attended=True)
+    second = O.compile_objective(store, request='two', tasks=specs, manifest=manifest, objective_summary='two', provenance=PERSON, attended=True)
     assert first['run_id'] != second['run_id']
     assert len(store.objective_tasks(first['run_id'])) == 2, 'the first run lost its tasks to the second'
     assert len(store.objective_tasks(second['run_id'])) == 2, 'the second objective was admitted with an empty task graph'
@@ -243,7 +244,7 @@ def test_task_ids_are_unique_across_runs(tmp_path):
     specs = [{'capability': 'system_get_info', 'arguments': {}, 'dependencies': []}]
     ids = set()
     for _ in range(3):
-        created = O.compile_objective(store, request='r', tasks=specs, manifest=caps.as_dicts(), objective_summary='r')
+        created = O.compile_objective(store, request='r', tasks=specs, manifest=caps.as_dicts(), objective_summary='r', provenance=PERSON, attended=True)
         for task in store.objective_tasks(created['run_id']):
             assert task['task_id'] not in ids, f"{task['task_id']} was reused across runs"
             ids.add(task['task_id'])
@@ -259,7 +260,7 @@ def test_dependencies_still_resolve_after_the_rename(tmp_path):
     from friday import objectives as O
     store = Store(tmp_path / 'deps.sqlite3')
     specs = [{'capability': 'system_get_info', 'arguments': {}, 'dependencies': []}, {'capability': 'apps_open', 'arguments': {'name': 'Paint'}, 'dependencies': ['t1']}]
-    created = O.compile_objective(store, request='r', tasks=specs, manifest=caps.as_dicts(), objective_summary='r')
+    created = O.compile_objective(store, request='r', tasks=specs, manifest=caps.as_dicts(), objective_summary='r', provenance=PERSON, attended=True)
     tasks = {t['capability']: t for t in store.objective_tasks(created['run_id'])}
     dependency = tasks['apps_open']['dependencies']
     assert len(dependency) == 1

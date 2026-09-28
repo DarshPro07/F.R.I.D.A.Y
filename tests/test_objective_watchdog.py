@@ -19,6 +19,7 @@ import pytest
 from friday.continuous import ContinuousTaskExecutor, RunWatchdog
 from friday.objectives import RUN_TERMINAL, RunStatus, compile_objective
 from friday.store import Store
+from friday.contracts import PERSON
 
 
 class SimpleRegistry:
@@ -55,7 +56,7 @@ def compile_small(store) -> dict:
             {"id": "b", "description": "b"},
             {"id": "c", "description": "c"},
         ],
-        objective_summary="probe",
+        objective_summary="probe", provenance=PERSON, attended=True
     )
 
 

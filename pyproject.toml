@@ -31,6 +31,11 @@ dependencies = [
     "mss>=9",                 # screen capture, vision.capture_screen (MIT)
     "send2trash>=1.8",        # files_recycle: recycle bin, never rm (BSD-3-Clause)
     "pyyaml>=6",              # Hermes profile/config reads (MIT)
+    # Imported at call time by web_rss (friday/toolsets/web.py) and the
+    # YouTube toolset: RSS and caption XML are attacker-influenceable input,
+    # so the code refuses xml.etree - but the package was never declared,
+    # and neither venv had it (found packaging FRIDAY.exe, 2026-09-14).
+    "defusedxml>=0.7",        # safe XML parsing (PSF-2.0)
 ]
 
 [project.optional-dependencies]

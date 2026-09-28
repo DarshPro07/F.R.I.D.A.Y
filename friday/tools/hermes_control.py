@@ -13,18 +13,39 @@ boot and most sessions never delegate.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 import time
+from dataclasses import replace
 
+from friday import contracts as c
 from friday import execution_economics as ee
 from friday import governor as G
 from friday import hermes_bridge as hb
+from friday.policy import PolicyEngine, PolicyError
+from friday.toolsets.system import APPROVAL_PREFIX
 
 logger = logging.getLogger("friday-agent")
 
 _supervisor: hb.HermesSupervisor | None = None
+_engine: PolicyEngine | None = None
 _lock = threading.Lock()
+
+
+def _get_engine() -> PolicyEngine:
+    """The same policy engine shape every other control consults."""
+    global _engine
+    if _engine is None:
+        _engine = PolicyEngine()
+        for tool_id in (t.strip() for t in
+                        os.getenv("ADA_PREAPPROVED_TOOLS", "").split(",") if t.strip()):
+            try:
+                _engine.approve_for_session(tool_id)
+            except PolicyError:
+                continue
+    return _engine
 
 
 def supervisor() -> hb.HermesSupervisor:
@@ -53,11 +74,60 @@ def _broker_answer(question: str, options: list[str]) -> str | None:
     return None
 
 
+def _stop_hermes(reason: str) -> None:
+    """STOP-001: an emergency stop ends the Hermes gateway this process owns,
+    and every run inside it with it."""
+    with _lock:
+        running = _supervisor
+    if running is not None:
+        running.stop()
+
+
+def _register_stop_hook() -> None:
+    from friday import stop
+
+    stop.register_hook("hermes", _stop_hermes)
+
+
+_register_stop_hook()
+
+
 def configure(new_supervisor: hb.HermesSupervisor | None) -> None:
     """Test seam. Production never calls this."""
     global _supervisor
     with _lock:
         _supervisor = new_supervisor
+
+
+def _objective_envelope(run_id: str) -> c.Envelope:
+    """
+    One durable objective's stored envelope, read here from the shared store.
+
+    A caller supplies only the id. The envelope comes from the store, and an
+    envelope can only narrow, so an id pointing at another objective gains a
+    caller nothing. Missing or unreadable is a refusal, as it is for the
+    executor (fail closed).
+    """
+    from friday import objectives as O
+    from friday.toolsets.objectives import store as objective_store
+
+    db = objective_store()
+    row = db.objective_run(run_id)
+    raw = (row or {}).get("envelope")
+    if not raw:
+        raise c.OutsideEnvelope(f"no objective {run_id} with an execution envelope")
+    # The id also decides whose budget the work is charged to, so it is
+    # accepted only while that objective is itself running a delegation.
+    if not any(task.get("capability") == "hermes_delegate"
+               and task.get("status") == O.TASK_RUNNING
+               for task in db.objective_tasks(run_id)):
+        raise c.OutsideEnvelope(
+            f"objective {run_id} is not running a delegation now")
+    try:
+        return c.Envelope.from_dict(json.loads(raw))
+    except (TypeError, ValueError) as exc:
+        raise c.OutsideEnvelope(
+            f"objective {run_id}'s envelope cannot be read ({exc})") from exc
 
 
 def register(mcp):
@@ -67,7 +137,8 @@ def register(mcp):
                         acceptance: str = "", constraints: str = "",
                         code_refs: str = "", skill_hints: str = "",
                         model: str = "", route_reason: str = "",
-                        wait_seconds: int = 5) -> dict:
+                        wait_seconds: int = 5,
+                        objective_run_id: str = "") -> dict:
         """
         Hand one bounded engineering task to the Hermes agent: inspect or
         analyse a project/codebase, find architectural problems, implement
@@ -91,13 +162,62 @@ def register(mcp):
         `model`, say WHY in `route_reason` (e.g. "hard cross-file
         reasoning" or "small bounded read - economical model") - the
         route and its reason are recorded on the durable run.
+
+        `objective_run_id` is set by FRIDAY's objective engine, not chosen in
+        conversation: the delegation is then held to that objective's stored
+        execution envelope (where the session starts, its roots and network
+        in the task's scope, interrupted when the envelope expires).
         """
+        # Delegation hands Hermes terminals and file edits: the policy table
+        # classes it COMMAND_EXECUTION. The same decision every other control
+        # asks for, before anything starts - the resource governor below is
+        # a capacity check, not an authorisation.
+        verdict = _get_engine().decide("hermes_delegate")
+        if not verdict.allowed:
+            return {"status": "failed",
+                    "error": f"{APPROVAL_PREFIX}: {verdict.reason} [{verdict.decision}]"}
         split = (lambda raw: tuple(
             s.strip() for s in (raw or "").split(",") if s.strip()))
         bundle = hb.TaskBundle(
             goal=goal, user_outcome=user_outcome,
             acceptance=split(acceptance), constraints=split(constraints),
             code_refs=split(code_refs), skill_hints=split(skill_hints))
+        bounded = None
+        if objective_run_id:
+            try:
+                envelope = _objective_envelope(objective_run_id)
+                bounded = hb.bounded_by(bundle, envelope)
+            except c.OutsideEnvelope as exc:
+                return {"status": "failed", "error": f"ENVELOPE: {exc}"}
+            bundle = bounded.bundle
+            # CTX-003: the fresh worker starts from a packet, not the history,
+            # so the objective's critical facts go in as recorded and a packet
+            # that would not carry every one of them is not sent.
+            from friday import compaction
+            from friday.toolsets.objectives import store as objective_store
+
+            try:
+                facts = compaction.for_objective(objective_store(), objective_run_id)
+            except (c.ContractError, ValueError, LookupError) as exc:
+                return {"status": "failed",
+                        "error": f"CONTEXT: the objective's record cannot be read: {exc}"}
+            # What the person gave binds the worker; what tools recorded is
+            # quoted data. An objective that came from read material has
+            # nothing the person gave, so all of it is data.
+            binding = facts.binding() if envelope.provenance == c.PERSON else ()
+            recorded = tuple(line for line in facts.lines() if line not in binding)
+            bundle = replace(bundle, critical_facts=binding, recorded_state=recorded)
+            try:
+                compaction.validate(bundle.render(), facts)
+            except compaction.LossyCompaction as exc:
+                return {"status": "failed", "error": f"LOSSY_COMPACTION: {exc}"}
+        held = ({"envelope": {"objective_run_id": objective_run_id,
+                              "strength": bounded.strength}}
+                if bounded is not None else {})
+        within = ({"workspace": bounded.workspace,
+                   "friday_run_id": objective_run_id,
+                   "expires_in": bounded.expires_in}
+                  if bounded is not None else {})
         # H1/H2: when the caller did not pin a model, one deterministic
         # pass picks the minimum capable route AND its reasoning depth -
         # zero model calls spent deciding which model to call. An explicit
@@ -113,7 +233,7 @@ def register(mcp):
                                         provider=plan.get("provider", ""),
                                         route_reason=route_reason,
                                         reasoning_effort=plan["effort"],
-                                        wait=False)
+                                        wait=False, **within)
         except hb.HermesUnavailable as exc:
             return {"status": "failed", "error": str(exc)}
         except G.Refused as exc:
@@ -154,6 +274,7 @@ def register(mcp):
                     "pending_question": record.get("pending_question", ""),
                     "bundle": out["bundle"],
                     "model": record.get("model", ""),
+                    **held,
                 }
             time.sleep(2)
         return {
@@ -164,6 +285,7 @@ def register(mcp):
                      "tell the boss it is in progress and stop. Do not "
                      "delegate the same task again."),
             "bundle": out["bundle"],
+            **held,
         }
 
     @mcp.tool()

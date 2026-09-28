@@ -224,3 +224,25 @@ def test_a_forged_approved_by_argument_grants_nothing(guarded_bench):
                                               "content": "x", "approved_by": "boss"}, run=run)
     assert result.status == c.CANCELLED and "APPROVAL_REQUIRED" in result.error
     assert not (guarded_bench.files / "forged.py").exists()
+
+
+def test_a_bench_that_fails_to_start_restores_what_it_patched(tmp_path, monkeypatch):
+    """V7-D48 review: the bench points process-wide singletons at itself; if
+    it cannot finish starting, they go back, or every later case runs on its
+    half-built state."""
+    from friday import fsjail
+    from friday import trust as T
+    from friday.toolsets import files as F
+    from friday.toolsets import objectives as OT
+
+    roots, store, jail = fsjail.configured_roots, OT.store, F.jail()
+
+    def unavailable(*args, **kwargs):
+        raise OSError("audit log unavailable")
+
+    monkeypatch.setattr(T, "AuditLog", unavailable)
+    with pytest.raises(OSError):
+        G.Bench(tmp_path / "bench").__enter__()
+    assert fsjail.configured_roots is roots
+    assert OT.store is store
+    assert F.jail() is jail

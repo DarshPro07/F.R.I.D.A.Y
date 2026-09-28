@@ -152,7 +152,7 @@ def specs(task="", limit=4, excerpt=600):
 def rules(task="", limit=8):
     items = []
     try:
-        from friday.brain import SharedBrainAdapter
+        from friday.brain import RULING_ORIGINS, SharedBrainAdapter
         p = Path(SharedBrainAdapter()._ledger_path())
         if p.exists():
             seen = set()
@@ -162,6 +162,11 @@ def rules(task="", limit=8):
                 except ValueError:
                     continue
                 fact = (e.get("fact") or "").strip()
+                # A rule is the person's or FRIDAY's own. An entry a worker
+                # or read material wrote, or one that does not say who wrote
+                # it, is never rendered as one (V7-D34).
+                if e.get("origin") not in RULING_ORIGINS:
+                    continue
                 if fact and fact not in seen:
                     seen.add(fact)
                     items.append({"rule": fact[:200], "entity": e.get("entity") or "friday",

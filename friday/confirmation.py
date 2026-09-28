@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -128,7 +130,7 @@ class Book:
         self.pending[confirmation.nonce] = confirmation
         return confirmation
 
-    def approve(self, nonce: str) -> Verdict:
+    def approve(self, nonce: str, *, answered_by: str = "person") -> Verdict:
         """
         The human said yes.
 
@@ -153,7 +155,7 @@ class Book:
         confirmation.state = APPROVED
         return Verdict(True, "approved", confirmation)
 
-    def refuse(self, nonce: str) -> Verdict:
+    def refuse(self, nonce: str, *, answered_by: str = "person") -> Verdict:
         confirmation = self.pending.get(nonce)
         if confirmation is not None:
             confirmation.state = REFUSED
@@ -206,8 +208,156 @@ class Book:
         return len(dead)
 
 
-#: The process-wide book. Reset in tests rather than shared between them.
-book = Book()
+#: This process instance. A shared yes is spent only by the instance that
+#: asked it, so a restart voids everything asked before it - the property the
+#: in-memory book above had by construction.
+INSTANCE = f"{os.getpid()}-{secrets.token_hex(6)}"
+
+
+def _process_store():
+    from friday.toolsets import memory
+
+    return memory.store()
+
+
+def _from_row(row: dict) -> Confirmation:
+    return Confirmation(
+        nonce=row["nonce"], run_id=row["run_id"], action=row["action"],
+        target=row["target"], arguments={}, fingerprint=row["fingerprint"],
+        question=row["question"],
+        created_at=datetime.fromisoformat(row["created_at"]),
+        expires_at=datetime.fromisoformat(row["expires_at"]),
+        state=row["state"])
+
+
+class _Confirmations(Mapping):
+    """
+    `book.pending` for the shared book: every stored confirmation by nonce,
+    whatever its state - the same shape as the in-memory book's dict. Read
+    from the store on each access, so every process sees the same thing, and
+    holding nothing itself.
+    """
+
+    def __init__(self, book: "StoredBook") -> None:
+        self._book = book
+
+    def __getitem__(self, nonce: str) -> Confirmation:
+        row = self._book.store().confirmation(nonce)
+        if row is None:
+            raise KeyError(nonce)
+        return _from_row(row)
+
+    def __iter__(self):
+        return iter([row["nonce"] for row in self._book.store().confirmations()])
+
+    def __len__(self) -> int:
+        return len(self._book.store().confirmations())
+
+    def clear(self) -> None:
+        """Tests only: forget every confirmation, answered or not."""
+        self._book.store().confirmations_forget(now="9999")
+
+
+class StoredBook:
+    """
+    The process-wide book, shared through the store (PRD v7, V7-D08).
+
+    The person answers where the person is - the voice turn, the control
+    room - which is rarely the process that asked; the MCP process asks
+    about a purchase in the browser or a permanent delete. A yes given in any
+    FRIDAY process is seen here, and spent only by the process instance that
+    asked, exactly once, for exactly the action it was given for. Each state
+    change is one conditional UPDATE in the store, so racing answers or
+    spends cannot both win.
+    """
+
+    def __init__(self, store=None, *, instance: str | None = None) -> None:
+        self.store = store or _process_store
+        self.instance = instance or INSTANCE
+        self.pending = _Confirmations(self)
+
+    def ask(self, run_id: str, action: str, target: str, question: str,
+            arguments: dict | None = None,
+            seconds: float = DEFAULT_SECONDS) -> Confirmation:
+        """Record what is being asked, and hand back the handle for the yes."""
+        now = _now()
+        confirmation = Confirmation(
+            nonce=secrets.token_urlsafe(12),
+            run_id=run_id, action=action, target=target,
+            arguments=dict(arguments or {}),
+            fingerprint=fingerprint(run_id, action, target, arguments),
+            question=question, created_at=now,
+            expires_at=now + timedelta(seconds=seconds))
+        self.store().confirmation_record(
+            nonce=confirmation.nonce, asker=self.instance, run_id=run_id,
+            action=action, target=target, fingerprint=confirmation.fingerprint,
+            question=question, state=PENDING, created_at=now.isoformat(),
+            expires_at=confirmation.expires_at.isoformat())
+        return confirmation
+
+    def approve(self, nonce: str, *, answered_by: str = "person") -> Verdict:
+        """
+        The human said yes.
+
+        Callers must only reach this from a real answer - there is no tool
+        the model can call to approve its own request.
+        """
+        if self.store().confirmation_approve(nonce, answered_by=answered_by,
+                                             now=_now().isoformat()):
+            return Verdict(True, "approved", self.pending.get(nonce))
+        return Verdict(False, self._why_not(nonce, answering=True))
+
+    def refuse(self, nonce: str, *, answered_by: str = "person") -> Verdict:
+        self.store().confirmation_refuse(nonce, answered_by=answered_by,
+                                         now=_now().isoformat())
+        return Verdict(False, "refused")
+
+    def consume(self, nonce: str, *, run_id: str, action: str, target: str,
+                arguments: dict | None = None) -> Verdict:
+        """Spend the yes on exactly the thing it was given for, from the
+        process that asked, once."""
+        wanted = fingerprint(run_id, action, target, arguments)
+        if self.store().confirmation_spend(nonce, asker=self.instance,
+                                           fingerprint=wanted,
+                                           now=_now().isoformat()):
+            return Verdict(True, "confirmed for this exact action",
+                           self.pending.get(nonce))
+        return Verdict(False, self._why_not(nonce, wanted=(action, target)))
+
+    def forget_expired(self) -> int:
+        """Drop what can no longer be used. Returns how many went."""
+        return self.store().confirmations_forget(now=_now().isoformat())
+
+    def _why_not(self, nonce: str, *, answering: bool = False,
+                 wanted: tuple[str, str] = ("", "")) -> str:
+        """Why an answer or a spend did not happen, in the book's own words."""
+        row = self.store().confirmation(nonce)
+        if row is None:
+            return f"no confirmation {nonce!r} is pending"
+        state = row["state"]
+        if state == CONSUMED:
+            return "that confirmation has already been used"
+        if state == REFUSED:
+            return "that was already refused; ask again" if answering else "that was refused"
+        expired = datetime.fromisoformat(row["expires_at"]) <= _now()
+        if answering:
+            if expired:
+                return "that confirmation expired before the answer"
+            return f"that confirmation is {state.lower()}, not waiting for an answer"
+        if state != APPROVED:
+            return "that has not been approved yet"
+        if expired:
+            return "that confirmation has expired - ask again"
+        if row["asker"] != self.instance:
+            return ("that yes was given to another process, or to this one "
+                    "before a restart - ask again")
+        return (f"that yes was for {row['action']} on {row['target']!r}, and "
+                f"this is {wanted[0]} on {wanted[1]!r} - ask again for this one")
+
+
+#: The process-wide book: shared through the store, so the person's answer
+#: reaches whichever process asked. Tests get a fresh store each (conftest).
+book = StoredBook()
 
 
 def reset() -> None:

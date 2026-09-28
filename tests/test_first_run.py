@@ -9,17 +9,17 @@ def make(tmp_path):
     return (fr.FirstRunContract(tmp_path, policy=policy), policy)
 
 
-def test_fresh_profile_asks_all_nine(tmp_path):
+def test_fresh_profile_asks_all_ten(tmp_path):
     contract, _ = make(tmp_path)
     assert not contract.exists()
-    assert len(contract.pending_questions()) == 9
+    assert len(contract.pending_questions()) == 10
 
 
 def test_known_context_skips_questions(tmp_path):
     contract, _ = make(tmp_path)
     pending = contract.pending_questions(known={'call_me': 'Boss'})
     assert all((q['id'] != 'name' for q in pending))
-    assert len(pending) == 8
+    assert len(pending) == 9
 
 
 def test_answers_persist_and_stop_reasking(tmp_path):
@@ -29,7 +29,7 @@ def test_answers_persist_and_stop_reasking(tmp_path):
     pending = contract.pending_questions()
     ids = {q['id'] for q in pending}
     assert 'name' not in ids and 'cost' not in ids
-    assert len(pending) == 7
+    assert len(pending) == 8
 
 
 def test_permission_answers_reach_user_policy(tmp_path):
@@ -67,4 +67,21 @@ def test_deleted_contract_reasks(tmp_path):
     contract, _ = make(tmp_path)
     contract.record({'call_me': 'Boss'})
     contract.path.unlink()
-    assert len(contract.pending_questions()) == 9
+    assert len(contract.pending_questions()) == 10
+
+
+def test_progress_detail_is_a_tenth_question(tmp_path):
+    contract, _ = make(tmp_path)
+    ids = {q['id'] for q in contract.pending_questions()}
+    assert 'progress' in ids
+
+
+def test_progress_detail_is_a_plain_preference_not_a_policy_domain(tmp_path):
+    """progress_detail (FR-POL-005) is not permission-shaped - it has no
+    UserPolicy domain, so recording it must never touch the audited
+    grant trail."""
+    contract, policy = make(tmp_path)
+    out = contract.record({'progress_detail': 'critical-only'})
+    assert 'progress_detail' not in out['applied_domains']
+    assert contract.read()['progress_detail'] == 'critical-only'
+    assert policy.audit_trail(limit=50) == []

@@ -22,6 +22,7 @@ from friday.continuous import (
 )
 from friday.objectives import TaskStatus, compile_objective
 from friday.store import Store
+from friday.contracts import PERSON
 
 
 def manifest() -> list[dict]:
@@ -50,7 +51,7 @@ def _compile(store, *, arguments=None):
     # per-test below, not the compiled task's requested value.
     tasks = [{"capability": "flaky", "arguments": arguments or {}}]
     return compile_objective(store, request="flaky test", tasks=tasks,
-                             manifest=manifest(), objective_summary="flaky")
+                             manifest=manifest(), objective_summary="flaky", provenance=PERSON, attended=True)
 
 
 @pytest.mark.asyncio

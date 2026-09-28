@@ -93,6 +93,26 @@ def test_private_addresses_blocked_by_netguard():
     assert verdict.decision == bc.BLOCK_NETWORK
 
 
+@pytest.mark.parametrize('url', ['http://127.0.0.1:abc/admin', 'http://localhost:9x/',
+                                 'http://[::1/'])
+def test_a_url_the_address_rules_cannot_judge_is_blocked(url):
+    """Slice 2 review: an unexpected error from netguard skipped the address
+    rules and the gate said ALLOW, so a loopback URL Python cannot parse
+    passed where the same URL, well formed, is refused. An unknown answer
+    about where the browser would go is a no."""
+    verdict = bc.classify_url(url)
+    assert verdict.decision == bc.BLOCK_NETWORK
+    assert 'could not be checked' in verdict.reason
+
+
+def test_an_unexpected_netguard_failure_blocks(monkeypatch):
+    def broken(url, **kwargs):
+        raise RuntimeError('the guard itself broke')
+    monkeypatch.setattr(bc.netguard, 'check', broken)
+    verdict = bc.classify_url('https://example.com/')
+    assert verdict.decision == bc.BLOCK_NETWORK
+
+
 def test_redirect_into_bank_is_blocked_mid_fetch():
     """Adversarial finding (Phase 12): classify_url sees only the
     ORIGINAL URL, so an allowed page 302-ing into a bank slipped the

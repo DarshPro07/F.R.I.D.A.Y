@@ -34,16 +34,20 @@ from pathlib import Path
 
 from friday import contracts as c
 
-from friday.executors import cli
+from friday.executors import cli, cli_prompts
 
-from friday.executors.brokers import Profile, QuestionBroker, denials_from, profile_for
+from friday.executors.brokers import (
+    ENVELOPE_PERMISSION_MODE, OutsideEnvelope, Profile, QuestionBroker, denials_from,
+    profile_for, within_envelope)
 
-from friday.executors.runs import Recovery, RunManager, session_file_exists
+from friday.executors.runs import (
+    Recovery, RunManager, WAITING_QUESTION, session_file_exists,
+)
 
 from friday.executors.worktrees import PROMOTED as WT_PROMOTED
 
 from friday.executors.worktrees import (
-    Promotion, WorktreeError, WorktreeManager, guard_before_resume,
+    WORKTREE_DIR, Promotion, WorktreeError, WorktreeManager, git, guard_before_resume,
 )
 
 from friday.store import Store
@@ -171,12 +175,42 @@ class Progress:
     tools: list[str] = field(default_factory=list)
     said: list[str] = field(default_factory=list)
     questions: list[dict] = field(default_factory=list)
+    #: FR-COD-003: every question `cli_prompts.detect` found in Claude's own
+    #: text output, with what was decided and why - see `_watch_for_prompt`.
+    prompt_decisions: list[dict] = field(default_factory=list)
 
-    def note(self, event: cli.Event) -> None:
+    def note(self, event: cli.Event, *, objective: str = "") -> dict | None:
         if event.kind == "tool" and event.name:
             self.tools.append(event.name)
         elif event.kind == "text" and event.text.strip():
             self.said.append(event.text.strip())
+            return self._watch_for_prompt(event.text, objective=objective)
+        return None
+
+    def _watch_for_prompt(self, text: str, *, objective: str) -> dict | None:
+        """
+        Detect, classify and decide - never log or act on it.
+
+        `execute()` owns turning this into a log line and, when it escalates,
+        a status the run can be found by. Stdin is already closed by the time
+        this text arrives (see cli.py's module docstring), so there is
+        nothing live to answer back into; this is the record of what FRIDAY
+        would have said and why, for the run's own output and for Developer
+        Mode - not a control channel back into the subprocess.
+        """
+        prompt: cli_prompts.Prompt | None = cli_prompts.detect(text)
+        if prompt is None:
+            return None
+        decision: cli_prompts.Decision = cli_prompts.decide(
+            prompt, objective=objective)
+        record = {
+            "question": prompt.question,
+            "options": [o.label for o in prompt.options],
+            "band": cli_prompts.classify(prompt),
+            **decision.as_dict(),
+        }
+        self.prompt_decisions.append(record)
+        return record
 
     def summary(self) -> str:
         counts: dict[str, int] = {}
@@ -227,10 +261,18 @@ class ClaudeCodeExecutor:
     # -- running -----------------------------------------------------------
 
     def launch_for(self, bundle: TaskBundle, *, profile: Profile | None = None,
-                   resume: str | None = None) -> cli.Launch:
+                   resume: str | None = None,
+                   envelope: c.Envelope | None = None) -> cli.Launch:
+        """
+        The launch for one run. With an execution envelope (a durable
+        objective's run, PRD v7 SEC-005) the profile is compiled down to it:
+        `dontAsk`, the envelope's roots as working directories, file edits
+        only under its write roots, web tools only inside its network scope.
+        Raises `OutsideEnvelope` when the envelope does not allow the launch.
+        """
         chosen = profile or profile_for(bundle.goal)
         ask_tool = "mcp__ada__ada_ask" if self.mcp_config else ""
-        return cli.Launch(
+        common = dict(
             prompt=bundle.prompt(ask_tool=ask_tool),
             cwd=bundle.workspace,
             session_id=None if resume else bundle.run_id_as_uuid(),
@@ -238,15 +280,63 @@ class ClaudeCodeExecutor:
             worktree=bundle.worktree_name() if bundle.isolate else None,
             mcp_config=self.mcp_config,
             model=self.model,
-            **chosen.as_launch_kwargs(),
         )
+        if envelope is None:
+            return cli.Launch(**common, **chosen.as_launch_kwargs())
+        terms = within_envelope(chosen, envelope, bundle.workspace)
+        if bundle.isolate:
+            # `--worktree` makes a checkout under the repository's top level,
+            # which may sit above the workspace: that has to be writable too.
+            try:
+                top = Path(git(Path(bundle.workspace), "rev-parse",
+                               "--show-toplevel")).resolve()
+            except WorktreeError as exc:
+                raise OutsideEnvelope(
+                    f"an isolated run needs a git checkout: {exc}") from exc
+            where = top / WORKTREE_DIR
+            if not envelope.writes(str(where)):
+                raise OutsideEnvelope(
+                    f"an isolated run's worktree ({where}) is outside this "
+                    "run's write roots")
+        allowed = terms.allowed
+        # The question channel is FRIDAY's own capability; under `dontAsk`
+        # it needs a rule, and it gets one only if the envelope allows it.
+        if ask_tool and not envelope.permits("ada_ask"):
+            allowed += (ask_tool,)
+        launch = cli.Launch(**common, permission_mode=ENVELOPE_PERMISSION_MODE,
+                            allowed_tools=allowed,
+                            disallowed_tools=terms.disallowed,
+                            add_dirs=terms.add_dirs,
+                            strength=dict(terms.strength))
+        launch.settings = {**launch.settings, "permissions": dict(terms.permissions)}
+        return launch
 
     async def execute(self, bundle: TaskBundle, *, profile: Profile | None = None,
                       resume: str | None = None,
                       timeout: float = DEFAULT_TIMEOUT,
-                      on_event=None) -> c.ActionResult:
-        run_ctx = c.Run.create(bundle.goal, capability="development")
+                      on_event=None,
+                      envelope: c.Envelope | None = None) -> c.ActionResult:
+        if envelope is None:
+            run_ctx = c.Run.create(bundle.goal, capability="development")
+        else:
+            run_ctx = c.Run(run_id=c.new_run_id(), request=bundle.goal,
+                            capability="development",
+                            provenance=envelope.provenance,
+                            attended=envelope.attended, envelope=envelope)
         started = c.started(run_ctx.run_id, "executor.claude_code")
+
+        # Compiled before anything is admitted, opened or started: a launch
+        # the envelope does not allow is refused, not attempted.
+        try:
+            launch = self.launch_for(bundle, profile=profile, resume=resume,
+                                     envelope=envelope)
+        except OutsideEnvelope as exc:
+            return run_ctx.record(started.finish(
+                status=c.NOT_PERMITTED, error=f"ENVELOPE: {exc}"))
+        # The run ends when its envelope does, whatever timeout was asked for.
+        left = envelope.seconds_left() if envelope is not None else None
+        if left is not None:
+            timeout = min(timeout, left)
 
         if not cli.available():
             return run_ctx.record(c.failed(
@@ -272,15 +362,30 @@ class ClaudeCodeExecutor:
             G.governor().release(lease)
             raise
 
-        launch = self.launch_for(bundle, profile=profile, resume=resume)
         self.sandbox = self._sandbox_for(bundle)
         self.run = cli.Run(launch, sandbox=self.sandbox)
         self.progress = Progress()
         final: dict = {}
+        limit = envelope.tool_call_limit if envelope is not None else 0
+        tool_calls = 0
 
         try:
             async for event in self.run.events(timeout=timeout):
-                self.progress.note(event)
+                if event.kind == "tool":
+                    tool_calls += 1
+                    if limit and tool_calls > limit:
+                        await self.run.cancel()
+                        result = run_ctx.record(started.finish(
+                            status=c.NOT_PERMITTED,
+                            error=f"ENVELOPE: tool-call limit {limit} reached; "
+                                  "the run was stopped"))
+                        self.runs.close(bundle.run_id, result)
+                        self._close_sandbox()
+                        G.governor().release(lease)
+                        return result
+                decided = self.progress.note(event, objective=bundle.goal)
+                if decided is not None:
+                    self._log_prompt_decision(bundle.run_id, decided)
                 if event.kind == "init" and event.session_id:
                     self._remember_session(bundle, event.session_id)
                     self.runs.running(
@@ -314,6 +419,31 @@ class ClaudeCodeExecutor:
         self._close_sandbox()
         G.governor().release(lease)
         return result
+
+    def _log_prompt_decision(self, run_id: str, decided: dict) -> None:
+        """
+        FR-COD-003, the caller side: `cli_prompts` returns data and decides
+        nothing about logging or the run's status - this is where that data
+        becomes both.
+
+        A trivial or ordinary decision is an INFO line; nothing here pauses
+        the subprocess pump for it, which is what keeps FRIDAY from blocking
+        on a question it already knows how to answer. An escalation is a
+        WARNING line plus `WAITING_QUESTION` on the run record, so the run is
+        findable by the same status a question asked through `ada_ask` would
+        leave - not because this run is paused (it is not; `-p` runs to
+        completion regardless), but because someone still needs to look.
+        """
+        level = logging.WARNING if decided["escalate"] else logging.INFO
+        logger.log(
+            level,
+            "executor.cli_prompt run=%s band=%s escalate=%s confidence=%.2f "
+            "answer=%r reason=%s",
+            run_id, decided["band"], decided["escalate"], decided["confidence"],
+            decided["answer"], decided["reason"])
+        if decided["escalate"]:
+            self.runs.saw(run_id, f"cli question: {decided['reason']}",
+                          status=WAITING_QUESTION)
 
     def _sandbox_for(self, bundle: TaskBundle):
         """
@@ -441,6 +571,9 @@ class ClaudeCodeExecutor:
             "refused": denials,
             "cost_usd": final.get("total_cost_usd"),
             "turns": final.get("num_turns"),
+            # FR-COD-003: every question `cli_prompts` found in the output,
+            # what was decided, and why - the Developer Mode record.
+            "cli_prompts": self.progress.prompt_decisions,
         }
 
         if not final:

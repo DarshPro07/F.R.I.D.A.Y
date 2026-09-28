@@ -26,8 +26,9 @@ from pathlib import Path
 import pytest
 from friday.store import Store
 ROOT = Path(__file__).resolve().parent.parent
-PYTHON = ROOT / '.venv' / 'Scripts' / 'python.exe'
-PYTHON = str(PYTHON if PYTHON.exists() else sys.executable)
+#: The suite's own interpreter: the live .venv belongs to the running agent
+#: (AGENTS.md; V7-D41).
+PYTHON = sys.executable
 NO_WINDOW = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
 
 

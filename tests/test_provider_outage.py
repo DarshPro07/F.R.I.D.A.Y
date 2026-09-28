@@ -30,6 +30,7 @@ from friday import objectives as O
 from friday.continuous import ContinuousTaskExecutor, FailureClassifier
 from friday.objectives import FailureKind, TaskStatus, compile_objective
 from friday.store import Store
+from friday.contracts import PERSON
 
 
 class Registry:
@@ -73,7 +74,7 @@ def compile_graph(store, tasks: list[dict]) -> dict:
         store, request="provider outage probe", tasks=tasks,
         manifest=[{"id": f"cap{i}", "description": f"cap {i}"}
                   for i in range(1, len(tasks) + 1)],
-        objective_summary="probe")
+        objective_summary="probe", provenance=PERSON, attended=True)
 
 
 def by_plan_id(store, run_id: str) -> dict:

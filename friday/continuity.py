@@ -209,7 +209,7 @@ class ContinuityManager:
         return recovered
 
     def list_runs(self, limit: int = 20) -> list[RunSnapshot]:
-        rows = self.store._conn.execute('SELECT r.run_id FROM runs r JOIN run_controls rc ON rc.run_id=r.run_id ORDER BY r.updated_at DESC LIMIT ?', (limit,)).fetchall()
+        rows = self.store._conn.execute('SELECT r.run_id FROM runs r JOIN run_controls rc ON rc.run_id=r.run_id ORDER BY r.updated_at DESC, r.rowid DESC LIMIT ?', (limit,)).fetchall()
         return [self.status(row['run_id']) for row in rows]
 
     def events(self, run_id: str, *, after: int = 0, limit: int = 50) -> list[dict]:

@@ -254,3 +254,20 @@ def test_hermes_delegate_tool_reports_refusal_honestly(tmp_path):
         assert "cap 2" in out["reason"] and out["active_workers"] == 2
     finally:
         hermes_control.configure(None)
+
+
+@pytest.mark.slow
+def test_real_memory_pressure_bounds_new_work():
+    """RES-001's low-RAM stress test: memory really allocated, the machine
+    really sampled. The governor must shed optional work, hold concurrency to
+    one worker, then start nothing, as the RAM climbs - and admit again once
+    it is released. Slow: it allocates up to 1.2 GB, so the standard gate
+    leaves it out and it is run on its own."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import stress_low_ram
+
+    result = stress_low_ram.run(cap_mb=1200)
+    wrong = [step for step in result["steps"] + [result["released"]]
+             if not step["as_policy_says"]]
+    assert not wrong, wrong
+    assert result["demonstrated"], (result["peak"], result["released"]["level"], result["stopped"])

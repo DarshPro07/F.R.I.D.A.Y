@@ -1,7 +1,7 @@
 ---
 description: "Friday team rules, compact index. Rules 01-13 hold the detail and load by path scope (restored 2026-09-05, audit A-028)."
 globs: "*"
-alwaysApply: true
+alwaysApply: false
 ---
 # Team rules (compact)
 - Plan first for work crossing 2+ files or services: a plan under `docs/plans/<slug>/` (the software-factory gates) or `.plans/`; single-file fixes skip it.

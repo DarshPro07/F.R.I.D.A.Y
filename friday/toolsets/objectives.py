@@ -323,9 +323,48 @@ def _plan_clause(clause: str, manifest: list[dict]) -> dict | None:
 # Tools
 # ---------------------------------------------------------------------------
 
+def _composition_consent(run: c.Run, started: c.ActionResult, text: str,
+                         need, engine: PolicyEngine, nonce: str):
+    """
+    PRD v7 CAP-002: the person's yes to a capability set that could send what
+    it reads. True when it is given; otherwise the result to return - the
+    question, or why the yes offered does not apply.
+
+    DANGEROUS autonomy is the owner's standing yes; it is still recorded, so
+    the escalation is never silent.
+    """
+    from friday import confirmation, trust
+    from friday.policy import DANGEROUS
+
+    bound = {"capabilities": list(need.capabilities)}
+    if engine.autonomy == DANGEROUS:
+        trust.audit().record(actor="autonomy:DANGEROUS", action="objective.composition",
+                             tier=trust.R2, decision="AUTO", target=text[:120],
+                             detail={**bound, "reason": need.verdict.reason})
+        return True
+    if nonce:
+        spent = confirmation.book.consume(nonce, run_id=run.run_id,
+                                          action="objective.composition",
+                                          target=text, arguments=bound)
+        if spent.ok:
+            trust.audit().record(actor="person", action="objective.composition",
+                                 tier=trust.R2, decision="CONFIRMED",
+                                 target=text[:120], detail=bound)
+            return True
+        return run.record(started.finish(
+            status=c.CANCELLED, error=f"{APPROVAL_PREFIX}: {spent.reason}"))
+    pending = confirmation.book.ask(
+        run.run_id, "objective.composition", text,
+        f"{need.verdict.reason}. Start it anyway?", arguments=bound)
+    return run.record(started.finish(
+        status=c.CANCELLED,
+        error=f"{APPROVAL_PREFIX}: {need.verdict.reason}",
+        output=_scoped({"confirm": pending.to_dict()})))
+
+
 def objective_start(run: c.Run, objective: str, *, tasks: str = "",
                     replace: bool = False,
-                    engine: PolicyEngine = default_engine):
+                    engine: PolicyEngine = default_engine, nonce: str = ""):
     """Start a new objective run: compile, persist, wake.
 
     ``objective`` is the natural-language request; ``tasks`` is optional
@@ -358,6 +397,9 @@ def objective_start(run: c.Run, objective: str, *, tasks: str = "",
                      executor_id="objectives.start")
 
     manifest = capabilities.as_dicts()
+    # An explicit task list has no request text read by the compiler, so it
+    # carries no contract; one read from words does (below).
+    contract = None
     if tasks.strip():
         try:
             specs = json.loads(tasks)
@@ -388,6 +430,9 @@ def objective_start(run: c.Run, objective: str, *, tasks: str = "",
             return run.record(c.failed(
                 started, "the plan did not validate: " + "; ".join(complaints)))
         specs = SP.task_specs(semantic)
+        # The request as the intent compiler read it travels with the run,
+        # and compile holds the plan to the literals in it (INTENT-001).
+        contract = SP.contract_for(semantic, text)
         if not specs:
             return run.record(c.failed(
                 started,
@@ -395,10 +440,21 @@ def objective_start(run: c.Run, objective: str, *, tasks: str = "",
                 + (f" (unplaceable: {semantic.unresolved[:3]})"
                    if semantic.unresolved else "")))
 
+    compile_args = dict(request=text, tasks=specs, manifest=manifest,
+                        objective_summary=text, contract=contract)
     try:
-        created = O.compile_objective(
-            db, request=text, tasks=specs, manifest=manifest,
-            objective_summary=text)
+        # The objective is the caller's: it keeps their lineage (TRUST-002).
+        created = O.compile_objective(db, **compile_args, provenance=run.provenance,
+                                      attended=run.attended)
+    except O.CompositionNeedsConfirmation as need:
+        consent = _composition_consent(run, started, text, need, engine, nonce)
+        if consent is not True:
+            return consent
+        try:
+            created = O.compile_objective(db, **compile_args, provenance=run.provenance,
+                                          attended=run.attended, composition_confirmed=True)
+        except O.CompileError as exc:
+            return run.record(c.failed(started, str(exc)))
     except O.CompileError as exc:
         return run.record(c.failed(started, str(exc)))
 

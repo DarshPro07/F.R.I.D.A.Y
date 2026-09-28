@@ -98,13 +98,14 @@ _REPORTING = re.compile(
 _SAFETY = re.compile(
     r"\b(?:do not|don't|dont|never)\s+(?:shut down|shutdown|restart|reboot|"
     r"delete|erase|terminate|kill|touch|modify|change|purchase|buy|publish|"
-    r"send|share)\b",
+    r"send|share|remove|recycle|move|rename|overwrite|uninstall|empty)\b",
     re.IGNORECASE)
 
 #: How to speak during the work.
 _PRESENTATION = re.compile(
     r"\b(?:short|brief|concise|quiet(?:ly)?)\b.{0,20}\b(?:updates?|answers?|"
-    r"replies)|\b(?:don't|do not|dont) narrate\b|\bkeep me posted\b",
+    r"replies)|\b(?:updates?|answers?|replies)\s+(?:short|brief|concise)\b|"
+    r"\b(?:don't|do not|dont) narrate\b|\bkeep me posted\b",
     re.IGNORECASE)
 
 #: Where one instruction ends and the next begins. Kept simple on purpose:
@@ -113,8 +114,14 @@ _PRESENTATION = re.compile(
 #: The outer group captures, so `re.split` hands back the separator alongside
 #: the pieces. What separated two instructions is information: "then" means
 #: one follows the other, and a non-capturing split throws that away.
+#: A full stop ends a sentence only before a space or the end: the dot in
+#: `notes.txt` or `v1.2` is part of what the person named (INTENT-001).
 _SPLIT = re.compile(
-    r"([.;!?\n]+|,?\s+(?:and then|then|after that|afterwards)\s+|"
+    r"((?:[;!?\n]|\.(?=\s|$))+|,?\s+(?:and then|then|after that|afterwards)\s+|"
+    # A prohibition, or a word about how to work, starts its own clause:
+    # left behind, "and do not" handed "delete anything" to the next piece
+    # as a request (V7-D39).
+    r"(?:,\s*(?:and\s+|but\s+)?|\s+(?:and|but)\s+)(?=(?:do not|don't|dont|never|keep)\b)|"
     r"[,\s]\s*(?:and\s+)?(?=(?:check|open|find|create|read|write|play|pause|stop|"
     r"resume|search|look|make|delete|remove|recycle|rename|move|copy|list|"
     r"show|tell|research|get|set|close|start|run|clean|tidy)\b))",
@@ -129,8 +136,79 @@ _SPLIT = re.compile(
 _WHITESPACE_ONLY_SEPARATOR = re.compile(r"^\s+$")
 
 
+#: Quoted words are the person's own, to be used as given: nothing inside
+#: them is a separator. Single quotes are left alone - they are apostrophes
+#: ("don't") far more often than quotation marks.
+_QUOTED = re.compile(r'"[^"\n]*"|“[^”\n]*”|`[^`\n]*`')
+_HELD = re.compile("\x00(\\d+)\x00")
+
+#: "keep a reading list", "the shopping list": a verb word straight after an
+#: article and one more word is a noun, not a second request. Split on it,
+#: "list" became `system_list_processes`.
+_NOUN_PHRASE_END = re.compile(
+    r"\b(?:a|an|the|my|your|our|his|her|their|this|that)\s+[\w-]+$", re.IGNORECASE)
+
+#: "do not" / "never" at the end of a piece: the verb after it is what is
+#: forbidden, and stays with it (V7-D39).
+_NEGATION_END = re.compile(r"\b(?:do not|don't|dont|never|not)$", re.IGNORECASE)
+
+#: A file the person named: a name with an extension of two or more
+#: characters (so not "v1.2" or "e.g"), or a path to one.
+_NAMED_PATH = re.compile(
+    r"(?<![\w.\\/-])((?:[A-Za-z]:[\\/]|~?[\\/])?(?:[\w.-]+[\\/])*[\w-]+"
+    r"\.[A-Za-z][A-Za-z0-9]{1,7})(?![\w\\/])")
+
+#: Content the person gave in words: "containing ...", "saying ...".
+_CONTENT_AFTER = re.compile(
+    r"\b(?:containing|saying|that says|with the (?:text|words|content))\s+(.+)$",
+    re.IGNORECASE)
+
+
+#: "I want to ...", "we'd like to ...", "the goal is ...": why, not what.
+_PURPOSE = re.compile(
+    r"^\s*(?:(?:i|we)\s+(?:want|would like|need|am trying|are trying|plan)\s+to\b"
+    r"|(?:i|we)'d like to\b|(?:the\s+)?(?:goal|idea|point|plan)\s+is\b)",
+    re.IGNORECASE)
+
+
+def _unquoted(text: str) -> str:
+    """The sentence without the person's quoted words, for reading what it
+    asks: words inside quotes are content, not instructions."""
+    return _QUOTED.sub('""', text or "")
+
+
+def _named_path(text: str) -> str:
+    """The file the person named, verbatim, or ""."""
+    found = _NAMED_PATH.search(_unquoted(text))
+    if found:
+        return found.group(1)
+    for quoted in _QUOTED.findall(text or ""):
+        if _NAMED_PATH.fullmatch(quoted[1:-1]):
+            return quoted[1:-1]
+    return ""
+
+
+def _named_content(text: str) -> str:
+    """The words the person gave as content, verbatim, or ""."""
+    path = _named_path(text)
+    for quoted in _QUOTED.findall(text or ""):
+        if quoted[1:-1] != path:
+            return quoted[1:-1]
+    found = _CONTENT_AFTER.search(_unquoted(text))
+    return found.group(1).strip() if found else ""
+
+
 def _split_requests(text: str) -> list[str]:
-    pieces = _SPLIT.split(text)
+    quoted: list[str] = []
+
+    def hold(match: re.Match) -> str:
+        quoted.append(match.group(0))
+        return f"\x00{len(quoted) - 1}\x00"
+
+    def restore(piece: str) -> str:
+        return _HELD.sub(lambda m: quoted[int(m.group(1))], piece)
+
+    pieces = [restore(piece) for piece in _SPLIT.split(_QUOTED.sub(hold, text))]
     if len(pieces) < 3:
         return pieces
     merged: list[str] = [pieces[0]]
@@ -138,7 +216,9 @@ def _split_requests(text: str) -> list[str]:
         separator, following = pieces[index], pieces[index + 1] if index + 1 < len(pieces) else ""
         head = merged[-1]
         if (_WHITESPACE_ONLY_SEPARATOR.match(separator or "")
-                and S._QUESTION.match(head.lstrip(" ,"))):
+                and (S._QUESTION.match(head.lstrip(" ,"))
+                     or _NOUN_PHRASE_END.search(head.rstrip())
+                     or _NEGATION_END.search(head.rstrip()))):
             merged[-1] = f"{head}{separator}{following}"
             continue
         merged.append(separator)
@@ -196,6 +276,9 @@ class Plan:
     reporting: list[str] = field(default_factory=list)
     safety: list[str] = field(default_factory=list)
     presentation: list[str] = field(default_factory=list)
+    #: Why the person wants this ("I want to keep a reading list"), when a
+    #: concrete instruction follows it: the objective's purpose, not a step.
+    purpose: list[str] = field(default_factory=list)
     discarded: list[str] = field(default_factory=list)
     unresolved: list[str] = field(default_factory=list)
 
@@ -353,7 +436,15 @@ def interpret(text: str) -> Plan:
     counter = 0
     previous: Goal | None = None
 
-    for segment in segments(text):
+    pieces = segments(text)
+    for position, segment in enumerate(pieces):
+        # "I want to keep a reading list: create reading.md" - the first
+        # half says why; only the second is work. Said alone, the purpose is
+        # the request, and stays a goal (INTENT-001).
+        if (segment.kind == OBJECTIVE and _PURPOSE.match(segment.text)
+                and any(later.kind == OBJECTIVE for later in pieces[position + 1:])):
+            plan.purpose.append(segment.text.strip())
+            continue
         if segment.kind == VOCATIVE:
             plan.discarded.append(segment.text)
             continue
@@ -370,8 +461,14 @@ def interpret(text: str) -> Plan:
             plan.presentation.append(segment.text)
             continue
 
-        operation = S.for_request(segment.text)
-        target = S.target_for_request(segment.text)
+        # What is asked is read without the person's quoted words, which
+        # are content: "write "call Anna..." to todo.md" is about a file,
+        # not about Anna.
+        plain = _unquoted(segment.text)
+        operation = S.for_request(plain)
+        target = S.target_for_request(plain)
+        if target is None and _named_path(segment.text):
+            target = "FILE"
         counter += 1
 
         if operation is None and target is None:
@@ -414,7 +511,7 @@ def interpret(text: str) -> Plan:
             intent=segment.text,
             operation=operation or S.READ,
             target=target or "",
-            entity=_entity(segment.text),
+            entity=_entity(plain),
             depends_on=depends,
             operation_assumed=operation is None,
         )
@@ -816,10 +913,22 @@ def arguments_for(goal: Goal) -> dict:
             arguments[name] = goal.entity
         elif lowered in _FROM_QUERY:
             arguments[name] = _wanted(goal.intent)
-        elif lowered in _FROM_PATH and required:
-            arguments[name] = _note_path(goal)
+        elif lowered in _FROM_PATH:
+            # What the person named is used as named (INTENT-001); a file of
+            # FRIDAY's own only when they named none.
+            named = _named_path(goal.intent)
+            if named:
+                arguments[name] = named
+            elif required:
+                arguments[name] = _note_path(goal)
         elif lowered == "content" and goal.target == "FILE":
-            arguments[name] = f"Created by Friday for: {goal.intent}"
+            given = _named_content(goal.intent)
+            if given:
+                arguments[name] = given
+            elif not _named_path(goal.intent):
+                # FRIDAY's own note file says what it is for. A file the
+                # person named gets no words they did not give.
+                arguments[name] = f"Created by Friday for: {goal.intent}"
     return arguments
 
 
@@ -828,6 +937,87 @@ def _note_path(goal: Goal) -> str:
     stem = re.sub("[^a-z0-9]+", "-",
                   _wanted(goal.intent).lower()).strip("-")
     return f"friday-{stem or 'note'}.txt"
+
+
+#: "at most 20 changes", "no more than 3 emails": a ceiling on side effects.
+_LIMIT = re.compile(
+    r"\b(?:at most|no more than|up to|only)\s+(\d+)\s+(?:changes?|edits?|writes?|"
+    r"updates?|emails?|messages?|posts?|files?)\b", re.IGNORECASE)
+#: "do not delete anything", "never send it", "don't delete config.yaml".
+_PROHIBITION = re.compile(r"\b(?:do not|don't|dont|never)\s+(.+)$", re.IGNORECASE)
+#: What a prohibition is about when it names no particular thing.
+_ANY_OBJECT = re.compile(
+    r"^\s*(?:anything|everything|any\b|all\b|files?\b|emails?\b|messages?\b|"
+    r"posts?\b|it\b|them\b)", re.IGNORECASE)
+
+
+def governance_for(plan: Plan, text: str) -> dict:
+    """
+    What the person forbade or limited, in the form the objective enforces
+    (BCON-001): an action class forbidden outright ("do not delete
+    anything"), a named thing protected from one ("don't delete
+    config.yaml"), and a ceiling on changes ("at most 20 changes"). A
+    prohibition about something unnamed and specific ("don't touch my
+    photos") stays a recorded constraint.
+    """
+    from friday import contracts as c
+
+    governance: dict = {}
+    limit = _LIMIT.search(text or "")
+    if limit:
+        governance["max_side_effects"] = int(limit.group(1))
+    forbidden: list[str] = []
+    protected: dict[str, list[str]] = {}
+    for rule in plan.safety:
+        found = _PROHIBITION.search(rule)
+        if not found:
+            continue
+        verb, _, rest = found.group(1).partition(" ")
+        kind = c.action_class(verb) or c.action_class(found.group(1)[:12])
+        if not kind:
+            continue
+        named = _named_path(rest)
+        if named:
+            protected.setdefault(kind, [])
+            if named not in protected[kind]:
+                protected[kind].append(named)
+        elif not rest.strip() or _ANY_OBJECT.match(rest):
+            if kind not in forbidden:
+                forbidden.append(kind)
+    if forbidden:
+        governance["forbidden"] = sorted(forbidden)
+    if protected:
+        governance["protected"] = protected
+    return governance
+
+
+def contract_for(plan: Plan, text: str):
+    """
+    The objective's contract, as this reading of `text` found it (PRD v7
+    §10.3): the whole request as the goal, why (purpose), what must not
+    happen and how the work must be done (hard constraints), how to speak
+    (preferences), what done means for each goal (success criteria), and
+    the names and words the person gave, which the plan must use verbatim.
+    """
+    from friday import contracts as c
+
+    literals: list[str] = []
+    for goal in plan.goals:
+        if not goal.capability:
+            continue
+        for found in (_named_path(goal.intent), _named_content(goal.intent)):
+            if found and found not in literals:
+                literals.append(found)
+    return c.ObjectiveContract(
+        goal=text,
+        purpose=tuple(plan.purpose),
+        hard_constraints=tuple(plan.safety) + tuple(plan.constraints),
+        preferences=tuple(plan.presentation) + tuple(plan.reporting),
+        exact_literals=tuple(literals),
+        success_criteria=tuple(goal.intent.strip() for goal in plan.goals
+                               if goal.capability),
+        governance=governance_for(plan, text),
+    )
 
 
 def task_specs(plan: Plan) -> list[dict]:

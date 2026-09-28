@@ -24,8 +24,8 @@ def _get_engine() -> PolicyEngine:
     return _engine
 
 
-def _execute(request: str, fn, *args, **kwargs) -> dict:
-    run = c.Run.create(request, capability="objectives")
+def _execute(request: str, fn, *args, _run: c.Run | None = None, **kwargs) -> dict:
+    run = _run or c.Run.create(request, capability="objectives")
     result = fn(run, *args, engine=_get_engine(), **kwargs)
     run.transition("completed" if run.all_succeeded else "partial",
                    None if run.all_succeeded else (result.error or "not verified"))
@@ -40,7 +40,7 @@ def register(mcp):
 
     @mcp.tool()
     def objective_start(objective: str, tasks: str = "",
-                        replace: bool = False) -> dict:
+                        replace: bool = False, nonce: str = "") -> dict:
         """
         Start a multi-step objective that Friday runs on its own, no
         "continue" required. The request is compiled into a validated task
@@ -56,9 +56,25 @@ def register(mcp):
         capability's own name, e.g. "apps_open"). If an objective is already
         active it fails unless `replace` is true, which cancels the old run
         (with a reason trail) before starting the new one.
+
+        When the objective could send what it reads (it reads private data
+        and can reach the web, a browser or a terminal), the answer is
+        APPROVAL_REQUIRED with a `confirm.nonce`: ask the person, and once
+        they have answered call this again with the same `objective`,
+        `tasks` and that `nonce`. You cannot approve it yourself - the nonce
+        only says which question was answered.
         """
+        from friday import confirmation
+
+        # The yes is bound to the run that asked, so a retry carrying its
+        # nonce runs as that run - and only for this question.
+        pending = confirmation.book.pending.get(nonce) if nonce else None
+        run = (c.Run(run_id=pending.run_id, request=f"start objective: {objective}",
+                     capability="objectives")
+               if pending is not None and pending.action == "objective.composition"
+               else None)
         return _execute(f"start objective: {objective}", O.objective_start,
-                        objective, tasks=tasks, replace=replace)
+                        objective, tasks=tasks, replace=replace, nonce=nonce, _run=run)
 
     @mcp.tool()
     def objective_status(run_id: str = "") -> dict:

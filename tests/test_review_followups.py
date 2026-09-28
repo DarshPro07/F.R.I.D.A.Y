@@ -10,6 +10,7 @@ from friday import provider_cooldowns as PC
 from friday.continuous import STRATEGY_HINTS, ContinuousTaskExecutor
 from friday.objectives import TaskStatus, compile_objective
 from friday.store import Store
+from friday.contracts import PERSON
 
 
 def _manifest():
@@ -44,7 +45,7 @@ async def test_strategy_hint_reaches_the_worker_arguments():
     executor.max_attempts = 6
     run = compile_objective(store, request="flaky", manifest=_manifest(),
                             objective_summary="flaky",
-                            tasks=[{"capability": "flaky", "arguments": {}}])
+                            tasks=[{"capability": "flaky", "arguments": {}}], provenance=PERSON, attended=True)
     try:
         await executor.start(run["run_id"])
         await _run_to_terminal(store, run["run_id"])

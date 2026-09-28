@@ -19,6 +19,10 @@ that claim needed a human to remember eight commands and to remember which
 of them had actually been run against the commit in hand. That is exactly
 how a release gets called green because someone read a badge.
 
+PRD v7 §79 adds one more: every critical negative control must have a
+red-path test that passes on the candidate (VERIFY-002). Its registry is
+`tests/negative_controls.py`.
+
 So the rules here are deliberately unkind to good news:
 
 * **A gate that did not run is NOT_RUN, never PASS.** The soak takes eight
@@ -39,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import importlib.util
 import json
 import os
 import platform
@@ -46,6 +51,7 @@ import shutil
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -163,6 +169,111 @@ def gate_invariants(py: str, tmp: str) -> GateResult:
         PASS if code == 0 else FAIL, tail.splitlines()[-1] if tail else "",
         " ".join(cmd), code, secs,
         limitations=[] if code == 0 else ["the invariant suite is not green"])
+
+
+def _negative_controls() -> dict:
+    """PRD §79's registry, loaded from the test tree it belongs to."""
+    path = ROOT / "tests" / "negative_controls.py"
+    spec = importlib.util.spec_from_file_location("negative_controls", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.CONTROLS
+
+
+def _junit_outcomes(report: Path, nodes: tuple[str, ...]) -> dict[str, list[str]]:
+    """For each node ID asked for (parameters stripped), the outcome of each
+    of its cases, read from the JUnit report pytest itself wrote. A JUnit
+    classname does not say where the module ends and a class begins, so each
+    reading of it is tried against the node IDs that were requested."""
+    wanted = set(nodes)
+    outcomes: dict[str, list[str]] = {}
+    for case in ET.parse(report).getroot().iter("testcase"):
+        parts = (case.get("classname") or "").split(".")
+        name = (case.get("name") or "").split("[", 1)[0]
+        readings = ("::".join(["/".join(parts[:cut]) + ".py", *parts[cut:], name])
+                    for cut in range(len(parts), 0, -1))
+        node = next((reading for reading in readings if reading in wanted), None)
+        if node is None:
+            continue
+        kinds = {child.tag for child in case}
+        outcome = ("failed" if kinds & {"failure", "error"}
+                   else "skipped" if "skipped" in kinds else "passed")
+        outcomes.setdefault(node, []).append(outcome)
+    return outcomes
+
+
+def gate_negative_controls(py: str, tmp: str,
+                           controls: dict | None = None) -> GateResult:
+    """§79 / VERIFY-002: every critical guard has a red path that passes here.
+
+    One pytest run per control, so each verdict has its own command and exit
+    code in the evidence, and each run's JUnit report says what every named
+    test did. Every named test must pass: one that failed, did not run, or
+    skipped is a problem - a key control that skipped while a sibling passed
+    would otherwise let the control read as demonstrated. The one exception
+    is a skip the registry allows for this host (`host_skips`, with its
+    reason), which is reported as a limitation, and even then the control
+    needs at least one passing case. A control with no test keeps the gate
+    at FAIL - the PRD requires the red path for release, not a plan for one.
+    """
+    controls = _negative_controls() if controls is None else controls
+    started = time.time()
+    registry = [py, "-m", "pytest", "tests/test_negative_controls.py", "-q",
+                "-p", "no:cacheprovider", "--basetemp", tmp + "/neg-registry"]
+    code, tail, _ = _run(registry, timeout=900)
+    codes = [code]
+    problems = [] if code == 0 else ["the registry meta-test is not green: "
+                                     + (tail.splitlines()[-1] if tail else "")]
+    skipped_on_host, evidence = [], []
+    for index, (name, control) in enumerate(sorted(controls.items())):
+        if not control.tests:
+            problems.append(f"{name}: no red-path test yet (owned by "
+                            f"{control.open_row or 'nobody'})")
+            continue
+        report = Path(tmp) / f"neg-{index}.xml"
+        report.unlink(missing_ok=True)      # never judge a stale report
+        cmd = [py, "-m", "pytest", *control.tests, "-q", "-p",
+               "no:cacheprovider", "--basetemp", f"{tmp}/neg-{index}",
+               f"--junitxml={report}"]
+        run_code, run_tail, _ = _run(cmd, timeout=900)
+        codes.append(run_code)
+        outcomes = (_junit_outcomes(report, control.tests)
+                    if report.is_file() else {})
+        found = []
+        for test in control.tests:
+            cases = outcomes.get(test, [])
+            if not cases:
+                found.append(f"{name}: {test} did not run")
+            elif "failed" in cases:
+                found.append(f"{name}: {test} failed")
+            elif "skipped" in cases:
+                reason = control.host_skips.get(test)
+                if reason:
+                    skipped_on_host.append(
+                        f"{name}: {test} skipped on this host ({reason})")
+                else:
+                    found.append(f"{name}: {test} skipped, and that is not "
+                                 f"an allowed host skip")
+        passed = sum(cases.count("passed") for cases in outcomes.values())
+        if not passed:
+            found.append(f"{name}: no red-path case passed")
+        if run_code != 0 and not found:
+            found.append(f"{name}: pytest exit {run_code}: "
+                         + (run_tail.splitlines()[-1] if run_tail else ""))
+        problems += found
+        evidence.append(f"{name}: exit {run_code}, {passed} passed")
+    covered = sum(1 for control in controls.values() if control.tests)
+    return GateResult(
+        "Negative controls",
+        "Every §79 critical guard has a passing red-path test",
+        FAIL if problems else PASS,
+        f"{covered}/{len(controls)} controls have a red path"
+        + (f"; {problems[0]}" if problems else "; every one passed here"),
+        " ".join(registry) + " ; then pytest <each control's tests>",
+        max(codes), time.time() - started,
+        evidence="; ".join(evidence),
+        limitations=problems + skipped_on_host)
 
 
 def gate_verification(py: str, tmp: str) -> GateResult:
@@ -428,6 +539,7 @@ def main() -> int:
               f"({result.seconds:.0f}s) {result.detail[:70]}", flush=True)
 
     add(gate_invariants(py, tmp))
+    add(gate_negative_controls(py, tmp))
     add(gate_verification(py, tmp))
     add(gate_budget(py, tmp))
     add(gate_persistence(py, tmp))

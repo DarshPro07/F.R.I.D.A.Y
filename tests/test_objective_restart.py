@@ -30,6 +30,7 @@ import pytest
 from friday.continuous import ContinuousTaskExecutor, RunWatchdog
 from friday.objectives import RunStatus, TaskStatus, compile_objective
 from friday.store import Store
+from friday.contracts import PERSON
 
 
 class SimpleRegistry:
@@ -61,7 +62,7 @@ def compile_restartable(store) -> dict:
             {"id": "b", "description": "b"},
             {"id": "c", "description": "c"},
         ],
-        objective_summary="restart probe",
+        objective_summary="restart probe", provenance=PERSON, attended=True
     )
 
 

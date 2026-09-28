@@ -324,3 +324,57 @@ def test_external_pause_invalidates_late_speech_and_next_turn_resumes(tmp_path):
         assert adapter.active_claim is not None
         store.close()
     asyncio.run(scenario())
+
+def _long_objective() -> str:
+    return ('rewrite the onboarding guide; ' + 'keep every section heading as it is; ' * 80
+            + "and save it as 'Onboarding v3 FINAL.md'")
+
+
+def test_the_continuation_packet_carries_every_critical_fact(tmp_path):
+    """CTX-003: a resumed portion starts from this packet, not the history, so
+    the whole objective, the task it resumes, the evidence so far and the
+    authority reach the model as recorded."""
+    from friday import compaction as K
+    store = Store(tmp_path / 'handoff.sqlite3')
+    manager = C.ContinuityManager(store, clock=lambda: NOW)
+    manager.start_run(_long_objective(), initial_task='draft the guide')
+
+    async def scenario():
+        session = FakeSession()
+        adapter = LiveKitContinuity(manager, worker_id='voice-fresh')
+        adapter.attach(session)
+        claim = await adapter.pump_once()
+        (packet,) = session.generated
+        facts = K.for_continuation(objective=claim.objective, task_id=claim.task_id,
+                                   evidence_refs=claim.evidence_refs, provenance=claim.provenance)
+        assert K.missing(packet, facts) == []
+        assert "'Onboarding v3 FINAL.md'" in packet
+    asyncio.run(scenario())
+    store.close()
+
+
+def test_a_continuation_that_would_drop_a_critical_fact_is_not_sent(tmp_path, monkeypatch):
+    from friday import compaction as K
+    store = Store(tmp_path / 'lossy.sqlite3')
+    manager = C.ContinuityManager(store, clock=lambda: NOW)
+    manager.start_run(_long_objective(), initial_task='draft the guide')
+    compose = LiveKitContinuity._packet
+    # A later change that shortens the objective in the packet must be caught.
+    monkeypatch.setattr(LiveKitContinuity, '_packet',
+                        lambda self, claim, facts: compose(self, claim, facts).replace(
+                            "and save it as 'Onboarding v3 FINAL.md'", ''))
+
+    async def scenario():
+        session = FakeSession()
+        adapter = LiveKitContinuity(manager, worker_id='voice-fresh')
+        adapter.attach(session)
+        try:
+            await adapter.pump_once()
+        except K.LossyCompaction as exc:
+            assert any('Onboarding v3 FINAL.md' in line for line in exc.missing)
+        else:
+            raise AssertionError('a lossy continuation was not refused')
+        assert session.generated == []
+        assert adapter.active_claim is None
+    asyncio.run(scenario())
+    store.close()

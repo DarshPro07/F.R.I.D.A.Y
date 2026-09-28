@@ -89,24 +89,40 @@ SECRET_PATTERNS = (
 OPAQUE = "[SECRET-REDACTED]"
 
 
-def classify_url(url: str) -> BrowserVerdict:
-    """The pre-capture gate. Called before ANY navigation/snapshot."""
+def classify_url(url: str, *, net: dict | None = None) -> BrowserVerdict:
+    """The pre-capture gate. Called before ANY navigation/snapshot.
+
+    `net` (netguard.run_scope) holds a durable run to its envelope's network
+    scope (NET-001). A scope or an address that cannot be checked blocks: an
+    unknown answer about where the browser would go is a no."""
     # Observation boundary first: a financial page is never observed,
     # regardless of anything else about the URL.
     if sensitive_domains.enabled() and sensitive_domains.is_sensitive(url):
         return BrowserVerdict(BLOCK_SENSITIVE,
                               sensitive_domains.refusal(url))
 
-    # Network boundary second: SSRF/private-address refusal.
+    if net and net.get("scope") is not None:
+        try:
+            netguard.check_scope(url, net["scope"], net.get("revoked"))
+        except netguard.UrlRefused as exc:
+            return BrowserVerdict(BLOCK_NETWORK, str(exc))
+        except Exception as exc:                            # noqa: BLE001
+            return BrowserVerdict(
+                BLOCK_NETWORK, f"this run's network scope could not be "
+                               f"checked ({type(exc).__name__})")
+
+    # Network boundary second: SSRF/private-address refusal. An unexpected
+    # error here used to skip the address rules and fall through to ALLOW, so
+    # a loopback URL Python cannot parse (`http://127.0.0.1:abc/`) passed
+    # where the same URL, well formed, is refused (Slice 2 review).
     try:
         netguard.check(url)
     except netguard.UrlRefused as exc:
         return BrowserVerdict(BLOCK_NETWORK, str(exc))
-    except Exception:                                        # noqa: BLE001
-        # netguard errors never fail open a SENSITIVE check (already
-        # passed above); an unexpected parser error only skips the
-        # network refinement.
-        pass
+    except Exception as exc:                                 # noqa: BLE001
+        return BrowserVerdict(
+            BLOCK_NETWORK, f"this address could not be checked "
+                           f"({type(exc).__name__})")
 
     lowered = (url or "").lower()
     for pattern in _AUTH_PATTERNS:

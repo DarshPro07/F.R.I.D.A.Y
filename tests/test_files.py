@@ -78,7 +78,7 @@ def test_permanent_user_delete_consumes_exact_original_run_confirmation(root):
     assert reused.output['result'] == F.BLOCKED
 
 
-def test_permanent_confirmation_refuses_retarget_expiry_and_reuse(root):
+def test_permanent_confirmation_refuses_retarget_expiry_and_reuse(root, monkeypatch):
     first = root / 'first.txt'
     second = root / 'second.txt'
     first.write_text('one', encoding='utf-8')
@@ -90,8 +90,10 @@ def test_permanent_confirmation_refuses_retarget_expiry_and_reuse(root):
     retargeted = F.files_delete(run(original.run_id), str(second), permanent=True, nonce=nonce, engine=engine())
     assert retargeted.status == c.CANCELLED
     assert first.exists() and second.exists()
-    pending = confirmation.book.pending[nonce]
-    pending.expires_at = pending.created_at - timedelta(seconds=1)
+    # Past its expiry. The book is shared through the store, so time moves
+    # rather than the record being edited in place.
+    later = confirmation.book.pending[nonce].expires_at + timedelta(seconds=1)
+    monkeypatch.setattr(confirmation, "_now", lambda: later)
     expired = F.files_delete(run(original.run_id), str(first), permanent=True, nonce=nonce, engine=engine())
     assert expired.status == c.CANCELLED
     assert first.exists()

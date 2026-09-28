@@ -236,3 +236,96 @@ def test_load_contention_is_not_a_sampling_gap_but_sleep_still_is():
     hourly = _gapped([100.0] * 40, step=20.0, gap_at=20, gap=400.0)
     assert S.analyse(hourly, 1200.0, COUNTS_ALL, [], [], 40, sample_every_s=20.0)["gaps"], (
         "the real 8 h configuration stopped detecting a 400 s hole")
+
+
+# ---------------------------------------------------------------------------
+# telemetry that fails must not take the verdict with it
+# ---------------------------------------------------------------------------
+
+class _ProcThatCannotEnumerateHandles:
+    """psutil on Windows raises a plain RuntimeError from its system-wide
+    handle enumeration when a runaway process holds millions of handles
+    ("SystemExtendedHandleInformation buffer too big"). Seen 2026-09-15."""
+
+    pid = 4242
+
+    class _Mem:
+        rss = 150 * 1048576
+
+    def oneshot(self):
+        import contextlib
+        return contextlib.nullcontext()
+
+    def memory_info(self):
+        return self._Mem()
+
+    def num_handles(self):
+        return 1200
+
+    def num_threads(self):
+        return 20
+
+    def children(self, recursive=True):
+        return []
+
+    def cpu_percent(self, interval=None):
+        return 1.5
+
+    def open_files(self):
+        raise RuntimeError("SystemExtendedHandleInformation buffer too big")
+
+
+class _NoStore:
+    _lock = __import__("threading").Lock()
+
+    class _Conn:
+        def execute(self, *_):
+            raise RuntimeError("no store in this test")
+
+    _conn = _Conn()
+
+
+class _NoTelemetry:
+    def _connect(self):
+        raise RuntimeError("no telemetry in this test")
+
+
+def test_a_sampler_probe_that_raises_costs_one_series_not_the_sample(tmp_path):
+    row = soak.sample(_ProcThatCannotEnumerateHandles(), _NoStore(), _NoTelemetry(),
+                      tmp_path / "absent.log", 0.0)
+    assert row["sqlite_conns"] == -1                       # the lost series, excluded by analyse
+    assert row["rss_mb"] > 0 and row["handles"] == 1200    # everything else was measured
+    assert "open_files: RuntimeError: SystemExtendedHandleInformation" in row["sampling_error"]
+
+
+def test_lost_telemetry_is_inconclusive_never_pass_and_never_a_crash():
+    n = 720
+    s = _samples([50.0 for _ in range(n)])
+    for row in s[100:110]:
+        row["sqlite_conns"] = -1
+        row["sampling_error"] = "open_files: RuntimeError: SystemExtendedHandleInformation buffer too big"
+    r = soak.analyse(s, 7200.0, COUNTS_ALL, [], [], 100)
+    assert r["verdict"] == "INCONCLUSIVE"
+    assert r["sampling_error_count"] == 10
+    assert "lost telemetry" in r["reason"]
+    assert r["missing_moves"] == []                        # the shape is complete
+    assert "telemetry lost" in soak.render(r)
+
+
+def test_a_violation_still_fails_even_with_lost_telemetry():
+    s = _samples([50.0 for _ in range(720)])
+    s[5]["sampling_error"] = "process: RuntimeError: boom"
+    r = soak.analyse(s, 7200.0, COUNTS_ALL, ["budget: exhausted objective allowed a call"], [], 100)
+    assert r["verdict"] == "FAIL"
+    assert r["sampling_error_count"] == 1
+
+
+def test_too_few_samples_still_reports_the_full_shape():
+    s = _samples([50.0, 51.0])
+    s[0]["sampling_error"] = "process: RuntimeError: boom"
+    r = soak.analyse(s, 7200.0, COUNTS_ALL, [], [], 3)
+    assert r["verdict"] == "INCONCLUSIVE"
+    assert "lost telemetry" in r["reason"]
+    for key in ("missing_moves", "violations", "errors", "error_count", "sampling_error_count", "samples", "host"):
+        assert key in r, key
+    assert "telemetry lost" in soak.render(r)
