@@ -73,8 +73,23 @@ Rulings (reversible; consequence if wrong in brackets):
 
 ## Resume (fresh session)
 
-Current: harness complete at 59815a0. Next: `build_program.py --priority P0` in the background, then read
+Current: harness complete at 59815a0. Next: `build_program.py --priority P0`, then read
 `data/build_state.json` (stop_reason, waves, parked, escalations) - not the worker transcripts.
+
+First P0 run (2026-09-30 23:44, `--max-waves 3 --max-usd 15`) was **killed by Claude Code's low-memory reaper**
+one minute into wave 1 (2.3 of 15.4 GB free). The reaper kills the whole tree it launched, so both workers died
+with it; `CREATE_NEW_PROCESS_GROUP` does not escape it. No state file was written. Left on disk, uncommitted:
+- `.worktrees/brow-001` (build/brow-001): 5 files, +60 (action_path, capability_router, planner, routing_memory,
+  test_capability_router); session `994c165a-9aa3-43e7-a07a-0b98a0426ba0`.
+- `.worktrees/core-001` (build/core-001): hermes_control.py +64; session `bfe81b84-af46-4448-8e8d-b526f8638ff1`.
+A new program run parks both as `stale worktree` (safe). Options: resume each session in its worktree
+(`claude -p --resume <sid>`), or remove the worktrees and let the next run start them fresh.
+
+Before the next run: start it detached (`Start-Process ... -WindowStyle Hidden`, then a Monitor on the log /
+state file), never as a harness background task; on this host prefer `--cap 1` while headroom is this low. The
+governor allowed 2 workers at launch - two `claude -p` workers plus their pytest runs outgrew the headroom, a
+data point for the resource governor's thresholds. A kernel `resume REQ` command (session id from the stream's
+init line) would make a killed run recoverable in code.
 
 Older resume steps, kept for the record:
 
