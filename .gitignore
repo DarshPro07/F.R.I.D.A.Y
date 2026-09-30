@@ -117,3 +117,6 @@ data/soak/
 .slim/deepwork/
 # Build-harness worker checkouts (BUILD-006)
 .worktrees/
+
+# Build-kernel packets, logs and evidence (per worktree)
+.build/
