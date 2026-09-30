@@ -2788,6 +2788,41 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "EXTEND: exercise a real power flip on REFERENCE-A (unplug while the server runs) and record the "
             "history entry; let the power state gate background work (BG-001)."),
     }),
+    # --- BROW-001: recorded routing outcomes in the path order, 2026-09-30 (first build-kernel worker)
+    ("BROW-001", {
+        "status": PARTIAL,
+        "current_implementation": (
+            "friday/action_path.py is section 48's router: each capability acts through a path - native API, "
+            "official scripting, a structured tool or MCP, the DOM, semantic vision or screen coordinates - and "
+            "rank() puts a step's candidates most direct path first, moving a path that has kept failing (five "
+            "tries or more, under half succeeding) behind the others. Capability search offers tied matches in "
+            "that order without changing what is offered, and a tie now also moves last a capability that has "
+            "kept being the wrong prediction for this request shape: routing_memory.reliability() tallies the "
+            "settled shadow predictions per capability (right or wrong for the request). "
+            "scripts/journey_hybrid_browser.py runs one objective that reads a page over HTTP and then opens, "
+            "reads and closes it in a headless Chromium through the real executor; the browser extra is "
+            "installed in the product's own .venv and reads BROWSER_READY (BROW-004). Gaps: the outcome that "
+            "feeds rank() is routing correctness, not whether running a path succeeded - execution outcomes "
+            "do not feed it yet; the planner does not choose between alternative paths for a step."),
+        "files": ["friday/action_path.py:25,45,58,66", "friday/capability_router.py:545",
+                  "friday/routing_memory.py:133", "scripts/journey_hybrid_browser.py", "pyproject.toml:57"],
+        "tests": ["tests/test_action_path.py::test_one_objective_runs_a_structured_step_and_a_real_browser_step",
+                  "tests/test_action_path.py::test_the_order_is_section_48s",
+                  "tests/test_action_path.py::test_a_step_takes_the_most_direct_path_first",
+                  "tests/test_action_path.py::test_a_path_that_keeps_failing_moves_behind_the_others",
+                  "tests/test_capability_router.py::test_a_tie_in_search_goes_to_the_more_direct_path",
+                  "tests/test_capability_router.py::test_the_path_order_never_changes_what_is_offered",
+                  "tests/test_capability_router.py::test_a_tie_moves_a_path_that_keeps_failing_for_this_request_behind"],
+        "evidence": (
+            "2026-09-27/28: the action-path tests failed first; the real hybrid journey passed on REFERENCE-A "
+            "(data/prd_v7_audit/brow001_hybrid_journey_2026-09-28.json). 2026-09-30: the routing-outcome change "
+            "was made by the first build-kernel worker (headless Sonnet in its own worktree: 23 turns, 150 s, "
+            "$0.36) and verified by the controller: disabling the reliability input turns the new test red; the "
+            "13 directly affected test files and the reachability test pass in the main checkout (287)."),
+        "next_action": (
+            "EXTEND: feed execution outcomes (a path's recorded successes and failures when run) into rank(), "
+            "and let the planner choose a step's path with them."),
+    }),
 ]
 
 

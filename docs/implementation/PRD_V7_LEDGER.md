@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `0557c9d9adcaa9ec07962f083a342862fb00ac6ff7a3134b59aac180800c3ab5`
 - PRD size: 8008 lines, 269029 bytes
-- Repository HEAD: `079b7aabd1f392fb24864949a137d8e6de8047a9`
-- Uncommitted paths at generation: 34
-- Generated: 2026-09-30T18:40:39+05:30
+- Repository HEAD: `23e98ed1ff63214ca04f717bb359d23ad7d51024`
+- Uncommitted paths at generation: 38
+- Generated: 2026-09-30T18:59:16+05:30
 
 ## Status vocabulary
 
@@ -242,7 +242,7 @@ Unresolved P1: 82 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MO
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| BROW-001 | P0 | **PARTIAL** | Hybrid action route supports structured + GUI paths. | Golden journey/backend evaluation. | FR-BRW-001 | `friday/action_path.py:25,29,45,58,66`, `friday/capability_router.py:543`, `scripts/journey_hybrid_browser.py` | 2026-09-27: the action-path tests and the tie test failed first. The first version of the tie-break also reordered the whole candidate list, which pushed four needed capabilities out of the top six on the development split (732 to 728); it was narrowed to order only what is offered, and the guard test pins that. Five mutations each turn a test red: in the router, the whole list reordered and the order dropped from what is offered; in action_path, failures ignored, desktop classed as structured and a single failure demoting a path. The 24 routing, semantics, planner, capability and golden-suite test files pass (539). The four-chunk suite over the tree with the Slice 6 work and the review fixes (data/baseline_v7_slice6b): all four chunks exit 0, 4,707 passed (1,273, 1,059, 1,355 and 1,020), none failed. 2026-09-28, REFERENCE-A (15.4 GB RAM, integrated GPU), the real journey (data/prd_v7_audit/brow001_hybrid_journey_2026-09-28.json): one objective, web_fetch on the native-API path and browser_open, browser_inspect and browser_close on the DOM path, all SUCCEEDED and the run COMPLETED in 27 s; both paths read the page. The browser cost the machine 184 MB in its own processes and 140 MB of RAM at peak over the start. The live test that runs it passes (marked live: it needs the network and Chromium). |
+| BROW-001 | P0 | **PARTIAL** | Hybrid action route supports structured + GUI paths. | Golden journey/backend evaluation. | FR-BRW-001 | `friday/action_path.py:25,45,58,66`, `friday/capability_router.py:545`, `friday/routing_memory.py:133` | 2026-09-27/28: the action-path tests failed first; the real hybrid journey passed on REFERENCE-A (data/prd_v7_audit/brow001_hybrid_journey_2026-09-28.json). 2026-09-30: the routing-outcome change was made by the first build-kernel worker (headless Sonnet in its own worktree: 23 turns, 150 s, $0.36) and verified by the controller: disabling the reliability input turns the new test red; the 13 directly affected test files and the reachability test pass in the main checkout (287). |
 
 ## PRD section 49
 

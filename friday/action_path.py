@@ -63,6 +63,8 @@ def rank(candidates, *, reliability: dict | None = None) -> list[str]:
                                                ORDER.index(path_of(cap))))
 
 
-def order_key(capability_id: str) -> int:
-    """Where a capability's path stands in §48's order, for tie-breaking."""
-    return ORDER.index(path_of(capability_id))
+def order_key(capability_id: str, reliability: dict | None = None) -> tuple[bool, int]:
+    """Where a capability's path stands in §48's order, for tie-breaking: a
+    path that keeps failing for this kind of step sorts behind the rest."""
+    return (_failing(capability_id, reliability or {}),
+            ORDER.index(path_of(capability_id)))

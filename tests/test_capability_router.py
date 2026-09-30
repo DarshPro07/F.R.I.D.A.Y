@@ -115,6 +115,45 @@ def test_a_tie_in_search_goes_to_the_more_direct_path():
     assert found[:2] == ["web_zqxreadpage", "browser_zqxreadpage"], found
 
 
+def test_a_tie_moves_a_path_that_keeps_failing_for_this_request_behind(monkeypatch):
+    """BROW-001: recorded outcomes feed rank - the HTTP read has failed in
+    four of six tries for this shape, so the browser read is offered first."""
+    from friday import routing_memory
+    monkeypatch.setattr(routing_memory, "reliability",
+                        lambda text: {"web_zqxreadpage": (2, 6)})
+    router = R.Router()
+    router.load([SchemaTool("browser_zqxreadpage", "zqx summary of a thing"),
+                 SchemaTool("web_zqxreadpage", "zqx summary of a thing")])
+    found = [m["capability"] for m in router.search("zqxreadpage thing")]
+    assert found[:2] == ["browser_zqxreadpage", "web_zqxreadpage"], found
+
+
+def test_reliability_is_tallied_from_settled_outcomes(monkeypatch):
+    """The recorded shadow outcomes for a request shape become
+    (successes, attempts) per capability."""
+    import sqlite3
+    from friday import routing_memory
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE shadow_predictions (fingerprint TEXT, "
+                 "predicted_capability TEXT, intent_correct INTEGER, settled_at TEXT)")
+    rows = [("fp", "web_a", 1, "t"), ("fp", "web_a", 0, "t"), ("fp", "web_a", 0, "t"),
+            ("fp", "web_a", 0, None), ("other", "web_a", 1, "t")]
+    conn.executemany("INSERT INTO shadow_predictions VALUES (?,?,?,?)", rows)
+
+    class Db:
+        _conn = conn
+
+    monkeypatch.setattr(routing_memory, "_store", lambda: Db())
+    monkeypatch.setattr(routing_memory, "fingerprint", lambda text: "fp")
+    routing_memory.forget()
+    try:
+        assert routing_memory.reliability("anything") == {"web_a": (1, 3)}
+    finally:
+        routing_memory.forget()
+
+
 def test_the_path_order_never_changes_what_is_offered():
     """Seven equal matches, six places: the path order may put the browser
     tool last, but must not push it out - which tools are offered is the

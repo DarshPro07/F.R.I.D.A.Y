@@ -45,6 +45,7 @@ OUTCOME_CAP = 12
 MIN_OBSERVATIONS = 2
 
 _CACHE: dict[str, tuple[float, dict]] = {}
+_RELIABILITY_CACHE: dict[str, tuple[float, dict]] = {}
 
 
 def _store():
@@ -129,9 +130,39 @@ def prior(text: str) -> dict[str, int]:
     return merged
 
 
+def reliability(text: str) -> dict[str, tuple[int, int]]:
+    """capability -> (successes, attempts) over the settled outcomes for this
+    request shape, for `action_path.rank`. {} when nothing is recorded.
+
+    Never raises, for the same reason `prior` does not."""
+    try:
+        fp = fingerprint(text)
+    except Exception:  # noqa: BLE001
+        return {}
+    if not fp:
+        return {}
+    hit = _RELIABILITY_CACHE.get(fp)
+    if hit and (time.monotonic() - hit[0]) < TTL_SECONDS:
+        return hit[1]
+    try:
+        rows = _store()._conn.execute(
+            "SELECT predicted_capability AS cap, intent_correct AS ok "
+            "FROM shadow_predictions WHERE fingerprint=? AND settled_at IS NOT NULL "
+            "AND predicted_capability IS NOT NULL LIMIT 200", (fp,))
+        tally: dict[str, tuple[int, int]] = {}
+        for row in rows:
+            good, total = tally.get(row["cap"], (0, 0))
+            tally[row["cap"]] = (good + (1 if row["ok"] else 0), total + 1)
+    except Exception:  # noqa: BLE001
+        tally = {}
+    _RELIABILITY_CACHE[fp] = (time.monotonic(), tally)
+    return tally
+
+
 def forget() -> None:
     """Drop the cache. For tests, and for after a correction is recorded."""
     _CACHE.clear()
+    _RELIABILITY_CACHE.clear()
 
 
 def explain(text: str) -> dict:

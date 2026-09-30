@@ -540,8 +540,11 @@ class Router:
         # What is offered is decided by the score alone; among what is
         # offered, a tie goes to the more direct action path (PRD v7 §48),
         # so the order says which to try first without changing what is found.
+        # A path that has kept failing for this request shape goes last among
+        # its ties (measured, from the recorded outcomes).
+        measured = routing_memory.reliability(lowered)
         shown = sorted(scored[:limit],
-                       key=lambda pair: (-pair[0], action_path.order_key(pair[1]), pair[1]))
+                       key=lambda pair: (-pair[0], action_path.order_key(pair[1], measured), pair[1]))
         return [self.describe_tool(name) for _, name in shown]
 
     def invocable(self, name: str):
