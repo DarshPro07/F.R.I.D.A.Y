@@ -145,3 +145,27 @@ def test_watch_kills_on_stall(tmp_path):
     run = _fake_run(tmp_path, "import time;time.sleep(60)")
     rec = K.watch([run], stall_s=0.3, poll_s=0.05, runs_dir=tmp_path / "runs")[0]
     assert rec["state"] == "STALLED"
+
+
+def test_allowed_tools_are_narrow_and_bash_is_always_patterned():
+    cmd = K.launch(row("REQ-1"), worktrees=Path("wts"), dry_run=True)["command"]
+    tools = cmd[cmd.index("--allowedTools") + 1].split(",")
+    assert tools == ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git status:*)",
+                     "Bash(git diff:*)", "Bash(git log:*)", f"Bash({K.VENV_PY}:*)"]
+    assert "Bash" not in tools
+
+
+def test_worker_env_points_state_inside_the_worktree(tmp_path):
+    env = K.worker_env(tmp_path / "wt", {"KEEP": "1"})
+    home = tmp_path / "wt" / ".build" / "home"
+    assert home.is_dir() and env["KEEP"] == "1"
+    assert Path(env["FRIDAY_HOME"]) == home
+    assert Path(env["ADA_DB"]) == home / "ada.sqlite3"
+    assert Path(env["ADA_AUDIT_DB"]) == home / "audit.sqlite3"
+
+
+def test_a_worker_starts_without_mcp_servers_or_hooks():
+    cmd = K.worker_command("sonnet", 5, 1.0)
+    assert "--strict-mcp-config" in cmd
+    assert cmd[cmd.index("--settings") + 1] == '{"disableAllHooks": true}'
+    assert "bypassPermissions" not in " ".join(cmd)

@@ -38,7 +38,9 @@ VENV_PY = "F:/F.R.I.D.A.Y/.venv-build/Scripts/python.exe"
 DEFAULT_CAP = 2
 DEFAULT_WALL_S = 45 * 60
 DEFAULT_STALL_S = 10 * 60
-ALLOWED_TOOLS = "Read,Edit,Write,Glob,Grep,Bash"
+ALLOWED_TOOLS = ",".join(("Read", "Edit", "Write", "Glob", "Grep",
+                          "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
+                          f"Bash({VENV_PY}:*)"))
 _PRIORITY = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
@@ -176,12 +178,25 @@ Summary: {row['summary']}
 """
 
 
+def worker_env(wt: Path, base: dict | None = None) -> dict:
+    """The worker's environment: its own state root, never the live data/."""
+    home = wt / ".build" / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ if base is None else base)
+    env.update(FRIDAY_HOME=str(home), ADA_DB=str(home / "ada.sqlite3"),
+               ADA_AUDIT_DB=str(home / "audit.sqlite3"))
+    return env
+
+
 def worker_command(model: str, max_turns: int, max_budget: float) -> list[str]:
     exe = shutil.which("claude") or "claude"
     return [exe, "-p", "Read .build/packet.md and carry out the requirement it describes.",
             "--model", model, "--max-turns", str(max_turns),
             "--max-budget-usd", str(max_budget), "--output-format", "stream-json",
-            "--verbose", "--permission-mode", "acceptEdits", "--allowedTools", ALLOWED_TOOLS]
+            "--verbose", "--permission-mode", "acceptEdits", "--allowedTools", ALLOWED_TOOLS,
+            # A minimal worker (BUILD-010): no MCP servers, no hooks injecting
+            # context. Safety is the permission rules, which still apply.
+            "--strict-mcp-config", "--settings", '{"disableAllHooks": true}']
 
 
 @dataclass
@@ -212,7 +227,7 @@ def launch(row: dict, *, worktrees: Path | None = None, model: str = "sonnet",
     kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
           else {"start_new_session": True})
     proc = subprocess.Popen(cmd, cwd=wt, stdout=log, stderr=subprocess.STDOUT,
-                            stdin=subprocess.DEVNULL, **kw)
+                            stdin=subprocess.DEVNULL, env=worker_env(wt), **kw)
     log.close()
     return Running(row["id"], proc, wt)
 
