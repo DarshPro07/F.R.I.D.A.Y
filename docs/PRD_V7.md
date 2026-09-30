@@ -24,6 +24,9 @@
 >
 > Amendment A4 (§98 and Appendix F) was added on 2026-09-28 at the owner's
 > instruction; see the note at §98.
+>
+> Amendment A5 (§99 and Appendix G) was added on 2026-09-29 at the owner's
+> instruction; see the note at §99.
 
 | | |
 |---|---|
@@ -42,7 +45,7 @@
 | First real-world pilot | Crunchy Fashion, without making ecommerce the product definition |
 | Product posture | local-first, model-agnostic, capability-driven, evidence-driven, privacy-aware, self-improving under controlled authority |
 | Status | authoritative target-state PRD; implementation MUST audit current repository before building |
-| Amendments | A1, 2026-09-26: domain partitioning, the domain partition of the general build, and the updated implementation controller (§95, Appendix C); A2, 2026-09-27: durable execution, behavioural contracts and interoperability (§96, Appendix D); A3, 2026-09-27: the local-model hardware rule and the prompt research corpus (§97, Appendix E); A4, 2026-09-28: adaptive hardware and the two reference machines (§98, Appendix F) |
+| Amendments | A1, 2026-09-26: domain partitioning, the domain partition of the general build, and the updated implementation controller (§95, Appendix C); A2, 2026-09-27: durable execution, behavioural contracts and interoperability (§96, Appendix D); A3, 2026-09-27: the local-model hardware rule and the prompt research corpus (§97, Appendix E); A4, 2026-09-28: adaptive hardware and the two reference machines (§98, Appendix F); A5, 2026-09-29: live browser readiness, test isolation and the P0 drive (§99, Appendix G) |
 
 ---
 
@@ -1570,6 +1573,48 @@ working set, progressive disclosure and context health (CTX-001, CTX-002, CTX-00
 | MODEL-009 | P1 | Local model loading, quantization, context size, CPU/GPU offload and residency SHALL be dynamically selected against measured RAM, VRAM, latency, thermal and stability constraints. | A benchmark of CPU-only, partial and full feasible GPU offload on each reference machine chooses the configuration, and the choice differs where the measurements differ. | F, "Add these formal requirements" |
 | MODEL-010 | P1 | Failure to run a preferred local model SHALL degrade to a smaller/local alternative or policy-permitted remote route without making FRIDAY itself unavailable. | A local model that fails to load or runs out of memory falls back to a smaller model or a permitted remote route, and the request completes. | F, "Add these formal requirements" |
 | BG-001 | P1 | Background learning, research, indexing and proactive work SHALL run only when current machine headroom, user activity, power state and objective priority permit it. | Background work is deferred while the person is active or the machine is pressured or on battery, and runs when it is idle, plugged in and has headroom. | F, "Add these formal requirements" |
+
+## 99. Amendment A5 (2026-09-29): live browser readiness, test isolation and the P0 drive
+
+> **Transcription note (added 2026-09-29; not part of the owner's text).** Added at the owner's instruction, in reply
+> to the follow-up report of 2026-09-28. Appendix G is the owner's text verbatim, and "G, <heading>" below names one
+> of its headings. §99.1 is derived by the implementing agent. §99.2's two requirements are the owner's invariants
+> ("This becomes a product invariant"; "I would formalize this as TEST-ISOLATION-001"), worded as requirements with
+> derived acceptance; TEST-ISOLATION-001 is P0 because it protects the owner's live data, BROW-004 is P1. The owner
+> may re-rank.
+
+### 99.1 Decisions carried by this amendment (derived)
+
+- The browser extra is installed in FRIDAY's live environment, not only the test one, and browser readiness is a
+  real launch - extra installed, Chromium build present, a harmless public page loaded and read - on both reference
+  machines, with its cost recorded (G, "1. Browser runtime").
+- RES-003 gains the owner's practical rule: static percentage thresholds are emergency guardrails, not the primary
+  pressure classifier. No machine is special-cased by hostname; a third machine is profiled the same way
+  (G, "2. Hardware governor").
+- The audit rows written by tests are not deleted: the contamination is recorded as an incident (V7-D52), and the
+  invariant that automated tests never write live user-state stores becomes TEST-ISOLATION-001 (G, "4. Audit rows").
+- Provider-shaped fake keys in tests are replaced by clearly synthetic values, or, where the test is about
+  recognising a provider's key shape, assembled at run time; secret scanning and push protection are not weakened or
+  bypassed, and this is settled before the branch is first pushed (G, "5. Fake-key fixtures").
+- Sequence: finish the follow-up checkpoint, run the full suite, commit, leave the tree clean, inspect the diff
+  against main, merge; Slice 7 continues from main on a new branch (G, "6. Merge").
+- A provider safety check that keeps failing is a route-health signal, not a reason to retry: bounded retry, then
+  persist state and switch route or start a fresh session - the safeguard-aware routing of DOMAIN-001 (G, "7.").
+- Scope: no large new architecture on the implementation branch for now; unresolved P0s are driven toward zero in
+  the owner's order - live browser readiness, the adaptive resource governor, CORE-001, ACT-001 and action truth,
+  DOMAIN-001, MCP-001, EVAL-001, remaining security and isolation P0s, CTX retrieval quality, the Cyber interface
+  boundary only (G, "One thing I would change in the current priority").
+- CTX-002 is not complete at 75.9% single-search recall. Before any larger model: benchmark lexical (BM25),
+  embedding, hybrid, metadata filters, a small local reranker and a skill/tool reranker on Recall@1, @3 and @5,
+  schema tokens and latency; the target the owner names is Recall@1 at least 90% and Recall@3 at least 97% while
+  keeping the 80% disclosure reduction (G, "CTX search at 75.9%").
+
+### 99.2 Requirement matrix addendum (derived wording; the verbatim text controls)
+
+| ID | Pri | Requirement | Acceptance evidence | Source |
+|---|---|---|---|---|
+| TEST-ISOLATION-001 | P0 | Automated tests may read production-like schemas but never write, or open, the owner's live user-state stores - the store, the audit log, the workspace, nonce, cooldown and access files, the logs - neither in the test process nor in any process a test starts. | A full suite run with FRIDAY not running leaves every file under the live data/ and logs/ unchanged, and the runner fails a run that changes one; a test that opens a live store is refused; a process a test starts resolves the test session's state root. | G, "4. Audit rows" |
+| BROW-004 | P1 | Browser readiness is a real launch: the browser extra installed, its Chromium build present, and a headless launch that loads and reads a harmless public page is BROWSER_READY; importing Playwright is not readiness, and a missing package or browser build is reported as such. | The readiness probe reports BROWSER_READY from FRIDAY's own environment on each reference machine, with the launch's time and memory recorded; with the package or the browser build missing it reports which. | G, "1. Browser runtime" |
 
 ## Appendix C. Implementation controller, updated 2026-09-26 (owner's text, verbatim)
 
@@ -6812,4 +6857,380 @@ Do not let another six slices pile onto a large uncommitted tree.
 That is the correct direction: **same FRIDAY, different machine, FRIDAY adapts itself.**
 
 You shouldn't need to know whether to use 65%, 75%, MiniCPM-1B, MiniCPM-2B, CPU, GPU, one worker or two workers. **That is FRIDAY's job.**
+````
+
+## Appendix G. Live browser readiness, test isolation and the P0 drive, 2026-09-29 (owner's text, verbatim)
+
+````text
+Yes — the implementation is going in the right direction. I’d make the following decisions now, and I’d keep the build moving from the current checkpoint rather than reopening the completed slices.
+
+### 1. Browser runtime: **install the browser extra in FRIDAY’s live `.venv`**
+
+BROW-001 is supposed to be a real product capability, so it should not work only inside the test environment.
+
+Use the project’s own optional extra:
+
+```bash
+uv pip install -e ".[browser]"
+```
+
+Then run a **runtime smoke test from the same `.venv` that launches FRIDAY**:
+
+```text
+FRIDAY live runtime
+→ import Playwright
+→ launch Chromium
+→ load harmless public page
+→ read title/content
+→ close browser
+```
+
+Playwright’s official Python setup requires both the Python package and compatible browser binaries; if the compatible Chromium binary is already present in Playwright’s cache, it does not need to download it again. Otherwise the runtime should provision Chromium as part of installer/first-run setup. :chatgpt-content-reference{index="0"}
+
+This becomes a product invariant:
+
+> `browser extra installed` + `browser binary available` + `real launch probe passes` = `BROWSER_READY`
+
+Not just:
+
+> Playwright imported successfully.
+
+And because both laptops are primary machines, this real browser journey should pass on **both**, with resource usage recorded.
+
+---
+
+### 2. Hardware governor: **do not manually raise the 75% threshold**
+
+Your current machine is valuable precisely because it exposes why a static threshold is wrong.
+
+Keep the new A4 design:
+
+```text
+machine baseline
++
+available headroom
++
+actual pressure signals
++
+hysteresis
++
+resource trend
+```
+
+rather than:
+
+```text
+RAM > 75%
+→ always shed work
+```
+
+Both machines become first-class reference hosts:
+
+```text
+REFERENCE HOST A
+~15.4 GB RAM
+integrated GPU
+~0.5 GB dedicated VRAM
+
+REFERENCE HOST B
+16 GB RAM
+4 GB VRAM
+```
+
+FRIDAY should automatically discover which machine it is on and derive:
+
+```text
+worker concurrency
+browser concurrency
+background work allowance
+model residency
+CPU/GPU offload
+local-model choice
+context ceiling
+research parallelism
+```
+
+So **do not special-case either laptop by hostname**. A third 12 GB or 32 GB machine should work through exactly the same profiling logic.
+
+I’d add a practical rule to RES-003:
+
+```text
+Static percentage thresholds are emergency guardrails,
+not the primary pressure classifier.
+```
+
+---
+
+### 3. The uncommitted Playwright + audit-isolation work: **commit it before Slice 7 grows further**
+
+You already have an excellent checkpoint:
+
+```text
+3d956ba
+4,716 passed
+0 failed
+```
+
+and now another clean point:
+
+```text
+Playwright real browser journey PASS
+audit-test isolation fixed
+4,717 passed
+0 failed
+```
+
+That deserves a second coherent checkpoint.
+
+Something like:
+
+```text
+fix(runtime): isolate audit tests and enable real browser validation
+```
+
+The commit should include:
+
+- browser optional extra;
+- BROW-001 real journey;
+- audit DB isolation fix;
+- related tests;
+- ledger/evidence updates;
+- Slice 7 design note if appropriate.
+
+Then continue.
+
+I would **not wait for another 100-file slice before committing this**.
+
+---
+
+### 4. Audit rows 480–486: **leave them alone**
+
+Correct decision not to delete them.
+
+An audit trail should not be retroactively cleaned simply because tests accidentally wrote into it.
+
+Instead record an incident such as:
+
+```yaml
+incident: V7-D52
+affected_rows:
+  - 480
+  - 481
+  - 482
+  - 483
+  - 484
+  - 485
+  - 486
+
+classification:
+  test-contamination
+
+cause:
+  child-process tests inherited production audit location
+
+repair:
+  test processes now force data/audit.sqlite3
+
+production_data_deleted:
+  false
+```
+
+If three are definitively from today's harness execution, annotate that in the incident/evidence register, but preserve them.
+
+That gives us a new important invariant:
+
+> **Tests may read production-like schemas, but automated tests must never write into live user-state stores.**
+
+I would formalize this as `TEST-ISOLATION-001` if an equivalent requirement does not already exist.
+
+---
+
+### 5. Fake-key fixtures before push: **change them rather than relying on bypass**
+
+GitHub push protection can block a push when a string matches a supported secret pattern. GitHub does allow a contributor to mark a detected secret as “used in tests,” but doing so creates a bypass record/alert under repository push protection. :chatgpt-content-reference{index="1"}
+
+For FRIDAY, I’d rather our tests **not resemble valid provider credentials unless the test specifically tests secret detection**.
+
+So replace generic fake fixtures like:
+
+```text
+sk-abc...
+```
+
+with clearly synthetic values that do not match provider formats, e.g.:
+
+```text
+FRIDAY_TEST_SECRET_001
+TEST_ONLY_INVALID_API_KEY
+```
+
+For tests whose whole purpose is verifying scanners recognize OpenAI-style/provider-style patterns, construct the string dynamically in the test or keep it in an explicitly isolated fixture with a documented push-protection strategy.
+
+Do **not** disable secret scanning or globally bypass push protection.
+
+GitHub scans Git history, not merely the latest file state, so it is better to resolve these before the first push of the branch. :chatgpt-content-reference{index="2"}
+
+---
+
+### 6. Merge: **not yet — finish this tiny follow-up checkpoint first**
+
+I would sequence it:
+
+```text
+3d956ba
+foundation checkpoint
+     ↓
+browser + audit-isolation follow-up
+     ↓
+4,717+ full suite
+     ↓
+commit
+     ↓
+working tree clean
+     ↓
+inspect diff against main
+     ↓
+merge
+```
+
+After that, continue Slice 7 from main/new implementation branch.
+
+This gives you a clean bisect point:
+
+```text
+foundation security state
+→ browser/runtime correction
+→ adaptive hardware governor
+```
+
+Much easier to debug later.
+
+---
+
+### 7. Safety-classifier transient failures: **stopping retries was correct**
+
+Treat this as an infrastructure/routing failure, not a product defect.
+
+The durable state should say:
+
+```text
+CLASSIFIER_TRANSIENT_FAILURE
+```
+
+and the remaining two actions should be resumable from the checkpoint.
+
+Do not repeatedly resend shell commands until the provider terminates the session.
+
+This is actually a useful real-world case for the safeguard-aware router we added:
+
+```text
+command
+↓
+provider safety system unavailable/transient failure
+↓
+bounded retry
+↓
+provider/session route unhealthy
+↓
+persist
+↓
+fresh session / compatible route
+```
+
+not:
+
+```text
+retry forever
+```
+
+---
+
+## One thing I would change in the current priority
+
+You currently have:
+
+```text
+124 requirements
+32 VERIFIED
+20 unresolved P0
+```
+
+At this stage I would **stop adding large new architectural ideas to the implementation branch for a bit**.
+
+Keep the ideas in the PRD/research registry, but drive the build toward:
+
+```text
+20 unresolved P0
+→ 15
+→ 10
+→ 5
+→ 0
+```
+
+before another major architecture expansion.
+
+Your next order after committing the follow-up should be roughly:
+
+```text
+1. Finish live-browser runtime readiness
+2. Finish adaptive Resource Governor
+3. CORE-001
+4. ACT-001 / action-truth P0s
+5. DOMAIN-001 / safeguard routing
+6. MCP-001
+7. EVAL-001
+8. remaining P0 security/isolation
+9. CTX retrieval quality
+10. Cyber interface boundary only
+```
+
+### CTX search at 75.9%
+
+The ≥80% schema reduction is good.
+
+The **75.9% top-search retrieval is not good enough to call CTX complete**, and `PARTIAL` is the correct status.
+
+I would not immediately throw a bigger LLM at it.
+
+First benchmark:
+
+```text
+BM25 / lexical
+embedding
+hybrid lexical + embedding
+metadata filters
+small local reranker
+R3-style skill/tool reranker
+```
+
+Measure:
+
+```text
+Recall@1
+Recall@3
+Recall@5
+schema tokens loaded
+latency
+```
+
+The real target may be:
+
+```text
+Recall@1 >= 90%
+Recall@3 >= 97%
+```
+
+while still maintaining the ≥80% disclosure reduction.
+
+That's a better objective than simply “search accuracy increased.”
+
+---
+
+## Instruction I'd give the builder now
+
+You can paste this directly:
+
+> **Continue from `prd-v7/foundations-checkpoint` without reopening completed work. First complete the pending browser/audit follow-up: verify the live audit state without modifying it, update BROW-001 with the real Playwright journey evidence, replace or isolate provider-shaped fake-key fixtures so the branch can pass GitHub push protection without weakening scanning, install the `[browser]` extra into the live FRIDAY `.venv`, and run a live-runtime Chromium smoke test. Run targeted tests, then the full suite, and create a coherent follow-up commit. Do not delete audit rows 480–486; document V7-D52 as historical test contamination. After that, continue Slice 7. The Resource Governor must self-profile the host and derive policies from measured headroom/pressure/hysteresis rather than hardcoding either reference machine or simply increasing the 75% threshold. Both the 15.4 GB integrated-GPU machine and the 16 GB/4 GB-VRAM machine are mandatory reference targets. If provider safety checks repeatedly fail, persist state and switch/fresh-session rather than repeatedly retrying. Continue dependency-ready P0 work autonomously.**
+
+That is the state I would lock.
 ````

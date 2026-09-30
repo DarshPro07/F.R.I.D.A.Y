@@ -237,6 +237,30 @@ TRUST-001/002) and V7-D29 (`secrets_list` policy categories disagree between ali
   reference machines (REFERENCE-A this host, REFERENCE-B 16 GB / 4 GB VRAM); commit a checkpoint before
   further major slices.
 
+## FOLLOW-UP CHECKPOINT (2026-09-28/29; Amendment A5)
+
+- Committed 3d956ba (branch `prd-v7/foundations-checkpoint`). Since then: MCP-001 firewall, Amendment A4 (RES-002/003/004,
+  MODEL-009/010, BG-001), the browser extra (V7-D53), BROW-001's real journey, BROW-004's readiness probe (BROWSER_READY
+  from the product `.venv`, 2.67 s, 270 MB), TEST-ISOLATION-001 (session state root, live-store guard, runner live-state
+  check), V7-D52 incident record (>=251 test rows in the live audit log, preserved), V7-D54, provider-shaped test
+  fixtures replaced or assembled at run time, Amendment A5.
+- CLASSIFIER_TRANSIENT_FAILURE (2026-09-28 ~20:45): the harness's safety classifier returned no verdict on consecutive
+  shell commands; work stopped and resumed from this file. Rule: bounded retry, then persist state and start fresh -
+  never resend until the session ends.
+- REFERENCE-B (16 GB / 4 GB VRAM) runs owed by the owner: `python -m friday.browser_readiness`,
+  `scripts/journey_hybrid_browser.py`, and Slice 7's hardware qualification once built.
+- P0 order (owner, A5): browser readiness, adaptive resource governor (Slice 7, `06-slice-7-adaptive-hardware.md`),
+  CORE-001, ACT-001, DOMAIN-001, MCP-001, EVAL-001, remaining security/isolation, CTX retrieval, Cyber boundary only.
+  No large new architecture on the implementation branch meanwhile.
+- V7-D55/V7-D56 (2026-09-29, found when the session's state root left the project): FRIDAY's work areas were jail
+  roots only inside the project (packaged builds refused them), and from a source checkout the file tools could
+  reach FRIDAY's own control state (store, audit trail, confirmation nonces, MCP pins, logs). Fixed in
+  `friday/fsjail.py`; cited under SEC-003.
+- Clean four-chunk suite on the follow-up tree (`data/baseline_v7_followup`, FRIDAY not running): all chunks exit 0,
+  4,734 passed, 0 failed; `live_state unchanged (244 files under data/ and logs/)`. TEST-ISOLATION-001 VERIFIED.
+- The foundation commit is rebuilt without provider-shaped literals (3d956ba differed only in eight test files'
+  fixtures); nothing is pushed.
+
 ## NEXT
 
 1. Remaining unresolved P0s per `02-build-sequence.md`: CORE-001,

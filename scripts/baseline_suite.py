@@ -79,6 +79,62 @@ def _kill_tree(proc: subprocess.Popen) -> None:
         pass
 
 
+def _live_state(root: Path, *, exclude: Path) -> dict[str, tuple[int, int]]:
+    """Every file under `root`'s data/ and logs/ - the owner's live state in a
+    source checkout - with its size and modification time, leaving out this
+    run's own output (TEST-ISOLATION-001)."""
+    state: dict[str, tuple[int, int]] = {}
+    for base in (root / "data", root / "logs"):
+        if not base.exists():
+            continue
+        for path in base.rglob("*"):
+            try:
+                if not path.is_file() or exclude == path or exclude in path.parents:
+                    continue
+                stat = path.stat()
+            except OSError:
+                continue
+            state[path.relative_to(root).as_posix()] = (stat.st_size, stat.st_mtime_ns)
+    return state
+
+
+def _changed(before: dict, after: dict) -> list[str]:
+    """Files added, removed or rewritten between the two snapshots."""
+    return sorted(path for path in set(before) | set(after) if before.get(path) != after.get(path))
+
+
+def _friday_running(root: Path) -> list[str]:
+    """Process ids of a live FRIDAY (voice agent, tool server, launcher or the
+    packaged build) - whose own writes to live state are not the suite's."""
+    try:
+        import psutil
+    except ImportError:
+        return ["unknown (psutil unavailable)"]
+    marker = str(root).lower()
+    found = []
+    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            command = " ".join(proc.info.get("cmdline") or []).lower()
+            name = (proc.info.get("name") or "").lower()
+        except (psutil.Error, TypeError):
+            continue
+        if name == "friday.exe" or (marker in command and any(
+                entry in command for entry in ("agent_friday", "server.py", "start.py"))):
+            found.append(str(proc.info["pid"]))
+    return found
+
+
+def _verdict(changed: list[str], *, running: list[str], watched: int) -> tuple[bool, str]:
+    """Whether the run kept its hands off live state, and the summary line."""
+    if not changed:
+        return True, f"live_state unchanged ({watched} files under data/ and logs/)"
+    listed = ", ".join(changed[:20]) + (f" and {len(changed) - 20} more" if len(changed) > 20 else "")
+    if running:
+        return True, (f"live_state changed while FRIDAY was running (pids {', '.join(running)}), "
+                      f"so not attributed to the suite: {listed}")
+    return False, f"live_state CHANGED by the suite (TEST-ISOLATION-001): {listed}"
+
+
 def run_chunk(python: str, files: list[str], log: Path, *, per_test_timeout: int,
               chunk_timeout: int, marker: str) -> tuple[int, str, float]:
     cmd = [python, "-m", "pytest", *files, "-m", marker, "-q", "-p", "no:cacheprovider",
@@ -131,6 +187,8 @@ def main(argv=None) -> int:
               f"python={args.python} platform={sys.platform}")
     summary.write_text(header + "\n", encoding="utf-8")
     print(header, flush=True)
+    live_before = _live_state(ROOT, exclude=out)
+    running = _friday_running(ROOT)
 
     ok = True
     for i in range(args.chunks):
@@ -145,6 +203,15 @@ def main(argv=None) -> int:
             fh.write(line + "\n")
         print(line, flush=True)
         ok = ok and code == 0
+    # TEST-ISOLATION-001: the run must leave the owner's live state as it was.
+    live_after = _live_state(ROOT, exclude=out)
+    running += [pid for pid in _friday_running(ROOT) if pid not in running]
+    kept, line = _verdict(_changed(live_before, live_after), running=running,
+                          watched=len(live_before))
+    with summary.open("a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+    print(line, flush=True)
+    ok = ok and kept
     return 0 if ok else 1
 
 

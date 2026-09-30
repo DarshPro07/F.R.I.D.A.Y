@@ -2387,8 +2387,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "its own measure). "
             "The four-chunk suite over this tree (data/baseline_v7_slice5a): all four chunks exit 0, 4,693 passed (1,262, 1,042, 1,286 and 1,103), none failed."),
         "next_action": (
-            "EXTEND: raise single-search recall on the development split (then confirm once on the holdout), "
-            "and apply L0/L1/L2 to skills, memory and documents."),
+            "EXTEND (owner's target, Amendment A5): benchmark lexical (BM25), embedding, hybrid, metadata "
+            "filters, a small local reranker and a skill/tool reranker on Recall@1/@3/@5, schema tokens and "
+            "latency, and reach Recall@1 >= 90% and Recall@3 >= 97% on the development split while keeping the "
+            "80% disclosure reduction (then confirm once on the holdout); apply L0/L1/L2 to skills, memory and "
+            "documents."),
     }),
     # --- CTX-001: the working-set compiler, 2026-09-27
     ("CTX-001", {
@@ -2483,13 +2486,17 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "matches in that order, so the model tries the more direct path first; which capabilities are "
             "offered is still the score's decision alone (the development-split recall is unchanged, "
             "732/965). The structured path (connector plane, web) and the GUI path (browser, vision, desktop) "
-            "both exist as capabilities an objective can mix. Gaps: no objective in this environment has run "
-            "a structured step and a real browser step together - Playwright is not installed in the verify "
-            "venv on this host, so that golden journey is blocked here; nothing yet feeds measured "
-            "reliability into rank(); the planner does not choose between alternative paths for a step."),
+            "both exist as capabilities an objective can mix, and scripts/journey_hybrid_browser.py runs one "
+            "objective that does both for real: it reads a public page over HTTP, then opens, reads and "
+            "closes the same page in a headless Chromium, through the real executor and capability runtime, "
+            "recording what the browser costs the machine. Playwright is now the optional browser extra "
+            "(V7-D53). Gaps: nothing yet feeds measured reliability into rank(); the planner does not choose "
+            "between alternative paths for a step; the running product's own venv still lacks Playwright."),
         "files": ["friday/action_path.py:25,29,45,58,66", "friday/capability_router.py:543",
+                  "scripts/journey_hybrid_browser.py", "pyproject.toml:57",
                   "friday/connectors/plane.py:85-100", "friday/browser_capability.py:37-135"],
-        "tests": ["tests/test_action_path.py::test_the_order_is_section_48s",
+        "tests": ["tests/test_action_path.py::test_one_objective_runs_a_structured_step_and_a_real_browser_step",
+                  "tests/test_action_path.py::test_the_order_is_section_48s",
                   "tests/test_action_path.py::test_each_path_is_what_the_capability_does",
                   "tests/test_action_path.py::test_every_screen_and_browser_capability_is_on_a_gui_path",
                   "tests/test_action_path.py::test_a_step_takes_the_most_direct_path_first",
@@ -2504,11 +2511,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "reordered and the order dropped from what is offered; in action_path, failures ignored, desktop "
             "classed as structured and a single failure demoting a path. The 24 routing, semantics, planner, "
             "capability and golden-suite test files pass (539). "
-            "The four-chunk suite over the tree with the Slice 6 work and the review fixes (data/baseline_v7_slice6b): all four chunks exit 0, 4,707 passed (1,273, 1,059, 1,355 and 1,020), none failed."),
+            "The four-chunk suite over the tree with the Slice 6 work and the review fixes (data/baseline_v7_slice6b): all four chunks exit 0, 4,707 passed (1,273, 1,059, 1,355 and 1,020), none failed. "
+            "2026-09-28, REFERENCE-A (15.4 GB RAM, integrated GPU), the real journey (data/prd_v7_audit/brow001_hybrid_journey_2026-09-28.json): one objective, web_fetch on the native-API path and browser_open, browser_inspect and browser_close on the DOM path, all SUCCEEDED and the run COMPLETED in 27 s; both paths read the page. The browser cost the machine 184 MB in its own processes and 140 MB of RAM at peak over the start. The live test that runs it passes (marked live: it needs the network and Chromium)."),
         "next_action": (
-            "OWNER + EXTEND: install Playwright in the verify venv (or run on a host that has it) so one "
-            "objective can run a connector step and a browser step end to end; then feed recorded task "
-            "outcomes into rank() and let the planner pick a step's path with it."),
+            "EXTEND: feed recorded task outcomes into rank() and let the planner pick a step's path with it; "
+            "OWNER: install the browser extra in the product venv so its browser tools work."),
     }),
     # --- MCP-001: the MCP firewall, 2026-09-28
     ("MCP-001", {
@@ -2546,6 +2553,76 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "EXTEND: pin the server name and version from the MCP handshake, type a pinned server's tool "
             "output as untrusted in the capability runtime, and route any future third-party MCP client "
             "through the same firewall."),
+    }),
+    # --- SEC-003: FRIDAY's own state is not a file for its tools (V7-D56), 2026-09-29
+    ("SEC-003", {
+        "current_implementation": (
+            "friday/self_upgrade.py:110-129 is_kernel_path() normalizes separators, case and dot-segments and "
+            "matches KERNEL_PATHS; guard_kernel raises UpgradeRefused and journals refused_kernel, so a worker "
+            "write to a kernel file is refused. The kernel's own state is now protected as well: from a source "
+            "checkout the project directory is a file-tool root, and the file jail's denylist covered only "
+            "secret-shaped files, so files_read, files_write and files_delete could reach the live store (which "
+            "holds approval records), the audit trail, the consumed confirmation nonces (removing one would let "
+            "a one-time confirmation be replayed), the MCP firewall pins and the logs (V7-D56). friday/fsjail.py "
+            "now refuses any path inside the state root's data directory except FRIDAY's two work areas (its "
+            "workspace and its artifacts), before containment and whatever roots are configured. The same "
+            "change makes those work areas roots wherever the state root lives, which a packaged build needs "
+            "(V7-D55)."),
+        "files": ["friday/self_upgrade.py:84-129", "tests/test_self_upgrade.py:37-43",
+                  "friday/fsjail.py:64,144,231,277", "tests/test_fsjail_state.py:22-42"],
+        "tests": ["tests/test_self_upgrade.py::test_kernel_surface_is_refused",
+                  "tests/test_fsjail_state.py::test_fridays_own_state_is_refused_even_inside_a_root",
+                  "tests/test_fsjail_state.py::test_the_work_areas_inside_the_state_are_files_for_the_tools",
+                  "tests/test_fsjail_state.py::test_the_work_areas_are_roots_wherever_the_state_lives"],
+        "evidence": (
+            "test_kernel_surface_is_refused: pytest.raises(su.UpgradeRefused) on guard_kernel(['friday/policy.py']) "
+            "and on guard_kernel(['E:/x/friday/sensitive_domains.py']); assert 'refused_kernel' in the journal - "
+            "an exact match for 'Worker write blocked.' Re-run 2026-09-25 on 030795f with a dirty tree: every "
+            "cited test passed (data/prd_v7_audit/rerun.xml). "
+            "2026-09-29 (V7-D56): the state tests failed first - each of the store, the audit trail, the nonce "
+            "file, the MCP pins, the access log and a log file resolved inside a root. Three mutations each turn "
+            "a test red: the own-state check removed from resolve(), the work areas no longer exempted, and the "
+            "work areas no longer roots. The 18 test files that exercise the jail pass (275 passed, 2 skipped)."),
+    }),
+    # --- TEST-ISOLATION-001: a full suite run leaves the live state as it was, 2026-09-29
+    ("TEST-ISOLATION-001", {
+        "status": VERIFIED,
+        "current_implementation": (
+            "tests/conftest.py sets FRIDAY_HOME to a per-session temporary root before anything imports "
+            "FRIDAY, so every path derived from the state root - the store, the audit log, the workspace, "
+            "the nonce, cooldown and access files, the logs - is the session's, for the test process and "
+            "every child that inherits the environment; the audit log follows ADA_AUDIT_DB as the store "
+            "follows ADA_DB, so a test's child writes the test's audit log (V7-D52); opening a SQLite store "
+            "under the live data directory is refused in the test process. scripts/baseline_suite.py "
+            "compares the live data/ and logs/ before and after a run and fails the run - whatever the "
+            "chunks did - when they changed and no live FRIDAY process was running. Residual: a few modules "
+            "write repository-relative paths that ignore the state root (the deck queue, browser "
+            "screenshots, the self-development journals), which the runner would catch but nothing "
+            "prevents; a child started with a hand-built environment that leaves out FRIDAY_HOME would "
+            "resolve the live root (the ones the suite starts today are third-party fabric children, not "
+            "FRIDAY)."),
+        "files": ["tests/conftest.py:39,61,71,239", "scripts/baseline_suite.py:82,127,214",
+                  "friday/trust.py:264"],
+        "tests": ["tests/test_test_isolation.py::test_the_session_runs_on_its_own_state_root",
+                  "tests/test_test_isolation.py::test_a_process_a_test_starts_inherits_the_isolated_root",
+                  "tests/test_test_isolation.py::test_opening_a_live_store_is_refused",
+                  "tests/test_baseline_suite.py::test_the_run_names_every_live_file_it_changed",
+                  "tests/test_baseline_suite.py::test_a_change_is_blamed_on_the_suite_only_when_friday_was_not_running",
+                  "tests/test_baseline_suite.py::test_a_run_whose_chunks_pass_still_fails_when_live_state_changed",
+                  "tests/test_trust.py::test_a_child_process_of_a_test_writes_the_tests_audit_log_not_the_live_one"],
+        "evidence": (
+            "2026-09-29: the child-process audit test failed first (V7-D52; in failing it wrote live audit "
+            "row 486, which is kept and recorded with rows 480-485 as historical test contamination). The "
+            "four-chunk suite over the follow-up tree with FRIDAY not running (data/baseline_v7_followup): "
+            "all four chunks exit 0, 4,734 passed (1,279, 1,060, 1,371 and 1,024), none failed, and the "
+            "runner's own check reads 'live_state unchanged (244 files under data/ and logs/)'. Four "
+            "mutations each turn a test red: the live-store guard disabled, the verdict passing a changed "
+            "state, the runner leaving the verdict out of its exit code, and the audit log ignoring "
+            "ADA_AUDIT_DB. The FRIDAY_HOME line itself was not mutated: a run without it would point real "
+            "tests at the live state, which is what this requirement forbids."),
+        "next_action": (
+            "EXTEND: move the repository-relative writers onto the state root, and give a child started "
+            "with a hand-built environment the session's FRIDAY_HOME."),
     }),
 ]
 

@@ -264,9 +264,10 @@ def test_spoken_file_ops_never_leave_the_workspace(monkeypatch, tmp_path):
     import shutil
     import uuid
     from friday import config
-    # The files toolset's own jail allows E:\ wholesale (which is the point of
-    # this test), so the workspace stand-in must live inside it, not in %TEMP%.
-    work = config.ARTIFACTS_DIR.parent / ("_pytest_ws_" + uuid.uuid4().hex[:8])
+    # The workspace stand-in lives inside FRIDAY's artifacts area, which the
+    # jail always allows wherever the state root is (V7-D55); the rest of the
+    # state root's data directory is FRIDAY's own state and refused (V7-D56).
+    work = config.ARTIFACTS_DIR / ("_pytest_ws_" + uuid.uuid4().hex[:8])
     monkeypatch.setattr(config, "ARTIFACTS_DIR", work)
     try:
         out = V._run_files("read", {"path": "C:/Windows/win.ini"})

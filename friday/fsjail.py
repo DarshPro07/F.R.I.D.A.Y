@@ -28,7 +28,7 @@ import re
 import stat
 from pathlib import Path
 
-from friday.config import DATA_DIR, PROJECT_ROOT
+from friday.config import ARTIFACTS_DIR, DATA_DIR, PROJECT_ROOT
 
 #: Windows device names. Opening one is not a file operation at all.
 _RESERVED = frozenset(
@@ -57,6 +57,11 @@ _DENY_RE = tuple(re.compile(p, re.I) for p in DENY_PATTERNS)
 #: Anchored to the project, not to wherever the process was launched from.
 #: A jail whose root moves with the working directory is not a jail.
 DEFAULT_WORKSPACE = DATA_DIR / "workspace"
+
+#: FRIDAY's own work areas: the files it makes for the person. Always roots,
+#: wherever the state root lives (V7-D55), and the only part of the state
+#: root's data directory that is a file for the tools at all (V7-D56).
+WORK_AREAS = (DEFAULT_WORKSPACE, ARTIFACTS_DIR)
 
 
 class JailError(PermissionError):
@@ -127,19 +132,26 @@ def default_roots() -> tuple[Path, ...]:
     their working directory anyway.
 
     Add project drives with ADA_FILE_ROOTS (os.pathsep-separated).
+
+    FRIDAY's own work areas are roots whether or not they exist yet: they
+    were found only as part of the project directory, so a packaged build,
+    whose state lives under %LOCALAPPDATA%, refused the files FRIDAY makes for
+    the person (V7-D55).
     """
-    candidates = [PROJECT_ROOT, Path(DEFAULT_WORKSPACE)]
     home = Path.home()
-    candidates += [home / name for name in
+    # The project directory stays first: files_list and files_search default
+    # to the first root.
+    candidates = [(PROJECT_ROOT, True)] + [(Path(area), False) for area in WORK_AREAS]
+    candidates += [(home / name, True) for name in
                    ("Documents", "Desktop", "Downloads", "Projects", "code", "src")]
 
     roots: list[Path] = []
-    for candidate in candidates:
+    for candidate, must_exist in candidates:
         try:
             resolved = candidate.resolve()
         except OSError:
             continue
-        if resolved.is_dir() and resolved not in roots:
+        if (resolved.is_dir() or not must_exist) and resolved not in roots:
             roots.append(resolved)
     return tuple(roots)
 
@@ -215,6 +227,23 @@ class FileJail:
                     "(credentials, keys, VCS or environment files)"
                 )
 
+    @staticmethod
+    def _reject_own_state(path: Path) -> None:
+        """Inside the state root's data directory only the work areas are
+        files: the store, the audit trail, the confirmation nonces, the MCP
+        pins and the logs are FRIDAY's own state, which its own file tools do
+        not read or change (V7-D56)."""
+        data = DATA_DIR.resolve()
+        if path != data and not path.is_relative_to(data):
+            return
+        for area in WORK_AREAS:
+            area = Path(area).resolve()
+            if path == area or path.is_relative_to(area):
+                return
+        raise JailError(
+            "refused: that is FRIDAY's own state (the store, audit trail, "
+            "confirmation nonces, pins and logs), not a file the tools may touch")
+
     def _contained(self, path: Path) -> Path:
         for root in self.roots:
             if path == root or path.is_relative_to(root):
@@ -245,6 +274,7 @@ class FileJail:
 
         self._reject_reserved(resolved)
         self._reject_denylisted(resolved)
+        self._reject_own_state(resolved)
         return self._contained(resolved)
 
     def describe(self) -> dict:

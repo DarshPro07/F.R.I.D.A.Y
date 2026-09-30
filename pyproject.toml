@@ -54,6 +54,14 @@ documents = [
     "python-docx>=1.1",       # .docx incl. tables (MIT)
     "openpyxl>=3.1",          # .xlsx -> csv (MIT)
 ]
+# The browser capability (friday/toolsets/web.py, friday/ui_browser.py) drives
+# Chromium through Playwright; undeclared until 2026-09-28, so browser_* failed
+# on any install that lacked it. Kept out of the base runtime (Amendment A4).
+# Browsers are separate: `python -m playwright install chromium`. 1.59 uses
+# Chromium build 1217.
+browser = [
+    "playwright>=1.59,<1.60", # Apache-2.0
+]
 dev = [
     "pytest>=8",
     # tests/conftest.py implements pytest_asyncio_loop_factories, a

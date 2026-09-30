@@ -8,11 +8,11 @@ no next action, or (v7) a VERIFIED row naming no test or a citation that
 does not resolve on the tree.
 
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
-- PRD sha256: `658ca0b52cf3f0799727f3e50757cbe65e0394452650e021727b3a55bde4c97e`
-- PRD size: 6816 lines, 223275 bytes
-- Repository HEAD: `030795f5dcd9ccd9524c62aea7aef86d59312554`
-- Uncommitted paths at generation: 250
-- Generated: 2026-09-28T19:37:12+05:30
+- PRD sha256: `57014fe42ed2b320ac4aaa979c1a6aa16b19c8226908d9915687af4eebed244a`
+- PRD size: 7237 lines, 237122 bytes
+- Repository HEAD: `3d956ba197ed003096f8c2e33006b01099eb8607`
+- Uncommitted paths at generation: 61
+- Generated: 2026-09-29T23:58:55+05:30
 
 ## Status vocabulary
 
@@ -27,16 +27,16 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| PARTIAL | 54 |
+| PARTIAL | 55 |
 | MISSING | 41 |
-| VERIFIED | 32 |
+| VERIFIED | 33 |
 | DEFERRED_BY_PRD | 2 |
 | EXISTING_UNVERIFIED | 1 |
-| **total** | **130** |
+| **total** | **132** |
 
 Unresolved P0: 22 (CORE-001, INTENT-001, TRAJ-001, CTX-001, CTX-002, CTX-003, MEM-002, MEM-003, SEC-005, BROW-001, RES-001, EVAL-001, DOMAIN-001, ACT-001, MCP-001, CYBER-002, DUR-001, BCON-001, APPROVAL-001, JIT-001, RES-002, RES-003)
 
-Unresolved P1: 59 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001)
+Unresolved P1: 60 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004)
 
 ## PRD section 0
 
@@ -242,7 +242,7 @@ Unresolved P1: 59 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MO
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| BROW-001 | P0 | **PARTIAL** | Hybrid action route supports structured + GUI paths. | Golden journey/backend evaluation. | FR-BRW-001 | `friday/action_path.py:25,29,45,58,66`, `friday/capability_router.py:543`, `friday/connectors/plane.py:85-100` | 2026-09-27: the action-path tests and the tie test failed first. The first version of the tie-break also reordered the whole candidate list, which pushed four needed capabilities out of the top six on the development split (732 to 728); it was narrowed to order only what is offered, and the guard test pins that. Five mutations each turn a test red: in the router, the whole list reordered and the order dropped from what is offered; in action_path, failures ignored, desktop classed as structured and a single failure demoting a path. The 24 routing, semantics, planner, capability and golden-suite test files pass (539). The four-chunk suite over the tree with the Slice 6 work and the review fixes (data/baseline_v7_slice6b): all four chunks exit 0, 4,707 passed (1,273, 1,059, 1,355 and 1,020), none failed. |
+| BROW-001 | P0 | **PARTIAL** | Hybrid action route supports structured + GUI paths. | Golden journey/backend evaluation. | FR-BRW-001 | `friday/action_path.py:25,29,45,58,66`, `friday/capability_router.py:543`, `scripts/journey_hybrid_browser.py` | 2026-09-27: the action-path tests and the tie test failed first. The first version of the tie-break also reordered the whole candidate list, which pushed four needed capabilities out of the top six on the development split (732 to 728); it was narrowed to order only what is offered, and the guard test pins that. Five mutations each turn a test red: in the router, the whole list reordered and the order dropped from what is offered; in action_path, failures ignored, desktop classed as structured and a single failure demoting a path. The 24 routing, semantics, planner, capability and golden-suite test files pass (539). The four-chunk suite over the tree with the Slice 6 work and the review fixes (data/baseline_v7_slice6b): all four chunks exit 0, 4,707 passed (1,273, 1,059, 1,355 and 1,020), none failed. 2026-09-28, REFERENCE-A (15.4 GB RAM, integrated GPU), the real journey (data/prd_v7_audit/brow001_hybrid_journey_2026-09-28.json): one objective, web_fetch on the native-API path and browser_open, browser_inspect and browser_close on the DOM path, all SUCCEEDED and the run COMPLETED in 27 s; both paths read the page. The browser cost the machine 184 MB in its own processes and 140 MB of RAM at peak over the start. The live test that runs it passes (marked live: it needs the network and Chromium). |
 
 ## PRD section 49
 
@@ -284,7 +284,7 @@ Unresolved P1: 59 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MO
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| SEC-003 | P0 | **VERIFIED** | Protected kernel cannot be autonomously weakened. | Worker write blocked. | FR-SEC-002 | `friday/self_upgrade.py:84-129`, `tests/test_self_upgrade.py:37-43` | test_kernel_surface_is_refused: pytest.raises(su.UpgradeRefused) on guard_kernel(['friday/policy.py']) and on guard_kernel(['E:/x/friday/sensitive_domains.py']); assert 'refused_kernel' in journal_path.read_text() - exact match for 'Worker write blocked.' Scope: the coding CLI runs in its own worktree with --permission-mode default and bypassPermissions refused on the host (friday/executors/cli.py:70,144); an OS-level write jail applies only under the SANDBOX backend (see SEC-005). Re-run 2026-09-25 on 030795f with a dirty tree: every cited test passed (data/prd_v7_audit/rerun.xml). |
+| SEC-003 | P0 | **VERIFIED** | Protected kernel cannot be autonomously weakened. | Worker write blocked. | FR-SEC-002 | `friday/self_upgrade.py:84-129`, `tests/test_self_upgrade.py:37-43`, `friday/fsjail.py:64,144,231,277` | test_kernel_surface_is_refused: pytest.raises(su.UpgradeRefused) on guard_kernel(['friday/policy.py']) and on guard_kernel(['E:/x/friday/sensitive_domains.py']); assert 'refused_kernel' in the journal - an exact match for 'Worker write blocked.' Re-run 2026-09-25 on 030795f with a dirty tree: every cited test passed (data/prd_v7_audit/rerun.xml). 2026-09-29 (V7-D56): the state tests failed first - each of the store, the audit trail, the nonce file, the MCP pins, the access log and a log file resolved inside a root. Three mutations each turn a test red: the own-state check removed from resolve(), the work areas no longer exempted, and the work areas no longer roots. The 18 test files that exercise the jail pass (275 passed, 2 skipped). |
 | SELF-001 | P1 | **VERIFIED** | Self-development is isolated, benchmarked, rollbackable. | Production unchanged before promotion. | FR-SEC-002 | `tests/test_selfdev.py:104-115`, `tests/test_selfdev.py:118-124`, `tests/test_selfdev.py:210-236` | Read the actual test bodies. tests/test_selfdev.py:110-111 asserts the sandbox file has the change (VALUE=2) while the live repo file does not (VALUE=1), and line 113 asserts git status --porcelain == '' on the live repo — this is 'Production unchanged before promotion' verified directly, not a weaker neighbouring property. tests/test_selfdev.py:228-236 then simulates a post-promotion health failure and asserts automatic ROLLED_BACK restores VALUE=1 and git diff against base is empty. Re-run 2026-09-25 on 030795f with a dirty tree: every cited test passed (data/prd_v7_audit/rerun.xml). |
 
 ## PRD section 61
@@ -346,7 +346,7 @@ Unresolved P1: 59 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MO
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| DOMAIN-001 | P0 | **MISSING** | Work is classified by provider-safeguard domain before delegation; restricted domains run as separate bounded programs and the general build carries only their boundaries. | A general-engineering work packet carries no restricted-domain operational detail; a restricted packet goes to its own program or is marked BLOCKED_EXTERNAL, never retried on the same route. | - | - | Add a domain classifier on the work-packet path (CLI gateway, Hermes TaskBundle) with a deterministic restricted-domain list, a recorded safeguard event, and a refusal to retry the same route; test both the refusal and that general packets pass. |
+| DOMAIN-001 | P0 | **MISSING** | Work is classified by provider-safeguard domain before delegation; restricted domains run as separate bounded programs and the general build carries only their boundaries. | A general-engineering work packet carries no restricted-domain operational detail; a restricted packet goes to its own program or is marked BLOCKED_EXTERNAL, never retried on the same route. | - | - | Owner, Amendment A5: a provider safety check that keeps failing is a route-health signal - bounded retry, then persist state and switch route or start a fresh session, never retry indefinitely. Add a domain classifier on the work-packet path (CLI gateway, Hermes TaskBundle) with a deterministic restricted-domain list, a recorded safeguard event, and a refusal to retry the same route; test both the refusal and that general packets pass. |
 | MODEL-006 | P1 | **PARTIAL** | Model registry records policy/safeguard compatibility and known task restrictions; dispatch ends ALLOW/FALLBACK/LOCAL_ONLY/ASK_USER/BLOCKED and never retries an incompatible route. | A recorded safeguard intervention changes the next route instead of repeating it. | - | `friday/model_gateway.py:482-512`, `friday/model_gateway.py:745-772`, `friday/model_gateway.py:892-969` | EXTEND the route registry with per-route domain restrictions and a safeguard-event outcome that excludes the route for that domain; test that a second attempt takes the fallback or BLOCKED. |
 | CTX-007 | P1 | **MISSING** | Context payload classes and one Compression Coordinator with transformation provenance; LOSSLESS_REQUIRED never lossy, failures fail closed. | Lossless literals pass raw; stacked transformations lose no critical fact; every transformed artifact is recoverable by hash. | - | - | Build after CTX-003 (critical fact set): classify payloads, record source/transformed hashes and a recovery pointer per transformation, refuse lossy transforms of LOSSLESS_REQUIRED. |
 | CTX-008 | P2 | **MISSING** | Caveman only as a compression backend behind the coordinator, after per-subcomponent licence review, benchmarked OFF/OUTPUT_ONLY/ENGINE/FULL. | Licence review recorded before any embedding; benchmark report. | - | - | After CTX-007: pin the upstream, review each subcomponent's licence, add a fabric adapter reporting UNAVAILABLE when absent, then benchmark the four modes. |
@@ -422,6 +422,13 @@ Unresolved P1: 59 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MO
 | MODEL-009 | P1 | **MISSING** | Local model loading, quantisation, context, CPU/GPU offload and residency are chosen against measured RAM, VRAM, latency, thermal and stability constraints. | A benchmark of CPU-only, partial and full feasible GPU offload on each reference machine chooses the configuration, and the choice differs where the measurements differ. | - | `friday/privacy.py:52` | With MODEL-005 and MODEL-007: benchmark the offload options on each reference machine and select from the measurements. |
 | MODEL-010 | P1 | **MISSING** | A preferred local model that cannot run degrades to a smaller local model or a permitted remote route without making FRIDAY unavailable. | A local model that fails to load or runs out of memory falls back to a smaller model or a permitted remote route, and the request completes. | - | `friday/provider_fallback.py:1` | Once local models are managed, add the degrade path and a test that forces a load failure. |
 | BG-001 | P1 | **PARTIAL** | Background learning, research, indexing and proactive work run only when headroom, user activity, power state and objective priority permit. | Background work is deferred while the person is active or the machine is pressured or on battery, and runs when it is idle, plugged in and has headroom. | - | `friday/governor.py:261` | Gate optional work on user activity, power and priority as well as headroom, once RES-003 judges headroom correctly. |
+
+## PRD section 99
+
+| id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
+|---|---|---|---|---|---|---|---|
+| TEST-ISOLATION-001 | P0 | **VERIFIED** | Automated tests never write, or open, the owner's live user-state stores, in the test process or any process a test starts. | A full suite run with FRIDAY not running leaves every file under the live data/ and logs/ unchanged and the runner fails a run that changes one; a test that opens a live store is refused; a process a test starts resolves the session's state root. | - | `tests/conftest.py:39,61,71,239`, `scripts/baseline_suite.py:82,127,214`, `friday/trust.py:264` | 2026-09-29: the child-process audit test failed first (V7-D52; in failing it wrote live audit row 486, which is kept and recorded with rows 480-485 as historical test contamination). The four-chunk suite over the follow-up tree with FRIDAY not running (data/baseline_v7_followup): all four chunks exit 0, 4,734 passed (1,279, 1,060, 1,371 and 1,024), none failed, and the runner's own check reads 'live_state unchanged (244 files under data/ and logs/)'. Four mutations each turn a test red: the live-store guard disabled, the verdict passing a changed state, the runner leaving the verdict out of its exit code, and the audit log ignoring ADA_AUDIT_DB. The FRIDAY_HOME line itself was not mutated: a run without it would point real tests at the live state, which is what this requirement forbids. |
+| BROW-004 | P1 | **PARTIAL** | Browser readiness is a real launch: extra installed, Chromium build present, a headless launch reads a harmless public page (BROWSER_READY); import is not readiness. | The readiness probe reports BROWSER_READY from FRIDAY's own environment on each reference machine, with the launch's time and memory recorded; with the package or the browser build missing it reports which. | - | `friday/browser_readiness.py:1`, `pyproject.toml:57` | 2026-09-29, REFERENCE-A, from the product's own .venv after installing the browser extra: BROWSER_READY, Playwright 1.59.0, read https://example.com/ in 2.67 s warm (15.8 s cold) with 270 MB in the processes it started (data/prd_v7_audit/brow001_live_runtime_ready_2026-09-29.json). |
 
 ## Owner direction recorded against a requirement
 

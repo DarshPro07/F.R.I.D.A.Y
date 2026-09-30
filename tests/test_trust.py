@@ -365,3 +365,27 @@ def test_hermes_delegation_meets_the_policy_before_anything_starts(monkeypatch):
         assert started == ["refactor the repository"]
     finally:
         hc.configure(None)
+
+
+def test_a_child_process_of_a_test_writes_the_tests_audit_log_not_the_live_one(tmp_path):
+    """V7-D52: the per-test audit log was swapped in-process only, so a test's
+    child process - a real server, a restarted executor - fell back to the
+    live data/audit.sqlite3 and wrote test rows into the owner's audit trail.
+    The location now travels in the environment, as the store's does."""
+    import os
+    import subprocess
+    import sys
+
+    child = subprocess.run(
+        [sys.executable, "-c",
+         "from friday import trust; log = trust.AuditLog(); print(log.path); "
+         "log.record(actor='child', action='test.probe', tier='R0', decision='AUTO', target='x')"],
+        capture_output=True, text=True, timeout=60, env=dict(os.environ))
+    assert child.returncode == 0, child.stderr
+    from pathlib import Path
+    expected = Path(os.environ["ADA_AUDIT_DB"])
+    assert Path(child.stdout.strip()) == expected
+    rows = sqlite3.connect(str(expected)).execute(
+        "select count(*) from audit_log where action='test.probe'").fetchone()[0]
+    assert rows == 1
+    assert tmp_path in expected.parents

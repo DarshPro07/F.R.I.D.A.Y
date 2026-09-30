@@ -9,6 +9,8 @@ behind the ones that have not.
 """
 from __future__ import annotations
 
+import pytest
+
 from friday import action_path as A
 from friday import capabilities
 
@@ -54,3 +56,23 @@ def test_a_path_that_keeps_failing_moves_behind_the_others():
     # A path that mostly works keeps its place.
     assert A.rank(["web_fetch", "browser_act"], reliability={"web_fetch": (5, 6)}) == [
         "web_fetch", "browser_act"]
+
+
+@pytest.mark.live
+def test_one_objective_runs_a_structured_step_and_a_real_browser_step():
+    """BROW-001's journey, for real: the network and a headless Chromium
+    (the `browser` extra). One objective reads a public page over HTTP and
+    again through the browser's DOM, and both paths see it."""
+    import sys
+    from pathlib import Path
+
+    pytest.importorskip("playwright")
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import journey_hybrid_browser as J
+
+    result = J.run()
+    assert result["run_status"] == "COMPLETED", result
+    by_capability = {step["capability"]: step for step in result["steps"]}
+    assert all(step["status"] == "SUCCEEDED" for step in result["steps"]), result["steps"]
+    assert by_capability["web_fetch"]["path"] == A.NATIVE_API and by_capability["web_fetch"]["saw_the_page"]
+    assert by_capability["browser_inspect"]["path"] == A.DOM and by_capability["browser_inspect"]["saw_the_page"]

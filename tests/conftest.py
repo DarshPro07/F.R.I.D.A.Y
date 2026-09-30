@@ -18,9 +18,64 @@ Rather than banning asyncio.run in tests, every test gets a fresh loop.
 from __future__ import annotations
 
 import asyncio
+import atexit
+import os
+import shutil
+import sqlite3
 import sys
+import tempfile
+from pathlib import Path
 
 import pytest
+
+#: TEST-ISOLATION-001 (PRD v7): the session runs against its own state root,
+#: set here - before any test imports FRIDAY - so no test, and no process a
+#: test starts (it inherits the environment), writes the owner's live state
+#: under the repository's data/ and logs/: the store, the audit log, the
+#: workspace, the nonce and cooldown files, the logs. V7-D54: the suite wrote
+#: all of those until 2026-09-29.
+LIVE_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+_SESSION_HOME = tempfile.mkdtemp(prefix="friday-test-home-")
+os.environ["FRIDAY_HOME"] = _SESSION_HOME
+atexit.register(shutil.rmtree, _SESSION_HOME, True)
+
+
+def _live_store(database, uri: bool) -> Path | None:
+    """The path under the live data directory `database` would open, else None."""
+    if not isinstance(database, (str, bytes, os.PathLike)):
+        return None
+    text = os.fsdecode(database)
+    if uri or text.startswith("file:"):
+        if not text.startswith("file:"):
+            return None
+        text = text[len("file:"):].split("?", 1)[0]
+    if text in ("", ":memory:"):
+        return None
+    target = Path(text).resolve()
+    return target if LIVE_DATA_DIR in target.parents else None
+
+
+_REAL_CONNECT = sqlite3.connect
+
+
+def _guarded_connect(database, *args, **kwargs):
+    live = _live_store(database, bool(kwargs.get("uri", False)))
+    if live is not None:
+        raise sqlite3.OperationalError(
+            f"TEST-ISOLATION-001: a test opened the live store {live}; tests use "
+            f"their own state root (FRIDAY_HOME={_SESSION_HOME})")
+    return _REAL_CONNECT(database, *args, **kwargs)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _live_stores_are_off_limits():
+    """TEST-ISOLATION-001, enforced in the test process: opening a SQLite
+    store under the live data directory, to read or to write, is refused."""
+    import sqlite3.dbapi2 as dbapi2
+
+    sqlite3.connect = dbapi2.connect = _guarded_connect
+    yield
+    sqlite3.connect = dbapi2.connect = _REAL_CONNECT
 
 #: Test modules that exercise Windows-native surfaces (COM audio via
 #: pycaw/comtypes, Win32 window enumeration, power/session APIs). They
@@ -170,7 +225,7 @@ def _governor_sees_a_healthy_machine():
 
 
 @pytest.fixture(autouse=True)
-def _audit_log_is_per_test(tmp_path):
+def _audit_log_is_per_test(tmp_path, monkeypatch):
     """
     `PolicyEngine.decide` writes every R1+/non-AUTO verdict to the audit
     log (FR-065). Left alone, the suite would append thousands of rows to
@@ -179,6 +234,9 @@ def _audit_log_is_per_test(tmp_path):
     the audit uses `friday.trust.audit()` and sees only its own rows.
     """
     from friday import trust
+    # A child process (a real server, a restarted executor) builds its own
+    # log; the environment tells it where, as ADA_DB does for the store.
+    monkeypatch.setenv("ADA_AUDIT_DB", str(tmp_path / "audit.sqlite3"))
     log = trust.AuditLog(tmp_path / "audit.sqlite3")
     trust.configure_audit(log)
     yield

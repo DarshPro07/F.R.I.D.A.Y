@@ -27,6 +27,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import os
 import sqlite3
 import threading
 from dataclasses import asdict, dataclass, field
@@ -256,8 +257,11 @@ class AuditLog:
 
     def __init__(self, path: str | Path | None = None) -> None:
         if path is None:
+            # ADA_AUDIT_DB moves it the way ADA_DB moves the store, and a child
+            # process inherits it - so a test's child writes the test's log,
+            # never the live one (V7-D52).
             from friday.config import DATA_DIR
-            path = Path(DATA_DIR) / "audit.sqlite3"
+            path = os.getenv("ADA_AUDIT_DB") or Path(DATA_DIR) / "audit.sqlite3"
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()

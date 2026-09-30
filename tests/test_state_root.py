@@ -46,7 +46,9 @@ def test_from_source_the_repository_is_the_state_root(monkeypatch):
     monkeypatch.delenv("FRIDAY_HOME", raising=False)
     monkeypatch.setattr(sys, "frozen", False, raising=False)
     assert C.default_state_root() == C.PROJECT_ROOT
-    assert C.STATE_ROOT == C.PROJECT_ROOT          # what this test process resolved
+    # This process's own STATE_ROOT is the test session's (FRIDAY_HOME, set by
+    # tests/conftest.py for TEST-ISOLATION-001) and is checked in
+    # tests/test_test_isolation.py; the rule for a source checkout is above.
 
 
 def test_friday_home_wins_everywhere(tmp_path, monkeypatch, frozen_at):
