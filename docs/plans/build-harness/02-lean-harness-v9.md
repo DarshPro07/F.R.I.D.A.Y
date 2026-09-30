@@ -40,7 +40,43 @@ integration 0 unless conflict.
 Split for parallel workers (disjoint files): A = build_kernel.py (9, 8, 10, 6); B = code_capsule.py (4/5);
 C = build_integrate.py (3, 2, 7, ledger application); then D = build_program.py (1) once A-C land.
 
+## Status 2026-09-30 23:45 - A, B, C, D landed
+
+All four ran as kernel workers (Sonnet, no MCP/hooks), each verified by its tests plus mutation runs (A 7/7,
+C 10/10, B 1/1, D 10/11 killed; D's survivor is a redundant spend check covered by wave trimming).
+
+| Worker | Commit | Turns | Cost | Wall |
+|---|---|---|---|---|
+| A kernel (9, 8, 10, 6) | 8617c31 | 34 | $1.09 | 277 s |
+| B capsule (4/5) | 451906d | 17 | $0.36 | 155 s |
+| C integrator (3, 2, 7) | 7e7d5c3 | ~25 | $0.73 | ~200 s |
+| D program (1) | 07ab267 | 31 | $0.81 | 205 s |
+
+D was the first worker integrated by `build_integrate` itself: RED (collection) at base, GREEN at the commit,
+cherry-picked, affected tests green, worktree and branch removed - 29 s, no model.
+
+Defects the real runs found that the workers' own tests could not (all fixed test-first):
+- a17b9e7: the kernel-side commit used an exclude pathspec for `.build`; git exits non-zero when a pathspec
+  names a path `.gitignore` ignores, so BH-D's commit failed with the work staged.
+- 8617c31 (controller review): scouts ran with `--permission-mode acceptEdits`, which approves edits whatever
+  the allowlist says; scouts now run in `default` mode.
+- 59815a0: `build_program` rewrote the tracked `PRD_CURRENT_STATE.md` after every wave, and `build_integrate`
+  refuses a checkout with tracked changes - every wave after the first would have been parked.
+
+Rulings (reversible; consequence if wrong in brackets):
+- The kernel's code commits a DONE worker's diff on `build/<req>`; the model never commits. Reconciles v9 §51
+  with house rule 14. [workers would need commit rights - an allowlist change]
+- `build_program` owns only the `<!-- build-program:begin/end -->` block of `PRD_CURRENT_STATE.md` and writes
+  it once per program run; `data/build_state.json` is the per-wave state. [the doc lags a crashed run]
+- A row integrated PARTIAL twice is parked (escalation `partial`), not relaunched by every run.
+- Default spend cap $10/run fits one P0-class worker per wave; raise `--max-usd` for two.
+
 ## Resume (fresh session)
+
+Current: harness complete at 59815a0. Next: `build_program.py --priority P0` in the background, then read
+`data/build_state.json` (stop_reason, waves, parked, escalations) - not the worker transcripts.
+
+Older resume steps, kept for the record:
 
 1. `git status`, branch `prd-v7/slice-7-adaptive-hardware`, HEAD f12f027 or later; no stray `.worktrees/`.
 2. Copy the owner's v9 prompt and research reply verbatim into this folder (extraction, not retyping).
