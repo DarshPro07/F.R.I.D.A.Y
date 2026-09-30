@@ -31,6 +31,9 @@
 > Amendment A6 (§100 and Appendix H) was recorded on 2026-09-30 under the
 > owner's standing instruction to keep new architecture in the PRD while the
 > P0s are driven down; see the note at §100.
+>
+> Amendment A7 (§101) was added on 2026-09-30 at the owner's instruction ("DO
+> IT SAME FOR FRIDAY TOO"); see the note at §101.
 
 | | |
 |---|---|
@@ -49,7 +52,7 @@
 | First real-world pilot | Crunchy Fashion, without making ecommerce the product definition |
 | Product posture | local-first, model-agnostic, capability-driven, evidence-driven, privacy-aware, self-improving under controlled authority |
 | Status | authoritative target-state PRD; implementation MUST audit current repository before building |
-| Amendments | A1, 2026-09-26: domain partitioning, the domain partition of the general build, and the updated implementation controller (§95, Appendix C); A2, 2026-09-27: durable execution, behavioural contracts and interoperability (§96, Appendix D); A3, 2026-09-27: the local-model hardware rule and the prompt research corpus (§97, Appendix E); A4, 2026-09-28: adaptive hardware and the two reference machines (§98, Appendix F); A5, 2026-09-29: live browser readiness, test isolation and the P0 drive (§99, Appendix G); A6, 2026-09-30: the computer-use fabric and the Cua evaluation (§100, Appendix H) |
+| Amendments | A1, 2026-09-26: domain partitioning, the domain partition of the general build, and the updated implementation controller (§95, Appendix C); A2, 2026-09-27: durable execution, behavioural contracts and interoperability (§96, Appendix D); A3, 2026-09-27: the local-model hardware rule and the prompt research corpus (§97, Appendix E); A4, 2026-09-28: adaptive hardware and the two reference machines (§98, Appendix F); A5, 2026-09-29: live browser readiness, test isolation and the P0 drive (§99, Appendix G); A6, 2026-09-30: the computer-use fabric and the Cua evaluation (§100, Appendix H); A7, 2026-09-30: FRIDAY runs its workers the way its build should (§101) |
 
 ---
 
@@ -1677,6 +1680,55 @@ working set, progressive disclosure and context health (CTX-001, CTX-002, CTX-00
 | CUA-007 | P1 | Background computer use SHALL be tested for unintended focus theft, pointer movement and window-order changes. | Each background run records focus changes, pointer movement and window-order changes, and a path that disturbs the foreground is flagged. | H, "I would add these requirements" |
 | CUA-008 | P1 | Concurrent computer-use sessions SHALL have explicit ownership, leases and resource boundaries. | Each session has an owner (objective and worker), a lease with an expiry, its window set and resource limits; two sessions cannot act on the same window, and an expired lease stops the session. | H, "I would add these requirements" |
 | MODEL-011 | P2 | FRIDAY MAY use/train small specialized UI decision models only after they outperform deterministic/frontier baseline routes on Cua Bench/FRIDAY evaluations. | A small UI decision model is put on a path only after it beats the deterministic and frontier baselines on held-out execution-based tasks, with its licence checked; until then it is a research and benchmark entry. | H, "I would add these requirements" |
+
+## 101. Amendment A7 (2026-09-30): FRIDAY runs its workers the way its build should
+
+> **Transcription note (added 2026-09-30; not part of the owner's text).** The owner's directive of 2026-09-30 is
+> about the build harness - the build of FRIDAY is too serial and too token-hungry - and ends in the owner's own
+> words "DO IT SAME FOR FRIDAY TOO". Read (assumed; the owner may correct it) as: the same architecture governs how
+> FRIDAY itself runs Hermes and coding workers for the person. The directive is kept verbatim in
+> `docs/plans/build-harness/00-owner-directive-2026-09-30.md` rather than duplicated here, because it governs the
+> build harness as much as the product; its build-harness rules (BUILD-001..010, BUILD-EFF-001/002) live in
+> `docs/plans/build-harness/01-plan.md`, not in this PRD. §101.2 is the product side, worded by the implementing
+> agent from the directive; ranked P1 so the P0 burn-down keeps its order, and the owner may re-rank. Its claims about
+> other projects (Symphony, RTK, Beads, Superpowers, harness optimizers and the rest) are the owner's research, not
+> verified here.
+
+### 101.1 Decisions carried by this amendment (derived)
+
+- Scheduling is code, intelligence is the model: which task is ready, which worker is idle, which dependency finished,
+  which worktree belongs to whom, retries, backoff, stalls and timeouts are decided deterministically; a model is
+  woken for a failure, a merge conflict, an ambiguous requirement or a failed verification.
+- Parallelism is earned: independent tasks over disjoint files run as waves, within what the resource governor admits
+  on this machine; otherwise work is sequential. A worker is spawned for parallelism, specialisation, an isolated
+  context or independent verification, never because more agents sound powerful.
+- Every worker is fresh, small and bounded: a compact packet (the task, the current head, the relevant files and
+  tests, any previous failure), a stable prompt prefix, a token, turn, tool-call and wall-time budget with a soft
+  limit that asks for progress and a hard limit that stops it, and a structured result of a few hundred tokens with
+  the transcript on disk.
+- Output reaching a model is compressed where exactness is not needed - counts and failures, not thousands of lines -
+  with the raw output recoverable; one compressor per stage unless a benchmark says otherwise.
+- The cost is measured: tokens by source per model call, and verified work per token and per minute per strategy;
+  anything added to the harness stays only if removing it makes a benchmark worse.
+
+### 101.2 Requirement matrix addendum (derived from the directive; the verbatim text controls)
+
+| ID | Pri | Requirement | Acceptance evidence | Source |
+|---|---|---|---|---|
+| ORCH-001 | P1 | An objective's independent tasks run as dependency waves through isolated workers, scheduled by code from their dependencies and predicted file surfaces, within the resource governor's concurrency. | Given a plan whose tasks form independent branches over disjoint files, the branches run at once, a task sharing a file with a running one waits, a task starts only when its dependencies are done, and concurrency never exceeds what the governor admits. | Directive, "Agent Wave Scheduler", "File Conflict Prediction" |
+| ORCH-002 | P1 | A worker is spawned only for parallel work, specialisation, context isolation or independent verification. | Each worker records why it was started; a request that fits none of the four runs in the current worker. | Directive, "Agent spawn rule", "Parallelism Value Test" |
+| ORCH-003 | P1 | Every worker carries a token, turn, tool-call, research-call and wall-time budget, with a soft limit that asks for progress and a hard limit that stops it. | At the soft limit the worker reports progress, blocker and why more budget helps; at the hard limit code stops it unless the budget is raised; a runaway worker is stopped without a model noticing. | Directive, "Hard budgets", "Token Stop-Loss", "Wall-Time Stop-Loss" |
+| ORCH-004 | P1 | Workers hand results over as structured artifacts and references, not transcripts. | A worker's result reaches FRIDAY as a record (status, commit, tests, evidence references, blockers) of a few hundred tokens; the transcript stays on disk and is read only on demand. | Directive, "Artifact Handoffs" |
+| ORCH-005 | P1 | A task starts on the least costly model predicted to meet it and escalates only on measured need. | Each escalation to a stronger model is recorded with its cause (a failed test, a failed verification, a stated need); tasks that pass on the first model are not escalated. | Directive, "Cascade Model Strategy" |
+| ORCH-006 | P1 | Concurrent code workers work in isolated worktrees and branches, and FRIDAY integrates them. | Two concurrent coding workers never share a checkout; each result is integrated by FRIDAY, and a conflict becomes an integration task with both requirements in hand. | Directive, "Every worker gets its own Git worktree" |
+| ORCH-007 | P1 | Output reaching a model is compressed where exact text is not needed, and the raw output stays recoverable. | Test, git and search output reaches a model as counts and failures within a size cap, with the full output kept as an artifact it can ask for; no two compressors are stacked on one stage unless benchmarked. | Directive, "RTK", "OutputCompressionRouter", "Failure-Focused Output" |
+| ORCH-008 | P1 | A coding worker iterates on the tests its change affects; the full suite runs at checkpoints. | A worker's change runs the affected tests; the objective's checkpoint runs the full suite; a failure reports the failing ids and a pointer to the full log. | Directive, "Test Sampling During Iteration" |
+| ORCH-009 | P1 | Every model call is attributed by source, and verified work is measured per token and per minute. | Each call records its input by source (instructions, task, code, tool results, history) and its output; per objective FRIDAY reports verified work against tokens, wall time, retries and tool calls. | Directive, "TokenAttribution", "Agent cost accounting" |
+| ORCH-010 | P1 | Nothing becomes a default in FRIDAY's worker harness unless removing it makes a benchmark worse. | Each default instruction, hook, agent or skill has a recorded evaluation showing it helps; one that does not is removed. | Directive, "Harness Minimalism Gate" |
+| ORCH-011 | P1 | Worker supervision is event-driven code; a model is woken only when judgement is needed. | Starts, exits, heartbeats, timeouts, test results and resource limits are watched by code; a model is woken only for a failure, a conflict, an ambiguity or a failed verification. | Directive, "ZeroTokenSupervisor" |
+| ORCH-012 | P1 | Worker prompts keep a stable prefix and a dynamic suffix, so provider prompt caching holds. | Rules, role and tool definitions come first in a fixed order; nothing volatile (timestamps, ids, machine state) sits in the prefix; the cache hit rate is measured per worker. | Directive, "prompt-cache-aware compilation" |
+| ORCH-013 | P1 | A finished task that invalidates an assumption cancels the running tasks built on it. | When a task's result invalidates an assumption later tasks depend on, the scheduler cancels those still running and replans them. | Directive, "Early Cancel" |
+| ORCH-014 | P1 | FRIDAY's worker harness is measured against its own baseline for tokens and wall time at an equal or better verification rate. | On representative objectives the median model tokens fall at least 60%, and the wall time at least 40% on parallelisable work, against the recorded baseline, with the verification rate held. | Directive, "BUILD-EFF-001", "BUILD-EFF-002" |
 
 ## Appendix C. Implementation controller, updated 2026-09-26 (owner's text, verbatim)
 

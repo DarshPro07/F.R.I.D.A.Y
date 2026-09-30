@@ -29,7 +29,7 @@ def _v7_row(**fields):
 
 def _matrix() -> dict[str, str]:
     """id -> priority, read from the PRD's own requirement tables: section 91,
-    and the addenda of Amendments A1 to A6 in sections 95.3 to 100.2 (ids such
+    and the addenda of Amendments A1 to A7 in sections 95.3 to 101.2 (ids such
     as S1-001 carry a digit in their prefix; TEST-ISOLATION-001 a hyphen)."""
     text = (ROOT / "docs" / "PRD_V7.md").read_text(encoding="utf-8")
     rows = re.findall(r"^\| ([A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)*-\d{3}) \| (P\d) \|", text, flags=re.M)
@@ -37,12 +37,12 @@ def _matrix() -> dict[str, str]:
 
 
 def test_the_v7_set_covers_exactly_the_prd_matrix():
-    """Every section-91 and 95.3 to 100.2 id has one row, in the PRD's
+    """Every section-91 and 95.3 to 101.2 id has one row, in the PRD's
     order, with the PRD's priority, and the ledger holds nothing the PRD
     does not name."""
     matrix = _matrix()
     rows = PL._load_v7()
-    assert len(matrix) == 69 + 37 + 14 + 4 + 6 + 2 + 9
+    assert len(matrix) == 69 + 37 + 14 + 4 + 6 + 2 + 9 + 14
     assert [r["id"] for r in rows] == list(matrix)
     assert {r["id"]: r["priority"] for r in rows} == matrix
 

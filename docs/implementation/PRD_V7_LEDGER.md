@@ -8,11 +8,11 @@ no next action, or (v7) a VERIFIED row naming no test or a citation that
 does not resolve on the tree.
 
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
-- PRD sha256: `d088d6e1a9f436dcd0f24d5b19d20c3610609a1c80289a495c4e5633cb3c5646`
-- PRD size: 7956 lines, 261105 bytes
-- Repository HEAD: `9b91761efc9bc79ff91ba18971a5b49b6330f9a7`
-- Uncommitted paths at generation: 37
-- Generated: 2026-09-30T18:35:56+05:30
+- PRD sha256: `0557c9d9adcaa9ec07962f083a342862fb00ac6ff7a3134b59aac180800c3ab5`
+- PRD size: 8008 lines, 269029 bytes
+- Repository HEAD: `079b7aabd1f392fb24864949a137d8e6de8047a9`
+- Uncommitted paths at generation: 34
+- Generated: 2026-09-30T18:40:39+05:30
 
 ## Status vocabulary
 
@@ -28,15 +28,15 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 | state | count |
 |---|---:|
 | PARTIAL | 59 |
-| MISSING | 45 |
+| MISSING | 51 |
 | VERIFIED | 34 |
+| EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
-| EXISTING_UNVERIFIED | 1 |
-| **total** | **141** |
+| **total** | **155** |
 
 Unresolved P0: 21 (CORE-001, INTENT-001, TRAJ-001, CTX-001, CTX-002, CTX-003, MEM-002, MEM-003, SEC-005, BROW-001, RES-001, EVAL-001, DOMAIN-001, ACT-001, MCP-001, CYBER-002, DUR-001, BCON-001, APPROVAL-001, JIT-001, RES-002)
 
-Unresolved P1: 68 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008)
+Unresolved P1: 82 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008, ORCH-001, ORCH-002, ORCH-003, ORCH-004, ORCH-005, ORCH-006, ORCH-007, ORCH-008, ORCH-009, ORCH-010, ORCH-011, ORCH-012, ORCH-013, ORCH-014)
 
 ## PRD section 0
 
@@ -443,6 +443,25 @@ Unresolved P1: 68 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MO
 | CUA-007 | P1 | **MISSING** | Background computer use is tested for focus theft, pointer movement and window-order changes. | Each background run records focus changes, pointer movement and window-order changes, and a path that disturbs the foreground is flagged. | - | - | Record foreground window, focus, pointer position and window order before and after each run in the arena (CUA-006). |
 | CUA-008 | P1 | **MISSING** | Concurrent computer-use sessions have explicit ownership, leases and resource boundaries. | Each session has an owner (objective and worker), a lease with an expiry, its window set and resource limits; two sessions cannot act on the same window, and an expired lease stops the session. | - | `friday/governor.py:581` | A session registry with owner, lease and window set, built on the governor's leases, refusing a second session on a taken window. |
 | MODEL-011 | P2 | **MISSING** | A small local UI decision model is used only after it beats the deterministic and frontier baselines. | A small UI decision model is put on a path only after it beats the deterministic and frontier baselines on held-out execution-based tasks, with its licence checked; until then it is a research and benchmark entry. | - | - | After the arena (CUA-006): benchmark candidate UI models against the baselines; keep CUA-S1 as a research entry until then. |
+
+## PRD section 101
+
+| id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
+|---|---|---|---|---|---|---|---|
+| ORCH-001 | P1 | **EXISTING_UNVERIFIED** | An objective's independent tasks run as dependency waves through isolated workers, scheduled by code, within the governor's concurrency. | Given a plan whose tasks form independent branches over disjoint files, the branches run at once, a task sharing a file with a running one waits, a task starts only when its dependencies are done, and concurrency never exceeds what the governor admits. | - | `friday/planner.py:257,819`, `friday/governor.py:581` | Audit the continuous executor's scheduling; add file-surface independence and waves, sharing the build kernel's ready queue where it fits. |
+| ORCH-002 | P1 | **EXISTING_UNVERIFIED** | A worker is spawned only for parallel work, specialisation, context isolation or independent verification. | Each worker records why it was started; a request that fits none of the four runs in the current worker. | - | `friday/governor.py:581` | Record the spawn reason with every worker and refuse a spawn that has none. |
+| ORCH-003 | P1 | **EXISTING_UNVERIFIED** | Every worker carries a token, turn, tool-call, research-call and wall-time budget with a soft and a hard limit. | At the soft limit the worker reports progress, blocker and why more budget helps; at the hard limit code stops it unless the budget is raised; a runaway worker is stopped without a model noticing. | - | `friday/objective_budget.py` | Audit objective_budget against per-worker soft and hard limits and wall time; add what is missing. |
+| ORCH-004 | P1 | **EXISTING_UNVERIFIED** | Workers hand results over as structured artifacts and references, not transcripts. | A worker's result reaches FRIDAY as a record (status, commit, tests, evidence references, blockers) of a few hundred tokens; the transcript stays on disk and is read only on demand. | - | `friday/hermes_bridge.py` | Audit the reporting contract against the record shape and size; make the transcript on-demand. |
+| ORCH-005 | P1 | **EXISTING_UNVERIFIED** | A task starts on the least costly model predicted to meet it and escalates only on measured need. | Each escalation to a stronger model is recorded with its cause; tasks that pass on the first model are not escalated. | - | `friday/model_gateway.py:85` | Audit the gateway's routing for escalation on measured failure; record each escalation's cause. |
+| ORCH-006 | P1 | **EXISTING_UNVERIFIED** | Concurrent code workers work in isolated worktrees and branches, and FRIDAY integrates them. | Two concurrent coding workers never share a checkout; each result is integrated by FRIDAY, and a conflict becomes an integration task. | - | `friday/executors/worktrees.py` | Audit concurrent runs against a shared checkout and the integration step. |
+| ORCH-007 | P1 | **MISSING** | Output reaching a model is compressed where exact text is not needed, with the raw output recoverable. | Test, git and search output reaches a model as counts and failures within a size cap, with the full output kept as an artifact it can ask for; no two compressors are stacked unless benchmarked. | - | - | After the build harness's RTK A/B and brief pytest output: an output router for FRIDAY's workers. |
+| ORCH-008 | P1 | **MISSING** | A coding worker iterates on the tests its change affects; the full suite runs at checkpoints. | A worker's change runs the affected tests; the objective's checkpoint runs the full suite; a failure reports the failing ids and a pointer to the full log. | - | - | Give FRIDAY's coding workers the build harness's test-impact selection and brief output. |
+| ORCH-009 | P1 | **EXISTING_UNVERIFIED** | Every model call is attributed by source, and verified work is measured per token and per minute. | Each call records its input by source and its output; per objective FRIDAY reports verified work against tokens, wall time, retries and tool calls. | - | `friday/model_gateway.py:166` | Record input by source on every call; report verified work per token and minute per objective. |
+| ORCH-010 | P1 | **MISSING** | Nothing becomes a default in FRIDAY's worker harness unless removing it makes a benchmark worse. | Each default instruction, hook, agent or skill has a recorded evaluation showing it helps; one that does not is removed. | - | - | After ORCH-009 and a benchmark set: an ablation per default. |
+| ORCH-011 | P1 | **EXISTING_UNVERIFIED** | Worker supervision is event-driven code; a model is woken only when judgement is needed. | Starts, exits, heartbeats, timeouts, test results and resource limits are watched by code; a model is woken only for a failure, a conflict, an ambiguity or a failed verification. | - | `friday/hermes_bridge.py` | Audit where a model is consulted during supervision and move bookkeeping to code. |
+| ORCH-012 | P1 | **MISSING** | Worker prompts keep a stable prefix and a dynamic suffix, so prompt caching holds. | Rules, role and tool definitions come first in a fixed order; nothing volatile sits in the prefix; the cache hit rate is measured per worker. | - | - | Order worker prompts as a stable prefix and a dynamic suffix; measure cache hits. |
+| ORCH-013 | P1 | **MISSING** | A finished task that invalidates an assumption cancels the running tasks built on it. | When a task's result invalidates an assumption later tasks depend on, the scheduler cancels those still running and replans them. | - | - | After ORCH-001: dependency invalidation events and cancellation. |
+| ORCH-014 | P1 | **MISSING** | FRIDAY's worker harness is measured against its own baseline for tokens and wall time at an equal or better verification rate. | On representative objectives the median model tokens fall at least 60%, and the wall time at least 40% on parallelisable work, against the recorded baseline, with the verification rate held. | - | - | After ORCH-009: record the baseline, then measure each harness change against it. |
 
 ## Owner direction recorded against a requirement
 
