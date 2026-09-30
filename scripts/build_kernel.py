@@ -551,7 +551,11 @@ def _commit_run(run: Running, summary: str) -> tuple[str, list[str]]:
     """Commit the worker's diff on its build branch; ('', []) when nothing changed."""
     if not run.base_sha or not _changes(run.wt):
         return "", []
-    _git(["add", "-A", "--", ".", ":(exclude).build"], run.wt, 60)
+    # Stage everything, then unstage the kernel's own files. An exclude
+    # pathspec would do it in one step, but git refuses a pathspec naming a
+    # path .gitignore already ignores, and this repository ignores .build/.
+    _git(["add", "-A"], run.wt, 60)
+    _git(["rm", "-r", "-q", "--cached", "--ignore-unmatch", ".build"], run.wt, 60)
     msg = f"build({run.req}): {(summary.splitlines() or [''])[0].strip()[:60]}"
     _git(["-c", "user.name=DarshPro07", "-c", "user.email=DarshPro07", "commit", "-m", msg],
          run.wt, 120)

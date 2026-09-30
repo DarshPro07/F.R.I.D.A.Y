@@ -368,6 +368,19 @@ def test_finalize_commits_a_done_diff_on_the_build_branch(repo, tmp_path):
     assert (tmp_path / "runs" / "R-1.stream.jsonl").exists()
 
 
+def test_finalize_commits_when_the_repo_ignores_build(repo, tmp_path):
+    # The real repository ignores .build/; naming an ignored path in `git add`
+    # makes git exit non-zero, which failed BH-D's first real commit.
+    (repo / ".gitignore").write_text(".build/\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-q", "-m", "ignore build")
+    run, wt = _done_run(repo, tmp_path)
+    (wt / "new.py").write_text("x = 1\n")
+    (wt / ".build" / "evidence.json").write_text(json.dumps({"status": "DONE", "summary": "s"}))
+    rec = K.finalize(run, None, tmp_path / "runs")
+    assert rec["state"] == "DONE" and rec["files_changed"] == ["new.py"], rec.get("commit_error")
+
+
 def test_finalize_does_not_commit_failed_or_unchanged_runs(repo, tmp_path):
     run, wt = _done_run(repo, tmp_path)
     (wt / "new.py").write_text("x = 1\n")
