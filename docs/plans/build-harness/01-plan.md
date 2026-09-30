@@ -46,3 +46,21 @@ Beads (installed on this machine) is weighed against the ledger-backed queue in 
 - No bulk install of ECC or other catalogues; the Technology Scout is paused during the P0 burn-down.
 - RTK is measured, not adopted, until the A/B says so; raw output always stays recoverable.
 - The full four-chunk suite runs at checkpoints only.
+
+## Results so far (2026-09-30)
+
+- Steps 1-4 built by Sonnet workers (34-64k tokens each) and integrated by the controller: token attribution,
+  test impact + brief pytest output, the RTK A/B (not adopted as a default: lossy where it saves), the build kernel
+  (commits 7dc03bc, 5915ba7, 23e98ed).
+- Step 5, first data point (not yet the A/B): BROW-001's increment through the kernel - one headless Sonnet worker,
+  23 turns, 150 s, $0.36, ~0.67M tokens (0.62M cache reads) - verified and integrated (e46a8fd). The same session's
+  controller spent ~0.39M cache-read tokens on EACH of its own turns and about six turns reviewing and integrating,
+  so the controller, not the worker, is now the cost. Next: run waves from a fresh, small controller session.
+
+## Resume here (fresh session)
+
+1. `python scripts/build_kernel.py concurrency` and `waves --cap 2`; with under ~2 GB available run one worker.
+2. `python scripts/build_kernel.py run-wave --cap N` (background); on exit read `data/build_runs/<REQ>.json`.
+3. Verify each worker: its diff, one mutation of its core change, `scripts/test_impact.py --direct` + `scripts/pytest_brief.py`;
+   copy the files in, update the ledger entry honestly, commit, `git worktree remove`.
+4. Full four-chunk suite only at a checkpoint (the last: 258e3c0, 4,753 passed).
