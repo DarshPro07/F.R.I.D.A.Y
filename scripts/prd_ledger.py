@@ -2624,6 +2624,138 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "EXTEND: move the repository-relative writers onto the state root, and give a child started "
             "with a hand-built environment the session's FRIDAY_HOME."),
     }),
+    # --- Slice 7 (Amendment A4): pressure judged against the machine, 2026-09-30
+    ("RES-003", {
+        "status": VERIFIED,
+        "current_implementation": (
+            "friday/governor.py judges pressure against this machine, not fixed percentages. The primary "
+            "classifier is the share of the machine's idle headroom in use - available RAM, the commit "
+            "charge's room below its limit (Windows, GetPerformanceInfo) and CPU sustained over ten seconds - "
+            "against a Baseline, the median of readings taken while FRIDAY holds no leased work: measured by a "
+            "hardware qualification (RES-002) when one is stored for this machine, otherwise provisional and "
+            "refined from the governor's own idle readings. RAM and commit read YELLOW from 40% of the idle "
+            "headroom in use, ORANGE from 60% and RED from 80%; CPU from 60%, 80% and 95%. The trend: the "
+            "least-squares slope of available RAM over the last minute; if it would reach the emergency floor "
+            "within 60 s the level is ORANGE, within 300 s YELLOW. Static values are emergency guardrails only: "
+            "RAM or sustained CPU at 95%, available RAM below max(0.5 GB, 3%), commit headroom below max(1 GB, "
+            "3%), the disk at 1 or 5 GB. Hysteresis (Tracker): a worse level is entered at once; a better one "
+            "only after the reading, judged with the share lines 5 points lower, has held for 30 s, and then to "
+            "the worst level seen while waiting. GREEN, YELLOW, ORANGE and RED are NORMAL, ELEVATED, HIGH and "
+            "CRITICAL, so the admission policy is unchanged. Residual: paging activity is not measured "
+            "(psutil's page counters read 0 on Windows) and thermal state is not read; a provisional baseline "
+            "is not kept across restarts, and the product does not yet qualify the machine on its first run "
+            "(RES-004)."),
+        "files": ["friday/governor.py:84,182,261,328,343,416,679", "scripts/stress_low_ram.py",
+                  "data/prd_v7_audit/res003_stress_2026-09-30.json"],
+        "tests": ["tests/test_governor.py::test_a_machine_idling_at_76_percent_reads_green",
+                  "tests/test_governor.py::test_losing_headroom_fast_reads_pressured_before_any_fixed_line",
+                  "tests/test_governor.py::test_a_machine_at_68_percent_losing_memory_fast_is_pressured",
+                  "tests/test_governor.py::test_a_reading_wavering_at_a_boundary_does_not_flap",
+                  "tests/test_governor.py::test_a_better_reading_must_hold_before_the_level_falls",
+                  "tests/test_governor.py::test_the_level_falls_to_the_worst_reading_of_the_wait_and_needs_a_margin",
+                  "tests/test_governor.py::test_a_cpu_spike_is_not_pressure_but_a_sustained_load_is",
+                  "tests/test_governor.py::test_a_cpu_reading_right_after_another_is_not_a_new_measurement",
+                  "tests/test_governor.py::test_fixed_percentages_are_emergency_guardrails_only",
+                  "tests/test_governor.py::test_the_commit_charge_is_judged_against_its_own_idle_headroom",
+                  "tests/test_governor.py::test_without_a_qualified_baseline_the_governor_profiles_the_machine_itself",
+                  "tests/test_governor.py::test_real_memory_pressure_bounds_new_work"],
+        "evidence": (
+            "2026-09-30: the old classifier read REFERENCE-A at rest (76%) as ELEVATED ('RAM 76% used'), and the "
+            "new tests failed against it. Real run on REFERENCE-A - one governor on the real sampler, the "
+            "baseline measured at rest, no threshold moved (data/prd_v7_audit/res003_stress_2026-09-30.json): at "
+            "rest the machine read GREEN at 89-90% RAM; memory allocated in 20 MB steps read YELLOW at 160 MB "
+            "('available RAM falling 0.48 GB/min: the floor in 118 s', optional work shed) and ORANGE at 200 MB "
+            "(the second worker queued) at 90.9% RAM, below every guardrail; after release ORANGE held 30.1 s and "
+            "then fell; every admission matched the policy. The slow test that runs it passed on its own. The "
+            "first real run was void and is not counted: a CPU reading 20 ms after the last said 100% and drove "
+            "the peak (V7-D57, fixed); the harness now counts only memory-driven pressure. Eleven mutations each "
+            "turn a test red: the baseline ignored, the trend removed, the hysteresis removed, the release margin "
+            "removed, the worst-of-the-wait rule removed, a busy reading refining the baseline, a measured "
+            "baseline refined, the commit guardrail removed, a static 75% line put back, CPU judged on one "
+            "reading, and the CPU window removed. "
+            "The four-chunk suite over the Slice 7 tree (data/baseline_v7_slice7a), FRIDAY not running: all four "
+            "chunks exit 0, 4,753 passed (1,280, 1,073, 1,338 and 1,062), none failed, live state unchanged."),
+        "next_action": (
+            "EXTEND: measure paging activity (performance counters) and thermal state where the platform "
+            "reports them; keep the refined baseline across restarts; run the stress on REFERENCE-B."),
+    }),
+    ("RES-002", {
+        "status": PARTIAL,
+        "current_implementation": (
+            "friday/hardware_profile.py measures the machine: RAM, the idle baseline (the median of ten "
+            "readings at rest), logical and physical CPUs, GPUs with their dedicated and shared memory through "
+            "DXGI (the software renderer left out; None off Windows, never a guess), the state root's disk, the "
+            "battery, and - with --browser - one headless Chromium's memory from BROW-004's readiness probe. The "
+            "policy is derived from the measurements, not tiers: the room FRIDAY's work may take is RES-003's "
+            "YELLOW share of the idle headroom; browsers are as many as fit at the measured cost within the "
+            "governor's cap and never fewer than one; a local model's RAM budget is the room within A3's 2 GB per "
+            "artifact, and GPU offload goes up to the largest GPU's dedicated memory. The profile is stored in "
+            "the state root with a fingerprint of RAM, CPUs and GPUs; the process governor starts from its "
+            "baseline and caps when it describes this machine, and otherwise profiles the machine from its own "
+            "readings. Nothing is keyed to a hostname. Gaps: REFERENCE-B is not qualified; the product does not "
+            "qualify the machine on its first run or after a change (RES-004); a worker's memory is not "
+            "measured, so the worker cap stays FR-013's two; nothing benchmarks what models the machine can run "
+            "(MODEL-009)."),
+        "files": ["friday/hardware_profile.py:52,131,194,231,253,292,307,326", "friday/governor.py:679",
+                  "data/prd_v7_audit/res002_profile_REFERENCE-A_2026-09-30.json"],
+        "tests": ["tests/test_hardware_profile.py::test_this_machine_is_measured_and_nothing_is_guessed",
+                  "tests/test_hardware_profile.py::test_two_reference_machines_get_different_profiles_and_policies_from_the_same_code",
+                  "tests/test_hardware_profile.py::test_browsers_are_as_many_as_the_room_holds_at_the_measured_cost",
+                  "tests/test_hardware_profile.py::test_the_governor_starts_from_the_stored_profile_of_this_machine",
+                  "tests/test_hardware_profile.py::test_a_profile_of_another_machine_is_not_used",
+                  "tests/test_hardware_profile.py::test_the_command_line_qualifies_and_shows"],
+        "evidence": (
+            "2026-09-30: the tests failed first (no module). REFERENCE-A qualified from FRIDAY's own environment "
+            "(data/prd_v7_audit/res002_profile_REFERENCE-A_2026-09-30.json): 15.35 GB RAM with 2.11 GB available "
+            "at rest (the owner's programs open), 16 logical and 8 physical CPUs, an AMD Radeon integrated GPU "
+            "with 0.48 GB dedicated and 7.68 GB shared, on battery at 68%, one headless Chromium 265 MB; policy: "
+            "0.84 GB of room, 2 browsers, a model RAM budget of 0.84 GB, GPU offload up to 0.48 GB. The same code "
+            "on REFERENCE-B's hardware as Amendment A4 describes it derives a 2 GB model budget and 2 GB of "
+            "offload (test). Seven mutations each turn a test red: a RAM change not detected, a profile of "
+            "another machine used, the governor ignoring the stored profile, the software renderer counted as a "
+            "GPU, offload not bounded by the GPU's memory, zero browsers on a small machine, and the room taken "
+            "from total RAM instead of the idle headroom. "
+            "The four-chunk suite over the Slice 7 tree (data/baseline_v7_slice7a), FRIDAY not running: all four "
+            "chunks exit 0, 4,753 passed (1,280, 1,073, 1,338 and 1,062), none failed, live state unchanged."),
+        "next_action": (
+            "OWNER: on REFERENCE-B run `python -m friday.hardware_profile qualify --browser --no-save --out "
+            "<file>` from FRIDAY's .venv. EXTEND: qualify on first run and on a material change (RES-004), "
+            "measure a worker's memory, and benchmark models (MODEL-009)."),
+    }),
+    ("RES-001", {
+        "status": PARTIAL,
+        "current_implementation": (
+            "The resource governor (friday/governor.py) samples RAM, the commit charge, CPU, disk and browser "
+            "processes and admits, queues or sheds new work by pressure level: ELEVATED sheds optional work, "
+            "HIGH holds concurrency to one worker, CRITICAL starts nothing new; the level is judged against the "
+            "machine's own baseline (RES-003). scripts/stress_low_ram.py drives real memory pressure against one "
+            "governor judging against the baseline measured at rest, with no threshold moved: a child process "
+            "allocates and touches memory in steps sized to the machine, bounded by a cap and a 1 GB safety "
+            "floor, stopping once memory has held concurrency to one worker, and every decision is checked "
+            "against the policy before and after the memory is released. Gaps: GPU, network and local-model "
+            "residency (MODEL-005) are not sampled or governed; work already running is not reduced under "
+            "pressure, only new work refused or queued; section 55's owned-process record (owner, objective, "
+            "lease, heartbeat, deadline, cleanup) is not checked here."),
+        "files": ["friday/governor.py:84,343,416,581", "scripts/stress_low_ram.py",
+                  "data/prd_v7_audit/res001_low_ram_2026-09-27.json",
+                  "data/prd_v7_audit/res003_stress_2026-09-30.json"],
+        "tests": ["tests/test_governor.py::test_real_memory_pressure_bounds_new_work",
+                  "tests/test_governor.py::test_high_pressure_reduces_concurrency_to_one",
+                  "tests/test_governor.py::test_critical_pressure_sheds_all_new_work"],
+        "evidence": (
+            "2026-09-27, real memory on this 15.4 GB host (data/prd_v7_audit/res001_low_ram_2026-09-27.json), "
+            "with the thresholds then set a few points above the load at the start: 300 MB moved the governor to "
+            "ELEVATED, 600 MB to HIGH, 750 MB to CRITICAL; once released it admitted all three again; every "
+            "decision matched the policy. 2026-09-30, rerun against the machine's own baseline with nothing "
+            "moved (data/prd_v7_audit/res003_stress_2026-09-30.json): YELLOW then ORANGE on real memory before "
+            "any fixed line, every decision as the policy says; the slow test passed on its own. "
+            "The four-chunk suite over the Slice 7 tree (data/baseline_v7_slice7a), FRIDAY not running: all four "
+            "chunks exit 0, 4,753 passed (1,280, 1,073, 1,338 and 1,062), none failed, live state unchanged."),
+        "next_action": (
+            "EXTEND: sample GPU and network, govern local-model residency with MODEL-005, reduce running "
+            "optional work under pressure, and record section 55's owned-process fields for every spawned "
+            "process."),
+    }),
 ]
 
 

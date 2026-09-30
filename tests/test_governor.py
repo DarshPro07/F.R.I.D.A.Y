@@ -20,10 +20,20 @@ from friday import governor as G
 FAKE_GATEWAY = str(Path(__file__).parent / "fake_hermes_gateway.py")
 
 
-def sample(cpu=10.0, ram=30.0, disk=100.0, browsers=0) -> G.Sample:
-    return G.Sample(at=time.time(), cpu_percent=cpu, ram_percent=ram,
-                    ram_available_gb=16.0, disk_free_gb=disk,
-                    browser_processes=browsers, friday_rss_mb=200.0)
+TOTAL_GB = 32.0
+
+#: The machine the admission tests run on, at rest: 30% of its RAM and 10% of
+#: its CPU in use. Pressure is judged against this (RES-003).
+IDLE = G.Baseline(ram_available_gb=TOTAL_GB * 0.7, cpu_percent=10.0,
+                  readings=12, provisional=False)
+
+
+def sample(cpu=10.0, ram=30.0, disk=100.0, browsers=0, *, at=None,
+           total=TOTAL_GB) -> G.Sample:
+    return G.Sample(at=time.time() if at is None else at, cpu_percent=cpu,
+                    ram_percent=ram, ram_available_gb=total * (1 - ram / 100),
+                    disk_free_gb=disk, browser_processes=browsers,
+                    friday_rss_mb=200.0, ram_total_gb=total)
 
 
 class Dial:
@@ -36,32 +46,221 @@ class Dial:
         return self.s
 
 
-def make(s: G.Sample | None = None, **thresholds) -> tuple[G.Governor, Dial]:
+def make(s: G.Sample | None = None, *, baseline: G.Baseline | None = IDLE,
+         **thresholds) -> tuple[G.Governor, Dial]:
     dial = Dial(s or sample())
     gov = G.Governor(thresholds=G.Thresholds(**thresholds), sampler=dial,
-                     sample_ttl_s=0.0)
+                     sample_ttl_s=0.0, baseline=baseline)
     return gov, dial
 
 
 # -- assessment ------------------------------------------------------------
 
 
-def test_assess_levels_are_monotonic_in_cpu_and_ram():
-    assert G.assess(sample()).level == G.NORMAL
-    assert G.assess(sample(cpu=72)).level == G.ELEVATED
-    assert G.assess(sample(cpu=90)).level == G.HIGH
-    assert G.assess(sample(cpu=97)).level == G.CRITICAL
-    assert G.assess(sample(ram=80)).level == G.ELEVATED
-    assert G.assess(sample(ram=90)).level == G.HIGH
-    assert G.assess(sample(ram=96)).level == G.CRITICAL
-    assert G.assess(sample(disk=3)).level == G.HIGH
-    assert G.assess(sample(disk=0.5)).level == G.CRITICAL
+def test_levels_rise_with_the_share_of_idle_headroom_in_use():
+    def level(**reading) -> str:
+        return G.assess(sample(**reading), baseline=IDLE).level
+
+    assert level() == G.NORMAL
+    assert level(cpu=72) == G.ELEVATED       # 69% of the idle CPU capacity in use
+    assert level(cpu=90) == G.HIGH           # 89%
+    assert level(cpu=97) == G.CRITICAL
+    assert level(ram=50) == G.NORMAL         # 29% of the idle RAM headroom
+    assert level(ram=60) == G.ELEVATED       # 43%
+    assert level(ram=75) == G.HIGH           # 64%
+    assert level(ram=90) == G.CRITICAL       # 86%
+    assert level(disk=3) == G.HIGH
+    assert level(disk=0.5) == G.CRITICAL
 
 
 def test_assess_reports_every_reason_and_the_worst_level_wins():
-    p = G.assess(sample(cpu=90, ram=96))
+    p = G.assess(sample(cpu=90, ram=96), baseline=IDLE)
     assert p.level == G.CRITICAL
     assert any("CPU" in r for r in p.reasons) and any("RAM" in r for r in p.reasons)
+
+
+# -- RES-003: judged against this machine, not a fixed percentage ----------
+
+#: REFERENCE-A, measured: 15.35 GB of RAM, its operating system idling near
+#: 76% (RES-001, 2026-09-27).
+REF_A_TOTAL = 15.35
+REF_A_IDLE = G.Baseline(ram_available_gb=REF_A_TOTAL * 0.24, cpu_percent=8.0,
+                        readings=12, provisional=False)
+
+
+def ref_a(ram: float, *, at: float) -> G.Sample:
+    return sample(cpu=8.0, ram=ram, at=at, total=REF_A_TOTAL)
+
+
+def test_a_machine_idling_at_76_percent_reads_green():
+    # The old classifier called this ELEVATED and shed optional work at rest.
+    assert G.assess(ref_a(76.0, at=0.0)).level == G.NORMAL
+    gov, _ = make(ref_a(76.0, at=0.0), baseline=REF_A_IDLE)
+    p = gov.pressure()
+    assert p.level == G.NORMAL and p.to_dict()["state"] == "GREEN", p.reasons
+    assert gov.admit(G.OPTIONAL).admitted
+
+
+def test_losing_headroom_fast_reads_pressured_before_any_fixed_line():
+    # REFERENCE-A at rest, then something takes memory at about 45 MB/s.
+    gov, dial = make(ref_a(76.0, at=1000.0), baseline=REF_A_IDLE)
+    assert gov.pressure().level == G.NORMAL
+    for i, ram in enumerate((77.5, 79.0, 80.5, 82.0), start=1):
+        dial.s = ref_a(ram, at=1000.0 + 5 * i)
+        p = gov.pressure()
+    assert p.level in (G.ELEVATED, G.HIGH), p.reasons
+    assert any("falling" in r for r in p.reasons), p.reasons
+    assert p.sample.ram_percent < gov.thresholds.ram_critical
+    # The same reading without the fall behind it is not pressure: the
+    # governor answers to the fall, not to the number.
+    still, _ = make(ref_a(82.0, at=2000.0), baseline=REF_A_IDLE)
+    assert still.pressure().level == G.NORMAL
+
+
+def test_a_machine_at_68_percent_losing_memory_fast_is_pressured():
+    idle = G.Baseline(ram_available_gb=8.0, cpu_percent=5.0, readings=12, provisional=False)
+    gov, dial = make(sample(ram=50.0, at=0.0, total=16.0), baseline=idle)
+    gov.pressure()
+    for i, ram in enumerate((56.0, 62.0, 68.0), start=1):
+        dial.s = sample(ram=ram, at=4.0 * i, total=16.0)
+        p = gov.pressure()
+    assert p.level != G.NORMAL and any("falling" in r for r in p.reasons), p.reasons
+
+
+def _at_share(share: float, at: float) -> G.Sample:
+    """A reading with `share` of IDLE's RAM headroom in use."""
+    available = IDLE.ram_available_gb * (1 - share)
+    return sample(ram=100 * (1 - available / TOTAL_GB), at=at)
+
+
+def test_a_reading_wavering_at_a_boundary_does_not_flap():
+    # 40% of the idle headroom in use is the YELLOW line; for two minutes the
+    # reading sits a hair either side of it.
+    gov, dial = make(baseline=IDLE)
+    seen = []
+    for i in range(60):
+        dial.s = _at_share(0.402 if i % 2 == 0 else 0.398, at=100.0 + 2 * i)
+        seen.append(gov.pressure())
+    raw_changes = sum(1 for a, b in zip(seen, seen[1:]) if a.raw != b.raw)
+    changes = sum(1 for a, b in zip(seen, seen[1:]) if a.level != b.level)
+    assert raw_changes == 59                    # the line really is being crossed
+    assert seen[0].level == G.ELEVATED and changes == 0
+
+
+def test_a_better_reading_must_hold_before_the_level_falls():
+    gov, dial = make(baseline=IDLE)
+    dial.s = _at_share(0.64, at=0.0)            # ORANGE
+    assert gov.pressure().level == G.HIGH
+    held = []
+    for t in (2.0, 12.0, 22.0, 31.0):           # back at rest from t=2
+        dial.s = _at_share(0.0, at=t)
+        held.append(gov.pressure())
+    assert all(p.level == G.HIGH and p.raw == G.NORMAL for p in held), held
+    assert "holding ORANGE" in held[-1].reasons[-1]
+    dial.s = _at_share(0.0, at=32.0)            # 30 s of calm
+    assert gov.pressure().level == G.NORMAL
+
+
+def test_the_level_falls_to_the_worst_reading_of_the_wait_and_needs_a_margin():
+    gov, dial = make(baseline=IDLE)
+    dial.s = _at_share(0.64, at=0.0)
+    assert gov.pressure().level == G.HIGH
+    dial.s = _at_share(0.45, at=1.0)            # a YELLOW reading while calming
+    gov.pressure()
+    dial.s = _at_share(0.0, at=20.0)
+    gov.pressure()
+    dial.s = _at_share(0.0, at=31.0)
+    assert gov.pressure().level == G.ELEVATED   # not straight to GREEN
+    # Just under the YELLOW line is not far enough under it to leave.
+    for t in range(40, 200, 10):
+        dial.s = _at_share(0.37, at=float(t))
+        assert gov.pressure().level == G.ELEVATED, t
+
+
+def test_a_cpu_spike_is_not_pressure_but_a_sustained_load_is():
+    gov, dial = make(sample(cpu=10.0, at=0.0))
+    gov.pressure()
+    for t in (2.0, 4.0, 6.0, 8.0):
+        dial.s = sample(cpu=10.0, at=t)
+        gov.pressure()
+    dial.s = sample(cpu=100.0, at=9.0)          # one second at full load
+    p = gov.pressure()
+    assert p.level == G.NORMAL, p.reasons
+    for t in (11.0, 13.0, 15.0, 17.0, 19.0):    # ten seconds of it
+        dial.s = sample(cpu=100.0, at=t)
+        p = gov.pressure()
+    assert p.level == G.CRITICAL and "CPU 100%" in p.reasons
+
+
+def test_a_cpu_reading_right_after_another_is_not_a_new_measurement(monkeypatch):
+    """V7-D57: psutil measures CPU since its previous call, so a reading 20 ms
+    after another is noise - it said 100% on a quiet machine, and the
+    governor shed everything on it."""
+    import psutil
+
+    calls = []
+
+    def cpu_percent(interval=None):
+        calls.append(interval)
+        return 100.0
+
+    monkeypatch.setattr(psutil, "cpu_percent", cpu_percent)
+    monkeypatch.setattr(G, "_cpu_last", (time.monotonic(), 12.0))
+    assert G.sample_machine().cpu_percent == 12.0 and calls == []
+    monkeypatch.setattr(G, "_cpu_last", (time.monotonic() - 5.0, 12.0))
+    assert G.sample_machine().cpu_percent == 100.0 and calls == [None]
+
+
+def test_fixed_percentages_are_emergency_guardrails_only():
+    # 88% was the old HIGH line; on a machine that idles at 88% it is rest.
+    idle_88 = G.Baseline(ram_available_gb=REF_A_TOTAL * 0.12, cpu_percent=8.0,
+                         readings=12, provisional=False)
+    assert G.assess(ref_a(88.0, at=0.0), baseline=idle_88).level == G.NORMAL
+    # 95% is an emergency whatever the baseline.
+    idle_94 = G.Baseline(ram_available_gb=REF_A_TOTAL * 0.06, cpu_percent=8.0,
+                         readings=12, provisional=False)
+    p = G.assess(ref_a(95.2, at=0.0), baseline=idle_94)
+    assert p.level == G.CRITICAL and "RAM 95% used" in p.reasons
+    # So is available memory below the floor, and the commit charge at its limit.
+    low = ref_a(80.0, at=0.0)
+    low.ram_available_gb = 0.3
+    assert G.assess(low, baseline=REF_A_IDLE).level == G.CRITICAL
+    near_limit = ref_a(76.0, at=0.0)
+    near_limit.commit_available_gb, near_limit.commit_limit_gb = 0.4, 30.7
+    p = G.assess(near_limit, baseline=REF_A_IDLE)
+    assert p.level == G.CRITICAL and any("commit limit" in r for r in p.reasons)
+
+
+def test_the_commit_charge_is_judged_against_its_own_idle_headroom():
+    idle = G.Baseline(ram_available_gb=REF_A_TOTAL * 0.24, cpu_percent=8.0,
+                      commit_available_gb=10.0, readings=12, provisional=False)
+    reading = ref_a(76.0, at=0.0)
+    reading.commit_available_gb, reading.commit_limit_gb = 3.5, 30.7
+    p = G.assess(reading, baseline=idle)
+    assert p.level == G.HIGH and any("commit charge" in r for r in p.reasons), p.reasons
+
+
+def test_without_a_qualified_baseline_the_governor_profiles_the_machine_itself():
+    gov, dial = make(sample(ram=50.0, at=0.0), baseline=None)
+    p = gov.pressure()
+    assert p.level == G.NORMAL and p.baseline.provisional and p.baseline.readings == 1
+    # Readings at rest refine it - their median - spaced so a burst cannot dominate.
+    for i in range(1, 5):
+        dial.s = sample(ram=30.0, at=10.0 * i)
+        gov.pressure()
+    assert gov.baseline.readings == 5
+    assert gov.baseline.ram_available_gb == pytest.approx(TOTAL_GB * 0.7)
+    # Readings taken while FRIDAY holds work do not.
+    lease = gov.admit(G.WORKER).lease
+    dial.s = sample(ram=70.0, at=60.0)
+    gov.pressure()
+    assert gov.baseline.readings == 5
+    gov.release(lease)
+    # A measured baseline replaces it and is not moved by readings.
+    gov.rebaseline(IDLE)
+    dial.s = sample(ram=50.0, at=80.0)
+    gov.pressure()
+    assert gov.baseline == IDLE
 
 
 def test_live_sampler_has_the_shape_and_never_guesses():
@@ -71,6 +270,11 @@ def test_live_sampler_has_the_shape_and_never_guesses():
     assert s.disk_free_gb > 0
     assert s.browser_processes >= 0
     assert s.friday_rss_mb > 0
+    assert s.ram_total_gb and s.ram_available_gb < s.ram_total_gb
+    if sys.platform == "win32":                 # the commit charge, where it is reported
+        assert 0.0 < s.commit_available_gb < s.commit_limit_gb
+    else:
+        assert s.commit_available_gb is None and s.commit_limit_gb is None
 
 
 # -- admission -------------------------------------------------------------
@@ -122,7 +326,7 @@ def test_critical_pressure_sheds_all_new_work():
 def test_optional_work_is_shed_first():
     gov, dial = make()
     assert gov.admit(G.OPTIONAL).admitted
-    dial.s = sample(cpu=72)                      # merely ELEVATED
+    dial.s = sample(ram=60)                      # merely ELEVATED
     assert gov.admit(G.OPTIONAL).decision == G.SHED
     assert gov.admit(G.WORKER).admitted           # workers still fine
 
@@ -134,19 +338,20 @@ def test_browser_cap_and_high_pressure_serialise_browsers():
     assert a.admitted and b.admitted
     assert gov.admit(G.BROWSER).decision == G.QUEUE
     gov.release(b.lease)
-    dial.s = sample(cpu=90)
+    dial.s = sample(ram=75)                           # HIGH
     assert gov.admit(G.BROWSER).decision == G.QUEUE   # one already running
 
 
 def test_status_and_banner_explain_reduced_concurrency():
     gov, dial = make()
     assert gov.status()["banner"] == ""
-    dial.s = sample(cpu=90)
+    dial.s = sample(ram=75)
     st = gov.status()
-    assert st["pressure"]["level"] == G.HIGH
+    assert st["pressure"]["level"] == G.HIGH and st["pressure"]["state"] == "ORANGE"
+    assert st["pressure"]["baseline"]["provisional"] is False
     assert "one worker at a time" in st["banner"]
     assert st["caps"]["workers"] == 2
-    dial.s = sample(cpu=97)
+    dial.s = sample(ram=97)
     assert "critical" in gov.status()["banner"].lower()
 
 
@@ -258,16 +463,27 @@ def test_hermes_delegate_tool_reports_refusal_honestly(tmp_path):
 
 @pytest.mark.slow
 def test_real_memory_pressure_bounds_new_work():
-    """RES-001's low-RAM stress test: memory really allocated, the machine
-    really sampled. The governor must shed optional work, hold concurrency to
-    one worker, then start nothing, as the RAM climbs - and admit again once
-    it is released. Slow: it allocates up to 1.2 GB, so the standard gate
-    leaves it out and it is run on its own."""
+    """RES-001/RES-003's low-RAM stress test: memory really allocated, the
+    machine really sampled, judged against its own idle baseline with no
+    threshold moved. As the RAM climbs the governor must shed optional work
+    and hold concurrency to one worker before any fixed line is crossed, keep
+    that level for the dwell once the memory is released, and then admit
+    again. Slow: it allocates up to 1.2 GB, so the standard gate leaves it
+    out and it is run on its own."""
+    import psutil
+
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
     import stress_low_ram
 
-    result = stress_low_ram.run(cap_mb=1200)
-    wrong = [step for step in result["steps"] + [result["released"]]
+    room = psutil.virtual_memory().available / 1024**3 - 1.0
+    if room < 0.4:
+        pytest.skip(f"only {room:.2f} GB above the run's 1 GB safety floor: too little "
+                    "to show a fall without endangering the machine")
+    result = stress_low_ram.run(cap_mb=1200, floor_gb=1.0)
+    wrong = [step for step in result["steps"] + result["after_release"]
              if not step["as_policy_says"]]
     assert not wrong, wrong
     assert result["demonstrated"], (result["peak"], result["released"]["level"], result["stopped"])
+    first = result["first_pressure"]
+    assert first["ram_percent"] < result["thresholds"]["ram_critical"], first
+    assert result["held_s"] >= result["thresholds"]["dwell_s"], result["held_s"]

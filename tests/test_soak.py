@@ -88,6 +88,20 @@ def test_a_short_run_is_smoke_never_pass():
     assert r["verdict"] == "SMOKE"
 
 
+def test_a_short_runs_growth_is_reported_not_judged():
+    """V7-D58: 45 s with a one-time step in its first half - the Hermes
+    lifecycle moves firing for the first time; measured 2026-09-30, handles
+    went 550 -> 905 there and stayed flat for the next two minutes. A run this
+    short cannot tell a step from a leak, so the growth is reported and the
+    8-hour gate judges it; a violation still fails the short run."""
+    s = _samples([550.0 if i < 10 else 905.0 for i in range(23)], key="handles", step=2.0)
+    r = soak.analyse(s, 45.0, COUNTS_ALL, [], [], 5)
+    assert "handles" in r["growing"]
+    assert r["verdict"] == "SMOKE"
+    r = soak.analyse(s, 45.0, COUNTS_ALL, ["budget: exhausted objective allowed a call"], [], 5)
+    assert r["verdict"] == "FAIL"
+
+
 def test_a_shed_worker_lifecycle_is_incomplete_never_pass():
     counts = dict(COUNTS_ALL)
     for k in ("hermes_delegate", "hermes_stop_start", "hermes_crash_recovered"):

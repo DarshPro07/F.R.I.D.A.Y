@@ -9,26 +9,48 @@ workers) and scales only for demonstrably parallel work. NFR-P09.
 Three things, deliberately separate:
 
   1. `Sample`     one measurement of the machine (psutil) - never guessed.
-  2. `Pressure`   a level derived from the sample: NORMAL / ELEVATED / HIGH /
-                  CRITICAL, with the reasons that put it there.
+  2. `Pressure`   a level derived from the readings: NORMAL / ELEVATED /
+                  HIGH / CRITICAL (Amendment A4's GREEN / YELLOW / ORANGE /
+                  RED), with the reasons that put it there.
   3. `Governor`   the admission gate. Every worker dispatch asks
                   `admit(kind)` first and gets ADMIT / QUEUE / SHED with a
                   reason it can say out loud (the PRD's "resource pressure
                   banner"). Admitted work holds a lease it must release.
+
+The level is judged against this machine, not against fixed percentages
+(PRD v7 RES-003). A machine whose operating system idles at 76% of its RAM
+is not under pressure at 76%, and one at 68% whose free memory is collapsing
+is. Static percentages are emergency guardrails, not the primary pressure
+classifier:
+
+  - headroom: the share of the machine's idle headroom now in use - available
+    RAM, the commit charge's room below its limit where the platform reports
+    it, and idle CPU, sustained over a few seconds - against its `Baseline`,
+    the median of readings taken while FRIDAY holds no leased work;
+  - trend: how fast available RAM is falling, as the time left before it
+    reaches the emergency floor;
+  - guardrails: RAM or CPU at 95%, RAM or commit headroom below a floor, the
+    disk nearly full - pressure whatever the baseline;
+  - hysteresis (`Tracker`): a worse level is entered at once, a better one
+    only after the reading has stayed past the boundary, by a margin, for a
+    dwell time, so a reading wavering at a boundary does not flap.
 
 The governor never kills a worker; it stops NEW work being started when
 the machine cannot carry it. That is what keeps the control plane
 responsive (FR-056 acceptance): the control plane's own reads and voice
 turns are not workers and are never gated.
 
-Nothing here is a mock. Thresholds are configurable for tests, but the
-sample is always the live machine unless a test injects one.
+Nothing here is a mock. Thresholds and the baseline are configurable for
+tests, but the sample is always the live machine unless a test injects one.
 """
 from __future__ import annotations
 
 import logging
+import statistics
+import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("friday.governor")
@@ -40,6 +62,9 @@ ELEVATED = "ELEVATED"
 HIGH = "HIGH"
 CRITICAL = "CRITICAL"
 LEVELS = (NORMAL, ELEVATED, HIGH, CRITICAL)
+
+#: Amendment A4's names for the same four levels.
+STATES = {NORMAL: "GREEN", ELEVATED: "YELLOW", HIGH: "ORANGE", CRITICAL: "RED"}
 
 # -- admission decisions -----------------------------------------------------
 
@@ -57,27 +82,60 @@ KINDS = (WORKER, BROWSER, OPTIONAL)
 
 @dataclass(frozen=True)
 class Thresholds:
-    """Percent-of-machine limits. ELEVATED starts backpressure on optional
-    work; HIGH queues new workers; CRITICAL sheds everything but the one
-    worker already running."""
+    """What decides the level (RES-003), and the concurrency caps (FR-013).
 
-    cpu_elevated: float = 70.0
-    cpu_high: float = 85.0
-    cpu_critical: float = 95.0
-    ram_elevated: float = 75.0
-    ram_high: float = 88.0
+    The shares are fractions of this machine's idle headroom in use, so the
+    same numbers are different amounts on different machines. Memory is
+    judged more conservatively than CPU: running out of memory pages the
+    machine and recovers slowly, a saturated CPU slows work and recovers at
+    once. The guardrails are the only fixed lines, and they are emergencies.
+    """
+
+    # share of the idle headroom in use: available RAM and commit headroom
+    ram_yellow: float = 0.40
+    ram_orange: float = 0.60
+    ram_red: float = 0.80
+    # share of the idle CPU capacity in use, sustained over `cpu_window_s`
+    cpu_window_s: float = 10.0
+    cpu_yellow: float = 0.60
+    cpu_orange: float = 0.80
+    cpu_red: float = 0.95
+    # available RAM falling: seconds left before it reaches the floor
+    trend_window_s: float = 60.0
+    trend_min_span_s: float = 10.0
+    trend_min_samples: int = 3
+    trend_orange_s: float = 60.0
+    trend_yellow_s: float = 300.0
+    # hysteresis: how long, and by how much, a better reading must hold
+    dwell_s: float = 30.0
+    release_margin: float = 0.05
+    # emergency guardrails
     ram_critical: float = 95.0
+    cpu_critical: float = 95.0
+    ram_floor_gb: float = 0.5
+    ram_floor_share: float = 0.03
+    commit_floor_gb: float = 1.0
+    commit_floor_share: float = 0.03
     disk_free_gb_low: float = 5.0
     disk_free_gb_critical: float = 1.0
+    # concurrency caps
     max_workers: int = 2                   # FR-013 / NFR-P09 default
     max_browsers: int = 2
     max_queue: int = 8
+
+    def ram_floor(self, total_gb: float | None) -> float:
+        """The least available RAM that is not an emergency on this machine."""
+        return max(self.ram_floor_gb, self.ram_floor_share * (total_gb or 0.0))
+
+    def commit_floor(self, limit_gb: float | None) -> float:
+        return max(self.commit_floor_gb, self.commit_floor_share * (limit_gb or 0.0))
 
 
 @dataclass
 class Sample:
     """One reading of the machine. `browser_processes` counts Chromium-family
-    processes, which is what a runaway browser session looks like."""
+    processes, which is what a runaway browser session looks like. A value
+    the platform does not report is None, never guessed."""
 
     at: float
     cpu_percent: float
@@ -86,11 +144,25 @@ class Sample:
     disk_free_gb: float
     browser_processes: int
     friday_rss_mb: float
+    ram_total_gb: float | None = None
+    #: The commit charge's room below the commit limit (Windows): when it
+    #: runs out, allocations fail whatever physical memory is free.
+    commit_available_gb: float | None = None
+    commit_limit_gb: float | None = None
+
+    def total_gb(self) -> float | None:
+        if self.ram_total_gb:
+            return self.ram_total_gb
+        used = self.ram_percent / 100.0
+        return self.ram_available_gb / (1.0 - used) if used < 1.0 else None
 
     def to_dict(self) -> dict:
         return {"at": self.at, "cpu_percent": self.cpu_percent,
                 "ram_percent": self.ram_percent,
                 "ram_available_gb": self.ram_available_gb,
+                "ram_total_gb": self.ram_total_gb,
+                "commit_available_gb": self.commit_available_gb,
+                "commit_limit_gb": self.commit_limit_gb,
                 "disk_free_gb": self.disk_free_gb,
                 "browser_processes": self.browser_processes,
                 "friday_rss_mb": self.friday_rss_mb}
@@ -98,14 +170,61 @@ class Sample:
 
 _BROWSER_NAMES = ("chrome", "chromium", "msedge", "brave", "firefox", "playwright")
 
+#: psutil measures CPU since its previous call, and a window of a few
+#: milliseconds is noise: a reading taken 20 ms after the last one said 100%
+#: on a quiet machine (V7-D57). A sooner call reuses the last reading, so the
+#: next one covers the whole time since.
+CPU_MIN_WINDOW_S = 1.0
+_cpu_last: tuple[float, float] | None = None       # (monotonic time, percent)
+_cpu_lock = threading.Lock()
+
+
+def _cpu_percent(interval: float = 0.0) -> float:
+    global _cpu_last
+    import psutil
+
+    with _cpu_lock:
+        now = time.monotonic()
+        if not interval and _cpu_last is not None and now - _cpu_last[0] < CPU_MIN_WINDOW_S:
+            return _cpu_last[1]
+        value = float(psutil.cpu_percent(interval=interval or None))
+        _cpu_last = (time.monotonic(), value)
+        return value
+
+
+def _commit() -> tuple[float | None, float | None]:
+    """(room below the commit limit, the limit) in GB where the platform
+    reports them - Windows, through GetPerformanceInfo - else (None, None)."""
+    if sys.platform != "win32":
+        return None, None
+    import ctypes
+
+    size_t, dword = ctypes.c_size_t, ctypes.c_uint32
+
+    class PerformanceInformation(ctypes.Structure):
+        _fields_ = [("cb", dword), ("CommitTotal", size_t), ("CommitLimit", size_t),
+                    ("CommitPeak", size_t), ("PhysicalTotal", size_t),
+                    ("PhysicalAvailable", size_t), ("SystemCache", size_t),
+                    ("KernelTotal", size_t), ("KernelPaged", size_t),
+                    ("KernelNonpaged", size_t), ("PageSize", size_t),
+                    ("HandleCount", dword), ("ProcessCount", dword), ("ThreadCount", dword)]
+
+    info = PerformanceInformation()
+    info.cb = ctypes.sizeof(info)
+    if not ctypes.windll.psapi.GetPerformanceInfo(ctypes.byref(info), info.cb):
+        return None, None
+    page_gb = info.PageSize / 1024**3
+    return (info.CommitLimit - info.CommitTotal) * page_gb, info.CommitLimit * page_gb
+
 
 def sample_machine(*, cpu_interval: float = 0.0) -> Sample:
-    """Measure. `cpu_interval=0` returns the delta since the last call,
-    which is what a periodic sampler wants; a first call reports 0.0."""
+    """Measure. `cpu_interval=0` returns the CPU since the last reading,
+    which is what a periodic sampler wants - at least `CPU_MIN_WINDOW_S` of
+    it; a first call reports 0.0."""
     import psutil
     from pathlib import Path
 
-    cpu = psutil.cpu_percent(interval=cpu_interval or None) if cpu_interval else psutil.cpu_percent(interval=None)
+    cpu = _cpu_percent(cpu_interval)
     mem = psutil.virtual_memory()
     try:
         from friday.config import DATA_DIR
@@ -125,11 +244,45 @@ def sample_machine(*, cpu_interval: float = 0.0) -> Sample:
         rss = psutil.Process().memory_info().rss / 1024**2
     except psutil.Error:
         rss = 0.0
-    return Sample(at=time.time(), cpu_percent=float(cpu),
+    try:
+        commit_available, commit_limit = _commit()
+    except OSError as exc:
+        logger.warning("commit charge unreadable: %s", exc)
+        commit_available, commit_limit = None, None
+    return Sample(at=time.time(), cpu_percent=cpu,
                   ram_percent=float(mem.percent),
                   ram_available_gb=mem.available / 1024**3,
                   disk_free_gb=disk_free, browser_processes=browsers,
-                  friday_rss_mb=rss)
+                  friday_rss_mb=rss, ram_total_gb=mem.total / 1024**3,
+                  commit_available_gb=commit_available, commit_limit_gb=commit_limit)
+
+
+@dataclass(frozen=True)
+class Baseline:
+    """This machine at rest: what its operating system and the person's own
+    programs hold while FRIDAY holds no leased work (RES-003). Medians, so
+    one busy moment does not move it. Provisional until a hardware
+    qualification has measured it (RES-002)."""
+
+    ram_available_gb: float
+    cpu_percent: float
+    commit_available_gb: float | None = None
+    readings: int = 1
+    provisional: bool = True
+
+    @classmethod
+    def of(cls, samples, *, provisional: bool) -> "Baseline":
+        samples = list(samples)
+        commits = [s.commit_available_gb for s in samples if s.commit_available_gb is not None]
+        return cls(ram_available_gb=statistics.median(s.ram_available_gb for s in samples),
+                   cpu_percent=statistics.median(s.cpu_percent for s in samples),
+                   commit_available_gb=statistics.median(commits) if commits else None,
+                   readings=len(samples), provisional=provisional)
+
+    def to_dict(self) -> dict:
+        return {"ram_available_gb": self.ram_available_gb, "cpu_percent": self.cpu_percent,
+                "commit_available_gb": self.commit_available_gb,
+                "readings": self.readings, "provisional": self.provisional}
 
 
 @dataclass
@@ -137,15 +290,66 @@ class Pressure:
     level: str
     reasons: list[str] = field(default_factory=list)
     sample: Sample | None = None
+    #: The level the reading alone supports, before hysteresis.
+    raw: str = ""
+    baseline: Baseline | None = None
 
     def to_dict(self) -> dict:
-        return {"level": self.level, "reasons": list(self.reasons),
-                "sample": self.sample.to_dict() if self.sample else None}
+        return {"level": self.level, "state": STATES[self.level],
+                "raw": self.raw or self.level, "reasons": list(self.reasons),
+                "sample": self.sample.to_dict() if self.sample else None,
+                "baseline": self.baseline.to_dict() if self.baseline else None}
 
 
-def assess(sample: Sample, thresholds: Thresholds = Thresholds()) -> Pressure:
-    """Derive the pressure level from a sample. Pure; unit-testable."""
+def _consumed(idle_free: float | None, free_now: float | None) -> float:
+    """The share of the idle headroom in use; 0 when there is none to judge
+    against (the guardrails decide then)."""
+    if not idle_free or idle_free <= 0 or free_now is None:
+        return 0.0
+    return max(0.0, (idle_free - free_now) / idle_free)
+
+
+def _falling_gb_per_s(recent, t: Thresholds) -> float | None:
+    """How fast available RAM is falling across the recent readings (a
+    least-squares slope, positive when falling), or None when there are too
+    few readings, or too short a span, to say."""
+    points = [(s.at, s.ram_available_gb) for s in recent]
+    if len(points) < t.trend_min_samples or points[-1][0] - points[0][0] < t.trend_min_span_s:
+        return None
+    n = len(points)
+    mean_t = sum(a for a, _ in points) / n
+    mean_v = sum(v for _, v in points) / n
+    spread = sum((a - mean_t) ** 2 for a, _ in points)
+    if spread <= 0:
+        return None
+    return -sum((a - mean_t) * (v - mean_v) for a, v in points) / spread
+
+
+def _sustained_cpu(sample: Sample, recent, t: Thresholds) -> float:
+    """CPU over the last `cpu_window_s` of readings. Each reading covers the
+    time since the one before it, so readings are weighted by that time; a
+    reading with nothing before it is taken as it is. A program starting or a
+    page loading is a spike, not pressure; a load that lasts is."""
+    readings = list(recent) if recent and recent[-1] is sample else [sample]
+    weighted = covered = 0.0
+    for before, reading in zip(readings, readings[1:]):
+        span = reading.at - before.at
+        if span > 0 and sample.at - reading.at <= t.cpu_window_s:
+            weighted += reading.cpu_percent * span
+            covered += span
+    return weighted / covered if covered else sample.cpu_percent
+
+
+def assess(sample: Sample, thresholds: Thresholds = Thresholds(), *,
+           baseline: Baseline | None = None, recent=(), margin: float = 0.0) -> Pressure:
+    """The level one reading supports, judged against the machine's baseline
+    and the readings just before it (RES-003). Pure; unit-testable.
+
+    Without a baseline the reading is its own: nothing counts as consumed,
+    so only the trend and the guardrails can raise the level. `margin`
+    lowers the share lines, which is how a release is judged (`Tracker`)."""
     t = thresholds
+    base = baseline or Baseline.of([sample], provisional=True)
     reasons: list[str] = []
     level = NORMAL
 
@@ -155,23 +359,123 @@ def assess(sample: Sample, thresholds: Thresholds = Thresholds()) -> Pressure:
         if LEVELS.index(to) > LEVELS.index(level):
             level = to
 
-    if sample.cpu_percent >= t.cpu_critical:
-        bump(CRITICAL, f"CPU {sample.cpu_percent:.0f}%")
-    elif sample.cpu_percent >= t.cpu_high:
-        bump(HIGH, f"CPU {sample.cpu_percent:.0f}%")
-    elif sample.cpu_percent >= t.cpu_elevated:
-        bump(ELEVATED, f"CPU {sample.cpu_percent:.0f}%")
+    def by_share(share: float, yellow: float, orange: float, red: float) -> str:
+        if share >= red - margin:
+            return CRITICAL
+        if share >= orange - margin:
+            return HIGH
+        if share >= yellow - margin:
+            return ELEVATED
+        return NORMAL
+
+    # Headroom against this machine's baseline: the primary classifier.
+    share = _consumed(base.ram_available_gb, sample.ram_available_gb)
+    found = by_share(share, t.ram_yellow, t.ram_orange, t.ram_red)
+    if found != NORMAL:
+        bump(found, f"RAM {sample.ram_percent:.0f}% used, {share:.0%} of this machine's idle "
+                    f"headroom ({sample.ram_available_gb:.1f} of {base.ram_available_gb:.1f} GB left)")
+    if sample.commit_available_gb is not None:
+        share = _consumed(base.commit_available_gb, sample.commit_available_gb)
+        found = by_share(share, t.ram_yellow, t.ram_orange, t.ram_red)
+        if found != NORMAL:
+            bump(found, f"commit charge using {share:.0%} of its idle headroom "
+                        f"({sample.commit_available_gb:.1f} GB below the limit)")
+    cpu = _sustained_cpu(sample, recent, t)
+    share = _consumed(100.0 - base.cpu_percent, 100.0 - cpu)
+    found = by_share(share, t.cpu_yellow, t.cpu_orange, t.cpu_red)
+    if found != NORMAL:
+        bump(found, f"CPU {cpu:.0f}%, {share:.0%} of the idle capacity in use")
+
+    # The trend: memory going fast is pressure before any line is crossed.
+    floor = t.ram_floor(sample.total_gb())
+    falling = _falling_gb_per_s(recent, t)
+    if falling and falling > 0:
+        left = max(0.0, sample.ram_available_gb - floor) / falling
+        if left <= t.trend_orange_s:
+            bump(HIGH, f"available RAM falling {falling * 60:.2f} GB/min: the floor in {left:.0f} s")
+        elif left <= t.trend_yellow_s:
+            bump(ELEVATED, f"available RAM falling {falling * 60:.2f} GB/min: the floor in {left:.0f} s")
+
+    # Emergency guardrails: the only fixed lines.
     if sample.ram_percent >= t.ram_critical:
         bump(CRITICAL, f"RAM {sample.ram_percent:.0f}% used")
-    elif sample.ram_percent >= t.ram_high:
-        bump(HIGH, f"RAM {sample.ram_percent:.0f}% used")
-    elif sample.ram_percent >= t.ram_elevated:
-        bump(ELEVATED, f"RAM {sample.ram_percent:.0f}% used")
+    if sample.ram_available_gb < floor:
+        bump(CRITICAL, f"only {sample.ram_available_gb:.2f} GB RAM available")
+    if (sample.commit_available_gb is not None
+            and sample.commit_available_gb < t.commit_floor(sample.commit_limit_gb)):
+        bump(CRITICAL, f"only {sample.commit_available_gb:.2f} GB left below the commit limit")
+    if cpu >= t.cpu_critical:
+        bump(CRITICAL, f"CPU {cpu:.0f}%")
     if sample.disk_free_gb <= t.disk_free_gb_critical:
         bump(CRITICAL, f"disk {sample.disk_free_gb:.1f} GB free")
     elif sample.disk_free_gb <= t.disk_free_gb_low:
         bump(HIGH, f"disk {sample.disk_free_gb:.1f} GB free")
-    return Pressure(level=level, reasons=reasons, sample=sample)
+    return Pressure(level=level, reasons=reasons, sample=sample, raw=level, baseline=baseline)
+
+
+class Tracker:
+    """What one reading cannot show (RES-003): the machine's baseline, the
+    readings just before this one, and how long a better reading has held.
+
+    A worse level is entered at once - the governor errs toward protecting
+    the machine. A better one is entered only when the reading, judged with
+    the share lines lowered by `release_margin`, has supported it for
+    `dwell_s` of sample time; the level then falls to the worst level the
+    readings supported during that wait. Without a baseline the first reading
+    stands in, provisionally, and readings taken while FRIDAY holds no leased
+    work refine it (their median) until a qualified one replaces it.
+
+    Not locked on its own: the Governor holds its lock around `observe`."""
+
+    def __init__(self, thresholds: Thresholds, baseline: Baseline | None = None, *,
+                 idle_spacing_s: float = 10.0, idle_keep: int = 720) -> None:
+        self.thresholds = thresholds
+        self.baseline = baseline
+        self.level = NORMAL
+        self._recent: deque[Sample] = deque(maxlen=512)
+        self._idle: deque[Sample] = deque(maxlen=idle_keep)
+        self._idle_spacing_s = idle_spacing_s
+        self._calm_since: float | None = None
+        self._calm_level = NORMAL
+
+    def _learn(self, sample: Sample, idle: bool) -> None:
+        if self.baseline is not None and not self.baseline.provisional:
+            return
+        if self.baseline is None:
+            self._idle.append(sample)
+        elif idle and (not self._idle or sample.at - self._idle[-1].at >= self._idle_spacing_s):
+            self._idle.append(sample)
+        else:
+            return
+        self.baseline = Baseline.of(self._idle, provisional=True)
+
+    def observe(self, sample: Sample, *, idle: bool) -> Pressure:
+        t = self.thresholds
+        self._learn(sample, idle)
+        self._recent.append(sample)
+        while sample.at - self._recent[0].at > t.trend_window_s:
+            self._recent.popleft()
+        raw = assess(sample, t, baseline=self.baseline, recent=self._recent)
+        rank = LEVELS.index
+        if rank(raw.level) >= rank(self.level):
+            self.level, self._calm_since = raw.level, None
+            return raw
+        release = assess(sample, t, baseline=self.baseline, recent=self._recent,
+                         margin=t.release_margin).level
+        if rank(release) >= rank(self.level):
+            self._calm_since = None
+        elif self._calm_since is None:
+            self._calm_since, self._calm_level = sample.at, release
+        else:
+            self._calm_level = max(self._calm_level, release, key=rank)
+            if sample.at - self._calm_since >= t.dwell_s:
+                self.level, self._calm_since = self._calm_level, None
+        reasons = list(raw.reasons)
+        if self.level != raw.level:
+            reasons.append(f"holding {STATES[self.level]} until a better reading has lasted "
+                           f"{t.dwell_s:.0f} s")
+        return Pressure(level=self.level, reasons=reasons, sample=sample, raw=raw.level,
+                        baseline=self.baseline)
 
 
 @dataclass
@@ -199,17 +503,21 @@ class Governor:
 
     `sampler` is injectable so tests drive pressure deterministically; the
     default samples the real machine, cached for `sample_ttl_s` so a burst
-    of admissions does not spend a CPU probe each.
+    of admissions does not spend a CPU probe each. `baseline` is the
+    machine's measured idle state; without one the governor profiles the
+    machine from its own readings (provisional).
     """
 
     def __init__(self, *, thresholds: Thresholds | None = None,
-                 sampler=None, sample_ttl_s: float = 2.0) -> None:
+                 sampler=None, sample_ttl_s: float = 2.0,
+                 baseline: Baseline | None = None) -> None:
         self.thresholds = thresholds or Thresholds()
         self._sampler = sampler or sample_machine
         self.sample_ttl_s = sample_ttl_s
         self._lock = threading.Lock()
         self._leases: dict[str, tuple[str, float, str]] = {}   # lease -> (kind, at, label)
         self._queue: list[tuple[str, str, float]] = []           # (kind, label, at)
+        self._tracker = Tracker(self.thresholds, baseline)
         self._last: Pressure | None = None
         self._last_at = 0.0
         self._next = 0
@@ -218,6 +526,17 @@ class Governor:
 
     # -- measurement --------------------------------------------------------
 
+    @property
+    def baseline(self) -> Baseline | None:
+        with self._lock:
+            return self._tracker.baseline
+
+    def rebaseline(self, baseline: Baseline) -> None:
+        """Adopt a newly measured baseline (a hardware qualification)."""
+        with self._lock:
+            self._tracker.baseline = baseline
+            self._last = None
+
     def pressure(self, *, fresh: bool = False) -> Pressure:
         now = time.time()
         with self._lock:
@@ -225,7 +544,8 @@ class Governor:
                 return self._last
         try:
             sample = self._sampler()
-            p = assess(sample, self.thresholds)
+            with self._lock:
+                p = self._tracker.observe(sample, idle=not self._leases)
         except Exception as exc:  # noqa: BLE001 - a failed probe is ELEVATED, never a crash
             logger.warning("governor sample failed: %s", exc)
             p = Pressure(level=ELEVATED, reasons=[f"sample failed: {exc}"])
@@ -357,10 +677,14 @@ _LOCK = threading.Lock()
 
 
 def governor() -> Governor:
+    """The process's governor, judging against this machine's stored profile
+    (RES-002) when there is one that matches it."""
     global _GOVERNOR
     with _LOCK:
         if _GOVERNOR is None:
-            _GOVERNOR = Governor()
+            from friday import hardware_profile
+            baseline, thresholds = hardware_profile.for_governor()
+            _GOVERNOR = Governor(thresholds=thresholds, baseline=baseline)
         return _GOVERNOR
 
 

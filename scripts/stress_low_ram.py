@@ -1,21 +1,26 @@
 """
-Real memory pressure against the resource governor (PRD v7 RES-001, §55).
+Real memory pressure against the resource governor (PRD v7 RES-001, RES-003, §55).
 
 Run:  .venv-verify/Scripts/python.exe scripts/stress_low_ram.py --out <file.json>
 
 The governor's unit tests turn a dial; this does not. A child process
-allocates and touches memory in steps while the governor samples the real
-machine with its own sampler. The RAM thresholds are set a few points above
-what the machine is using when the run starts, so every level is crossed
-with a bounded allocation (at most --cap-mb, and never leaving less than
---floor-gb available) rather than by driving the whole machine to 95%. CPU
-and disk thresholds are set out of reach so only memory decides.
+allocates and touches memory in steps while one governor samples the real
+machine with its own sampler and judges it the way the product does
+(RES-003): against this machine's idle baseline - measured here, at rest,
+before anything is allocated - by the share of the idle headroom in use, by
+how fast available memory is falling, and by the emergency guardrails. No
+threshold is moved to make a level reachable. The allocation is bounded (at
+most --cap-mb, and never leaving less than --floor-gb available).
 
 At each step the governor is asked for optional work, a first worker and a
-second worker. What it admits, queues and sheds is the observation, checked
-against its policy: ELEVATED sheds optional work, HIGH holds concurrency to
-one worker, CRITICAL starts nothing. The memory is then released and the
-same three questions asked again.
+second worker, and what it admits, queues and sheds is checked against its
+policy: ELEVATED sheds optional work, HIGH holds concurrency to one worker,
+CRITICAL starts nothing; the leases are handed back after each ask. Then the
+memory is released and the governor is watched until its level falls: how
+long it holds the worse level once the pressure has gone (the hysteresis) is
+measured, not assumed. The run demonstrates RES-003 when memory - not CPU,
+not disk - is read as pressure before RAM reaches the emergency line, and the
+level falls once the memory is back.
 """
 from __future__ import annotations
 
@@ -44,6 +49,10 @@ for line in sys.stdin:
     print(len(blocks), flush=True)
 """
 
+#: Reasons that come from memory - headroom, the fall, the commit charge,
+#: the floor - as opposed to CPU or disk.
+MEMORY_REASONS = ("RAM ", "available RAM", "commit", "only ")
+
 #: What the governor's policy says each level must do with the three asks.
 EXPECTED = {
     "NORMAL": ("ADMIT", "ADMIT", "ADMIT"),
@@ -53,37 +62,59 @@ EXPECTED = {
 }
 
 
-def _probe(thresholds) -> dict:
+def measure_baseline(*, readings: int = 5, every_s: float = 1.0):
+    """The machine at rest, before anything is allocated: medians of a few
+    readings, as a hardware qualification takes them."""
+    from friday import governor as G
+
+    G.sample_machine()                      # primes the CPU counter
+    samples = []
+    for _ in range(readings):
+        time.sleep(every_s)
+        samples.append(G.sample_machine())
+    return G.Baseline.of(samples, provisional=False)
+
+
+def _probe(gov, started: float) -> dict:
     from friday import governor as G
 
     # One real sample, held for the three asks, so they see the same machine.
-    gov = G.Governor(thresholds=thresholds, sample_ttl_s=60.0)
     pressure = gov.pressure(fresh=True)
     asks = (gov.admit(G.OPTIONAL, label="stress optional"),
             gov.admit(G.WORKER, label="stress worker 1"),
             gov.admit(G.WORKER, label="stress worker 2"))
+    for d in asks:
+        if d.lease:
+            gov.release(d.lease)
     decisions = tuple(d.decision for d in asks)
-    return {"ram_percent": round(pressure.sample.ram_percent, 2),
-            "available_gb": round(pressure.sample.ram_available_gb, 2),
-            "level": pressure.level, "optional": decisions[0],
-            "first_worker": decisions[1], "second_worker": decisions[2],
+    return {"t_s": round(pressure.sample.at - started, 2),
+            "ram_percent": round(pressure.sample.ram_percent, 2),
+            "available_gb": round(pressure.sample.ram_available_gb, 3),
+            "commit_available_gb": (round(pressure.sample.commit_available_gb, 3)
+                                    if pressure.sample.commit_available_gb is not None else None),
+            "level": pressure.level, "raw": pressure.raw, "reasons": pressure.reasons,
+            "memory_driven": any(r.startswith(MEMORY_REASONS) for r in pressure.reasons
+                                 if not r.startswith("holding")),
+            "optional": decisions[0], "first_worker": decisions[1], "second_worker": decisions[2],
             "as_policy_says": decisions == EXPECTED[pressure.level]}
 
 
-def run(*, step_mb: int = 150, cap_mb: int = 1000, floor_gb: float = 1.5,
-        margins: tuple[float, float, float] = (1.5, 3.0, 4.5),
-        settle_s: float = 1.5) -> dict:
+def run(*, step_mb: int | None = None, cap_mb: int = 1000, floor_gb: float = 1.0,
+        settle_s: float = 1.5, watch_s: float | None = None) -> dict:
+    """`step_mb` defaults to a step sized to this machine: 1/150 of the memory
+    available at the start (at least 20 MB), so the fall is fast relative to
+    the machine's own headroom - what is fast on a machine with 1 GB free is
+    unremarkable on one with 12 GB."""
     import psutil
 
     from friday import governor as G
 
-    baseline = G.sample_machine().ram_percent
-    thresholds = G.Thresholds(
-        ram_elevated=baseline + margins[0], ram_high=baseline + margins[1],
-        ram_critical=baseline + margins[2],
-        cpu_elevated=101.0, cpu_high=101.0, cpu_critical=101.0,
-        disk_free_gb_low=0.0, disk_free_gb_critical=-1.0)
-    steps = [{"allocated_mb": 0, **_probe(thresholds)}]
+    baseline = measure_baseline()
+    if step_mb is None:
+        step_mb = max(20, int(psutil.virtual_memory().available / 1024**2 / 150))
+    gov = G.Governor(baseline=baseline, sample_ttl_s=60.0)
+    started = time.time()
+    steps = [{"allocated_mb": 0, **_probe(gov, started)}]
     stopped = "cap reached"
     child = subprocess.Popen([sys.executable, "-c", CHILD], stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, text=True)
@@ -100,9 +131,14 @@ def run(*, step_mb: int = 150, cap_mb: int = 1000, floor_gb: float = 1.5,
                 break
             allocated += step_mb
             time.sleep(settle_s)
-            steps.append({"allocated_mb": allocated, **_probe(thresholds)})
+            steps.append({"allocated_mb": allocated, **_probe(gov, started)})
             if steps[-1]["level"] == G.CRITICAL:
                 stopped = "CRITICAL reached"
+                break
+            # Enough shown: memory has held concurrency to one worker. Going on
+            # would only load the person's machine further.
+            if steps[-1]["level"] == G.HIGH and steps[-1]["memory_driven"]:
+                stopped = "HIGH reached on memory"
                 break
     finally:
         try:
@@ -115,34 +151,55 @@ def run(*, step_mb: int = 150, cap_mb: int = 1000, floor_gb: float = 1.5,
         except subprocess.TimeoutExpired:
             child.kill()
             child.wait(timeout=30)
-    time.sleep(settle_s * 2)
-    released = _probe(thresholds)
+    released_at = time.time()
 
     order = list(G.LEVELS)
     peak = max((s["level"] for s in steps), key=order.index)
-    return {"baseline_ram_percent": round(baseline, 2),
-            "thresholds": {"ram_elevated": thresholds.ram_elevated,
-                           "ram_high": thresholds.ram_high,
-                           "ram_critical": thresholds.ram_critical},
-            "steps": steps, "stopped": stopped, "released": released, "peak": peak,
-            "as_policy_says": all(s["as_policy_says"] for s in steps + [released]),
-            "demonstrated": (order.index(peak) >= order.index(G.HIGH)
+    # Watch the level fall once the memory is back: it must hold for the
+    # dwell (no flapping) and then fall below the peak.
+    limit = watch_s if watch_s is not None else gov.thresholds.dwell_s + 30.0
+    after: list[dict] = []
+    while True:
+        time.sleep(2.0)
+        after.append(_probe(gov, started))
+        if order.index(after[-1]["level"]) < order.index(peak) or time.time() - released_at > limit:
+            break
+    released = after[-1]
+    held_s = round(time.time() - released_at, 1)
+    # Where memory was first read as pressure - the demonstration is about
+    # memory, so a CPU or disk reason does not count.
+    first = next((s for s in steps if s["raw"] != G.NORMAL and s["memory_driven"]), None)
+    return {"baseline": baseline.to_dict(), "step_mb": step_mb, "settle_s": settle_s,
+            "thresholds": {"ram_yellow": gov.thresholds.ram_yellow,
+                           "ram_orange": gov.thresholds.ram_orange,
+                           "ram_red": gov.thresholds.ram_red,
+                           "trend_orange_s": gov.thresholds.trend_orange_s,
+                           "trend_yellow_s": gov.thresholds.trend_yellow_s,
+                           "dwell_s": gov.thresholds.dwell_s,
+                           "ram_critical": gov.thresholds.ram_critical},
+            "steps": steps, "stopped": stopped, "after_release": after,
+            "released": released, "held_s": held_s, "peak": peak, "first_pressure": first,
+            "as_policy_says": all(s["as_policy_says"] for s in steps + after),
+            "demonstrated": (first is not None
+                             and first["ram_percent"] < gov.thresholds.ram_critical
                              and order.index(released["level"]) < order.index(peak))}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--out", required=True)
-    parser.add_argument("--step-mb", type=int, default=150)
+    parser.add_argument("--step-mb", type=int, default=None)
     parser.add_argument("--cap-mb", type=int, default=1000)
-    parser.add_argument("--floor-gb", type=float, default=1.5)
+    parser.add_argument("--floor-gb", type=float, default=1.0)
+    parser.add_argument("--settle-s", type=float, default=1.5)
     args = parser.parse_args(argv)
-    result = run(step_mb=args.step_mb, cap_mb=args.cap_mb, floor_gb=args.floor_gb)
+    result = run(step_mb=args.step_mb, cap_mb=args.cap_mb, floor_gb=args.floor_gb,
+                 settle_s=args.settle_s)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(result, indent=1), encoding="utf-8")
-    print(json.dumps({k: v for k, v in result.items() if k != "steps"}, indent=1))
-    for step in result["steps"]:
-        print(step)
+    print(json.dumps({k: v for k, v in result.items() if k not in ("steps", "after_release")}, indent=1))
+    for step in result["steps"] + result["after_release"]:
+        print({k: v for k, v in step.items() if k != "reasons"}, step["reasons"])
     return 0 if result["as_policy_says"] and result["demonstrated"] else 1
 
 

@@ -524,15 +524,19 @@ def run(duration_s: float, out: Path, sample_every_s: float = 5.0,
     """`governor_mode`: "product" leaves the resource governor at its shipped
     thresholds - on a host already at 95%+ RAM it sheds every worker, the
     Hermes lifecycle never runs, and the verdict is INCOMPLETE (correct: the
-    product refused, the soak did not measure). "relaxed" raises ONLY the
-    RAM/CPU critical lines for this process so the lifecycle runs on a
-    loaded machine; the report names the mode, and shedding itself is not
-    under test here (tests/test_governor.py is)."""
+    product refused, the soak did not measure). "relaxed" moves the lines
+    that hold or refuse workers - the ORANGE and RED headroom shares, the
+    ORANGE trend and the emergency guardrails - out of reach for this
+    process, so the lifecycle runs on a loaded machine; the report names the
+    mode, and shedding itself is not under test here (tests/test_governor.py
+    is)."""
     out.mkdir(parents=True, exist_ok=True)
     from friday import governor as G
     if governor_mode == "relaxed":
-        G.configure(G.Governor(thresholds=G.Thresholds(cpu_critical=101.0, ram_critical=101.0,
-                                                        cpu_high=101.0, ram_high=101.0)))
+        G.configure(G.Governor(thresholds=G.Thresholds(
+            ram_orange=2.0, ram_red=2.0, cpu_orange=2.0, cpu_red=2.0, trend_orange_s=0.0,
+            cpu_critical=101.0, ram_critical=101.0, ram_floor_gb=0.0, ram_floor_share=0.0,
+            commit_floor_gb=0.0, commit_floor_share=0.0)))
     else:
         G.configure(None)
     os.environ["ADA_DB"] = str(out / "soak.sqlite3")
@@ -693,8 +697,11 @@ def analyse(samples: list[dict], duration_s: float, counts: dict, violations: li
     rates = {k: round(counts.get(k, 0) / hours, 1) for k in sorted(counts)}
     # A cycle that raised is a workload move that did not complete: the
     # soak did not exercise what it claims it did. Counted against the
-    # verdict, never footnoted.
-    verdict = "PASS" if not growing and not violations and not errors else "FAIL"
+    # verdict, never footnoted. Growth is judged only on a run long enough to
+    # separate warm-up from a leak; a short run reports it (V7-D58: a 45 s
+    # run straddling the first Hermes restart read a one-time step as growth).
+    judged = span >= MIN_JUDGED_S
+    verdict = "PASS" if (not growing or not judged) and not violations and not errors else "FAIL"
     # Coverage: every move the workload PROMISES must actually have run.
     # A host under pressure makes the governor shed every worker (correct),
     # and then the Hermes lifecycle was never exercised - a PASS with that
@@ -732,7 +739,7 @@ def analyse(samples: list[dict], duration_s: float, counts: dict, violations: li
     noise = (statistics.pstdev(tail_rss) if len(tail_rss) > 2 else 0.0)
     floor_mb_per_h = round(noise * 3600.0 / win, 2) if win else 0.0
     return {"verdict": verdict, "reason": reason, "duration_s": round(span, 1), "planned_s": duration_s,
-            "window_s": win, "warmup_s": warmup, "judged": span >= MIN_JUDGED_S, **telemetry,
+            "window_s": win, "warmup_s": warmup, "judged": judged, **telemetry,
             "gaps": gaps, "detection_floor_mb_per_hour": floor_mb_per_h,
             "rss_by_move": attribution or (samples[-1].get("rss_by_move") if samples else {}),
             "samples": len(samples), "cycles": cycles,

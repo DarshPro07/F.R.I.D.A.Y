@@ -260,6 +260,24 @@ TRUST-001/002) and V7-D29 (`secrets_list` policy categories disagree between ali
   4,734 passed, 0 failed; `live_state unchanged (244 files under data/ and logs/)`. TEST-ISOLATION-001 VERIFIED.
 - The foundation commit is rebuilt without provider-shaped literals (3d956ba differed only in eight test files'
   fixtures); nothing is pushed.
+- 2026-09-30: foundation b451f16 and follow-up dc4356c fast-forwarded onto local `main` (origin/main still 030795f,
+  nothing pushed). Slice 7 continues on `prd-v7/slice-7-adaptive-hardware`.
+
+## SLICE 7: ADAPTIVE HARDWARE (2026-09-30, in progress)
+
+- RES-003 built: pressure judged against the machine's idle baseline (headroom share, RAM trend, commit charge,
+  sustained CPU), static percentages as emergency guardrails only, hysteresis. Real run on REFERENCE-A: GREEN at
+  89-90% RAM at rest, YELLOW then ORANGE on a real 12 MB/s fall before any guardrail, ORANGE held 30.1 s after release.
+- RES-002 built: `friday/hardware_profile.py` (DXGI GPUs, measured browser cost, derived policy, stored profile that
+  the governor starts from). REFERENCE-A qualified.
+- V7-D57 (the sampler's CPU reading was noise when taken within milliseconds of the last) and V7-D58 (the soak's
+  45 s smoke run judged a one-time warm-up step as growth; flaky under memory pressure, reproduced on the committed
+  tree) found and fixed along the way.
+- REFERENCE-B, owed by the owner (from FRIDAY's own `.venv`, FRIDAY idle):
+  `python -m friday.hardware_profile qualify --browser --no-save --out res002_profile_REFERENCE-B.json`,
+  `python scripts/stress_low_ram.py --out res003_stress_REFERENCE-B.json`, and the two browser commands above.
+- Next in the slice: RES-004 (qualify on first run and on a material change, with its cause), BG-001 (background work
+  waits for idle, mains power and headroom).
 
 ## NEXT
 
