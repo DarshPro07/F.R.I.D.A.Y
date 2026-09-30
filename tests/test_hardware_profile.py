@@ -117,3 +117,88 @@ def test_the_command_line_qualifies_and_shows(tmp_path, monkeypatch, capsys):
     capsys.readouterr()
     assert hp.main(["show"]) == 0
     assert json.loads(capsys.readouterr().out)["changes"] == []
+
+
+# -- RES-004: re-profiled when the machine changes, with the cause --------
+
+
+class Readings:
+    """A sampler whose readings the test sets: `used` percent of `total`."""
+
+    def __init__(self, *, total: float, used: float) -> None:
+        self.total, self.used, self.at = total, used, 0.0
+
+    def __call__(self) -> G.Sample:
+        self.at += 1.0
+        return G.Sample(
+            at=self.at, cpu_percent=8.0, ram_percent=self.used,
+            ram_available_gb=self.total * (1 - self.used / 100), disk_free_gb=200.0,
+            browser_processes=0, friday_rss_mb=150.0, ram_total_gb=self.total)
+
+
+def test_the_first_run_qualifies_the_machine_and_records_why(tmp_path, monkeypatch):
+    monkeypatch.setattr(hp, "PROFILE_PATH", tmp_path / "hardware_profile.json")
+    sampler = Readings(total=15.35, used=76.0)
+    profile, cause = hp.refresh(machine=REFERENCE_A, sampler=sampler, readings=2, every_s=0.0)
+    assert cause == "first run on this machine"
+    assert hp.stored() == profile and not profile.baseline.provisional
+    assert [h["cause"] for h in profile.history] == [cause]
+    again, cause = hp.refresh(machine=REFERENCE_A, sampler=sampler, readings=2, every_s=0.0)
+    assert cause is None and again == profile             # nothing changed, nothing redone
+
+
+def test_a_hardware_change_is_measured_again_with_its_cause(tmp_path, monkeypatch):
+    monkeypatch.setattr(hp, "PROFILE_PATH", tmp_path / "hardware_profile.json")
+    first, _ = hp.refresh(machine=REFERENCE_A, sampler=Readings(total=15.35, used=76.0),
+                          readings=2, every_s=0.0)
+    upgraded = dict(REFERENCE_A, ram_total_gb=31.35,
+                    gpus=[hp.GPU("NVIDIA GeForce RTX", "0x10de", 4.0, 15.7)])
+    profile, cause = hp.refresh(machine=upgraded, sampler=Readings(total=31.35, used=40.0),
+                                readings=2, every_s=0.0)
+    assert f"RAM total {round(15.35, 1)} -> {round(31.35, 1)} GB" in cause and "GPUs" in cause
+    assert profile.baseline.ram_available_gb == pytest.approx(31.35 * 0.6)
+    assert profile.policy["model"]["gpu_offload_gb"] == hp.MODEL_ARTIFACT_CAP_GB
+    assert [h["remeasured"] for h in profile.history] == [["machine", "baseline", "policy"]] * 2
+    assert hp.changes(hp.stored(), upgraded) == []
+
+
+def test_a_power_change_rederives_without_measuring_again(tmp_path, monkeypatch):
+    monkeypatch.setattr(hp, "PROFILE_PATH", tmp_path / "hardware_profile.json")
+    first, _ = hp.refresh(machine=REFERENCE_A, sampler=Readings(total=15.35, used=76.0),
+                          readings=2, every_s=0.0)
+    unplugged = dict(REFERENCE_A, battery={"percent": 64.0, "plugged": False})
+    profile, cause = hp.refresh(machine=unplugged, sampler=Readings(total=15.35, used=90.0),
+                                readings=2, every_s=0.0)
+    assert cause == "power: mains -> battery"
+    assert profile.baseline == first.baseline               # not measured again
+    assert profile.battery == unplugged["battery"]
+    assert profile.history[-1]["remeasured"] == ["power", "policy"]
+
+
+def test_the_running_governor_adopts_a_new_profile(tmp_path, monkeypatch):
+    monkeypatch.setattr(hp, "PROFILE_PATH", tmp_path / "hardware_profile.json")
+    G.configure(G.Governor(sampler=Readings(total=15.35, used=76.0)))
+    try:
+        profile, cause = hp.refresh_and_adopt(machine=REFERENCE_A,
+                                              sampler=Readings(total=15.35, used=76.0),
+                                              readings=2, every_s=0.0)
+        assert cause and G.governor().baseline == profile.baseline
+        assert G.governor().thresholds.max_browsers == profile.policy["browsers"]["max"]
+    finally:
+        G.configure(None)
+
+
+def test_a_busy_governor_postpones_the_measurement(tmp_path, monkeypatch):
+    monkeypatch.setattr(hp, "PROFILE_PATH", tmp_path / "hardware_profile.json")
+    gov = G.Governor(sampler=Readings(total=15.35, used=76.0))
+    G.configure(gov)
+    try:
+        lease = gov.admit(G.WORKER).lease
+        profile, cause = hp.refresh_and_adopt(machine=REFERENCE_A,
+                                              sampler=Readings(total=15.35, used=76.0),
+                                              readings=2, every_s=0.0)
+        assert profile is None and cause == "postponed: FRIDAY is busy"
+        assert hp.stored() is None
+        gov.release(lease)
+    finally:
+        G.configure(None)

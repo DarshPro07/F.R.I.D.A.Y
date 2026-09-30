@@ -531,10 +531,13 @@ class Governor:
         with self._lock:
             return self._tracker.baseline
 
-    def rebaseline(self, baseline: Baseline) -> None:
-        """Adopt a newly measured baseline (a hardware qualification)."""
+    def rebaseline(self, baseline: Baseline, *, thresholds: Thresholds | None = None) -> None:
+        """Adopt a newly measured baseline (a hardware qualification), and the
+        caps derived with it."""
         with self._lock:
             self._tracker.baseline = baseline
+            if thresholds is not None:
+                self.thresholds = self._tracker.thresholds = thresholds
             self._last = None
 
     def pressure(self, *, fresh: bool = False) -> Pressure:

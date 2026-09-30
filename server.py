@@ -33,9 +33,12 @@ def main() -> None:
     """The `friday` console script (pyproject), `python server.py` and the
     launcher's server role all start here."""
     # STOP-001: this process honours an emergency stop pressed anywhere.
-    from friday import stop
+    from friday import hardware_profile, stop
 
     stop.watch()
+    # RES-004: this process admits work, so it keeps the machine's profile
+    # current - measured on first run, again when the hardware changes.
+    hardware_profile.watch()
     # Spin up transport adapter
     mcp.run(transport="sse")
 

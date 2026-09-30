@@ -2756,6 +2756,38 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "optional work under pressure, and record section 55's owned-process fields for every spawned "
             "process."),
     }),
+    # --- RES-004: the profile kept current, 2026-09-30
+    ("RES-004", {
+        "status": PARTIAL,
+        "current_implementation": (
+            "friday/hardware_profile.py refresh() brings the stored profile up to date with this machine and "
+            "measures only what changed: with no profile, or a RAM total, CPU count or GPU set that differs, it "
+            "measures the machine again - its facts, the idle baseline and the policy; with a changed power "
+            "source (mains or battery) it updates the power state and derives the policy again, leaving the "
+            "baseline. Each pass is recorded in the profile's history with its cause and what was measured "
+            "again (the last 20 kept), and the process governor adopts the new baseline and caps. A pass is "
+            "postponed while FRIDAY holds leased work, so the baseline is never taken under FRIDAY's own load. "
+            "server.main starts watch(), which runs the pass 30 s after start and every five minutes; a failed "
+            "pass is logged and retried, never stopping the server. Gaps: no real hardware change or power flip "
+            "has been exercised on a machine yet (the tests stand the machine in); the power state does not "
+            "yet change what background work may run (BG-001); the voice agent's process keeps its own "
+            "governor and does not run the watch."),
+        "files": ["friday/hardware_profile.py:340,349,387,392,405", "server.py:32"],
+        "tests": ["tests/test_hardware_profile.py::test_the_first_run_qualifies_the_machine_and_records_why",
+                  "tests/test_hardware_profile.py::test_a_hardware_change_is_measured_again_with_its_cause",
+                  "tests/test_hardware_profile.py::test_a_power_change_rederives_without_measuring_again",
+                  "tests/test_hardware_profile.py::test_the_running_governor_adopts_a_new_profile",
+                  "tests/test_hardware_profile.py::test_a_busy_governor_postpones_the_measurement",
+                  "tests/test_entry_points.py::test_the_server_honours_an_emergency_stop"],
+        "evidence": (
+            "2026-09-30: the tests failed first (no refresh). Three mutations each turn a test red: a power "
+            "change ignored, a busy governor not postponing the measurement, and the server not starting the "
+            "watch. The affected test files pass (entry points, hardware profile, governor, reachability: 67). "
+            "Not yet in a four-chunk run; the next checkpoint's suite covers it."),
+        "next_action": (
+            "EXTEND: exercise a real power flip on REFERENCE-A (unplug while the server runs) and record the "
+            "history entry; let the power state gate background work (BG-001)."),
+    }),
 ]
 
 

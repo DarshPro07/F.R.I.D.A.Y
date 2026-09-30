@@ -32,8 +32,13 @@ def test_the_server_honours_an_emergency_stop(monkeypatch):
     import server
     from friday import stop
 
-    started, ran = [], []
+    from friday import hardware_profile
+
+    started, ran, profiled = [], [], []
     monkeypatch.setattr(stop, "watch", lambda *a, **k: started.append(True))
+    monkeypatch.setattr(hardware_profile, "watch", lambda *a, **k: profiled.append(True))
     monkeypatch.setattr(server.mcp, "run", lambda **kwargs: ran.append(kwargs))
     server.main()
     assert started and ran == [{"transport": "sse"}]
+    # RES-004: the process that admits work keeps the machine's profile current.
+    assert profiled

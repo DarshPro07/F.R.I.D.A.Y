@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -163,6 +164,8 @@ class Profile:
     battery: dict | None
     browser_mb: float | None = None  # one headless Chromium (BROW-004's probe), when measured
     policy: dict = field(default_factory=dict)
+    #: Every time it was taken or brought up to date, and why (RES-004).
+    history: list[dict] = field(default_factory=list)
 
     def identity(self) -> dict:
         """What makes this machine this machine, for the profile: RAM, CPUs
@@ -251,18 +254,20 @@ def _browser_mb() -> float | None:
 
 
 def qualify(*, cause: str, readings: int = 10, every_s: float = 1.0, sampler=None,
-            browser: bool = False, save: bool = True) -> Profile:
+            browser: bool = False, save: bool = True, machine: dict | None = None,
+            browser_mb: float | None = None) -> Profile:
     """Measure this machine and derive its policy. The idle baseline is the
     median of `readings` taken `every_s` apart, so take it while FRIDAY is
-    doing nothing; `browser` also launches Chromium once to measure its cost."""
+    doing nothing; `browser` also launches Chromium once to measure its cost
+    (otherwise `browser_mb` carries an earlier measurement)."""
     sample = sampler or G.sample_machine
     sample()                                        # opens the CPU window
     taken = []
     for _ in range(readings):
         time.sleep(every_s)
         taken.append(sample())
-    profile = build(measure_machine(), taken, cause=cause,
-                    browser_mb=_browser_mb() if browser else None)
+    profile = build(machine or measure_machine(), taken, cause=cause,
+                    browser_mb=_browser_mb() if browser else browser_mb)
     if save:
         store(profile)
     return profile
@@ -318,9 +323,102 @@ def for_governor() -> tuple[G.Baseline | None, G.Thresholds]:
                        "against this one's own readings until it is measured again",
                        "; ".join(moved))
         return None, G.Thresholds()
-    caps = dataclasses.replace(G.Thresholds(), max_workers=profile.policy["workers"]["max"],
+    return profile.baseline, _caps(profile)
+
+
+def _caps(profile: Profile) -> G.Thresholds:
+    return dataclasses.replace(G.Thresholds(), max_workers=profile.policy["workers"]["max"],
                                max_browsers=profile.policy["browsers"]["max"])
-    return profile.baseline, caps
+
+
+# -- RES-004: kept current --------------------------------------------------
+
+#: How many times a profile remembers being taken or brought up to date.
+HISTORY_KEPT = 20
+
+
+def _power(battery: dict | None) -> str | None:
+    """"mains", "battery", or None when the platform does not say. A machine
+    with no battery runs on mains."""
+    if battery is None:
+        return "mains"
+    plugged = battery.get("plugged")
+    return None if plugged is None else ("mains" if plugged else "battery")
+
+
+def refresh(*, machine: dict | None = None, sampler=None, readings: int = 10,
+            every_s: float = 1.0) -> tuple[Profile | None, str | None]:
+    """Bring the stored profile up to date with this machine, measuring only
+    what changed, and record why (RES-004):
+
+      - no profile yet, or its RAM, CPUs or GPUs differ: the machine is
+        measured again - its facts, its idle baseline and the policy;
+      - the power source changed: the power state is updated and the policy
+        derived again; the baseline stands.
+
+    Returns the profile and the cause, or the stored profile and None when
+    nothing changed."""
+    now = machine or measure_machine()
+    old = stored()
+    if old is None:
+        cause, remeasured = "first run on this machine", ["machine", "baseline", "policy"]
+    else:
+        moved = changes(old, now)
+        was, is_ = _power(old.battery), _power(now["battery"])
+        if moved:
+            cause, remeasured = "; ".join(moved), ["machine", "baseline", "policy"]
+        elif was and is_ and was != is_:
+            cause, remeasured = f"power: {was} -> {is_}", ["power", "policy"]
+        else:
+            return old, None
+    if "baseline" in remeasured:
+        profile = qualify(cause=cause, readings=readings, every_s=every_s, sampler=sampler,
+                          save=False, machine=now, browser_mb=old.browser_mb if old else None)
+    else:
+        profile = dataclasses.replace(old, cause=cause, battery=now["battery"])
+        profile.policy = derive_policy(profile)
+    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    profile.history = ((old.history if old else [])
+                       + [{"at": at, "cause": cause, "remeasured": remeasured}])[-HISTORY_KEPT:]
+    store(profile)
+    return profile, cause
+
+
+def adopt(profile: Profile) -> None:
+    """The process governor judges against the profile from now on."""
+    G.governor().rebaseline(profile.baseline, thresholds=_caps(profile))
+
+
+def refresh_and_adopt(**kwargs) -> tuple[Profile | None, str | None]:
+    """One pass of the watch: postponed while FRIDAY holds leased work - the
+    baseline is the machine at rest, and measuring it under FRIDAY's own load
+    would make that load look normal."""
+    if G.governor().active():
+        return None, "postponed: FRIDAY is busy"
+    profile, cause = refresh(**kwargs)
+    if cause:
+        logger.info("hardware profile brought up to date: %s", cause)
+        adopt(profile)
+    return profile, cause
+
+
+def watch(*, first_delay_s: float = 30.0, every_s: float = 300.0) -> threading.Thread:
+    """Keep this machine's profile current for the life of the process: once
+    the process has settled, and then every `every_s`. A failed pass is logged
+    and retried at the next one - the governor goes on judging against what it
+    has, so a profile that cannot be refreshed never stops FRIDAY."""
+    def loop() -> None:
+        time.sleep(first_delay_s)
+        while True:
+            try:
+                refresh_and_adopt()
+            except Exception:  # noqa: BLE001 - logged; the next pass retries
+                logger.exception("hardware profile refresh failed")
+            time.sleep(every_s)
+
+    thread = threading.Thread(target=loop, name="friday-hardware-profile", daemon=True)
+    thread.start()
+    return thread
 
 
 def main(argv: list[str] | None = None) -> int:
