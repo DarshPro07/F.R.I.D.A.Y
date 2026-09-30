@@ -500,3 +500,57 @@ def test_cli_arguments(monkeypatch):
     monkeypatch.setattr(BP, "run_program", lambda **kw: seen.update(kw) or {"stop_reason": "x"})
     assert BP.main(["--max-waves", "3", "--max-usd", "7", "--cap", "1", "--priority", "P0", "--dry-run"]) == 0
     assert seen == {"max_waves": 3, "max_usd": 7.0, "cap": 1, "priority": "P0", "dry_run": True}
+
+
+# ------------------------------------------------------------ real-git hazards
+
+def test_tracked_state_doc_is_untouched_until_the_program_finishes(env):
+    # build_integrate refuses a checkout with tracked changes. Rewriting the
+    # tracked PRD_CURRENT_STATE.md after wave 1 made every later wave refused.
+    env.doc.write_bytes(b"# hand-written\n")
+    k = FakeKernel(ids=("A", "B", "C"))
+    k.script = {i: [rec(i)] for i in ("A", "B", "C")}
+    seen = []
+
+    class Watching(FakeIntegrator):
+        def integrate(self, req):
+            seen.append(env.doc.read_bytes())
+            return super().integrate(req)
+
+    _, bi = go(env, k, bi=Watching(k))
+    assert bi.calls == ["A", "B", "C"] and len(state_of(env)["waves"]) == 2
+    assert seen == [b"# hand-written\n"] * 3
+    assert b"build-program:begin" in env.doc.read_bytes()
+
+
+def test_a_requirement_left_partial_twice_is_parked_across_runs(env):
+    # PARTIAL rows stay in the ready queue; without a cap every program run
+    # would pay for the same unclosable gap again.
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A"), rec("A"), rec("A")]}
+
+    class Partial(FakeIntegrator):
+        def integrate(self, req):
+            return {**super().integrate(req), "ledger_status": "PARTIAL"}
+
+    for _ in range(3):
+        go(env, k, bi=Partial(k, close=False))
+    assert [x[0] for x in k.launches] == ["A", "A"]
+    assert "A" in state_of(env)["parked"]
+
+
+def test_a_failed_docs_commit_is_an_escalation_not_silence(env):
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+
+    class CommitFails(FakeGit):
+        def __call__(self, cmd, cwd, timeout=60):
+            res = super().__call__(cmd, cwd, timeout)
+            if "commit" in cmd:
+                return subprocess.CompletedProcess(cmd, 1, "", "index.lock exists")
+            return res
+
+    env.git = CommitFails()
+    go(env, k)
+    esc = state_of(env)["escalations"]
+    assert esc and esc[-1]["kind"] == "docs_commit" and "index.lock" in esc[-1]["detail"]

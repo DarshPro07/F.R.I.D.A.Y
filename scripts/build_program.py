@@ -83,6 +83,7 @@ def load_state(path: Path) -> dict:
     return {"last_full_suite": old.get("last_full_suite") or dict(LAST_SUITE),
             "waves": list(old.get("waves") or []), "parked": dict(old.get("parked") or {}),
             "attempts": dict(old.get("attempts") or {}),
+            "partials": dict(old.get("partials") or {}),
             "escalations": list(old.get("escalations") or []),
             "spend_usd_total": float(old.get("spend_usd_total") or 0.0)}
 
@@ -210,6 +211,12 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
         spend += float((res.get("verifier") or {}).get("cost_usd") or 0.0)
         if res["result"] == "INTEGRATED":
             integrated.add(req)
+            # A PARTIAL row stays ready; cap how often a run may pay for it.
+            if res.get("ledger_status") == "PARTIAL":
+                state["partials"][req] = state["partials"].get(req, 0) + 1
+                if state["partials"][req] >= MAX_ATTEMPTS:
+                    park(state, req, f"partial x{state['partials'][req]}", "partial",
+                         "integrated twice without closing its gaps")
             return "INTEGRATED", spend, True
         park(state, req, res["result"], "integration", json.dumps(res, default=str)[:300])
         return res["result"], spend, False
@@ -268,8 +275,10 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
         stop = "no progress" if idle >= NO_PROGRESS_WAVES else None
         rows = k.load_rows()
         snap = snapshot(state, rows, next_ready(rows, state, integrated, cap, k), stop, repo, runner)
+        # Only the untracked state file between waves: the next wave's
+        # integration refuses a checkout with tracked changes, and the
+        # current-state doc is tracked. It is written once, below.
         write_state(state_file, snap)
-        write_doc(state_doc, snap)
     if dry_run:
         out(f"nothing to plan: {stop}")
         return {"stop_reason": stop, "waves": []}
@@ -299,9 +308,16 @@ def finish(snap: dict, state: dict, repo: Path, state_file: Path, state_doc: Pat
         return snap
     changed = git_out(repo, "diff", "--name-only", "--", DOCS_DIR, runner=runner)
     if changed:
-        runner(["git", "add", "-u", "--", DOCS_DIR], repo)
-        runner(["git", *IDENTITY, "commit", "-m",
-                f"docs(state): build program stopped after wave {n} ({snap['stop_reason']})"], repo)
+        for cmd in (["git", "add", "-u", "--", DOCS_DIR],
+                    ["git", *IDENTITY, "commit", "-m",
+                     f"docs(state): build program stopped after wave {n} ({snap['stop_reason']})"]):
+            r = runner(cmd, repo)
+            if r.returncode != 0:
+                state["escalations"].append({"req": "-", "kind": "docs_commit", "at": now(),
+                                             "detail": (r.stderr or r.stdout or "").strip()[-300:]})
+                snap = {**snap, "escalations": state["escalations"]}
+                write_state(state_file, snap)
+                break
     return snap
 
 
