@@ -27,6 +27,10 @@
 >
 > Amendment A5 (§99 and Appendix G) was added on 2026-09-29 at the owner's
 > instruction; see the note at §99.
+>
+> Amendment A6 (§100 and Appendix H) was recorded on 2026-09-30 under the
+> owner's standing instruction to keep new architecture in the PRD while the
+> P0s are driven down; see the note at §100.
 
 | | |
 |---|---|
@@ -45,7 +49,7 @@
 | First real-world pilot | Crunchy Fashion, without making ecommerce the product definition |
 | Product posture | local-first, model-agnostic, capability-driven, evidence-driven, privacy-aware, self-improving under controlled authority |
 | Status | authoritative target-state PRD; implementation MUST audit current repository before building |
-| Amendments | A1, 2026-09-26: domain partitioning, the domain partition of the general build, and the updated implementation controller (§95, Appendix C); A2, 2026-09-27: durable execution, behavioural contracts and interoperability (§96, Appendix D); A3, 2026-09-27: the local-model hardware rule and the prompt research corpus (§97, Appendix E); A4, 2026-09-28: adaptive hardware and the two reference machines (§98, Appendix F); A5, 2026-09-29: live browser readiness, test isolation and the P0 drive (§99, Appendix G) |
+| Amendments | A1, 2026-09-26: domain partitioning, the domain partition of the general build, and the updated implementation controller (§95, Appendix C); A2, 2026-09-27: durable execution, behavioural contracts and interoperability (§96, Appendix D); A3, 2026-09-27: the local-model hardware rule and the prompt research corpus (§97, Appendix E); A4, 2026-09-28: adaptive hardware and the two reference machines (§98, Appendix F); A5, 2026-09-29: live browser readiness, test isolation and the P0 drive (§99, Appendix G); A6, 2026-09-30: the computer-use fabric and the Cua evaluation (§100, Appendix H) |
 
 ---
 
@@ -1615,6 +1619,64 @@ working set, progressive disclosure and context health (CTX-001, CTX-002, CTX-00
 |---|---|---|---|---|
 | TEST-ISOLATION-001 | P0 | Automated tests may read production-like schemas but never write, or open, the owner's live user-state stores - the store, the audit log, the workspace, nonce, cooldown and access files, the logs - neither in the test process nor in any process a test starts. | A full suite run with FRIDAY not running leaves every file under the live data/ and logs/ unchanged, and the runner fails a run that changes one; a test that opens a live store is refused; a process a test starts resolves the test session's state root. | G, "4. Audit rows" |
 | BROW-004 | P1 | Browser readiness is a real launch: the browser extra installed, its Chromium build present, and a headless launch that loads and reads a harmless public page is BROWSER_READY; importing Playwright is not readiness, and a missing package or browser build is reported as such. | The readiness probe reports BROWSER_READY from FRIDAY's own environment on each reference machine, with the launch's time and memory recorded; with the package or the browser build missing it reports which. | G, "1. Browser runtime" |
+
+## 100. Amendment A6 (2026-09-30): the computer-use fabric and the Cua evaluation
+
+> **Transcription note (added 2026-09-30; not part of the owner's text).** Recorded under the owner's standing
+> instruction of Amendment A5 - new architecture goes into the PRD and research registry, not onto the
+> implementation branch, while the unresolved P0s are driven down. Appendix H is the owner's text verbatim, and
+> "H, <heading>" below names one of its headings. §100.1 is derived by the implementing agent. §100.2's requirements
+> are the owner's text with derived acceptance. They are ranked P1 (MODEL-011, a "MAY", P2) because A5 put the P0s
+> first; the owner's text calls Cua Driver "high-priority" and proposes a Cua Driver spike as the next
+> implementation step, so the owner decides whether that spike comes before the remaining P0s, and may re-rank.
+> What the text says about Cua's current features, versions, permission modes, issue tracker and model card is the
+> owner's research as of 2026-09-30, not verified here; it is checked against a pinned clone before any adoption
+> decision rests on it.
+
+### 100.1 Decisions carried by this amendment (derived)
+
+- The action-path router (§48, BROW-001) grows into a provider-neutral computer-use fabric: structured APIs and
+  scripts first, then the browser (WebMCP where offered, Playwright and the DOM), then desktop backends, then vision,
+  with screen coordinates the last resort. Cua Driver is a candidate desktop backend under it, not FRIDAY's desktop
+  architecture, and it does not replace Playwright for browser-only work (H, "Add: ComputerUseFabric").
+- Background desktop operation is the reason to adopt it: FRIDAY acting on permitted windows while the person keeps
+  the physical pointer, keyboard and foreground (H, "The biggest reason I want it"). Each background session has an
+  owner (objective, worker), an explicit window and application set, a permission manifest, its own cursor where
+  the backend supports one, an evidence stream and a lease (H, "BackgroundDesktopSessions").
+- Default permission mode is bounded: FRIDAY's policy, then its execution envelope, then the backend's own bounded
+  manifest (applications, windows, actions, file roots, clipboard, expiry) - two independent boundaries. An
+  unrestricted or approval-bypassing mode is never normal operation (H, "But we should NOT give Cua unrestricted
+  host authority").
+- A backend's report is not proof: every computer-use action is checked against an independently read post-state
+  (H, "Cua also fits our evidence philosophy"). Desktop readiness is earned like BROWSER_READY: installed, signature
+  and integrity checked, launched, windows enumerated, an accessibility tree read, a background action taken and its
+  post-state verified, multi-monitor where relevant - otherwise a named degraded state and the router falls back
+  (H, "There are current Cua issues we must not ignore").
+- Supply chain: Cua comes in through the capability fabric like any upstream - licence read, commit pinned in the
+  upstream lock, absent means UNAVAILABLE - and before any binary is bundled, its signing (upstream-signed, built
+  from pinned source, or signed with FRIDAY's package) is settled against Windows Smart App Control
+  (H, "Very important: code signing").
+- Evaluation: the paths are compared on the same execution-based tasks (a pinned Cua Bench pack among them) for
+  success, latency, tokens, actions, retries, RAM, CPU, foreground disruption, wrong targets and verified post-state
+  (H, "Cua Bench"). CUA-S1 is research and benchmark only, not a production dependency; a small local UI model is
+  used only after it beats the deterministic and frontier baselines there (H, "CUA-S1").
+- Environments: the person's own desktop for normal personal tasks; an isolated sandbox or VM for untrusted work
+  and testing; the Cyber Lab's own VM or container, never the personal desktop. A cloud fleet is optional, never
+  required (H, "Cua Sandbox / Fleet").
+
+### 100.2 Requirement matrix addendum (the owner's requirement text; acceptance derived)
+
+| ID | Pri | Requirement | Acceptance evidence | Source |
+|---|---|---|---|---|
+| CUA-001 | P1 | FRIDAY SHALL provide a provider-neutral ComputerUseFabric supporting structured browser, desktop, visual and isolated-computer execution backends. | One interface serves the Playwright browser backend and at least one desktop backend, each registered through the capability fabric and chosen by the action-path router; a missing backend reports UNAVAILABLE without breaking the others. | H, "I would add these requirements" |
+| CUA-002 | P1 | Where OS/application support permits, FRIDAY SHALL execute desktop tasks without unnecessarily moving the physical pointer, stealing focus or interrupting the user's foreground session. | On a Windows reference machine a desktop task on a background window completes with the physical pointer, the foreground window and focus unchanged, measured before and after; where the target cannot be driven in the background, that is said before acting. | H, "I would add these requirements" |
+| CUA-003 | P1 | Each concurrent background computer-use worker SHALL receive an explicit allowed window/application set. | A session acts only on its listed windows and applications; an action on any other is refused and recorded. | H, "I would add these requirements" |
+| CUA-004 | P1 | Computer-use actions SHALL not count as successful solely because the automation backend returned success. | An action counts as done only when an independent read of the application's state afterwards shows the intended change; a backend reporting success with no change is recorded as a failure. | H, "I would add these requirements" |
+| CUA-005 | P1 | Cua/Playwright/other computer-use backend health SHALL be validated using real action + independently observed post-state. | A backend is reported ready only after a real action with an independently observed post-state on this machine; a failed step is named (for example the binary blocked by code integrity, the launch failed, no accessibility tree) and the router falls back. | H, "I would add these requirements" |
+| CUA-006 | P1 | Alternative computer-use paths SHALL be benchmarkable against execution-based tasks for correctness, latency, resource cost and interaction count. | The same pinned task set runs through each available path and reports success, latency, tokens, actions, retries, RAM, CPU, foreground disruption, wrong targets and verified post-state per path. | H, "I would add these requirements" |
+| CUA-007 | P1 | Background computer use SHALL be tested for unintended focus theft, pointer movement and window-order changes. | Each background run records focus changes, pointer movement and window-order changes, and a path that disturbs the foreground is flagged. | H, "I would add these requirements" |
+| CUA-008 | P1 | Concurrent computer-use sessions SHALL have explicit ownership, leases and resource boundaries. | Each session has an owner (objective and worker), a lease with an expiry, its window set and resource limits; two sessions cannot act on the same window, and an expired lease stops the session. | H, "I would add these requirements" |
+| MODEL-011 | P2 | FRIDAY MAY use/train small specialized UI decision models only after they outperform deterministic/frontier baseline routes on Cua Bench/FRIDAY evaluations. | A small UI decision model is put on a path only after it beats the deterministic and frontier baselines on held-out execution-based tasks, with its licence checked; until then it is a research and benchmark entry. | H, "I would add these requirements" |
 
 ## Appendix C. Implementation controller, updated 2026-09-26 (owner's text, verbatim)
 
@@ -7233,4 +7295,661 @@ You can paste this directly:
 > **Continue from `prd-v7/foundations-checkpoint` without reopening completed work. First complete the pending browser/audit follow-up: verify the live audit state without modifying it, update BROW-001 with the real Playwright journey evidence, replace or isolate provider-shaped fake-key fixtures so the branch can pass GitHub push protection without weakening scanning, install the `[browser]` extra into the live FRIDAY `.venv`, and run a live-runtime Chromium smoke test. Run targeted tests, then the full suite, and create a coherent follow-up commit. Do not delete audit rows 480–486; document V7-D52 as historical test contamination. After that, continue Slice 7. The Resource Governor must self-profile the host and derive policies from measured headroom/pressure/hysteresis rather than hardcoding either reference machine or simply increasing the 75% threshold. Both the 15.4 GB integrated-GPU machine and the 16 GB/4 GB-VRAM machine are mandatory reference targets. If provider safety checks repeatedly fail, persist state and switch/fresh-session rather than repeatedly retrying. Continue dependency-ready P0 work autonomously.**
 
 That is the state I would lock.
+````
+
+## Appendix H. The computer-use fabric and the Cua evaluation, 2026-09-30 (owner's text, verbatim)
+
+````text
+Yes — **`trycua/cua` is one of the stronger additions we’ve found for FRIDAY**, especially because your goal is not merely browser automation but **real computer control in the background while you keep using the laptop**.
+
+I would not treat the whole Cua repository as one dependency. I’d adopt **three parts selectively**:
+
+1. **Cua Driver → high-priority desktop execution backend**
+2. **Cua Bench → computer-use evaluation/trajectory system**
+3. **CUA-S1 → research candidate for tiny local UI decisions, not production core yet**
+
+Cua’s current design is almost exactly aligned with our architecture: it treats GUI control as one action surface alongside code, structured tools and APIs rather than forcing every task into screenshot-click automation. Cua Driver works across Windows, macOS and Linux and exposes pixels, accessibility state and GUI actions through CLI/MCP/SDK interfaces. :chatgpt-content-reference{index="0"}
+
+## The biggest reason I want it: background computer control
+
+On Windows, Cua Driver now supports **background computer-use**. It can target Win32, WPF, WinUI, Electron, Chromium and other applications using a combination of UI Automation/accessibility, pixels and targeted input. Its synthetic cursor can remain separate from your physical cursor where the target supports it. :chatgpt-content-reference{index="1"}
+
+That is extremely important for your vision.
+
+Instead of:
+
+```text
+FRIDAY starts working
+→ steals mouse
+→ opens windows in front of you
+→ you cannot use laptop
+```
+
+we want:
+
+```text
+YOU
+│
+├── physical mouse/keyboard
+│
+└── keep working normally
+
+FRIDAY
+│
+├── background cursor/session A → Chrome
+├── background cursor/session B → Excel
+└── background cursor/session C → another app
+```
+
+Current Cua 0.8 work describes synthetic multi-cursor sessions across Windows/macOS/Linux, with each session tied to its own cursor, actions and recording; non-overlapping windows can be worked concurrently without agents fighting over the physical pointer. :chatgpt-content-reference{index="2"}
+
+That is almost exactly a requirement we haven't properly formalized yet.
+
+# Add: `ComputerUseFabric`
+
+I would upgrade our current Browser/Desktop architecture into:
+
+```text
+                         FRIDAY
+                            │
+                    Action Path Router
+                            │
+        ┌───────────────────┼────────────────────┐
+        ▼                   ▼                    ▼
+    STRUCTURED             WEB                 DESKTOP
+        │                   │                    │
+ API / MCP / script    WebMCP / Playwright    Cua Driver
+                            │                    │
+                            │               accessibility
+                            │               background input
+                            │               pixels
+                            │                    │
+        └───────────────────┼────────────────────┘
+                            ▼
+                       Vision fallback
+                            │
+                            ▼
+                       Coordinates
+                       LAST RESORT
+```
+
+Cua does **not replace Playwright**.
+
+They solve different problems.
+
+### Browser-only work
+
+Prefer:
+
+```text
+WebMCP
+→ Playwright/DOM
+→ browser structured APIs
+```
+
+because they're deterministic and cheap.
+
+### Native apps / browser chrome / dialogs / desktop apps
+
+Use:
+
+```text
+Cua Driver
+```
+
+Examples:
+
+- DaVinci Resolve;
+- Adobe apps;
+- Excel;
+- file dialogs;
+- Windows settings;
+- Calculator;
+- installed business apps;
+- Chrome browser chrome, extensions or native dialogs;
+- apps without APIs.
+
+### Weird/custom UI
+
+Then:
+
+```text
+Cua pixels/vision
+→ coordinate fallback
+```
+
+So this substantially improves `BROW-001` rather than replacing your now-working Playwright path.
+
+---
+
+# The feature I particularly want: `BackgroundDesktopSessions`
+
+Add a formal subsystem:
+
+```text
+BackgroundDesktopSession
+{
+    session_id
+    objective_id
+    worker_id
+    assigned_windows[]
+    permission_manifest
+    cursor
+    evidence_stream
+    lease
+}
+```
+
+Then FRIDAY can do:
+
+```text
+Objective A:
+update spreadsheet
+→ Session A
+→ Excel window
+
+Objective B:
+download report
+→ Session B
+→ Chrome window
+```
+
+while you are still typing to FRIDAY or doing something else.
+
+That's a serious step toward the Iron-Man-style experience you're describing.
+
+---
+
+# But we should NOT give Cua unrestricted host authority
+
+Cua Driver currently has permission modes including `standard`, `bounded`, and an unrestricted mode requiring an explicit dangerous bypass flag. :chatgpt-content-reference{index="3"}
+
+For FRIDAY I would enforce:
+
+```text
+DEFAULT:
+BOUNDED
+```
+
+FRIDAY creates a manifest such as:
+
+```yaml
+objective: OBJ-928
+
+apps:
+  - chrome
+  - excel
+
+windows:
+  - approved_window_ids
+
+actions:
+  - inspect
+  - click
+  - type
+  - scroll
+  - set_value
+
+files:
+  allowed:
+    - C:\Users\...\Project
+
+clipboard:
+  false
+
+expiry:
+  30m
+```
+
+Then:
+
+```text
+FRIDAY policy
+      ↓
+FRIDAY ExecutionEnvelope
+      ↓
+Cua bounded manifest
+      ↓
+Windows
+```
+
+Two independent security boundaries.
+
+Do **not** use:
+
+```text
+--dangerously-bypass-approvals
+```
+
+as normal operation.
+
+---
+
+# Cua also fits our evidence philosophy extremely well
+
+I liked something in their current engineering work a lot.
+
+Their regression harness does **not** trust:
+
+```text
+Driver says click succeeded
+```
+
+It independently checks whether the application's state actually changed. Their current matrix reportedly includes more than 500 behavioral checks across Windows, macOS and Linux toolkits. :chatgpt-content-reference{index="4"}
+
+That's exactly our existing rule:
+
+> **A tool response isn't proof of success.**
+
+So Cua should integrate with:
+
+```text
+Cua Action
+    ↓
+Reality Ledger
+    ↓
+Independent post-state
+    ↓
+Proof-Carrying Action
+```
+
+Example:
+
+```text
+FRIDAY:
+"Set calculator to 42"
+
+Cua:
+clicks
+
+Verifier:
+reads Calculator display
+
+display = 42
+
+→ VERIFIED
+```
+
+Perfect.
+
+---
+
+# Cua Bench: YES, probably even more valuable than it first appears
+
+`Cua Bench` gives us reproducible computer-use tasks and execution-based evaluation. Its basic task pack currently includes things like clicking, form filling, spreadsheet editing, dropdowns, sliders, switches, video controls, right-click menus and drag/drop. :chatgpt-content-reference{index="5"}
+
+Instead of inventing every desktop benchmark ourselves, create:
+
+# `ComputerUseArena`
+
+```text
+                   COMPUTER USE ARENA
+                           │
+       ┌───────────────────┼───────────────────┐
+       ▼                   ▼                   ▼
+  Playwright path       Cua path          Vision path
+       │                   │                   │
+       └───────────────────┼───────────────────┘
+                           ▼
+                       Cua Bench
+                           │
+                           ▼
+                  independent scoring
+```
+
+Measure:
+
+```text
+success %
+latency
+tokens
+actions
+retries
+RAM
+CPU
+foreground disruption
+wrong clicks
+wrong targets
+post-state verification
+```
+
+Then `CapabilityPathNet` later learns:
+
+> “For this application/task class, Cua accessibility wins.”
+
+instead of us hardcoding opinions forever.
+
+---
+
+# CUA-S1 is also interesting for our tiny-model plan
+
+This caught my attention because we just designed:
+
+```text
+Laya
+FunctionGemma
+FRIDAY micro models
+```
+
+Cua has now started **CUA-S1**, a family of small specialized System-1 models for computer-use decisions. Its initial research profile is deliberately narrow: given structured UI elements and document values, score bounded actions such as fill/check/click/skip; deterministic code orders the actual actions. :chatgpt-content-reference{index="6"}
+
+Conceptually:
+
+```text
+Screenshot/accessibility state
+           ↓
+Cua-S1 / Friday UI Net
+           ↓
+which field/value/action?
+           ↓
+deterministic executor
+```
+
+This is exactly the **small-specialized-model architecture** we've been converging toward.
+
+But:
+
+### I would NOT ship CUA-S1 yet.
+
+Their current model card explicitly describes the initial component as a **research profile**, not a general computer-use model, and says checkpoint artifacts may have separate licensing. :chatgpt-content-reference{index="7"}
+
+So classify:
+
+```text
+CUA-S1
+
+STATUS:
+WATCH / RESEARCH / BENCHMARK
+
+NOT:
+default production dependency
+```
+
+What is more valuable immediately is their **architecture**.
+
+We could eventually train:
+
+# `FridayUI-300M`
+
+from our own verified Cua Bench / FRIDAY trajectories.
+
+Its task:
+
+```text
+given:
+UI state
++
+objective
+
+predict:
+target
+action class
+confidence
+```
+
+That could eliminate a lot of Claude/Gemini calls during routine computer operation.
+
+---
+
+# This gives us a beautiful future training loop
+
+Remember our Distillation Factory?
+
+Now:
+
+```text
+Frontier model
+      ↓
+uses Cua Driver
+      ↓
+verified UI trajectory
+      ↓
+Cua Bench / FRIDAY evaluator
+      ↓
+training record
+      ↓
+FridayUI small model
+      ↓
+Model Arena
+```
+
+Over time:
+
+```text
+DAY 1
+
+Claude decides most GUI operations
+
+
+LATER
+
+FridayUI decides:
+80% routine targets locally
+
+Claude only handles:
+weird/new/difficult UI
+```
+
+This is exactly how FRIDAY should become more local over time.
+
+---
+
+# There are current Cua issues we must not ignore
+
+It's promising, but not magic.
+
+Current upstream issue tracking still shows Windows edge cases, including an `ERROR_INVALID_HANDLE` screenshot path and prior multi-monitor coordinate/input issues. :chatgpt-content-reference{index="8"}
+
+There is also a current Windows Smart App Control / Code Integrity issue reporting unsigned Cua Driver release binaries being blocked on some Windows 11 configurations. :chatgpt-content-reference{index="9"}
+
+That matters a lot for our installer.
+
+So do not do:
+
+```text
+install Cua
+→ declare DESKTOP_READY
+```
+
+Instead:
+
+```text
+install
+↓
+signature/integrity check
+↓
+launch probe
+↓
+window enumerate
+↓
+accessibility read
+↓
+background click
+↓
+post-state verification
+↓
+multi-monitor probe if relevant
+↓
+DESKTOP_READY
+```
+
+If it fails:
+
+```text
+CUA_DRIVER_DEGRADED
+```
+
+and our path router can fall back.
+
+---
+
+# Very important: code signing
+
+Because you were already considering Azure Artifact Signing for FRIDAY.exe, this overlaps with a real deployment problem.
+
+If we eventually bundle or redistribute a Cua-derived driver on Windows, we need to investigate:
+
+```text
+upstream binary signing
+vs
+build our own pinned source
+vs
+sign our packaged binary
+```
+
+Do not blindly redistribute an unsigned executable and then discover Windows blocks FRIDAY during onboarding.
+
+This should go into our **Capability Supply Chain + Installer qualification**.
+
+---
+
+# Cua Sandbox / Fleet: useful, but not core default
+
+Cua also provides isolated computers/sandboxes/fleets. Their docs recommend isolation for sensitive/untrusted computer-use work. :chatgpt-content-reference{index="10"}
+
+For FRIDAY:
+
+```text
+NORMAL PERSONAL TASK
+→ Cua Driver on real computer
+
+UNTRUSTED TASK
+→ isolated sandbox/VM
+
+TESTING
+→ Cua Sandbox / local VM where available
+
+CYBER LAB
+→ Kali/container/VM, not personal desktop
+```
+
+Because we're local-first, I would **not require Cua Cloud Fleet**.
+
+Expose:
+
+```text
+ComputerEnvironmentProvider
+├── LocalHostCua
+├── LocalSandbox
+├── Kali
+├── VM
+└── CloudFleet   optional
+```
+
+---
+
+# We should actually rename one architectural concept
+
+Our current:
+
+```text
+Browser/Desktop Hybrid Action Router
+```
+
+is becoming too narrow.
+
+I would promote it to:
+
+# `ComputerUseFabric`
+
+And underneath:
+
+```text
+ComputerUseFabric
+
+├── WebNative
+│   ├── WebMCP
+│   └── official browser APIs
+│
+├── BrowserStructured
+│   └── Playwright
+│
+├── DesktopStructured
+│   └── Cua Driver
+│
+├── ApplicationAdapters
+│   ├── DaVinci
+│   ├── Blender
+│   └── ...
+│
+├── Vision
+│   └── local/cloud visual model
+│
+└── SandboxProviders
+    ├── local sandbox
+    ├── Kali
+    └── VM
+```
+
+That is the better long-term abstraction.
+
+---
+
+# I would add these requirements
+
+### `CUA-001 — Computer Use Backend Abstraction`
+
+FRIDAY SHALL provide a provider-neutral ComputerUseFabric supporting structured browser, desktop, visual and isolated-computer execution backends.
+
+### `CUA-002 — Background Desktop Operation`
+
+Where OS/application support permits, FRIDAY SHALL execute desktop tasks without unnecessarily moving the physical pointer, stealing focus or interrupting the user's foreground session.
+
+### `CUA-003 — Window Ownership`
+
+Each concurrent background computer-use worker SHALL receive an explicit allowed window/application set.
+
+### `CUA-004 — Real-State Verification`
+
+Computer-use actions SHALL not count as successful solely because the automation backend returned success.
+
+### `CUA-005 — Backend Health`
+
+Cua/Playwright/other computer-use backend health SHALL be validated using real action + independently observed post-state.
+
+### `CUA-006 — ComputerUse Arena`
+
+Alternative computer-use paths SHALL be benchmarkable against execution-based tasks for correctness, latency, resource cost and interaction count.
+
+### `CUA-007 — Foreground Preservation`
+
+Background computer use SHALL be tested for unintended focus theft, pointer movement and window-order changes.
+
+### `CUA-008 — Desktop Session Isolation`
+
+Concurrent computer-use sessions SHALL have explicit ownership, leases and resource boundaries.
+
+### `MODEL-011 — Local UI Decision Model`
+
+FRIDAY MAY use/train small specialized UI decision models only after they outperform deterministic/frontier baseline routes on Cua Bench/FRIDAY evaluations.
+
+---
+
+# My adoption decision
+
+| Cua component | Decision |
+|---|---|
+| **Cua Driver** | **YES — high-priority Desktop backend** |
+| Windows background automation | **YES — major FRIDAY capability** |
+| Synthetic multi-cursor | **YES — benchmark carefully** |
+| Cua MCP | Useful adapter, **but don't make MCP mandatory** |
+| Cua SDK/native interface | **Preferred integration candidate** |
+| **Cua Bench** | **YES — add to ComputerUseArena** |
+| **CUA-S1** | **Research/watch/benchmark; not production yet** |
+| Lume | Useful later for macOS/local VM |
+| Cua Sandbox | Useful optional isolation backend |
+| Cua Cloud Fleet | **Optional only**, not local-first core |
+| `unrestricted` permission mode | **No for normal FRIDAY** |
+| bounded capability manifests | **Yes** |
+| Cua as FRIDAY's entire desktop architecture | **No — backend under ComputerUseFabric** |
+
+The strongest reason to adopt it is **not merely that it can click buttons**.
+
+It's that it can potentially let FRIDAY behave like a genuine second operator on your machine:
+
+> You continue using the laptop while FRIDAY independently operates another permitted application/window in the background, observes the outcome, and proves the action worked.
+
+That's much closer to the product you're actually trying to build.
+
+And because your current branch already has Playwright/browser work passing, I would **not replace that work**. The next implementation step should be a **Cua Driver spike behind the existing action-path abstraction**, run it on your current integrated-GPU Windows laptop, measure RAM/CPU/focus-stealing/action accuracy, and compare it directly with the existing Playwright path before promoting it.
 ````

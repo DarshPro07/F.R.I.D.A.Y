@@ -8,11 +8,11 @@ no next action, or (v7) a VERIFIED row naming no test or a citation that
 does not resolve on the tree.
 
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
-- PRD sha256: `57014fe42ed2b320ac4aaa979c1a6aa16b19c8226908d9915687af4eebed244a`
-- PRD size: 7237 lines, 237122 bytes
-- Repository HEAD: `dc4356c138abb06c7f872cebccc458ed9a87b41b`
-- Uncommitted paths at generation: 41
-- Generated: 2026-09-30T18:25:32+05:30
+- PRD sha256: `d088d6e1a9f436dcd0f24d5b19d20c3610609a1c80289a495c4e5633cb3c5646`
+- PRD size: 7956 lines, 261105 bytes
+- Repository HEAD: `258e3c0d1dc7cb0e8ba99fd1aebed929081f8bc5`
+- Uncommitted paths at generation: 33
+- Generated: 2026-09-30T18:30:03+05:30
 
 ## Status vocabulary
 
@@ -27,16 +27,16 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| PARTIAL | 56 |
-| MISSING | 39 |
+| PARTIAL | 58 |
+| MISSING | 46 |
 | VERIFIED | 34 |
 | DEFERRED_BY_PRD | 2 |
 | EXISTING_UNVERIFIED | 1 |
-| **total** | **132** |
+| **total** | **141** |
 
 Unresolved P0: 21 (CORE-001, INTENT-001, TRAJ-001, CTX-001, CTX-002, CTX-003, MEM-002, MEM-003, SEC-005, BROW-001, RES-001, EVAL-001, DOMAIN-001, ACT-001, MCP-001, CYBER-002, DUR-001, BCON-001, APPROVAL-001, JIT-001, RES-002)
 
-Unresolved P1: 60 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004)
+Unresolved P1: 68 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008)
 
 ## PRD section 0
 
@@ -429,6 +429,20 @@ Unresolved P1: 60 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MO
 |---|---|---|---|---|---|---|---|
 | TEST-ISOLATION-001 | P0 | **VERIFIED** | Automated tests never write, or open, the owner's live user-state stores, in the test process or any process a test starts. | A full suite run with FRIDAY not running leaves every file under the live data/ and logs/ unchanged and the runner fails a run that changes one; a test that opens a live store is refused; a process a test starts resolves the session's state root. | - | `tests/conftest.py:39,61,71,239`, `scripts/baseline_suite.py:82,127,214`, `friday/trust.py:264` | 2026-09-29: the child-process audit test failed first (V7-D52; in failing it wrote live audit row 486, which is kept and recorded with rows 480-485 as historical test contamination). The four-chunk suite over the follow-up tree with FRIDAY not running (data/baseline_v7_followup): all four chunks exit 0, 4,734 passed (1,279, 1,060, 1,371 and 1,024), none failed, and the runner's own check reads 'live_state unchanged (244 files under data/ and logs/)'. Four mutations each turn a test red: the live-store guard disabled, the verdict passing a changed state, the runner leaving the verdict out of its exit code, and the audit log ignoring ADA_AUDIT_DB. The FRIDAY_HOME line itself was not mutated: a run without it would point real tests at the live state, which is what this requirement forbids. |
 | BROW-004 | P1 | **PARTIAL** | Browser readiness is a real launch: extra installed, Chromium build present, a headless launch reads a harmless public page (BROWSER_READY); import is not readiness. | The readiness probe reports BROWSER_READY from FRIDAY's own environment on each reference machine, with the launch's time and memory recorded; with the package or the browser build missing it reports which. | - | `friday/browser_readiness.py:1`, `pyproject.toml:57` | 2026-09-29, REFERENCE-A, from the product's own .venv after installing the browser extra: BROWSER_READY, Playwright 1.59.0, read https://example.com/ in 2.67 s warm (15.8 s cold) with 270 MB in the processes it started (data/prd_v7_audit/brow001_live_runtime_ready_2026-09-29.json). |
+
+## PRD section 100
+
+| id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
+|---|---|---|---|---|---|---|---|
+| CUA-001 | P1 | **PARTIAL** | A provider-neutral computer-use fabric serves structured browser, desktop, visual and isolated-computer backends. | One interface serves the Playwright browser backend and at least one desktop backend, each registered through the capability fabric and chosen by the action-path router; a missing backend reports UNAVAILABLE without breaking the others. | - | `friday/action_path.py:25`, `friday/toolsets/desktop.py:541`, `friday/browser_readiness.py:52` | Owner decides when (A6 is ranked behind the P0s). Then: a computer-use backend interface under the action-path router, the Playwright path behind it, and a desktop backend spike (Cua Driver, pinned and licence-checked through the fabric) measured on REFERENCE-A. |
+| CUA-002 | P1 | **MISSING** | Desktop tasks run without moving the physical pointer, stealing focus or interrupting the foreground, where the OS and application allow. | On a Windows reference machine a desktop task on a background window completes with the physical pointer, the foreground window and focus unchanged, measured before and after; where the target cannot be driven in the background, that is said before acting. | - | `friday/platform/windows.py:590`, `friday/toolsets/desktop.py:541` | After CUA-001: a background desktop backend and a before/after measurement of pointer, foreground window and focus. |
+| CUA-003 | P1 | **MISSING** | Each background computer-use worker has an explicit allowed window and application set. | A session acts only on its listed windows and applications; an action on any other is refused and recorded. | - | - | Add the window and application set to the session manifest and refuse, and record, an action outside it. |
+| CUA-004 | P1 | **MISSING** | A computer-use action is not a success because the backend said so. | An action counts as done only when an independent read of the application's state afterwards shows the intended change; a backend reporting success with no change is recorded as a failure. | - | - | Build on ACT-001: a post-state verifier per computer-use action, and a failure record when the backend reports success without the change. |
+| CUA-005 | P1 | **PARTIAL** | Computer-use backend health is a real action with an independently observed post-state. | A backend is reported ready only after a real action with an independently observed post-state on this machine; a failed step is named (for example the binary blocked by code integrity, the launch failed, no accessibility tree) and the router falls back. | - | `friday/browser_readiness.py:52` | Give each desktop backend the same earned readiness (installed, signature and integrity, launch, window enumeration, accessibility read, background action, post-state) and have the router fall back on a named degraded state. |
+| CUA-006 | P1 | **MISSING** | Alternative computer-use paths are benchmarked on execution-based tasks. | The same pinned task set runs through each available path and reports success, latency, tokens, actions, retries, RAM, CPU, foreground disruption, wrong targets and verified post-state per path. | - | `scripts/journey_hybrid_browser.py` | A computer-use arena over a pinned execution-based task set (a Cua Bench pack among them) for each available path. |
+| CUA-007 | P1 | **MISSING** | Background computer use is tested for focus theft, pointer movement and window-order changes. | Each background run records focus changes, pointer movement and window-order changes, and a path that disturbs the foreground is flagged. | - | - | Record foreground window, focus, pointer position and window order before and after each run in the arena (CUA-006). |
+| CUA-008 | P1 | **MISSING** | Concurrent computer-use sessions have explicit ownership, leases and resource boundaries. | Each session has an owner (objective and worker), a lease with an expiry, its window set and resource limits; two sessions cannot act on the same window, and an expired lease stops the session. | - | `friday/governor.py:581` | A session registry with owner, lease and window set, built on the governor's leases, refusing a second session on a taken window. |
+| MODEL-011 | P2 | **MISSING** | A small local UI decision model is used only after it beats the deterministic and frontier baselines. | A small UI decision model is put on a path only after it beats the deterministic and frontier baselines on held-out execution-based tasks, with its licence checked; until then it is a research and benchmark entry. | - | - | After the arena (CUA-006): benchmark candidate UI models against the baselines; keep CUA-S1 as a research entry until then. |
 
 ## Owner direction recorded against a requirement
 

@@ -278,6 +278,10 @@ TRUST-001/002) and V7-D29 (`secrets_list` policy categories disagree between ali
   `python scripts/stress_low_ram.py --out res003_stress_REFERENCE-B.json`, and the two browser commands above.
 - Next in the slice: RES-004 (qualify on first run and on a material change, with its cause), BG-001 (background work
   waits for idle, mains power and headroom).
+- Amendment A6 (2026-09-30, §100, Appendix H): the computer-use fabric and the Cua evaluation - CUA-001..008 at P1,
+  MODEL-011 at P2, recorded, not started. OWNER DECISION PENDING: A6's text proposes a Cua Driver spike as the next
+  implementation step, while A5 put the P0s first; nothing from Cua is installed or cloned until the owner says so
+  (it would put unsigned third-party binaries in control of this desktop). Its upstream claims are unverified.
 
 ## NEXT
 
