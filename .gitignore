@@ -115,3 +115,5 @@ data/soak/
 
 # Local engineering-program progress; not product source.
 .slim/deepwork/
+# Build-harness worker checkouts (BUILD-006)
+.worktrees/
