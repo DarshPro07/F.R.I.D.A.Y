@@ -115,6 +115,33 @@ def test_a_tie_in_search_goes_to_the_more_direct_path():
     assert found[:2] == ["web_zqxreadpage", "browser_zqxreadpage"], found
 
 
+def test_a_tie_moves_a_path_that_fails_when_run_behind(monkeypatch):
+    """BROW-001: what happened when the path ran, not only whether it was the
+    right prediction, orders a tie."""
+    from friday import routing_memory
+    monkeypatch.setattr(routing_memory, "reliability", lambda text: {})
+    monkeypatch.setattr(routing_memory, "execution_reliability",
+                        lambda: {"web_zqxpage": (1, 6)})
+    router = R.Router()
+    router.load([SchemaTool("browser_zqxpage", "zqx summary of a thing"),
+                 SchemaTool("web_zqxpage", "zqx summary of a thing")])
+    found = [m["capability"] for m in router.search("zqxpage thing")]
+    assert found[:2] == ["browser_zqxpage", "web_zqxpage"], found
+
+
+def test_a_tie_moves_a_failing_path_behind_even_when_it_is_listed_first(monkeypatch):
+    """BROW-001: recorded execution outcomes feed rank too."""
+    from friday import routing_memory
+    monkeypatch.setattr(routing_memory, "reliability", lambda text: {})
+    monkeypatch.setattr(routing_memory, "execution_reliability",
+                        lambda: {"web_zqxrunpage": (1, 6)})
+    router = R.Router()
+    router.load([SchemaTool("web_zqxrunpage", "zqx summary of a thing"),
+                 SchemaTool("browser_zqxrunpage", "zqx summary of a thing")])
+    found = [m["capability"] for m in router.search("zqxrunpage thing")]
+    assert found[:2] == ["browser_zqxrunpage", "web_zqxrunpage"], found
+
+
 def test_a_tie_moves_a_path_that_keeps_failing_for_this_request_behind(monkeypatch):
     """BROW-001: recorded outcomes feed rank - the HTTP read has failed in
     four of six tries for this shape, so the browser read is offered first."""

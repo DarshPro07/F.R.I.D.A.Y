@@ -76,3 +76,54 @@ def test_one_objective_runs_a_structured_step_and_a_real_browser_step():
     assert all(step["status"] == "SUCCEEDED" for step in result["steps"]), result["steps"]
     assert by_capability["web_fetch"]["path"] == A.NATIVE_API and by_capability["web_fetch"]["saw_the_page"]
     assert by_capability["browser_inspect"]["path"] == A.DOM and by_capability["browser_inspect"]["saw_the_page"]
+
+
+def _execution_db(monkeypatch, rows):
+    import sqlite3
+
+    from friday import routing_memory
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE objective_tasks (capability TEXT, status TEXT)")
+    conn.executemany("INSERT INTO objective_tasks VALUES (?,?)", rows)
+
+    class Db:
+        _conn = conn
+
+    monkeypatch.setattr(routing_memory, "_store", lambda: Db())
+    routing_memory.forget()
+    return routing_memory
+
+
+def test_combine_sums_tallies():
+    assert A.combine({"a": (1, 2)}, {"a": (2, 3), "b": (0, 1)}, None) == {"a": (3, 5), "b": (0, 1)}
+
+
+def test_execution_outcomes_are_tallied_from_finished_tasks(monkeypatch):
+    rows = ([("web_a", "SUCCEEDED")] * 2 + [("web_a", "FAILED")] * 3
+            + [("web_a", "RUNNING"), ("", "FAILED")])
+    routing_memory = _execution_db(monkeypatch, rows)
+    try:
+        assert routing_memory.execution_reliability() == {"web_a": (2, 5)}
+    finally:
+        routing_memory.forget()
+
+
+def test_the_planner_moves_a_path_that_fails_when_run_behind_the_others(monkeypatch):
+    from friday import planner as P
+
+    rows = ([("web_zqxread", "FAILED")] * 4 + [("web_zqxread", "SUCCEEDED")]
+            + [("browser_zqxread", "SUCCEEDED")] * 5)
+    routing_memory = _execution_db(monkeypatch, rows)
+    monkeypatch.setattr(P, "candidates",
+                        lambda operation, target, limit=8: ["web_zqxread", "browser_zqxread"])
+    monkeypatch.setattr(P, "_fit", lambda intent, cid: 1)
+    try:
+        goal = P.Goal("g1", "read the zqx page", "READ", "WEB_PAGE")
+        assert P.resolve(P.Plan(goals=[goal])).goals[0].capability == "browser_zqxread"
+        monkeypatch.setattr(routing_memory, "execution_reliability", lambda: {})
+        goal = P.Goal("g1", "read the zqx page", "READ", "WEB_PAGE")
+        assert P.resolve(P.Plan(goals=[goal])).goals[0].capability == "web_zqxread"
+    finally:
+        routing_memory.forget()

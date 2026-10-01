@@ -676,7 +676,13 @@ def resolve(plan: Plan) -> Plan:
         # More than one is structurally capable, so the words decide - but
         # only among these. Text similarity ranks; it does not select, and
         # it never sees a capability the shape ruled out.
-        ranked = sorted(found, key=lambda cid: -_fit(goal.intent, cid))
+        # Equal fits go to the more direct action path (PRD v7 §48), and a
+        # path that keeps failing when run goes behind the others.
+        from friday import action_path
+        from friday import routing_memory
+        measured = routing_memory.execution_reliability()
+        ranked = sorted(found, key=lambda cid: (-_fit(goal.intent, cid),
+                                                action_path.order_key(cid, measured)))
         goal.capability = ranked[0]
         goal.confidence = 0.8
         goal.why = f"best of {len(found)} capabilities of that shape"

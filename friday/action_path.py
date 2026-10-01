@@ -55,6 +55,17 @@ def _failing(capability_id: str, reliability: dict) -> bool:
     return attempts >= MIN_ATTEMPTS and successes / attempts < MIN_SUCCESS_RATE
 
 
+def combine(*tallies: dict) -> dict:
+    """Sum several capability -> (successes, attempts) tallies, e.g. the
+    routing outcomes for a request shape and the recorded execution outcomes."""
+    out: dict[str, tuple[int, int]] = {}
+    for tally in tallies:
+        for cap, (good, total) in (tally or {}).items():
+            seen_good, seen_total = out.get(cap, (0, 0))
+            out[cap] = (seen_good + good, seen_total + total)
+    return out
+
+
 def rank(candidates, *, reliability: dict | None = None) -> list[str]:
     """`candidates` for one step, most direct path first. `reliability`
     maps a capability to (successes, attempts) for this kind of step."""

@@ -46,6 +46,7 @@ MIN_OBSERVATIONS = 2
 
 _CACHE: dict[str, tuple[float, dict]] = {}
 _RELIABILITY_CACHE: dict[str, tuple[float, dict]] = {}
+_EXECUTION_CACHE: dict[str, tuple[float, dict]] = {}
 
 
 def _store():
@@ -159,10 +160,34 @@ def reliability(text: str) -> dict[str, tuple[int, int]]:
     return tally
 
 
+def execution_reliability() -> dict[str, tuple[int, int]]:
+    """capability -> (successes, attempts) over the objective tasks that ran to
+    a SUCCEEDED or FAILED end, for `action_path.rank`. Whether a path worked
+    when run, not whether it was the right prediction. {} when nothing ran.
+
+    Never raises, for the same reason `prior` does not."""
+    hit = _EXECUTION_CACHE.get("all")
+    if hit and (time.monotonic() - hit[0]) < TTL_SECONDS:
+        return hit[1]
+    try:
+        rows = _store()._conn.execute(
+            "SELECT capability AS cap, "
+            "SUM(CASE WHEN status='SUCCEEDED' THEN 1 ELSE 0 END) AS good, "
+            "COUNT(*) AS total FROM objective_tasks "
+            "WHERE status IN ('SUCCEEDED','FAILED') AND capability IS NOT NULL "
+            "AND capability != '' GROUP BY capability")
+        tally = {row["cap"]: (int(row["good"]), int(row["total"])) for row in rows}
+    except Exception:  # noqa: BLE001
+        tally = {}
+    _EXECUTION_CACHE["all"] = (time.monotonic(), tally)
+    return tally
+
+
 def forget() -> None:
     """Drop the cache. For tests, and for after a correction is recorded."""
     _CACHE.clear()
     _RELIABILITY_CACHE.clear()
+    _EXECUTION_CACHE.clear()
 
 
 def explain(text: str) -> dict:
