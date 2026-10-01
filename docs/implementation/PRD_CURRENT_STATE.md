@@ -150,3 +150,16 @@ are single-tenant. `FR-PRV-002` is therefore `MISSING`, and it carries
 `FR-SKL-001`, `FR-CAP-003` and `FR-POL-004`.
 
 That is the first implementation target of this program.
+<!-- build-program:begin -->
+## Build program (generated; do not edit by hand)
+
+- HEAD: ae9ece3 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-01T17:55:24+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 51, "PARTIAL": 58, "VERIFIED": 35}
+- Unresolved P0: 20
+- Last full suite: 4,753 passed, 0 failed at 258e3c0
+- Last wave (2): CORE-001=VERIFIER_FAIL
+- Parked: CORE-001 (VERIFIER_FAIL)
+- Open escalations: 1
+  - CORE-001 integration: {"requirement": "CORE-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["test
+- Next ready: ACT-001, DOMAIN-001
+<!-- build-program:end -->
