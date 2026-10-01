@@ -91,6 +91,25 @@ One worker (all four touch build_kernel.py), COMPLEX class, launched detached:
 Product follow-ups stay with their rows, scheduled by the program: persisting the refined baseline across
 restarts (RES-003 EXTEND) and measuring a worker's memory into the derived policy (RES-002 EXTEND).
 
+### Status 2026-10-01 23:10 - BH-OPT-03 and BH-OPT-04 landed
+
+| Change | Commit | How verified |
+|---|---|---|
+| BH-E: RAM-slot concurrency, build-host profile, peak RSS, resume, capsule A/B arm, `roi` | 185966c | 12/12 mutations killed; RED/GREEN via build_integrate |
+| Worker-written commit subjects | 7b34181 | tests first |
+| Verifier budget floor $1, 15 turns, explicit model, receipt keeps cost + stop reason | 4c15a45 | tests first; reproduced the budget-stop JSON shape |
+| BH-F: repair loop - one squashed commit per run, `repair REQ`, program queues one repair before parking | 94a3f29 | 7/7 mutations killed; RED/GREEN via build_integrate |
+
+Measured on this host: build-host profile stored (`data/build_runs/host_profile.json`); worker peaks 648 MB
+(BROW-001 resume) and 409 MB (BH-F) against the 1.5 GB default. At 2.5 GB available the kernel computed 0
+slots before any measurement; the measured peaks raise that to one worker.
+
+BROW-001: the killed run resumed in 6 turns ($0.32). Its first integration hit VERIFIER_FAIL with an empty
+receipt (the defect fixed in 4c15a45); the second, a real verdict ($0.12): the acceptance needs the golden
+journey run, two tests in tests/test_capability_router.py share a name (one never runs), and execution
+reliability is per capability, not per request shape. Those findings went back to the worker via `repair`.
+CORE-001's killed run is still on disk, resumable.
+
 ## Resume (fresh session)
 
 Current: harness complete at 59815a0. Next: `build_program.py --priority P0`, then read
