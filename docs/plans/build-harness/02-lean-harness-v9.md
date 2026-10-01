@@ -71,6 +71,26 @@ Rulings (reversible; consequence if wrong in brackets):
 - A row integrated PARTIAL twice is parked (escalation `partial`), not relaunched by every run.
 - Default spend cap $10/run fits one P0-class worker per wave; raise `--max-usd` for two.
 
+## BH-OPT-03 - what the owner's v10 directive and the reaped run still require (2026-10-01)
+
+v10 (`00-owner-directive-2026-10-01.md` when extracted) adds: the capsule must win an A/B before it is trusted
+(§11), per-worker token/cost/ROI accounting (§19), concurrency from the governor sized for this host (§7),
+and resume from artifacts after an interrupted session (§40). The reaped run shows why §7 is not optional:
+the kernel's process governor had a provisional baseline (its own first reading), so a loaded host read NORMAL
+and two workers were admitted at 3.1 GB available. No measured profile is stored on this host.
+
+One worker (all four touch build_kernel.py), COMPLEX class, launched detached:
+
+| # | Upgrade | Where |
+|---|---|---|
+| E | Resource-true concurrency: governor configured from a build-host profile (`build_kernel.py qualify` -> `data/build_runs/host_profile.json`, never the live profile); CRITICAL 0, HIGH 1, else min(cap, max_workers, headroom slots); slots = (available - reserve) / measured worker peak (default 1.5 GB) | build_kernel.py |
+| F | Worker peak RSS measured per run (process tree, psutil) | build_kernel.py |
+| G | Resumable killed runs: `.build/run.json` at launch; `resume REQ` relaunches `--resume <sid>`; the program resumes a resumable stale worktree once instead of parking it | both |
+| H | Capsule A/B arm (stable 50/50 by id until decided), orientation metrics (searches, tool calls, tokens before first edit), `roi` report incl. AgentROI | both |
+
+Product follow-ups stay with their rows, scheduled by the program: persisting the refined baseline across
+restarts (RES-003 EXTEND) and measuring a worker's memory into the derived policy (RES-002 EXTEND).
+
 ## Resume (fresh session)
 
 Current: harness complete at 59815a0. Next: `build_program.py --priority P0`, then read
