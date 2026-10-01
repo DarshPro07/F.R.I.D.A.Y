@@ -39,6 +39,8 @@ class FakeKernel:
         self.watched = 0
         self.resumable_ids: set[str] = set()  # lower-case ids whose stale worktree can be resumed
         self.resumes: list[str] = []
+        self.repairs: list[str] = []
+        self.repair_errors: dict[str, str] = {}
 
     def load_rows(self):
         return [r for r in self.rows]
@@ -60,6 +62,12 @@ class FakeKernel:
 
     def resume(self, req, *, worktrees):
         self.resumes.append(req)
+        return SimpleNamespace(req=req)
+
+    def repair(self, req, *, worktrees):
+        if req in self.repair_errors:
+            raise KErr(self.repair_errors[req])
+        self.repairs.append(req)
         return SimpleNamespace(req=req)
 
     def mode_for(self, row):
@@ -249,6 +257,8 @@ def test_integrated_is_recorded_and_not_relaunched_even_if_the_ledger_is_stale(e
 def test_non_integrated_result_parks_with_escalation(env, result):
     k = FakeKernel(ids=("A",))
     k.script = {"A": [rec("A")]}
+    env.state.parent.mkdir(parents=True, exist_ok=True)
+    env.state.write_text(json.dumps({"repairs": {"A": 1}}), encoding="utf-8")  # its one repair is spent
     go(env, k, bi=FakeIntegrator(k, {"A": result}))
     st = state_of(env)
     assert st["parked"] == {"A": result}
@@ -619,3 +629,84 @@ def test_a_failed_docs_commit_is_an_escalation_not_silence(env):
     go(env, k)
     esc = state_of(env)["escalations"]
     assert esc and esc[-1]["kind"] == "docs_commit" and "index.lock" in esc[-1]["detail"]
+
+
+# ------------------------------------------------------------------ repair loop
+
+class Sequence(FakeIntegrator):
+    """integrate() answers each call from a per-requirement list, the last one repeating."""
+
+    def __init__(self, kernel, seq):
+        super().__init__(kernel)
+        self.seq = {r: list(v) for r, v in seq.items()}
+
+    def integrate(self, req):
+        self.results[req] = self.seq[req].pop(0) if len(self.seq[req]) > 1 else self.seq[req][0]
+        return super().integrate(req)
+
+
+@pytest.mark.parametrize("verdict", ["VERIFIER_FAIL", "NOT_RED", "NOT_GREEN", "NO_TEST", "FAILED_INTEGRATION"])
+def test_a_rejected_change_is_repaired_once_then_integrated(env, verdict):
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A"), rec("A")]}
+    res, bi = go(env, k, bi=Sequence(k, {"A": [verdict, "INTEGRATED"]}))
+    st = state_of(env)
+    assert k.repairs == ["A"] and [x[0] for x in k.launches] == ["A"]
+    assert bi.calls == ["A", "A"] and "A" not in st["parked"]
+    assert st["repairs"] == {"A": 1} and st["repair_queue"] == {}
+
+
+def test_a_change_is_repaired_only_once(env):
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A"), rec("A")]}
+    go(env, k, bi=Sequence(k, {"A": ["VERIFIER_FAIL"]}))
+    st = state_of(env)
+    assert k.repairs == ["A"] and st["parked"]["A"] == "VERIFIER_FAIL" and st["repair_queue"] == {}
+
+
+@pytest.mark.parametrize("verdict", ["CONFLICT", "REFUSED"])
+def test_a_conflict_or_refusal_is_never_repaired(env, verdict):
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+    res = "CONFLICT" if verdict == "CONFLICT" else KErr("refused")
+    go(env, k, bi=FakeIntegrator(k, {"A": res}))
+    st = state_of(env)
+    assert k.repairs == [] and "A" in st["parked"] and st["repair_queue"] == {}
+
+
+def test_a_queued_repair_survives_a_restart(env):
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A"), rec("A")]}
+    go(env, k, bi=Sequence(k, {"A": ["NO_TEST", "INTEGRATED"]}), max_waves=1)
+    queued = state_of(env)["repair_queue"]
+    assert list(queued) == ["A"] and queued["A"]["result"] == "NO_TEST" and queued["A"]["at"]
+    (env.wt / "a").mkdir()  # the rejected worktree is still on disk: not a stale one
+    go(env, k, bi=Sequence(k, {"A": ["INTEGRATED"]}))
+    assert k.repairs == ["A"] and state_of(env)["repair_queue"] == {} and "A" not in state_of(env)["parked"]
+
+
+def test_a_failed_repair_launch_parks_with_an_escalation(env):
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+    k.repair_errors = {"A": "no session"}
+    go(env, k, bi=Sequence(k, {"A": ["VERIFIER_FAIL"]}))
+    st = state_of(env)
+    assert st["parked"]["A"] == "repair failed" and st["repair_queue"] == {}
+    assert any(e["kind"] == "repair" and "no session" in e["detail"] for e in st["escalations"])
+
+
+def test_repairs_launch_first_and_count_toward_concurrency(env):
+    k = FakeKernel(ids=("A", "B"), level=1)
+    k.script = {"A": [rec("A"), rec("A")], "B": [rec("B")]}
+    go(env, k, bi=Sequence(k, {"A": ["VERIFIER_FAIL", "INTEGRATED"], "B": ["INTEGRATED"]}), max_waves=2)
+    st = state_of(env)
+    assert [w["reqs"] for w in st["waves"]] == [["A"], ["A"]]  # the repair took the only slot
+    assert k.repairs == ["A"] and [x[0] for x in k.launches] == ["A"]
+
+
+def test_load_state_keeps_repairs_and_the_repair_queue(tmp_path):
+    f = tmp_path / "s.json"
+    f.write_text(json.dumps({"repairs": {"A": 1}, "repair_queue": {"B": {"result": "NO_TEST", "at": "t"}}}))
+    st = BP.load_state(f)
+    assert st["repairs"] == {"A": 1} and st["repair_queue"]["B"]["result"] == "NO_TEST"
+    assert BP.load_state(tmp_path / "none.json")["repair_queue"] == {}

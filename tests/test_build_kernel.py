@@ -822,3 +822,85 @@ def test_commit_subject_falls_back_without_cutting_a_word(repo, tmp_path):
     K.finalize(run, None, tmp_path / "runs")
     subject = _git(wt, "log", "-1", "--format=%s")
     assert subject == "build(R-1): Added the wave controller that queues launches watches and"
+
+
+# ------------------------------------------------------------------ repair loop
+
+def _evidence_done(wt, summary="s"):
+    (wt / ".build" / "evidence.json").write_text(json.dumps({"status": "DONE", "summary": summary}))
+
+
+def _count(wt, base):
+    return int(_git(wt, "rev-list", "--count", f"{base}..HEAD"))
+
+
+def test_a_second_finalize_squashes_onto_one_commit_from_base(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    (wt / "a.py").write_text("a = 1\n")
+    _evidence_done(wt)
+    first = K.finalize(run, None, tmp_path / "runs")
+    (wt / "b.py").write_text("b = 1\n")
+    second = K.finalize(run, None, tmp_path / "runs")
+    assert _count(wt, run.base_sha) == 1 and second["commit"] != first["commit"]
+    assert _git(wt, "rev-parse", f"{second['commit']}~1") == run.base_sha
+    assert sorted(second["files_changed"]) == ["a.py", "b.py"]
+
+
+def test_a_second_finalize_with_no_new_change_returns_the_same_commit(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    (wt / "a.py").write_text("a = 1\n")
+    _evidence_done(wt)
+    first = K.finalize(run, None, tmp_path / "runs")
+    second = K.finalize(run, None, tmp_path / "runs")
+    assert second["commit"] == first["commit"] != ""
+    assert second["files_changed"] == ["a.py"] and _count(wt, run.base_sha) == 1
+
+
+def test_repair_prompt_carries_every_finding_and_the_rule():
+    p = K.repair_prompt({"requirement": "R-1", "result": "VERIFIER_FAIL", "detail": "bad merge",
+                         "verifier": {"verdict": "FAIL", "failing_criteria": ["crit one"],
+                                      "evidence_refs": ["a.py:3"]}})
+    for text in ("VERIFIER_FAIL", "crit one", "a.py:3", "bad merge", "never faked", ".build/evidence.json"):
+        assert text in p
+    q = K.repair_prompt({"requirement": "R-1", "result": "NOT_GREEN",
+                         "red_green": {"result": "NOT_GREEN", "tests": ["tests/t.py"], "tail": "E assert 1"}})
+    assert "tests/t.py" in q and "E assert 1" in q
+
+
+def _repairable(repo, tmp_path, integration=True, session="S1"):
+    run, wt = _done_run(repo, tmp_path)
+    (wt / "a.py").write_text("a = 1\n")
+    _evidence_done(wt)
+    runs = tmp_path / "runs"
+    K.finalize(run, None, runs)
+    if not session:
+        rec = json.loads((runs / "R-1.json").read_text())
+        (runs / "R-1.json").write_text(json.dumps({**rec, "session_id": ""}))
+    K._write_run_meta(wt, {"req": "R-1", "mode": "SHIP", "klass": "NORMAL",
+                           "base_sha": run.base_sha, "branch": "build/r-1", "model": "sonnet"})
+    if integration:
+        (runs / "R-1.integration.json").write_text(json.dumps(
+            {"requirement": "R-1", "result": "NO_TEST", "detail": "no test touched"}))
+    return wt, runs
+
+
+def test_repair_resumes_the_recorded_session_at_half_budget(monkeypatch, repo, tmp_path):
+    wt, runs = _repairable(repo, tmp_path)
+    cmds = []
+    monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
+    run = K.repair("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
+    cmd = cmds[0]
+    assert cmd[cmd.index("--resume") + 1] == "S1"
+    assert cmd[cmd.index("--max-turns") + 1] == "12" and cmd[cmd.index("--max-budget-usd") + 1] == "1.5"
+    assert any("NO_TEST" in c and "no test touched" in c for c in cmd)
+    assert run.repairs == 1 and run.base_sha and run.wt == wt
+
+
+@pytest.mark.parametrize("missing", ["worktree", "session", "integration"])
+def test_repair_refuses_without_worktree_session_or_integration(monkeypatch, repo, tmp_path, missing):
+    wt, runs = _repairable(repo, tmp_path, integration=missing != "integration",
+                           session="" if missing == "session" else "S1")
+    root = tmp_path / ("elsewhere" if missing == "worktree" else "wts")
+    monkeypatch.setattr(K, "_start", lambda cmd, w: pytest.fail("must not relaunch"))
+    with pytest.raises(K.KernelError):
+        K.repair("R-1", worktrees=root, runs_dir=runs, repo=repo)

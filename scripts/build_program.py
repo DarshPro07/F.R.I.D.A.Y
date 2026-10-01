@@ -35,6 +35,10 @@ DOCS_DIR = "docs/implementation"
 BEGIN = b"<!-- build-program:begin -->"
 END = b"<!-- build-program:end -->"
 MAX_ATTEMPTS = 2
+MAX_REPAIRS = 1
+# Rejections a worker can answer by editing its own change; CONFLICT is a merge
+# problem and an integrator refusal is a refusal, so neither is sent back.
+REPAIRABLE = ("VERIFIER_FAIL", "NOT_RED", "NOT_GREEN", "NO_TEST", "FAILED_INTEGRATION")
 NO_PROGRESS_WAVES = 2
 GIT_S = 60
 LEDGER_S = 300
@@ -84,6 +88,8 @@ def load_state(path: Path) -> dict:
     return {"last_full_suite": old.get("last_full_suite") or dict(LAST_SUITE),
             "waves": list(old.get("waves") or []), "parked": dict(old.get("parked") or {}),
             "attempts": dict(old.get("attempts") or {}),
+            "repairs": dict(old.get("repairs") or {}),
+            "repair_queue": dict(old.get("repair_queue") or {}),
             "partials": dict(old.get("partials") or {}),
             "capsule_decision": old.get("capsule_decision"),
             "escalations": list(old.get("escalations") or []),
@@ -158,7 +164,7 @@ def queue_for(rows: list[dict], state: dict, integrated: set[str], worktrees: Pa
     out = []
     for row in k.ready(rows, cfg["depends"], cfg["order"]):
         rid = row["id"]
-        if rid in state["parked"] or rid in integrated:
+        if rid in state["parked"] or rid in integrated or rid in state["repair_queue"]:
             continue
         if priority and row.get("priority") != priority:
             continue
@@ -221,6 +227,35 @@ def launch_all(chosen, state: dict, k=build_kernel, worktrees: Path | None = Non
     return runs
 
 
+def pending_repairs(rows: list[dict], state: dict, integrated: set[str],
+                    priority: str | None, k=build_kernel) -> list[tuple[str, str]]:
+    """Queued repairs as (req, budget class), oldest first; a repair costs half its class budget."""
+    by_id = {r["id"]: r for r in rows}
+    out = []
+    for rid in sorted(state["repair_queue"], key=lambda r: state["repair_queue"][r].get("at", "")):
+        if rid in state["parked"] or rid in integrated:
+            continue
+        row = by_id.get(rid)
+        if priority and (row or {}).get("priority") != priority:
+            continue
+        out.append((rid, k.budget_class(row) if row else "NORMAL"))
+    return out
+
+
+def launch_repairs(repairs: list[tuple[str, str]], state: dict, k=build_kernel,
+                   worktrees: Path | None = None) -> list:
+    """Resume each queued requirement's own session with the integrator's findings."""
+    runs = []
+    for rid, _ in repairs:
+        state["repair_queue"].pop(rid, None)
+        state["repairs"][rid] = state["repairs"].get(rid, 0) + 1
+        try:
+            runs.append(k.repair(rid, worktrees=worktrees))
+        except k.KernelError as exc:
+            park(state, rid, "repair failed", "repair", str(exc))
+    return runs
+
+
 def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=build_integrate) -> tuple[str, float, bool]:
     """Apply one watched run's outcome. Returns (result, spend, made_progress)."""
     req, st = rec["requirement"], rec["state"]
@@ -243,6 +278,9 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
                     park(state, req, f"partial x{state['partials'][req]}", "partial",
                          "integrated twice without closing its gaps")
             return "INTEGRATED", spend, True
+        if res["result"] in REPAIRABLE and state["repairs"].get(req, 0) < MAX_REPAIRS:
+            state["repair_queue"][req] = {"result": res["result"], "at": now()}
+            return res["result"], spend, False
         park(state, req, res["result"], "integration", json.dumps(res, default=str)[:300])
         return res["result"], spend, False
     if st == "BLOCKED":
@@ -269,25 +307,38 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
     spent, idle, waves_run, stop = 0.0, 0, 0, None
     while not stop:
         rows = k.load_rows()
-        chosen = []
+        chosen, fixes = [], []
+        repairs = pending_repairs(rows, state, integrated, priority, k)
         if waves_run >= max_waves:
             stop = "max waves"
         elif spent >= max_usd:
             stop = "spend"
-        elif not (queue := queue_for(rows, state, integrated, worktrees, priority, k, not dry_run, resumed)):
+        elif not (queue := queue_for(rows, state, integrated, worktrees, priority, k, not dry_run, resumed)) \
+                and not repairs:
             stop = "no ready work"
         elif (n := k.concurrency(cap=cap)[0]) <= 0:
             stop = "pressure"
-        elif not (chosen := pick_wave(queue, cap, n, max_usd - spent, k)):
-            stop = "spend"
+        else:
+            left = max_usd - spent
+            for rid, klass in repairs[:n]:
+                if k.BUDGETS[klass][1] / 2 > left:
+                    break
+                fixes.append((rid, klass))
+                left -= k.BUDGETS[klass][1] / 2
+            chosen = pick_wave(queue, cap, n - len(fixes), left, k) if n > len(fixes) else []
+            if not fixes and not chosen:
+                stop = "spend"
         if stop:
             break
         if dry_run:
+            for rid, klass in fixes:
+                out(f"{rid} REPAIR {klass}")
             for row, mode, klass in chosen:
                 out(f"{row['id']} {mode} {klass}")
             return {"stop_reason": "dry run", "waves": []}
         results, wave_spend, progress = {}, 0.0, False
-        for rec in k.watch(launch_all(chosen, state, k, worktrees, resumed)):
+        runs = launch_repairs(fixes, state, k, worktrees) + launch_all(chosen, state, k, worktrees, resumed)
+        for rec in k.watch(runs):
             res, cost, ok = settle(rec, state, integrated, k, bi)
             results[rec["requirement"]] = res
             wave_spend += cost
@@ -296,7 +347,7 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
         waves_run += 1
         idle = 0 if progress else idle + 1
         state["spend_usd_total"] = round(state["spend_usd_total"] + wave_spend, 4)
-        state["waves"].append({"n": len(state["waves"]) + 1, "reqs": [r["id"] for r, _, _ in chosen],
+        state["waves"].append({"n": len(state["waves"]) + 1, "reqs": [rid for rid, _ in fixes] + [r["id"] for r, _, _ in chosen],
                                "results": results, "spend": round(wave_spend, 4)})
         stop = "no progress" if idle >= NO_PROGRESS_WAVES else None
         rows = k.load_rows()

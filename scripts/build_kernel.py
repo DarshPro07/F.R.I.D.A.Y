@@ -380,6 +380,7 @@ class Running:
     wall_s: float = DEFAULT_WALL_S
     repo: Path = ROOT
     continued: bool = False
+    repairs: int = 0
     capsule: bool = False
     peak_rss_mb: float | None = None
 
@@ -579,6 +580,77 @@ def resume(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
                    continued=True, capsule=bool(meta.get("capsule")))
 
 
+def _read_json(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def repair_prompt(integration: dict) -> str:
+    """The integrator's rejection, as a prompt for the worker that made the change."""
+    result = integration.get("result", "FAILED_INTEGRATION")
+    lines = [f"Your change for {integration.get('requirement', 'this requirement')} was "
+             f"rejected at integration: {result}."]
+    verifier = integration.get("verifier") or {}
+    if verifier:
+        lines.append(f"Verifier verdict: {verifier.get('verdict', '')}.")
+        for label, key in (("Failing criteria", "failing_criteria"),
+                           ("Evidence refs", "evidence_refs")):
+            items = verifier.get(key) or []
+            if items:
+                lines.append(f"{label}:")
+                lines += [f"- {item}" for item in items]
+    rg = integration.get("red_green") or {}
+    if result in ("NOT_RED", "NOT_GREEN", "NO_TEST") and rg:
+        lines.append(f"Red/green check: {rg.get('result', result)}.")
+        if rg.get("tests"):
+            lines.append("Tests: " + ", ".join(str(t) for t in rg["tests"]))
+        if rg.get("tail"):
+            lines += ["Test output tail:", str(rg["tail"])]
+    if integration.get("detail"):
+        lines.append(f"Detail: {integration['detail']}")
+    lines.append("Fix every finding you can in code and tests. A finding that needs something "
+                 "outside this worktree (a live run, hardware, an owner decision) is recorded "
+                 "in evidence gaps, never faked. Then rewrite .build/evidence.json (status, "
+                 "summary, acceptance_met, gaps, commit_subject).")
+    return "\n".join(lines)
+
+
+def repair(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR,
+           repo: Path = ROOT, model: str | None = None) -> Running:
+    """Resume the worker's own session in its worktree with the integrator's
+    findings, once, at half its class limits."""
+    wt = (worktrees or _worktrees_root()) / req.lower()
+    if not wt.is_dir():
+        raise KernelError(f"{req} has no worktree at {wt}")
+    run_rec = _read_json(runs_dir / f"{req}.json")
+    sid = run_rec.get("session_id")
+    if not sid:
+        raise KernelError(f"{req} has no recorded session to repair")
+    integration = _read_json(runs_dir / f"{req}.integration.json")
+    if not integration:
+        raise KernelError(f"{req} has no integration record to repair from")
+    meta = _run_meta(wt)
+    base_sha = meta.get("base_sha") or run_rec.get("base_sha")
+    if not base_sha:
+        raise KernelError(f"{req} has no base commit to repair against")
+    klass = meta.get("klass") or run_rec.get("budget_class") or "NORMAL"
+    turns, budget, wall = BUDGETS[klass]
+    started = time.time()
+    model = model or meta.get("model") or "sonnet"
+    branch = meta.get("branch") or run_rec.get("branch", "")
+    _write_run_meta(wt, {**meta, "req": req, "mode": "SHIP", "klass": klass,
+                         "base_sha": base_sha, "branch": branch, "model": model,
+                         "started": started})
+    cmd = worker_command(model, max(1, turns // 2), budget / 2, resume=str(sid),
+                         prompt=repair_prompt(integration))
+    return Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
+                   base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
+                   continued=True, repairs=1, capsule=bool(meta.get("capsule")))
+
+
 # ---------------------------------------------------------------- watch
 
 def kill_tree(proc: subprocess.Popen) -> None:
@@ -698,9 +770,18 @@ def commit_body(req: str, evidence: dict) -> str:
 
 
 def _commit_run(run: Running, evidence: dict) -> tuple[str, list[str]]:
-    """Commit the worker's diff on its build branch; ('', []) when nothing changed."""
-    if not run.base_sha or not _changes(run.wt):
+    """Commit the worker's diff on its build branch as ONE commit from base_sha
+    (build_integrate cherry-picks only that commit, so a repair squashes onto the
+    first run's commit); ('', []) when nothing changed since base_sha."""
+    if not run.base_sha:
         return "", []
+    head = _git(["rev-parse", "HEAD"], run.wt, 30)
+    if not _changes(run.wt):
+        if head == run.base_sha:
+            return "", []
+        return head, _git(["diff", "--name-only", run.base_sha, head], run.wt, 60).splitlines()
+    if head != run.base_sha:
+        _git(["reset", "--soft", run.base_sha], run.wt, 60)
     # Stage everything, then unstage the kernel's own files. An exclude
     # pathspec would do it in one step, but git refuses a pathspec naming a
     # path .gitignore already ignores, and this repository ignores .build/.
@@ -950,6 +1031,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("qualify")
     sub.add_parser("roi")
     sub.add_parser("resume").add_argument("req")
+    sub.add_parser("repair").add_argument("req")
     sub.add_parser("status")
     w = sub.add_parser("waves")
     rw = sub.add_parser("run-wave")
@@ -985,6 +1067,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "resume":
             for rec in watch([resume(args.req)]):
+                print(f"{rec['requirement']}: {rec['state']}")
+            return 0
+        if args.cmd == "repair":
+            for rec in watch([repair(args.req)]):
                 print(f"{rec['requirement']}: {rec['state']}")
             return 0
         rows, cfg = load_rows(), load_config()
