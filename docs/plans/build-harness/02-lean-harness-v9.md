@@ -110,9 +110,27 @@ journey run, two tests in tests/test_capability_router.py share a name (one neve
 reliability is per capability, not per request shape. Those findings went back to the worker via `repair`.
 CORE-001's killed run is still on disk, resumable.
 
+### Status 2026-10-01 23:40 - program running on P0, stopped on host memory
+
+- BROW-001 VERIFIED (ae9ece3): resume -> verifier FAIL (real findings) -> `repair` -> verifier PASS -> live golden
+  journey re-run outside the worker (1 passed). Per-request-shape scoping ruled a refinement (its next action).
+- Fixed on the way: VERIFIED ledger entries now carry evidence (9c5f438 - `--check` would have refused them);
+  a parked requirement no longer stops the program (2ccccc9 - CORE-001's two rejections had stopped it).
+- CORE-001 PARKED (verifier FAIL twice, worker itself `acceptance_met: false`); escalation in
+  `data/build_state.json`. Needs an OWNER decision: must every Hermes delegation have a verifier, and how is a check
+  derived from free-text acceptance? Also open: verifier blocks the gateway reader thread up to 120 s; verdict not
+  written to the objective store; an `audit.sqlite3` appears in the delegation workspace. Branch build/core-001 kept.
+- Third program run stopped at once on `pressure`: 3.1 GB available, reserve 1.5 GB, worker estimate 1.7 GB
+  (CORE-001's measured peak; BH-F 409 MB, BROW-001 776 MB) -> 0 slots. Chrome held ~7 GB. Owner choices: free
+  memory, accept a smaller reserve, or run on REFERENCE-B. The gate is not overridden by the controller.
+
 ## Resume (fresh session)
 
-Current: harness complete at 59815a0. Next: `build_program.py --priority P0`, then read
+`git status`; read `data/build_state.json` (parked, escalations, stop_reason); `build_kernel.py concurrency`;
+then `build_program.py --priority P0 --max-waves 6 --max-usd 15` started with Start-Process (never as a harness
+background task).
+
+Earlier: harness complete at 59815a0. Next: `build_program.py --priority P0`, then read
 `data/build_state.json` (stop_reason, waves, parked, escalations) - not the worker transcripts.
 
 First P0 run (2026-09-30 23:44, `--max-waves 3 --max-usd 15`) was **killed by Claude Code's low-memory reaper**
