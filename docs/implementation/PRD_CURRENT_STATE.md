@@ -153,7 +153,7 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: ae9ece3 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-01T17:55:24+00:00
+- HEAD: 2ccccc9 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-01T17:57:15+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 51, "PARTIAL": 58, "VERIFIED": 35}
 - Unresolved P0: 20
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
