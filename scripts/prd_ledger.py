@@ -2823,6 +2823,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "EXTEND: feed execution outcomes (a path's recorded successes and failures when run) into rank(), "
             "and let the planner choose a step's path with them."),
     }),
+    ('BROW-001', {
+        "status": PARTIAL,
+        "current_implementation": "Execution outcomes (SUCCEEDED/FAILED tasks per capability) feed action_path.rank via routing_memory.execution_reliability; router search and the planner's tie-break use them. Live golden journey (web_fetch + headless Chromium) ran and passed; duplicate test name fixed. (build run, commit 3a27257f8)",
+        "next_action": 'GAPS: execution_reliability is a per-capability tally over all runs, not scoped to a request shape or recency window; chosen because execution success is mostly a property of the capability, and rank() only reorders ties, never changes what is offered. Scoping needs an owner decision on a run-to-shape key.',
+    }),
 ]
 
 
