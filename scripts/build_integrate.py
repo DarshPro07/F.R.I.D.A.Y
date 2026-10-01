@@ -39,6 +39,8 @@ VERDICTS = ("PASS", "FAIL", "INSUFFICIENT_EVIDENCE")
 VERIFIER_TOOLS = ",".join(("Read", "Glob", "Grep", "Bash(git diff:*)",
                            "Bash(git log:*)", "Bash(git show:*)"))
 PATCH_CAP = 40 * 1024
+VERIFIER_FLOOR_USD = 1.0
+VERIFIER_TURNS = 15
 GIT_S = 120
 TEST_S = 900
 VERIFIER_S = 900
@@ -143,13 +145,13 @@ def red_green(run: dict, tests: list[str], repo: Path = ROOT, python: str = VENV
 
 # ---------------------------------------------------------------- verifier
 
+def _protected(path: str) -> bool:
+    f = path.replace("\\", "/")
+    return f in PROTECTED or "secret" in f or "broker" in f
+
+
 def needs_verifier(row: dict, files: list[str]) -> bool:
-    if row.get("priority") == "P0":
-        return True
-    for f in (p.replace("\\", "/") for p in files):
-        if f in PROTECTED or "secret" in f or "broker" in f:
-            return True
-    return False
+    return row.get("priority") == "P0" or any(_protected(f) for f in files)
 
 
 def verifier_prompt(row: dict, run: dict, rg: dict, repo: Path = ROOT) -> str:
@@ -179,11 +181,21 @@ Use only the material below and read-only tools. Reply with ONE JSON object and 
 """
 
 
-def verifier_command(cost_usd: float, exe: str | None = None) -> list[str]:
-    budget = max(0.25, 0.25 * float(cost_usd or 0))
-    return [exe or shutil.which("claude") or "claude", "-p", "--allowedTools", VERIFIER_TOOLS,
+def verifier_model(files: list[str]) -> str:
+    """Opus adjudicates trust-boundary changes; other consequential work gets a
+    fresh Sonnet - the verifier's independence is its fresh context."""
+    return "opus" if any(_protected(f) for f in files) else "sonnet"
+
+
+def verifier_command(cost_usd: float, files: list[str] = (), exe: str | None = None) -> list[str]:
+    """A quarter of the implementer's cost, never below the floor: the verifier
+    pays for its own system prompt before it reads a line of the change."""
+    budget = max(VERIFIER_FLOOR_USD, 0.25 * float(cost_usd or 0))
+    return [exe or shutil.which("claude") or "claude", "-p", "--model", verifier_model(list(files)),
+            "--allowedTools", VERIFIER_TOOLS,
             "--strict-mcp-config", "--settings", '{"disableAllHooks": true}',
-            "--max-turns", "10", "--max-budget-usd", f"{budget:.2f}", "--output-format", "json"]
+            "--max-turns", str(VERIFIER_TURNS), "--max-budget-usd", f"{budget:.2f}",
+            "--output-format", "json"]
 
 
 def default_runner(cmd: list[str], prompt: str, cwd: Path, timeout: int = VERIFIER_S) -> str:
@@ -192,14 +204,27 @@ def default_runner(cmd: list[str], prompt: str, cwd: Path, timeout: int = VERIFI
 
 
 def parse_receipt(stdout: str) -> dict:
-    """The first JSON object carrying a verdict in the verifier's result text."""
-    text = stdout
+    """The first JSON object carrying a verdict in the verifier's result text,
+    with what the run cost and how it stopped when the CLI reported that."""
+    text, meta = stdout, {}
     try:
         outer = json.loads(stdout)
-        if isinstance(outer, dict) and isinstance(outer.get("result"), str):
-            text = outer["result"]
     except ValueError:
-        pass
+        outer = None
+    if isinstance(outer, dict):
+        if isinstance(outer.get("result"), str):
+            text = outer["result"]
+        meta = {"cost_usd": outer.get("total_cost_usd"), "stop": outer.get("subtype")}
+        if outer.get("is_error") or str(outer.get("subtype", "")).startswith("error"):
+            errors = "; ".join(map(str, outer.get("errors") or []))
+            return {"verdict": "INSUFFICIENT_EVIDENCE", "requirement_ids": [], "evidence_refs": [],
+                    "failing_criteria": [f"verifier stopped: {outer.get('subtype')} {errors}".strip()],
+                    **meta}
+    receipt = _first_verdict(text)
+    return {**receipt, **meta}
+
+
+def _first_verdict(text: str) -> dict:
     dec, i = json.JSONDecoder(), 0
     while (i := text.find("{", i)) != -1:
         try:
@@ -222,7 +247,7 @@ def run_verifier(row: dict, run: dict, rg: dict, *, repo: Path = ROOT, runner=No
     if not cwd.is_dir():
         cwd = repo
     try:
-        out = (runner or default_runner)(verifier_command(run.get("cost_usd", 0)),
+        out = (runner or default_runner)(verifier_command(run.get("cost_usd", 0), run.get("files_changed", [])),
                                          verifier_prompt(row, run, rg, repo), cwd)
     except (subprocess.SubprocessError, OSError) as exc:
         return {"verdict": "INSUFFICIENT_EVIDENCE", "requirement_ids": [],

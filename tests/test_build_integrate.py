@@ -306,11 +306,19 @@ def test_verifier_prompt_and_command(tmp_path):
     repo, runs, run, rows = setup(tmp_path)
     prompt = bi.verifier_prompt(rows[0], run, {"result": "OK"}, repo)
     assert "twice doubles" in prompt and "adds twice" in prompt and "calc.py" in prompt and "def twice" in prompt
-    cmd = bi.verifier_command(2.0, exe="claude")
-    assert cmd[cmd.index("--max-budget-usd") + 1] == "0.50"
-    assert bi.verifier_command(0.1, exe="claude")[cmd.index("--max-budget-usd") + 1] == "0.25"
-    assert cmd[cmd.index("--max-turns") + 1] == "10" and "--strict-mcp-config" in cmd
+    # A quarter of the implementer's cost, but never below the floor: the
+    # verifier's own system prompt costs ~27k tokens before it reads a line,
+    # and a $0.25 cap ran out before BROW-001's verifier could answer.
+    cmd = bi.verifier_command(8.0, exe="claude")
+    assert cmd[cmd.index("--max-budget-usd") + 1] == "2.00"
+    low = bi.verifier_command(0.3, exe="claude")
+    assert low[low.index("--max-budget-usd") + 1] == f"{bi.VERIFIER_FLOOR_USD:.2f}" and bi.VERIFIER_FLOOR_USD >= 1.0
+    assert cmd[cmd.index("--max-turns") + 1] == "15" and "--strict-mcp-config" in cmd
     assert cmd[cmd.index("--allowedTools") + 1] == bi.VERIFIER_TOOLS and "Edit" not in bi.VERIFIER_TOOLS
+    # Opus adjudicates trust-boundary changes; other P0 work gets a fresh Sonnet.
+    assert cmd[cmd.index("--model") + 1] == "sonnet"
+    sec = bi.verifier_command(1.0, files=["friday/policy.py"], exe="claude")
+    assert sec[sec.index("--model") + 1] == "opus"
 
 
 def test_patch_is_capped(tmp_path):
@@ -331,7 +339,19 @@ def test_patch_is_capped(tmp_path):
 def test_parse_receipt(text, verdict):
     receipt = bi.parse_receipt(text)
     assert receipt["verdict"] == verdict
-    assert set(receipt) == {"verdict", "requirement_ids", "failing_criteria", "evidence_refs"}
+    assert {"verdict", "requirement_ids", "failing_criteria", "evidence_refs"} <= set(receipt)
+
+
+def test_a_verifier_that_ran_out_of_budget_says_so_and_its_cost_is_kept():
+    out = json.dumps({"type": "result", "subtype": "error_max_budget_usd", "is_error": True,
+                      "result": None, "total_cost_usd": 0.31, "errors": ["Reached maximum budget ($0.25)"]})
+    receipt = bi.parse_receipt(out)
+    assert receipt["verdict"] == "INSUFFICIENT_EVIDENCE" and receipt["cost_usd"] == 0.31
+    assert receipt["stop"] == "error_max_budget_usd"
+    assert any("error_max_budget_usd" in c for c in receipt["failing_criteria"])
+    ok = bi.parse_receipt(json.dumps({"subtype": "success", "total_cost_usd": 0.4,
+                                      "result": '{"verdict": "PASS"}'}))
+    assert ok["verdict"] == "PASS" and ok["cost_usd"] == 0.4 and ok["stop"] == "success"
 
 
 # ---------------------------------------------------------------- ledger
