@@ -201,22 +201,39 @@ def test_spend_stop_after_a_wave_reaches_the_limit(env):
     assert k.launches == [("A", "SHIP", "map-A")]
 
 
-def test_no_progress_after_two_idle_waves(env):
+def test_no_progress_after_two_waves_of_worker_failures(env):
+    # "No progress" means the workers themselves keep failing - a broken
+    # environment - not that requirements keep getting parked.
     k = FakeKernel(ids=("A", "B", "C"))
-    k.script = {i: [rec(i, "BLOCKED")] for i in "ABC"}
+    k.script = {i: [rec(i, "FAILED"), rec(i, "FAILED")] for i in "ABC"}
     res, _ = go(env, k, cap=1)
     assert res["stop_reason"] == "no progress"
     assert len(state_of(env)["waves"]) == 2
-    assert k.watched == 2
 
 
 def test_a_progress_wave_resets_the_idle_count(env):
-    k = FakeKernel(ids=("A", "B", "C", "D"))
-    k.script = {"A": [rec("A", "BLOCKED")], "B": [rec("B")], "C": [rec("C", "BLOCKED")],
-                "D": [rec("D", "BLOCKED")]}
+    k = FakeKernel(ids=("A", "B"))
+    k.script = {"A": [rec("A", "FAILED"), rec("A")], "B": [rec("B", "FAILED"), rec("B", "FAILED")]}
     res, _ = go(env, k, cap=1)
     assert res["stop_reason"] == "no progress"
     assert len(state_of(env)["waves"]) == 4
+
+
+@pytest.mark.parametrize("outcome", ["BLOCKED", "VERIFIER_FAIL"])
+def test_parked_requirements_do_not_stop_the_program(env, outcome):
+    # 2026-10-01: CORE-001 was rejected twice and parked, and the program
+    # stopped with 19 P0s untried. A parked blocker is persisted, and the
+    # program goes on with independent work.
+    k = FakeKernel(ids=("A", "B", "C"))
+    if outcome == "BLOCKED":
+        k.script = {i: [rec(i, "BLOCKED")] for i in "ABC"}
+        bi = FakeIntegrator(k)
+    else:
+        k.script = {i: [rec(i), rec(i)] for i in "ABC"}
+        bi = FakeIntegrator(k, results={i: "VERIFIER_FAIL" for i in "ABC"})
+    res, _ = go(env, k, bi=bi, cap=1, max_waves=20)
+    assert res["stop_reason"] == "no ready work"
+    assert set(state_of(env)["parked"]) == {"A", "B", "C"}
 
 
 # ------------------------------------------------------------------ outcomes

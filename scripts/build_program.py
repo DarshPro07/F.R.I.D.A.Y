@@ -257,7 +257,12 @@ def launch_repairs(repairs: list[tuple[str, str]], state: dict, k=build_kernel,
 
 
 def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=build_integrate) -> tuple[str, float, bool]:
-    """Apply one watched run's outcome. Returns (result, spend, made_progress)."""
+    """Apply one watched run's outcome. Returns (result, spend, settled).
+
+    `settled` is False only when the worker itself failed (FAILED, TIMEOUT,
+    STALLED) or the integrator refused to run: those are what a broken
+    environment looks like. A rejected or blocked requirement is settled - its
+    blocker is persisted and the program moves on to independent work."""
     req, st = rec["requirement"], rec["state"]
     spend = float(rec.get("cost_usd") or 0.0)
     if st == "DONE" and rec.get("mode") == "SCOUT":
@@ -280,13 +285,13 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
             return "INTEGRATED", spend, True
         if res["result"] in REPAIRABLE and state["repairs"].get(req, 0) < MAX_REPAIRS:
             state["repair_queue"][req] = {"result": res["result"], "at": now()}
-            return res["result"], spend, False
+            return res["result"], spend, True
         park(state, req, res["result"], "integration", json.dumps(res, default=str)[:300])
-        return res["result"], spend, False
+        return res["result"], spend, True
     if st == "BLOCKED":
         blockers = (rec.get("evidence") or {}).get("blockers") or []
         park(state, req, "blocked", "blocked", "; ".join(map(str, blockers)) or "no blockers recorded")
-        return "BLOCKED", spend, False
+        return "BLOCKED", spend, True
     state["attempts"][req] = state["attempts"].get(req, 0) + 1
     if state["attempts"][req] >= MAX_ATTEMPTS:
         park(state, req, f"{st.lower()} x{state['attempts'][req]}", "attempts", f"{st} twice")
