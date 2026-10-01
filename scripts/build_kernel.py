@@ -303,7 +303,8 @@ Summary: {row['summary']}
 - Finish by writing `.build/evidence.json`:
   {{"requirement": "{row['id']}", "status": "DONE|BLOCKED", "summary": "<=300 chars",
    "files_changed": [], "tests": {{"command": "", "passed": 0, "failed": 0}},
-   "acceptance_met": true|false, "gaps": [], "blockers": []}}
+   "acceptance_met": true|false, "gaps": [], "blockers": [],
+   "commit_subject": "<=72 chars, conventional, says why: e.g. fix(router): stop retrying a failing path"}}
 """
 
 
@@ -679,7 +680,24 @@ def _changes(wt: Path) -> str:
     return _git(["status", "--porcelain", "--", ".", ":(exclude).build"], wt, 60)
 
 
-def _commit_run(run: Running, summary: str) -> tuple[str, list[str]]:
+def commit_subject(req: str, evidence: dict) -> str:
+    """The worker's one-line subject when it wrote a usable one; else the
+    summary's opening words, cut at a word boundary."""
+    own = evidence.get("commit_subject")
+    if isinstance(own, str) and own.strip() and "\n" not in own.strip() and len(own.strip()) <= 72:
+        return own.strip()
+    first = (str(evidence.get("summary", "")).splitlines() or [""])[0].strip()
+    if len(first) > 60:
+        cut = first[:61].rfind(" ")
+        first = first[:cut] if cut > 0 else first[:60]
+    return f"build({req}): {first}"
+
+
+def commit_body(req: str, evidence: dict) -> str:
+    return f"{str(evidence.get('summary', '')).strip()}\n\nBuild run: {req}".strip()
+
+
+def _commit_run(run: Running, evidence: dict) -> tuple[str, list[str]]:
     """Commit the worker's diff on its build branch; ('', []) when nothing changed."""
     if not run.base_sha or not _changes(run.wt):
         return "", []
@@ -688,8 +706,8 @@ def _commit_run(run: Running, summary: str) -> tuple[str, list[str]]:
     # path .gitignore already ignores, and this repository ignores .build/.
     _git(["add", "-A"], run.wt, 60)
     _git(["rm", "-r", "-q", "--cached", "--ignore-unmatch", ".build"], run.wt, 60)
-    msg = f"build({run.req}): {(summary.splitlines() or [''])[0].strip()[:60]}"
-    _git(["-c", "user.name=DarshPro07", "-c", "user.email=DarshPro07", "commit", "-m", msg],
+    _git(["-c", "user.name=DarshPro07", "-c", "user.email=DarshPro07", "commit",
+          "-m", commit_subject(run.req, evidence), "-m", commit_body(run.req, evidence)],
          run.wt, 120)
     sha = _git(["rev-parse", "HEAD"], run.wt, 30)
     return sha, _git(["diff", "--name-only", run.base_sha, sha], run.wt, 60).splitlines()
@@ -729,7 +747,7 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
     commit, files, commit_error = "", [], ""
     if state == "DONE" and not scout:
         try:
-            commit, files = _commit_run(run, str(summary))
+            commit, files = _commit_run(run, ev)
         except KernelError as exc:
             state, commit_error = "FAILED", str(exc)
     usage = [r.get("usage") or {} for r in results]

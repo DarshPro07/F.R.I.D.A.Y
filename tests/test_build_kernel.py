@@ -799,3 +799,26 @@ def test_roi_counts_missing_fields_instead_of_crashing(tmp_path):
     assert g["capsule"]["unknown"]["runs"] == 2 and g["class"]["unknown"]["runs"] == 2
     assert g["class"]["unknown"]["missing"] > 0 and g["class"]["unknown"]["turns"] is None
     assert K.roi_table(tmp_path) and K.roi_groups(tmp_path / "none") == {"capsule": {}, "class": {}}
+
+
+def test_commit_uses_the_workers_subject_and_keeps_the_summary_in_the_body(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    (wt / "new.py").write_text("x = 1\n")
+    (wt / ".build" / "evidence.json").write_text(json.dumps(
+        {"status": "DONE", "summary": "Long account of what changed and why.",
+         "commit_subject": "fix(router): stop retrying a path that keeps failing"}))
+    K.finalize(run, None, tmp_path / "runs")
+    assert _git(wt, "log", "-1", "--format=%s") == "fix(router): stop retrying a path that keeps failing"
+    body = _git(wt, "log", "-1", "--format=%b")
+    assert "Long account of what changed and why." in body and "Build run: R-1" in body
+
+
+def test_commit_subject_falls_back_without_cutting_a_word(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    (wt / "new.py").write_text("x = 1\n")
+    (wt / ".build" / "evidence.json").write_text(json.dumps(
+        {"status": "DONE", "commit_subject": "two\nlines",
+         "summary": "Added the wave controller that queues launches watches and integrates runs"}))
+    K.finalize(run, None, tmp_path / "runs")
+    subject = _git(wt, "log", "-1", "--format=%s")
+    assert subject == "build(R-1): Added the wave controller that queues launches watches and"
