@@ -317,12 +317,29 @@ def _end_of_list(text: str, name: str = "PROGRESS_V7") -> tuple[int, int]:
     raise KernelError(f"{name} not found")
 
 
-def entry_text(req: str, status: str, impl: str, next_action: str, nl: str = "\n") -> str:
-    return nl.join((f"    ({req!r}, {{",
-                    f'        "status": {status},',
-                    f'        "current_implementation": {impl!r},',
-                    f'        "next_action": {next_action!r},',
-                    "    }),")) + nl
+def entry_text(req: str, status: str, impl: str, next_action: str, nl: str = "\n",
+               evidence: str = "") -> str:
+    lines = [f"    ({req!r}, {{",
+             f'        "status": {status},',
+             f'        "current_implementation": {impl!r},',
+             f'        "next_action": {next_action!r},']
+    if evidence:
+        lines.append(f'        "evidence": {evidence!r},')
+    return nl.join((*lines, "    }),")) + nl
+
+
+def evidence_text(run: dict, rg: dict, merged: dict, verifier: dict | None) -> str:
+    """What this integration proved, for the ledger's VERIFIED rule."""
+    counts = next((ln for ln in reversed(merged.get("summary") or []) if "passed" in ln), "passed")
+    parts = [f"build run {run['requirement']}, commit {merged['integrated_commit'][:9]}",
+             f"RED ({rg.get('red_kind')}) at {run['base_sha'][:9]} and GREEN at the commit for "
+             + ", ".join(rg.get("tests") or []),
+             f"affected tests {counts.strip()}"]
+    if verifier:
+        cost = verifier.get("cost_usd")
+        parts.append(f"fresh verifier {verifier.get('verdict')}"
+                     + (f" (${cost:.2f})" if isinstance(cost, (int, float)) else ""))
+    return "; ".join(parts)
 
 
 def load_ledger(path: Path):
@@ -332,15 +349,19 @@ def load_ledger(path: Path):
     return module
 
 
-def append_progress(path: Path, req: str, status: str, impl: str, next_action: str) -> None:
-    """Append one PROGRESS_V7 entry; restore the file byte-for-byte if it no longer loads."""
+def append_progress(path: Path, req: str, status: str, impl: str, next_action: str,
+                    evidence: str = "") -> None:
+    """Append one PROGRESS_V7 entry; restore the file byte-for-byte if it no longer loads.
+    A VERIFIED entry needs evidence: `prd_ledger.py --check` refuses one without."""
+    if status == "VERIFIED" and not evidence.strip():
+        raise KernelError(f"{req}: a VERIFIED entry needs evidence")
     original = Path(path).read_bytes()
     text = original.decode("utf-8")
     nl = "\r\n" if "\r\n" in text else "\n"
     idx, col = _end_of_list(text)
     lines_ = text.splitlines(keepends=True)
     head, tail = lines_[idx][:col], lines_[idx][col:]
-    entry = entry_text(req, status, impl, next_action, nl)
+    entry = entry_text(req, status, impl, next_action, nl, evidence)
     if head.strip():
         entry = head.rstrip() + nl + entry
         head = ""
@@ -415,7 +436,8 @@ def integrate(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR, ledger_
         status, gaps = decide_status(run, rg, merged, required, verifier)
         impl = f"{(run.get('evidence') or {}).get('summary', '')} (build run, commit {merged['integrated_commit'][:9]})"
         nxt = "" if status == "VERIFIED" else "GAPS: " + "; ".join(gaps)
-        append_progress(Path(ledger_path), req, status, impl, nxt)
+        proof = evidence_text(run, rg, merged, verifier) if status == "VERIFIED" else ""
+        append_progress(Path(ledger_path), req, status, impl, nxt, proof)
         commit_ledger(Path(ledger_path), req, status, repo)
         out["ledger_status"] = status
     remove_worker(run, repo)
