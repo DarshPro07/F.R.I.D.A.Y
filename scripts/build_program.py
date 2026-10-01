@@ -13,6 +13,7 @@ else in that file.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -84,6 +85,7 @@ def load_state(path: Path) -> dict:
             "waves": list(old.get("waves") or []), "parked": dict(old.get("parked") or {}),
             "attempts": dict(old.get("attempts") or {}),
             "partials": dict(old.get("partials") or {}),
+            "capsule_decision": old.get("capsule_decision"),
             "escalations": list(old.get("escalations") or []),
             "spend_usd_total": float(old.get("spend_usd_total") or 0.0)}
 
@@ -146,9 +148,12 @@ def write_doc(doc: Path, snap: dict) -> None:
 # -------------------------------------------------------------------- waves
 
 def queue_for(rows: list[dict], state: dict, integrated: set[str], worktrees: Path,
-              priority: str | None, k=build_kernel, record: bool = True) -> list[dict]:
-    """Ready rows minus parked and integrated ids; a row whose worktree dir is
-    left over is parked (unless `record` is off, as in a dry run)."""
+              priority: str | None, k=build_kernel, record: bool = True,
+              resumed: set[str] | None = None) -> list[dict]:
+    """Ready rows minus parked and integrated ids. A row whose worktree dir is
+    left over stays queued when its killed run is resumable and has not been
+    resumed in this program run; otherwise it is parked (unless `record` is
+    off, as in a dry run)."""
     cfg = k.load_config()
     out = []
     for row in k.ready(rows, cfg["depends"], cfg["order"]):
@@ -158,6 +163,9 @@ def queue_for(rows: list[dict], state: dict, integrated: set[str], worktrees: Pa
         if priority and row.get("priority") != priority:
             continue
         if (worktrees / rid.lower()).exists():
+            if rid not in (resumed or set()) and k.resumable(worktrees / rid.lower()):
+                out.append(row)
+                continue
             if record:
                 park(state, rid, "stale worktree", "stale_worktree",
                      f"{worktrees / rid.lower()} already exists")
@@ -185,11 +193,28 @@ def pick_wave(queue: list[dict], cap: int, n: int, remaining: float,
     return chosen
 
 
-def launch_all(chosen, state: dict, k=build_kernel) -> list:
+def capsule_arm(req: str, state: dict) -> bool:
+    """Whether this requirement's worker gets the code capsule: the program's
+    decision once made, else a stable per-id coin so the A/B survives restarts."""
+    decision = state.get("capsule_decision")
+    if decision in ("on", "off"):
+        return decision == "on"
+    return hashlib.sha256(req.encode("utf-8")).digest()[0] % 2 == 1
+
+
+def launch_all(chosen, state: dict, k=build_kernel, worktrees: Path | None = None,
+               resumed: set[str] | None = None) -> list:
     runs = []
     for row, mode, klass in chosen:
+        rid = row["id"]
         try:
-            capsule = k.code_map(row) if mode == "SHIP" else ""
+            if worktrees is not None and (worktrees / rid.lower()).exists():
+                runs.append(k.resume(rid, worktrees=worktrees))
+                state["attempts"][rid] = state["attempts"].get(rid, 0) + 1
+                if resumed is not None:
+                    resumed.add(rid)
+                continue
+            capsule = k.code_map(row) if mode == "SHIP" and capsule_arm(rid, state) else ""
             runs.append(k.launch(row, mode=mode, capsule=capsule))
         except k.KernelError as exc:
             park(state, row["id"], "launch failed", "launch", str(exc))
@@ -240,6 +265,7 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
     worktrees = worktrees or k._worktrees_root()
     state = load_state(state_file)
     integrated: set[str] = set()
+    resumed: set[str] = set()
     spent, idle, waves_run, stop = 0.0, 0, 0, None
     while not stop:
         rows = k.load_rows()
@@ -248,9 +274,9 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
             stop = "max waves"
         elif spent >= max_usd:
             stop = "spend"
-        elif not (queue := queue_for(rows, state, integrated, worktrees, priority, k, not dry_run)):
+        elif not (queue := queue_for(rows, state, integrated, worktrees, priority, k, not dry_run, resumed)):
             stop = "no ready work"
-        elif (n := k.concurrency(cap=cap)) <= 0:
+        elif (n := k.concurrency(cap=cap)[0]) <= 0:
             stop = "pressure"
         elif not (chosen := pick_wave(queue, cap, n, max_usd - spent, k)):
             stop = "spend"
@@ -261,7 +287,7 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
                 out(f"{row['id']} {mode} {klass}")
             return {"stop_reason": "dry run", "waves": []}
         results, wave_spend, progress = {}, 0.0, False
-        for rec in k.watch(launch_all(chosen, state, k)):
+        for rec in k.watch(launch_all(chosen, state, k, worktrees, resumed)):
             res, cost, ok = settle(rec, state, integrated, k, bi)
             results[rec["requirement"]] = res
             wave_spend += cost

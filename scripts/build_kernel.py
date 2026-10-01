@@ -3,6 +3,9 @@
     python scripts/build_kernel.py ready
     python scripts/build_kernel.py waves [--cap N]
     python scripts/build_kernel.py concurrency
+    python scripts/build_kernel.py qualify
+    python scripts/build_kernel.py resume REQ
+    python scripts/build_kernel.py roi
     python scripts/build_kernel.py launch REQ [--dry-run] [--model M] [--max-turns N] [--max-budget-usd X]
                                      [--mode SHIP|SCOUT] [--class MICRO|NORMAL|COMPLEX|P0]
     python scripts/build_kernel.py run-wave [--cap N] [--dry-run]
@@ -35,10 +38,18 @@ sys.path.insert(0, str(ROOT))
 import code_capsule  # noqa: E402
 import prd_ledger as PL  # noqa: E402
 
+try:
+    import psutil
+except ImportError:  # worker memory is then reported as unmeasured
+    psutil = None
+
 DEPS_FILE = ROOT / "docs" / "plans" / "build-harness" / "dependencies.json"
 RUNS_DIR = ROOT / "data" / "build_runs"
 VENV_PY = "F:/F.R.I.D.A.Y/.venv-build/Scripts/python.exe"
 DEFAULT_CAP = 2
+HOST_PROFILE = RUNS_DIR / "host_profile.json"
+DEFAULT_WORKER_GB = 1.5
+RSS_WINDOW = 10
 DEFAULT_WALL_S = 45 * 60
 DEFAULT_STALL_S = 10 * 60
 ALLOWED_TOOLS = ",".join(("Read", "Edit", "Write", "Glob", "Grep",
@@ -184,11 +195,52 @@ def waves(rows: list[dict], cap: int = DEFAULT_CAP) -> list[list[dict]]:
     return out
 
 
-def concurrency(level: str | None = None, cap: int = DEFAULT_CAP) -> int:
-    if level is None:
-        from friday.governor import governor
-        level = governor().pressure().level
-    return {"NORMAL": cap, "ELEVATED": 1}.get(level, 0)
+def host_governor(path: Path = HOST_PROFILE):
+    """The governor for this build host: configured from its own qualified
+    profile when that still describes this machine, else provisional (its
+    first reading is its baseline, which a loaded host mistakes for idle)."""
+    from friday import hardware_profile as HP
+    from friday.governor import Governor
+    profile = HP.stored(path)
+    if profile is not None and not HP.changes(profile):
+        return Governor(thresholds=HP._caps(profile), baseline=profile.baseline)
+    return Governor()
+
+
+def worker_gb(runs_dir: Path = RUNS_DIR) -> float:
+    """Largest measured worker peak (GB) over the last RSS_WINDOW run records."""
+    recs = []
+    for p in run_records(runs_dir):
+        try:
+            peak = json.loads(p.read_text(encoding="utf-8")).get("peak_rss_mb")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(peak, (int, float)) and not isinstance(peak, bool):
+            recs.append((p.stat().st_mtime, peak))
+    recent = [mb for _, mb in sorted(recs)[-RSS_WINDOW:]]
+    return max(recent) / 1024 if recent else DEFAULT_WORKER_GB
+
+
+def concurrency(cap: int = DEFAULT_CAP, *, gov=None, runs_dir: Path = RUNS_DIR) -> tuple[int, str]:
+    """How many workers to start now, and why: none at CRITICAL, one at HIGH,
+    else as many as the available RAM above the reserve holds, up to the caps."""
+    gov = gov or host_governor()
+    pressure = gov.pressure()
+    if pressure.level == "CRITICAL":
+        return 0, "pressure CRITICAL"
+    if pressure.level == "HIGH":
+        return 1, "pressure HIGH"
+    sample = pressure.sample
+    if sample is None:
+        return 0, "no memory reading"
+    limits = gov.thresholds
+    reserve = limits.ram_floor(sample.total_gb()) + 1.0
+    per_worker = worker_gb(runs_dir)
+    slots = max(0, int((sample.ram_available_gb - reserve) // per_worker))
+    n = min(cap, limits.max_workers, slots)
+    return n, (f"{sample.ram_available_gb:.1f} GB available, {reserve:.1f} GB reserve, "
+               f"{per_worker:.1f} GB per worker -> {slots} slots (cap {cap}, "
+               f"max_workers {limits.max_workers})")
 
 
 # --------------------------------------------------------------- launch
@@ -327,6 +379,8 @@ class Running:
     wall_s: float = DEFAULT_WALL_S
     repo: Path = ROOT
     continued: bool = False
+    capsule: bool = False
+    peak_rss_mb: float | None = None
 
 
 # ------------------------------------------------------------ worktrees
@@ -455,9 +509,73 @@ def launch(row: dict, *, worktrees: Path | None = None, model: str = "sonnet",
     (wt / ".build").mkdir(parents=True, exist_ok=True)
     text = scout_packet_text(row) if scout else packet_text(row, findings, klass, capsule)
     (wt / ".build" / "packet.md").write_text(text, encoding="utf-8", newline="\n")
+    branch = "" if scout else f"build/{name}"
+    started = time.time()
+    _write_run_meta(wt, {"req": row["id"], "mode": mode, "klass": klass, "base_sha": base_sha,
+                         "branch": branch, "model": model, "started": started,
+                         "capsule": bool(capsule)})
     proc = _start(cmd, wt)
-    return Running(row["id"], proc, wt, mode=mode, klass=klass, base_sha=base_sha,
-                   branch="" if scout else f"build/{name}", model=model, wall_s=wall, repo=repo)
+    return Running(row["id"], proc, wt, started=started, mode=mode, klass=klass,
+                   base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
+                   capsule=bool(capsule))
+
+
+def _write_run_meta(wt: Path, meta: dict) -> None:
+    (wt / ".build").mkdir(parents=True, exist_ok=True)
+    (wt / ".build" / "run.json").write_text(json.dumps(meta, indent=2) + "\n",
+                                            encoding="utf-8", newline="\n")
+
+
+def _run_meta(wt: Path) -> dict:
+    return _evidence(wt, "run.json")
+
+
+def resumable(wt: Path) -> str | None:
+    """The session id of a SHIP worker killed mid-run: its stream opens with an
+    init event carrying a session id and holds no result event."""
+    events = _events(wt / ".build" / "stream.jsonl")
+    init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), None)
+    sid = (init or {}).get("session_id")
+    if not sid or _results(events):
+        return None
+    mode = _run_meta(wt).get("mode")
+    if mode is None:  # an older run left no run.json; a scout's worktree is detached
+        try:
+            mode = "SCOUT" if _git(["rev-parse", "--abbrev-ref", "HEAD"], wt, 30) == "HEAD" else "SHIP"
+        except KernelError:
+            return None
+    return str(sid) if mode == "SHIP" else None
+
+
+def resume(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR,
+           repo: Path = ROOT, row: dict | None = None, model: str | None = None) -> Running:
+    """Relaunch a killed SHIP worker in its existing worktree from its session,
+    at half its class limits."""
+    wt = (worktrees or _worktrees_root()) / req.lower()
+    sid = resumable(wt) if wt.is_dir() else None
+    if not sid:
+        raise KernelError(f"{req} has no resumable run in {wt}")
+    meta = _run_meta(wt)
+    if not meta.get("base_sha"):
+        if row is None:
+            row = next((r for r in load_rows() if r["id"] == req), None)
+        if row is None:
+            raise KernelError(f"unknown requirement {req!r}")
+        meta = {"req": req, "mode": "SHIP", "klass": budget_class(row, load_findings(req, runs_dir)),
+                "base_sha": _git(["merge-base", "HEAD", _git(["rev-parse", "HEAD"], repo)], wt),
+                "branch": _git(["rev-parse", "--abbrev-ref", "HEAD"], wt),
+                "model": model or "sonnet", "capsule": False}
+    klass = meta["klass"]
+    turns, budget, wall = BUDGETS[klass]
+    started = time.time()
+    meta = {**meta, "started": started}
+    _write_run_meta(wt, meta)
+    cmd = worker_command(model or meta.get("model") or "sonnet", max(1, turns // 2), budget / 2,
+                         resume=sid, prompt=CONTINUE_PROMPT)
+    return Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
+                   base_sha=meta["base_sha"], branch=meta["branch"],
+                   model=model or meta.get("model") or "sonnet", wall_s=wall, repo=repo,
+                   continued=True, capsule=bool(meta.get("capsule")))
 
 
 # ---------------------------------------------------------------- watch
@@ -510,15 +628,29 @@ def _content_len(content) -> int:
 
 
 def read_metrics(events: list[dict]) -> dict:
-    """Post-hoc read cost from the stream: Read calls, the bytes they returned,
-    and how many Reads came before the first Edit/Write. Tolerates missing keys."""
+    """Post-hoc orientation cost from the stream: Read calls, the bytes they
+    returned, Reads and searches (Grep/Glob/Bash), all tool calls, and the input
+    tokens spent before the first Edit/Write. Tolerates missing keys."""
     reads: set[str] = set()
     n_reads, before_edit, edited, nbytes = 0, 0, False, 0
+    searches, calls, tokens = 0, 0, 0
     for ev in events:
         msg = ev.get("message")
         blocks = msg.get("content") if isinstance(msg, dict) else None
         if not isinstance(blocks, list):
             continue
+        used = [b.get("name") for b in blocks if ev.get("type") == "assistant"
+                and isinstance(b, dict) and b.get("type") == "tool_use"]
+        if ev.get("type") == "assistant" and not edited:
+            if any(u in ("Edit", "Write") for u in used):
+                edited = True
+            else:
+                usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
+                tokens += sum(usage.get(k) or 0 for k in
+                              ("input_tokens", "cache_read_input_tokens",
+                               "cache_creation_input_tokens"))
+        searches += sum(u in ("Grep", "Glob", "Bash") for u in used)
+        calls += len(used)
         for b in blocks:
             if not isinstance(b, dict):
                 continue
@@ -527,11 +659,11 @@ def read_metrics(events: list[dict]) -> dict:
                     n_reads += 1
                     before_edit += not edited
                     reads.add(str(b.get("id")))
-                elif b.get("name") in ("Edit", "Write"):
-                    edited = True
             elif b.get("type") == "tool_result" and str(b.get("tool_use_id")) in reads:
                 nbytes += _content_len(b.get("content"))
-    return {"reads": n_reads, "read_bytes": nbytes, "reads_before_first_edit": before_edit}
+    return {"reads": n_reads, "read_bytes": nbytes, "reads_before_first_edit": before_edit,
+            "searches": searches, "tool_calls": calls,
+            "tokens_before_first_edit": tokens if edited else None}
 
 
 def _evidence(wt: Path, name: str = "evidence.json") -> dict:
@@ -614,7 +746,8 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
            "mode": run.mode, "budget_class": run.klass, "base_sha": run.base_sha,
            "branch": run.branch, "commit": commit, "files_changed": files,
            "evidence": ev, "continued": run.continued,
-           "session_id": res.get("session_id", ""), "reads": read_metrics(events)}
+           "session_id": res.get("session_id", ""), "reads": read_metrics(events),
+           "capsule": run.capsule, "peak_rss_mb": run.peak_rss_mb}
     if commit_error:
         rec["commit_error"] = commit_error
     (runs_dir / f"{run.req}.json").write_text(json.dumps(rec, indent=2) + "\n",
@@ -646,6 +779,31 @@ def continuation(run: Running) -> bool:
     return True
 
 
+def tree_rss_mb(pid: int) -> float | None:
+    """Resident memory (MB) of a process and all its descendants; None when
+    psutil is missing or the process is gone."""
+    if psutil is None:
+        return None
+    try:
+        root = psutil.Process(pid)
+        procs = [root, *root.children(recursive=True)]
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return None
+    total = 0
+    for p in procs:
+        try:
+            total += p.memory_info().rss
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return total / 1024 / 1024
+
+
+def sample_rss(run: Running) -> None:
+    mb = tree_rss_mb(run.proc.pid)
+    if mb is not None and mb > (run.peak_rss_mb or 0.0):
+        run.peak_rss_mb = round(mb, 1)
+
+
 def watch(runs: list[Running], *, wall_s: float | None = None, stall_s: float = DEFAULT_STALL_S,
           poll_s: float = 5.0, runs_dir: Path = RUNS_DIR) -> list[dict]:
     """Poll to completion. Heartbeat = stream log growth. Zero model calls.
@@ -658,6 +816,7 @@ def watch(runs: list[Running], *, wall_s: float | None = None, stall_s: float = 
             reason = None
             if run.proc.poll() is None:
                 now = time.time()
+                sample_rss(run)
                 p = run.wt / ".build" / "stream.jsonl"
                 size = p.stat().st_size if p.exists() else 0
                 if size != last[req][0]:
@@ -681,13 +840,79 @@ def watch(runs: list[Running], *, wall_s: float | None = None, stall_s: float = 
 
 # ------------------------------------------------------------------ CLI
 
+def run_records(runs_dir: Path = RUNS_DIR) -> list[Path]:
+    """<REQ>.json run records only: not <REQ>.integration/.scout.json, not the
+    stream copies, not host_profile.json."""
+    if not runs_dir.exists():
+        return []
+    return [p for p in sorted(runs_dir.glob("*.json"))
+            if p.name.count(".") == 1 and p.name != HOST_PROFILE.name]
+
+
+_ROI_FIELDS = (("turns", ("turns",)), ("cost", ("cost_usd",)), ("wall", ("wall_seconds",)),
+               ("reads", ("reads", "reads")), ("searches", ("reads", "searches")),
+               ("tok_pre_edit", ("reads", "tokens_before_first_edit")))
+
+
+def _field(rec: dict, path: tuple[str, ...]):
+    for key in path:
+        rec = rec.get(key) if isinstance(rec, dict) else None
+    return rec if isinstance(rec, (int, float)) and not isinstance(rec, bool) else None
+
+
+def roi_groups(runs_dir: Path = RUNS_DIR) -> dict[str, dict[str, dict]]:
+    """Run records grouped by capsule arm (SHIP runs) and by budget class, each
+    with run count, DONE count, field means over the records that have the
+    field, a count of records missing it, and AgentROI = DONE runs per dollar."""
+    buckets: dict[str, dict[str, list[dict]]] = {"capsule": {}, "class": {}}
+    for p in run_records(runs_dir):
+        try:
+            rec = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("mode") != "SCOUT":
+            arm = {True: "on", False: "off"}.get(rec.get("capsule"), "unknown")
+            buckets["capsule"].setdefault(arm, []).append(rec)
+        buckets["class"].setdefault(str(rec.get("budget_class") or "unknown"), []).append(rec)
+    out: dict[str, dict[str, dict]] = {}
+    for dim, groups in buckets.items():
+        out[dim] = {}
+        for name, recs in sorted(groups.items()):
+            done = sum(r.get("state") == "DONE" for r in recs)
+            cost = sum(_field(r, ("cost_usd",)) or 0.0 for r in recs)
+            stat = {"runs": len(recs), "done": done, "done_share": done / len(recs),
+                    "agent_roi": done / cost if cost > 0 else None, "missing": 0}
+            for label, path in _ROI_FIELDS:
+                vals = [v for v in (_field(r, path) for r in recs) if v is not None]
+                stat["missing"] += len(recs) - len(vals)
+                stat[label] = sum(vals) / len(vals) if vals else None
+            out[dim][name] = stat
+    return out
+
+
+def roi_table(runs_dir: Path = RUNS_DIR) -> list[str]:
+    def num(v, spec: str) -> str:
+        return "n/a" if v is None else format(v, spec)
+
+    head = (f"{'GROUP':<14}{'RUNS':>5}{'DONE%':>7}" + "".join(f"{lbl.upper():>13}" for lbl, _ in _ROI_FIELDS)
+            + f"{'ROI/USD':>9}{'MISSING':>8}")
+    out = []
+    for dim, groups in roi_groups(runs_dir).items():
+        out += [f"by {dim}", head]
+        for name, s in groups.items():
+            out.append(f"{name:<14}{s['runs']:>5}{s['done_share'] * 100:>6.0f}%"
+                       + "".join(f"{num(s[lbl], '.2f'):>13}" for lbl, _ in _ROI_FIELDS)
+                       + f"{num(s['agent_roi'], '.2f'):>9}{s['missing']:>8}")
+    return out
+
+
 def status_table(runs_dir: Path = RUNS_DIR) -> list[str]:
     out = [f"{'REQ':<12}{'STATE':<9}{'TURNS':>6}{'IN':>9}{'CACHE_R':>11}{'CACHE_W':>10}"
            f"{'OUT':>8}{'USD':>8}{'SEC':>8}"]
     # <REQ>.json only; <REQ>.scout.json holds findings, not a run record.
-    for p in sorted(runs_dir.glob("*.json")) if runs_dir.exists() else []:
-        if p.name.count(".") != 1:
-            continue
+    for p in run_records(runs_dir):
         r = json.loads(p.read_text(encoding="utf-8"))
         out.append(f"{r['requirement']:<12}{r['state']:<9}{r['turns']:>6}{r['input_tokens']:>9}"
                    f"{r['cache_read_tokens']:>11}{r['cache_creation_tokens']:>10}{r['output_tokens']:>8}"
@@ -704,6 +929,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("ready").add_argument("--all", action="store_true")
     sub.add_parser("concurrency")
+    sub.add_parser("qualify")
+    sub.add_parser("roi")
+    sub.add_parser("resume").add_argument("req")
     sub.add_parser("status")
     w = sub.add_parser("waves")
     rw = sub.add_parser("run-wave")
@@ -725,7 +953,21 @@ def main(argv: list[str] | None = None) -> int:
             print("\n".join(status_table()))
             return 0
         if args.cmd == "concurrency":
-            print(concurrency())
+            n, why = concurrency()
+            print(f"{n} ({why})")
+            return 0
+        if args.cmd == "roi":
+            print("\n".join(roi_table()))
+            return 0
+        if args.cmd == "qualify":
+            from friday import hardware_profile as HP
+            # save=False: qualify() would otherwise write the live profile path.
+            profile = HP.qualify(cause="build-host", save=False)
+            print(f"stored {HP.store(profile, HOST_PROFILE)}")
+            return 0
+        if args.cmd == "resume":
+            for rec in watch([resume(args.req)]):
+                print(f"{rec['requirement']}: {rec['state']}")
             return 0
         rows, cfg = load_rows(), load_config()
         queue = ready(rows, cfg["depends"], cfg["order"])
@@ -752,10 +994,10 @@ def main(argv: list[str] | None = None) -> int:
                          capsule=code_map(row) if mode == "SHIP" else "")
             print(json.dumps(res, indent=2) if args.dry_run else f"started {row['id']} in {res.wt}")
         else:  # run-wave
-            n = concurrency(cap=args.cap)
+            n, why = concurrency(cap=args.cap)
             first = waves(queue, args.cap)[0][:n] if queue and n else []
             if not first:
-                print(f"nothing to run (ready={len(queue)}, concurrency={n})")
+                print(f"nothing to run (ready={len(queue)}, concurrency={n}: {why})")
                 return 0
             modes = [mode_for(r) for r in first]
             started = [launch(r, dry_run=args.dry_run, mode=m,

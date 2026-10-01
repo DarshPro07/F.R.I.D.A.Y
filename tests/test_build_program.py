@@ -37,6 +37,8 @@ class FakeKernel:
         self.launch_errors: dict[str, str] = {}
         self.closed: set[str] = set()
         self.watched = 0
+        self.resumable_ids: set[str] = set()  # lower-case ids whose stale worktree can be resumed
+        self.resumes: list[str] = []
 
     def load_rows(self):
         return [r for r in self.rows]
@@ -51,7 +53,14 @@ class FakeKernel:
         return [list(queue)]
 
     def concurrency(self, cap=2):
-        return min(self.level, cap)
+        return min(self.level, cap), "fake"
+
+    def resumable(self, wt):
+        return "S1" if wt.name in self.resumable_ids else None
+
+    def resume(self, req, *, worktrees):
+        self.resumes.append(req)
+        return SimpleNamespace(req=req)
 
     def mode_for(self, row):
         return self.modes.get(row["id"], "SHIP")
@@ -128,8 +137,11 @@ def env(tmp_path):
                            doc=tmp_path / "PRD_CURRENT_STATE.md", wt=wt, git=FakeGit())
 
 
-def go(env, k, bi=None, **kw):
+def go(env, k, bi=None, decision=None, **kw):
     bi = bi or FakeIntegrator(k)
+    if decision:
+        env.state.parent.mkdir(parents=True, exist_ok=True)
+        env.state.write_text(json.dumps({"capsule_decision": decision}), encoding="utf-8")
     kw.setdefault("max_waves", 5)
     kw.setdefault("max_usd", 100.0)
     res = BP.run_program(repo=Path("."), state_file=env.state, state_doc=env.doc, worktrees=env.wt,
@@ -176,7 +188,7 @@ def test_max_waves_stop(env):
 def test_spend_stop_after_a_wave_reaches_the_limit(env):
     k = FakeKernel(ids=("A", "B"))
     k.script = {i: [rec(i, cost=4.0)] for i in "AB"}
-    res, _ = go(env, k, cap=1, max_usd=3.0)
+    res, _ = go(env, k, cap=1, max_usd=3.0, decision="on")
     assert res["stop_reason"] == "spend"
     assert k.launches == [("A", "SHIP", "map-A")]
 
@@ -212,7 +224,7 @@ def test_scout_then_ship_across_waves(env):
         return run
 
     k.launch = launch
-    res, bi = go(env, k)
+    res, bi = go(env, k, decision="on")
     assert k.launches == [("A", "SCOUT", ""), ("A", "SHIP", "map-A")]
     assert bi.calls == ["A"]
     assert [w["results"] for w in state_of(env)["waves"]] == [{"A": "SCOUT_DONE"}, {"A": "INTEGRATED"}]
@@ -293,6 +305,59 @@ def test_stale_worktree_is_parked_not_launched(env):
     st = state_of(env)
     assert st["parked"]["A"] == "stale worktree"
     assert [x[0] for x in k.launches] == ["B"]
+    assert not k.resumes
+
+
+def test_resumable_stale_worktree_is_resumed_not_parked_or_relaunched(env):
+    (env.wt / "a").mkdir()
+    k = FakeKernel(ids=("A",))
+    k.resumable_ids = {"a"}
+    k.script = {"A": [rec("A")]}
+    go(env, k)
+    st = state_of(env)
+    assert k.resumes == ["A"] and not k.launches
+    assert "A" not in st["parked"] and st["attempts"]["A"] == 1
+
+
+def test_a_stale_worktree_is_resumed_at_most_once_per_run(env):
+    (env.wt / "a").mkdir()
+    k = FakeKernel(ids=("A",))
+    k.resumable_ids = {"a"}
+    state = BP.load_state(env.state)
+    assert [r["id"] for r in BP.queue_for(k.rows, state, set(), env.wt, None, k, resumed=set())] == ["A"]
+    assert not state["parked"]
+    assert BP.queue_for(k.rows, state, set(), env.wt, None, k, resumed={"A"}) == []
+    assert state["parked"]["A"] == "stale worktree"
+
+
+def test_a_resumed_run_that_fails_is_parked_by_its_attempts(env):
+    (env.wt / "a").mkdir()
+    k = FakeKernel(ids=("A",))
+    k.resumable_ids = {"a"}
+    k.script = {"A": [rec("A", "FAILED")]}
+    go(env, k, cap=1)
+    assert k.resumes == ["A"] and state_of(env)["parked"]["A"] == "failed x2"
+
+
+def test_the_capsule_arm_is_stable_and_splits_ids():
+    state = {"capsule_decision": None}
+    arms = {i: BP.capsule_arm(i, state) for i in (f"R-{n}" for n in range(40))}
+    assert arms == {i: BP.capsule_arm(i, dict(state)) for i in arms}
+    assert set(arms.values()) == {True, False}
+
+
+@pytest.mark.parametrize("decision,expect", [("on", True), ("off", False)])
+def test_a_capsule_decision_overrides_the_arm(decision, expect):
+    assert {BP.capsule_arm(f"R-{n}", {"capsule_decision": decision}) for n in range(20)} == {expect}
+
+
+def test_the_ship_capsule_follows_the_arm(env):
+    ids = tuple(f"R-{n}" for n in range(8))
+    k = FakeKernel(ids=ids)
+    k.script = {i: [rec(i)] for i in ids}
+    go(env, k, cap=1, max_waves=20)
+    got = {rid: capsule for rid, _, capsule in k.launches}
+    assert got == {i: (f"map-{i}" if BP.capsule_arm(i, {}) else "") for i in ids}
 
 
 def test_launch_kernel_error_parks_with_escalation(env):

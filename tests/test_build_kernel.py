@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,6 +17,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_kernel as K  # noqa: E402
 import prd_ledger as PL  # noqa: E402
+from friday.governor import Thresholds  # noqa: E402
 
 
 def row(id_, priority="P0", status="MISSING", files=("a.py",)):
@@ -79,10 +81,95 @@ def test_unknown_surface_leading_row_runs_alone():
     assert got == [["U"], ["A"]]
 
 
-@pytest.mark.parametrize("level,n", [("NORMAL", 2), ("ELEVATED", 1), ("HIGH", 0), ("CRITICAL", 0)])
-def test_concurrency_follows_governor_level(level, n):
-    assert K.concurrency(level) == n
-    assert K.concurrency(level, cap=3) == (3 if level == "NORMAL" else n)
+class FakeGov:
+    """A governor stand-in: a fixed level and memory reading, real thresholds."""
+
+    def __init__(self, level="NORMAL", available=8.0, total=16.0, thresholds=None):
+        self.thresholds = thresholds or Thresholds()
+        sample = SimpleNamespace(ram_available_gb=available, total_gb=lambda: total)
+        self._pressure = SimpleNamespace(level=level, sample=sample)
+
+    def pressure(self):
+        return self._pressure
+
+
+def _peak_record(runs_dir, name, peak, mtime):
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    p = runs_dir / f"{name}.json"
+    p.write_text(json.dumps({"requirement": name, "peak_rss_mb": peak}), encoding="utf-8")
+    os.utime(p, (mtime, mtime))
+
+
+def test_concurrency_is_zero_at_critical_however_much_ram_is_free(tmp_path):
+    n, why = K.concurrency(3, gov=FakeGov("CRITICAL", available=64.0), runs_dir=tmp_path)
+    assert n == 0 and "CRITICAL" in why
+
+
+def test_concurrency_is_one_at_high_whatever_the_cap(tmp_path):
+    assert K.concurrency(3, gov=FakeGov("HIGH", available=64.0), runs_dir=tmp_path)[0] == 1
+
+
+@pytest.mark.parametrize("available,n", [(8.0, 2), (4.5, 2), (3.1, 1), (3.0, 1), (2.9, 0), (1.0, 0)])
+def test_concurrency_is_limited_by_the_ram_above_the_reserve(tmp_path, available, n):
+    # reserve = ram_floor(16 GB) 0.5 + 1.0; one default worker = 1.5 GB
+    got, why = K.concurrency(3, gov=FakeGov(available=available), runs_dir=tmp_path)
+    assert got == n and "slots" in why
+
+
+def test_concurrency_is_limited_by_the_governors_max_workers_and_the_cap(tmp_path):
+    assert K.concurrency(1, gov=FakeGov(available=64.0), runs_dir=tmp_path)[0] == 1
+    assert K.concurrency(9, gov=FakeGov(available=64.0), runs_dir=tmp_path)[0] == 2
+    wide = FakeGov(available=64.0, thresholds=Thresholds(max_workers=5))
+    assert K.concurrency(9, gov=wide, runs_dir=tmp_path)[0] == 5
+
+
+def test_worker_size_is_the_largest_peak_of_the_last_ten_measured_records(tmp_path):
+    assert K.worker_gb(tmp_path) == K.DEFAULT_WORKER_GB
+    _peak_record(tmp_path, "OLD", 20480, 1)  # the 11th newest: out of the window
+    for i in range(10):
+        _peak_record(tmp_path, f"R{i}", 1024 + i * 512, 100 + i)
+    (tmp_path / "NOPEAK.json").write_text(json.dumps({"requirement": "NOPEAK", "peak_rss_mb": None}))
+    os.utime(tmp_path / "NOPEAK.json", (500, 500))
+    assert K.worker_gb(tmp_path) == (1024 + 9 * 512) / 1024
+    got, _ = K.concurrency(3, gov=FakeGov(available=4.4), runs_dir=tmp_path)
+    assert got == 0  # 4.4 - 1.5 reserve = 2.9 GB < one 5.5 GB worker
+
+
+def test_host_governor_uses_a_matching_profile_and_ignores_a_moved_one(monkeypatch, tmp_path):
+    from friday import hardware_profile as HP
+    monkeypatch.setattr(HP, "stored", lambda path=None: SimpleNamespace(baseline=None))
+    monkeypatch.setattr(HP, "_caps", lambda profile: Thresholds(max_workers=7))
+    monkeypatch.setattr(HP, "changes", lambda profile, machine=None: [])
+    assert K.host_governor(tmp_path / "p.json").thresholds.max_workers == 7
+    monkeypatch.setattr(HP, "changes", lambda profile, machine=None: ["RAM total 16 -> 8 GB"])
+    assert K.host_governor(tmp_path / "p.json").thresholds.max_workers == Thresholds().max_workers
+    monkeypatch.setattr(HP, "stored", lambda path=None: None)
+    assert K.host_governor(tmp_path / "p.json").thresholds.max_workers == Thresholds().max_workers
+
+
+def test_qualify_cli_stores_the_build_host_profile_and_never_the_live_one(monkeypatch, tmp_path):
+    from friday import hardware_profile as HP
+    live = tmp_path / "live" / "hardware_profile.json"
+    monkeypatch.setattr(HP, "PROFILE_PATH", live)
+    seen = {}
+
+    def fake_qualify(**kw):
+        seen["qualify"] = kw
+        if kw.get("save", True):
+            HP.store(SimpleNamespace(to_dict=lambda: {}))  # what an unguarded call does
+        return SimpleNamespace(to_dict=lambda: {"ok": 1})
+
+    monkeypatch.setattr(HP, "qualify", fake_qualify)
+    monkeypatch.setattr(HP, "store", lambda profile, path=None: seen.update(path=path) or Path(path))
+    assert K.main(["qualify"]) == 0
+    assert seen["qualify"] == {"cause": "build-host", "save": False}
+    assert seen["path"] == K.HOST_PROFILE and not live.exists()
+
+
+def test_concurrency_cli_prints_the_count_and_the_reason(monkeypatch, capsys):
+    monkeypatch.setattr(K, "concurrency", lambda **kw: (2, "plenty of RAM"))
+    assert K.main(["concurrency"]) == 0
+    assert capsys.readouterr().out.strip() == "2 (plenty of RAM)"
 
 
 def test_launch_dry_run_has_no_side_effects(tmp_path):
@@ -338,8 +425,26 @@ def test_read_metrics_counts_reads_bytes_and_reads_before_first_edit():
     m = K.read_metrics([use("1", "Read"), res("1", "abcd"), use("2", "Read"),
                         res("2", [{"type": "text", "text": "xyz"}]), use("3", "Edit"),
                         res("3", "ignored"), use("4", "Read"), {"type": "result"}, {"x": 1}])
-    assert m == {"reads": 3, "read_bytes": 7, "reads_before_first_edit": 2}
-    assert K.read_metrics([]) == {"reads": 0, "read_bytes": 0, "reads_before_first_edit": 0}
+    assert (m["reads"], m["read_bytes"], m["reads_before_first_edit"]) == (3, 7, 2)
+    assert K.read_metrics([]) == {"reads": 0, "read_bytes": 0, "reads_before_first_edit": 0,
+                                  "searches": 0, "tool_calls": 0, "tokens_before_first_edit": None}
+
+
+def test_read_metrics_counts_searches_tool_calls_and_tokens_before_the_first_edit():
+    def turn(name, usage=None):
+        msg = {"content": [{"type": "tool_use", "id": name, "name": name, "input": {}}]}
+        if usage:
+            msg["usage"] = usage
+        return {"type": "assistant", "message": msg}
+
+    u1 = {"input_tokens": 10, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 1000}
+    u2 = {"input_tokens": 20, "cache_read_input_tokens": 200}
+    big = {"input_tokens": 99999}
+    m = K.read_metrics([turn("Grep", u1), turn("Glob"), turn("Read", u2), turn("Bash"),
+                        turn("Edit", big), turn("Grep", big), turn("Write", big)])
+    assert m["searches"] == 4 and m["tool_calls"] == 7
+    assert m["tokens_before_first_edit"] == 1330  # the editing turn and later ones do not count
+    assert K.read_metrics([turn("Read", u1)])["tokens_before_first_edit"] is None
 
 
 def _done_run(repo, tmp_path, mode="SHIP"):
@@ -481,3 +586,216 @@ def test_cli_ship_packet_carries_the_code_map_of_its_surface(monkeypatch):
 def test_cli_scout_gets_no_code_map(monkeypatch):
     seen = _cli_launch(monkeypatch, row("R-8", "P1", files=()))
     assert seen["mode"] == "SCOUT" and seen["capsule"] == ""
+
+
+# ------------------------------------------------------- worker memory (RSS)
+
+class _NoSuchProcess(Exception):
+    pass
+
+
+class _AccessDenied(Exception):
+    pass
+
+
+def _fake_psutil(tree: dict):
+    """tree: pid -> (rss bytes | exception class, [child pids])."""
+    def proc(pid):
+        rss, kids = tree[pid]
+        def memory_info():
+            if isinstance(rss, type):
+                raise rss()
+            return SimpleNamespace(rss=rss)
+        return SimpleNamespace(memory_info=memory_info, children=lambda recursive=False: [proc(k) for k in kids])
+
+    def Process(pid):
+        if pid not in tree:
+            raise _NoSuchProcess()
+        return proc(pid)
+
+    return SimpleNamespace(Process=Process, NoSuchProcess=_NoSuchProcess, AccessDenied=_AccessDenied)
+
+
+MB = 1024 * 1024
+
+
+def test_tree_rss_sums_the_process_and_its_descendants_and_tolerates_vanishing_ones(monkeypatch):
+    tree = {1: (100 * MB, [2, 3, 4]), 2: (50 * MB, []), 3: (_NoSuchProcess, []), 4: (_AccessDenied, [])}
+    monkeypatch.setattr(K, "psutil", _fake_psutil(tree))
+    assert K.tree_rss_mb(1) == 150.0
+    assert K.tree_rss_mb(99) is None  # the worker already exited
+
+
+def test_tree_rss_is_none_without_psutil(monkeypatch):
+    monkeypatch.setattr(K, "psutil", None)
+    assert K.tree_rss_mb(1) is None
+
+
+def test_watch_records_the_peak_of_the_sampled_tree_rss(monkeypatch, tmp_path):
+    readings = iter([100.0, 300.0, 200.0])
+    monkeypatch.setattr(K, "tree_rss_mb", lambda pid: next(readings, 150.0))
+    run = _fake_run(tmp_path, "import time;time.sleep(0.6)")
+    rec = K.watch([run], poll_s=0.05, runs_dir=tmp_path / "runs")[0]
+    assert rec["peak_rss_mb"] == 300.0
+
+
+def test_a_run_without_psutil_records_a_null_peak_and_does_not_crash(monkeypatch, tmp_path):
+    monkeypatch.setattr(K, "psutil", None)
+    run = _fake_run(tmp_path, "pass")
+    rec = K.watch([run], poll_s=0.05, runs_dir=tmp_path / "runs")[0]
+    assert rec["peak_rss_mb"] is None
+
+
+# --------------------------------------------------------- run.json, resume
+
+def _launched(monkeypatch, repo, tmp_path, capsule=""):
+    monkeypatch.setattr(K, "_start", lambda cmd, w: _Proc(None))
+    r = row("R-1", "P1")
+    run = K.launch(r, worktrees=tmp_path / "wts", runs_dir=tmp_path / "runs", repo=repo, capsule=capsule)
+    return r, run
+
+
+def test_launch_writes_run_json_and_flags_the_capsule(monkeypatch, repo, tmp_path):
+    _, run = _launched(monkeypatch, repo, tmp_path, capsule="## map")
+    meta = json.loads((run.wt / ".build" / "run.json").read_text())
+    assert {k: meta[k] for k in ("req", "mode", "klass", "base_sha", "branch", "model")} == {
+        "req": "R-1", "mode": "SHIP", "klass": run.klass, "base_sha": run.base_sha,
+        "branch": "build/r-1", "model": "sonnet"}
+    assert isinstance(meta["started"], float) and run.capsule is True
+    assert K.finalize(run, "TIMEOUT", tmp_path / "runs")["capsule"] is True
+
+
+def test_launch_without_a_capsule_records_the_off_arm(monkeypatch, repo, tmp_path):
+    _, run = _launched(monkeypatch, repo, tmp_path)
+    assert run.capsule is False
+    assert K.finalize(run, "TIMEOUT", tmp_path / "runs")["capsule"] is False
+
+
+def _killed(repo, tmp_path, *events, name="r-1"):
+    wt = tmp_path / "wts" / name
+    base = K.create_worktree(wt, name, repo=repo)
+    _stream(wt, *events)
+    return wt, base
+
+
+INIT = {"type": "system", "subtype": "init", "session_id": "S9"}
+
+
+def test_resumable_needs_an_init_session_and_no_result(repo, tmp_path):
+    wt, _ = _killed(repo, tmp_path, INIT, {"type": "assistant", "message": {}})
+    assert K.resumable(wt) == "S9"
+    _stream(wt, INIT, {"type": "result", "subtype": "success", "session_id": "S9"})
+    assert K.resumable(wt) is None
+    _stream(wt, {"type": "assistant", "message": {}})
+    assert K.resumable(wt) is None
+    _stream(wt, {"type": "system", "subtype": "init"})
+    assert K.resumable(wt) is None
+
+
+def test_resumable_is_only_for_ship_runs(repo, tmp_path):
+    wt, _ = _killed(repo, tmp_path, INIT)
+    K._write_run_meta(wt, {"mode": "SCOUT"})
+    assert K.resumable(wt) is None
+    K._write_run_meta(wt, {"mode": "SHIP"})
+    assert K.resumable(wt) == "S9"
+    scout = tmp_path / "wts" / "s-1"
+    K.create_worktree(scout, "s-1", repo=repo, detach=True)  # no run.json: detached means scout
+    _stream(scout, INIT)
+    assert K.resumable(scout) is None
+
+
+def _resume_cmds(monkeypatch):
+    cmds = []
+    monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
+    return cmds
+
+
+def test_resume_relaunches_in_place_at_half_limits_from_run_json(monkeypatch, repo, tmp_path):
+    wt, base = _killed(repo, tmp_path, INIT)
+    K._write_run_meta(wt, {"req": "R-1", "mode": "SHIP", "klass": "COMPLEX", "base_sha": base,
+                           "branch": "build/r-1", "model": "opus", "started": 1.0, "capsule": True})
+    cmds = _resume_cmds(monkeypatch)
+    run = K.resume("R-1", worktrees=tmp_path / "wts", runs_dir=tmp_path / "runs", repo=repo)
+    cmd = cmds[0]
+    assert cmd[cmd.index("--resume") + 1] == "S9" and K.CONTINUE_PROMPT in cmd
+    assert cmd[cmd.index("--model") + 1] == "opus"
+    assert cmd[cmd.index("--max-turns") + 1] == "20" and cmd[cmd.index("--max-budget-usd") + 1] == "3.0"
+    assert (run.wt, run.klass, run.base_sha, run.branch, run.continued, run.capsule) == (
+        wt, "COMPLEX", base, "build/r-1", True, True)
+    assert run.started > 1.0
+
+
+def test_resume_without_run_json_derives_the_base_and_class(monkeypatch, repo, tmp_path):
+    wt, base = _killed(repo, tmp_path, INIT)
+    (wt / "new.py").write_text("x\n")
+    _git(wt, "add", "-A")
+    _git(wt, "-c", "user.name=t", "-c", "user.email=t", "commit", "-q", "-m", "partial")
+    cmds = _resume_cmds(monkeypatch)
+    r = row("R-1", "P1")
+    run = K.resume("R-1", worktrees=tmp_path / "wts", runs_dir=tmp_path / "runs", repo=repo, row=r)
+    assert run.base_sha == base != _git(wt, "rev-parse", "HEAD")
+    assert run.klass == K.budget_class(r) and run.branch == "build/r-1" and run.continued
+    assert len(cmds) == 1
+
+
+def test_resume_refuses_a_run_that_finished(monkeypatch, repo, tmp_path):
+    _killed(repo, tmp_path, INIT, {"type": "result", "subtype": "success", "session_id": "S9"})
+    monkeypatch.setattr(K, "_start", lambda cmd, w: pytest.fail("must not relaunch"))
+    with pytest.raises(K.KernelError):
+        K.resume("R-1", worktrees=tmp_path / "wts", runs_dir=tmp_path / "runs", repo=repo, row=row("R-1"))
+    with pytest.raises(K.KernelError):
+        K.resume("R-404", worktrees=tmp_path / "wts", runs_dir=tmp_path / "runs", repo=repo)
+
+
+def test_resume_cli_watches_and_prints_the_state(monkeypatch, capsys):
+    monkeypatch.setattr(K, "resume", lambda req: SimpleNamespace(req=req))
+    monkeypatch.setattr(K, "watch", lambda runs: [{"requirement": r.req, "state": "DONE"} for r in runs])
+    assert K.main(["resume", "R-1"]) == 0
+    assert capsys.readouterr().out.strip() == "R-1: DONE"
+
+
+# ---------------------------------------------------------------------- roi
+
+def _rec(runs_dir, name, **kw):
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    (runs_dir / name).write_text(json.dumps(kw), encoding="utf-8")
+
+
+def test_roi_reads_run_records_only(tmp_path):
+    run = {"requirement": "A", "state": "DONE", "mode": "SHIP", "budget_class": "NORMAL",
+           "capsule": True, "cost_usd": 2.0}
+    _rec(tmp_path, "A.json", **run)
+    _rec(tmp_path, "A.integration.json", **{**run, "cost_usd": 100.0})
+    _rec(tmp_path, "A.scout.json", **{**run, "cost_usd": 100.0})
+    _rec(tmp_path, "host_profile.json", cost_usd=100.0, state="DONE")
+    (tmp_path / "A.stream.jsonl").write_text(json.dumps(run) + "\n")
+    g = K.roi_groups(tmp_path)
+    assert g["capsule"]["on"]["runs"] == 1 and "off" not in g["capsule"]
+    assert g["class"]["NORMAL"]["runs"] == 1 and g["class"]["NORMAL"]["cost"] == 2.0
+
+
+def test_roi_groups_by_arm_and_class_with_agent_roi(tmp_path):
+    full = {"mode": "SHIP", "budget_class": "NORMAL", "turns": 10, "wall_seconds": 60,
+            "reads": {"reads": 4, "searches": 2, "tokens_before_first_edit": 1000}}
+    _rec(tmp_path, "A.json", requirement="A", state="DONE", capsule=True, cost_usd=1.0, **full)
+    _rec(tmp_path, "B.json", requirement="B", state="FAILED", capsule=True, cost_usd=3.0, **full)
+    _rec(tmp_path, "C.json", requirement="C", state="DONE", capsule=False, cost_usd=0.5,
+         **{**full, "budget_class": "MICRO", "turns": 4})
+    g = K.roi_groups(tmp_path)
+    on = g["capsule"]["on"]
+    assert (on["runs"], on["done"], on["done_share"], on["agent_roi"]) == (2, 1, 0.5, 0.25)
+    assert (on["turns"], on["cost"], on["searches"], on["tok_pre_edit"]) == (10, 2.0, 2, 1000)
+    assert g["capsule"]["off"]["agent_roi"] == 2.0
+    assert g["class"]["MICRO"]["turns"] == 4 and g["class"]["NORMAL"]["runs"] == 2
+    assert "ROI/USD" in "\n".join(K.roi_table(tmp_path))
+
+
+def test_roi_counts_missing_fields_instead_of_crashing(tmp_path):
+    _rec(tmp_path, "A.json", requirement="A", state="DONE")
+    _rec(tmp_path, "B.json", requirement="B", state="DONE", mode="SHIP", cost_usd=1.0,
+         reads={"reads": "many"}, capsule="maybe", budget_class=None)
+    (tmp_path / "C.json").write_text("{not json")
+    g = K.roi_groups(tmp_path)
+    assert g["capsule"]["unknown"]["runs"] == 2 and g["class"]["unknown"]["runs"] == 2
+    assert g["class"]["unknown"]["missing"] > 0 and g["class"]["unknown"]["turns"] is None
+    assert K.roi_table(tmp_path) and K.roi_groups(tmp_path / "none") == {"capsule": {}, "class": {}}
