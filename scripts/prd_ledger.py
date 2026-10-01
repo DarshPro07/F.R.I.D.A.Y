@@ -2828,6 +2828,12 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Execution outcomes (SUCCEEDED/FAILED tasks per capability) feed action_path.rank via routing_memory.execution_reliability; router search and the planner's tie-break use them. Live golden journey (web_fetch + headless Chromium) ran and passed; duplicate test name fixed. (build run, commit 3a27257f8)",
         "next_action": 'GAPS: execution_reliability is a per-capability tally over all runs, not scoped to a request shape or recency window; chosen because execution success is mostly a property of the capability, and rank() only reorders ties, never changes what is offered. Scoping needs an owner decision on a run-to-shape key.',
     }),
+    ('BROW-001', {
+        "status": VERIFIED,
+        "current_implementation": 'Recorded execution outcomes (SUCCEEDED/FAILED objective tasks per capability) feed action_path.rank via routing_memory.execution_reliability; router search merges them with routing outcomes and the planner breaks fit ties by path order and execution reliability (3a27257).',
+        "next_action": 'Refinement outside the acceptance (ruling 2026-10-01): scope execution reliability per request shape once a run-to-shape key exists; rank() only reorders ties today.',
+        "evidence": 'Golden journey: tests/test_action_path.py::test_one_objective_runs_a_structured_step_and_a_real_browser_step (live: a structured web_fetch step and a headless-Chromium step in one objective) passed on the integrated tree 469cd13, re-run by the build controller with an isolated state root (1 passed, 11.4 s). Build run commit 3a27257: RED (assertion) at a5a459f and GREEN at the commit for tests/test_action_path.py, tests/test_capability_router.py; affected tests passed; fresh verifier PASS (sonnet, $0.13).',
+    }),
 ]
 
 

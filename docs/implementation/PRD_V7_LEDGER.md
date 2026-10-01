@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `0557c9d9adcaa9ec07962f083a342862fb00ac6ff7a3134b59aac180800c3ab5`
 - PRD size: 8008 lines, 269029 bytes
-- Repository HEAD: `23e98ed1ff63214ca04f717bb359d23ad7d51024`
-- Uncommitted paths at generation: 38
-- Generated: 2026-09-30T18:59:16+05:30
+- Repository HEAD: `9c5f438c80e1f2bc12964ff77b70d42a90c0c1f0`
+- Uncommitted paths at generation: 33
+- Generated: 2026-10-01T23:16:21+05:30
 
 ## Status vocabulary
 
@@ -27,14 +27,14 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| PARTIAL | 59 |
+| PARTIAL | 58 |
 | MISSING | 51 |
-| VERIFIED | 34 |
+| VERIFIED | 35 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
 | **total** | **155** |
 
-Unresolved P0: 21 (CORE-001, INTENT-001, TRAJ-001, CTX-001, CTX-002, CTX-003, MEM-002, MEM-003, SEC-005, BROW-001, RES-001, EVAL-001, DOMAIN-001, ACT-001, MCP-001, CYBER-002, DUR-001, BCON-001, APPROVAL-001, JIT-001, RES-002)
+Unresolved P0: 20 (CORE-001, INTENT-001, TRAJ-001, CTX-001, CTX-002, CTX-003, MEM-002, MEM-003, SEC-005, RES-001, EVAL-001, DOMAIN-001, ACT-001, MCP-001, CYBER-002, DUR-001, BCON-001, APPROVAL-001, JIT-001, RES-002)
 
 Unresolved P1: 82 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008, ORCH-001, ORCH-002, ORCH-003, ORCH-004, ORCH-005, ORCH-006, ORCH-007, ORCH-008, ORCH-009, ORCH-010, ORCH-011, ORCH-012, ORCH-013, ORCH-014)
 
@@ -242,7 +242,7 @@ Unresolved P1: 82 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MO
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| BROW-001 | P0 | **PARTIAL** | Hybrid action route supports structured + GUI paths. | Golden journey/backend evaluation. | FR-BRW-001 | `friday/action_path.py:25,45,58,66`, `friday/capability_router.py:545`, `friday/routing_memory.py:133` | 2026-09-27/28: the action-path tests failed first; the real hybrid journey passed on REFERENCE-A (data/prd_v7_audit/brow001_hybrid_journey_2026-09-28.json). 2026-09-30: the routing-outcome change was made by the first build-kernel worker (headless Sonnet in its own worktree: 23 turns, 150 s, $0.36) and verified by the controller: disabling the reliability input turns the new test red; the 13 directly affected test files and the reachability test pass in the main checkout (287). |
+| BROW-001 | P0 | **VERIFIED** | Hybrid action route supports structured + GUI paths. | Golden journey/backend evaluation. | FR-BRW-001 | `friday/action_path.py:25,45,58,66`, `friday/capability_router.py:545`, `friday/routing_memory.py:133` | Golden journey: tests/test_action_path.py::test_one_objective_runs_a_structured_step_and_a_real_browser_step (live: a structured web_fetch step and a headless-Chromium step in one objective) passed on the integrated tree 469cd13, re-run by the build controller with an isolated state root (1 passed, 11.4 s). Build run commit 3a27257: RED (assertion) at a5a459f and GREEN at the commit for tests/test_action_path.py, tests/test_capability_router.py; affected tests passed; fresh verifier PASS (sonnet, $0.13). |
 
 ## PRD section 49
 
