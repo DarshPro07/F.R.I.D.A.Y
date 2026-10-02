@@ -153,16 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 1dbf7cc on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T13:04:50+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 70, "PARKED_BY_OWNER": 1, "PARTIAL": 60, "VERIFIED": 35}
-- Unresolved P0: 20
+- HEAD: f3c48ce on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T13:47:29+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 70, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
+- Unresolved P0: 19
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (12): DOMAIN-001=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), ACT-001 (stale worktree)
-- Open escalations: 11
-  - CORE-001 resolved: owner ruling: derive a check from acceptance; unparked with the ruling in its next action
-  - CORE-001 integration: {"requirement": "CORE-001", "result": "FAILED_INTEGRATION", "red_green": {"result": "OK", "tests": [
-  - ACT-001 integration: {"requirement": "ACT-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tests
+- Last wave (18): MCP-001=REFUSED
+- Parked: CORE-001 (PARKED_BY_OWNER), ACT-001 (stale worktree), DOMAIN-001 (partial x2), EVAL-001 (stale worktree), MCP-001 (integration refused)
+- Open escalations: 14
   - DOMAIN-001 attempts: FAILED twice
   - DOMAIN-001 resolved: unparked: scout write denied by a harness permission bug (fixed in the scout commit)
   - CORE-001 resolved: unparked: rejected for an @live test that fails without the change (fixed in d6242e9)
@@ -170,5 +167,8 @@ That is the first implementation target of this program.
   - CORE-001 parked_by_owner: owner: stop waiting on CORE-001, build the rest of the product; resume only on the owner's word or w
   - ACT-001 resolved: unparked so the escalation cascade (fresh strong model, then advisor) handles its five concrete veri
   - ACT-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\act-001 already exists
-- Next ready: MCP-001, EVAL-001
+  - DOMAIN-001 partial: integrated twice without closing its gaps
+  - EVAL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\eval-001 already exists
+  - MCP-001 integration: refusing MCP-001: run has no commit
+- Next ready: APPROVAL-001, BCON-001
 <!-- build-program:end -->
