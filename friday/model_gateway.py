@@ -843,6 +843,24 @@ class ModelGateway:
                 return p.get("route_kind", "")
         return ""
 
+    def _infer(self, provider: str, params: dict, *, timeout: float) -> dict:
+        """One worker `infer` call. A local route holds a MODEL lease for the
+        call (RES-001 / MODEL-005): the governor refuses it when the machine
+        cannot carry another resident model, which fails over like any other
+        unavailable route."""
+        if self.route_kind(provider) != "local":
+            return self.worker.call("infer", params, timeout=timeout)
+        from friday import governor as G
+        gov = G.governor()
+        decision = gov.admit(G.MODEL, label=f"{provider}/{params.get('model', '')}"[:60],
+                             owner="model_gateway", deadline_s=timeout + 30.0)
+        if not decision.admitted:
+            raise GatewayUnavailable(f"governor {decision.decision}: {decision.reason}")
+        try:
+            return self.worker.call("infer", params, timeout=timeout)
+        finally:
+            gov.release(decision.lease, retire_queue=False)
+
     # -- routing (FR-075) ---------------------------------------------------
 
     def tier_table(self) -> dict[str, tuple[str, str]]:
@@ -1167,7 +1185,7 @@ class ModelGateway:
                 params["reasoning"] = {"effort": reasoning}
             started = time.monotonic()
             try:
-                reply = self.worker.call("infer", params, timeout=request.timeout_s)
+                reply = self._infer(provider, params, timeout=request.timeout_s)
             except GatewayUnavailable as exc:
                 elapsed = int((time.monotonic() - started) * 1000)
                 attempts.append({"tier": tier, "provider": provider, "model": model,
@@ -1213,7 +1231,7 @@ class ModelGateway:
                         params = {**params, "max_output_tokens": widened, "_retried": True}
                         started = time.monotonic()
                         try:
-                            reply = self.worker.call("infer", params, timeout=request.timeout_s)
+                            reply = self._infer(provider, params, timeout=request.timeout_s)
                         except GatewayUnavailable as exc:
                             last_error, last_state = str(exc), "GATEWAY_UNAVAILABLE"
                             continue

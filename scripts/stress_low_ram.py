@@ -51,7 +51,10 @@ for line in sys.stdin:
 
 #: Reasons that come from memory - headroom, the fall, the commit charge,
 #: the floor - as opposed to CPU or disk.
-MEMORY_REASONS = ("RAM ", "available RAM", "commit", "only ")
+#: Idle work for the governor to stop: it does nothing until it is terminated.
+IDLE_HELPER = "import time\nwhile True:\n    time.sleep(1)\n"
+
+MEMORY_REASONS =("RAM ", "available RAM", "commit", "only ")
 
 #: What the governor's policy says each level must do with the three asks.
 EXPECTED = {
@@ -99,6 +102,16 @@ def _probe(gov, started: float) -> dict:
             "as_policy_says": decisions == EXPECTED[pressure.level]}
 
 
+def _stopped_at(gov, lease: str, step: dict) -> dict | None:
+    """The governor's reduction record for `lease`, with the level of the
+    reading that stopped it; None while the work is still running."""
+    for record in gov.reductions:
+        if record["lease"] == lease:
+            return {"level": step["level"], "memory_driven": step["memory_driven"],
+                    "reduction": dict(record)}
+    return None
+
+
 def run(*, step_mb: int | None = None, cap_mb: int = 1000, floor_gb: float = 1.0,
         settle_s: float = 1.5, watch_s: float | None = None) -> dict:
     """`step_mb` defaults to a step sized to this machine: 1/150 of the memory
@@ -114,6 +127,15 @@ def run(*, step_mb: int | None = None, cap_mb: int = 1000, floor_gb: float = 1.0
         step_mb = max(20, int(psutil.virtual_memory().available / 1024**2 / 150))
     gov = G.Governor(baseline=baseline, sample_ttl_s=60.0)
     started = time.time()
+    # Real running optional work, admitted before any memory is taken: the
+    # governor must stop it by itself when memory pressure arrives.
+    helper = subprocess.Popen([sys.executable, "-c", IDLE_HELPER])
+    admission = gov.admit(G.OPTIONAL, label="stress helper", owner="stress_low_ram",
+                          objective_id="RES-001", pid=helper.pid, deadline_s=600.0,
+                          cleanup=helper.terminate)
+    helper_record = next((o for o in gov.owned_processes()
+                          if o["lease"] == admission.lease), None)
+    helper_stopped: dict | None = None
     steps = [{"allocated_mb": 0, **_probe(gov, started)}]
     stopped = "cap reached"
     child = subprocess.Popen([sys.executable, "-c", CHILD], stdin=subprocess.PIPE,
@@ -132,6 +154,7 @@ def run(*, step_mb: int | None = None, cap_mb: int = 1000, floor_gb: float = 1.0
             allocated += step_mb
             time.sleep(settle_s)
             steps.append({"allocated_mb": allocated, **_probe(gov, started)})
+            helper_stopped = helper_stopped or _stopped_at(gov, admission.lease, steps[-1])
             if steps[-1]["level"] == G.CRITICAL:
                 stopped = "CRITICAL reached"
                 break
@@ -151,7 +174,13 @@ def run(*, step_mb: int | None = None, cap_mb: int = 1000, floor_gb: float = 1.0
         except subprocess.TimeoutExpired:
             child.kill()
             child.wait(timeout=30)
+        try:
+            helper.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            helper.kill()
+            helper.wait(timeout=10)
     released_at = time.time()
+    helper_stopped = helper_stopped or _stopped_at(gov, admission.lease, steps[-1])
 
     order = list(G.LEVELS)
     peak = max((s["level"] for s in steps), key=order.index)
@@ -169,7 +198,15 @@ def run(*, step_mb: int | None = None, cap_mb: int = 1000, floor_gb: float = 1.0
     # Where memory was first read as pressure - the demonstration is about
     # memory, so a CPU or disk reason does not count.
     first = next((s for s in steps if s["raw"] != G.NORMAL and s["memory_driven"]), None)
-    return {"baseline": baseline.to_dict(), "step_mb": step_mb, "settle_s": settle_s,
+    running_optional = {
+        "owned_process": helper_record,
+        "stopped_at_level": helper_stopped["level"] if helper_stopped else None,
+        "memory_driven": helper_stopped["memory_driven"] if helper_stopped else False,
+        "exit_code": helper.returncode,
+        "reduction": helper_stopped["reduction"] if helper_stopped else None}
+    helper_ok = (helper_stopped is not None and helper_stopped["memory_driven"]
+                 and order.index(helper_stopped["level"]) >= order.index(G.ELEVATED))
+    return {"running_optional": running_optional,"baseline": baseline.to_dict(), "step_mb": step_mb, "settle_s": settle_s,
             "thresholds": {"ram_yellow": gov.thresholds.ram_yellow,
                            "ram_orange": gov.thresholds.ram_orange,
                            "ram_red": gov.thresholds.ram_red,
@@ -180,7 +217,7 @@ def run(*, step_mb: int | None = None, cap_mb: int = 1000, floor_gb: float = 1.0
             "steps": steps, "stopped": stopped, "after_release": after,
             "released": released, "held_s": held_s, "peak": peak, "first_pressure": first,
             "as_policy_says": all(s["as_policy_says"] for s in steps + after),
-            "demonstrated": (first is not None
+            "demonstrated": (first is not None and helper_ok
                              and first["ram_percent"] < gov.thresholds.ram_critical
                              and order.index(released["level"]) < order.index(peak))}
 

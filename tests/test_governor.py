@@ -487,3 +487,109 @@ def test_real_memory_pressure_bounds_new_work():
     first = result["first_pressure"]
     assert first["ram_percent"] < result["thresholds"]["ram_critical"], first
     assert result["held_s"] >= result["thresholds"]["dwell_s"], result["held_s"]
+    # Real running optional work was stopped by the governor itself, by
+    # memory pressure, with section 55's record filled in.
+    running = result["running_optional"]
+    record = running["owned_process"]
+    assert record and record["owner"] == "stress_low_ram" and record["objective_id"] == "RES-001"
+    assert record["pid"] and record["deadline"] and record["cleanup"] and record["kind"] == G.OPTIONAL
+    assert running["memory_driven"] and running["stopped_at_level"] in (G.ELEVATED, G.HIGH, G.CRITICAL)
+    assert running["exit_code"] is not None
+    assert running["reduction"]["released"] and running["reduction"]["lease"] == record["lease"]
+
+
+# -- RES-001: GPU, network, model residency, running work, section 55 -------
+
+def test_gpu_memory_pressure_is_judged_and_absent_gpu_is_not_guessed():
+    assert sample().gpu_memory_percent is None
+    assert G.assess(sample(), G.Thresholds(), baseline=IDLE).level == G.NORMAL
+    full = sample()
+    full.gpu_memory_percent = 93.0
+    assert G.assess(full, G.Thresholds(), baseline=IDLE).level == G.HIGH
+    full.gpu_memory_percent = 99.0
+    p = G.assess(full, G.Thresholds(), baseline=IDLE)
+    assert p.level == G.CRITICAL and any("GPU memory" in r for r in p.reasons)
+    assert p.to_dict()["sample"]["gpu_memory_percent"] == 99.0
+
+
+def test_network_throughput_is_sampled_from_counter_deltas(monkeypatch):
+    import types
+
+    import psutil
+    counters = iter([types.SimpleNamespace(bytes_sent=0, bytes_recv=0),
+                     types.SimpleNamespace(bytes_sent=500_000, bytes_recv=500_000)])
+    monkeypatch.setattr(psutil, "net_io_counters", lambda *a, **k: next(counters))
+    clock = iter([100.0, 101.0])
+    monkeypatch.setattr(G.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(G, "_net_last", None)
+    assert G._network_mbps() is None            # nothing to measure against yet
+    assert G._network_mbps() == pytest.approx(8.0)
+
+
+def test_resident_model_is_capped_and_refused_under_high_pressure():
+    gov, dial = make()
+    assert gov.admit(G.MODEL, label="llama").admitted
+    assert gov.admit(G.MODEL, label="qwen").decision == G.QUEUE
+    gov.release(gov.active_leases()[0]["lease"])
+    dial.s = sample(cpu=90)
+    d = gov.admit(G.MODEL, label="qwen")
+    assert d.decision == G.SHED and "no new local model" in d.reason
+
+
+def test_every_admitted_lease_records_the_owned_process_fields():
+    gov, _ = make()
+    d = gov.admit(G.WORKER, label="job", objective_id="obj-1", owner="hermes",
+                  pid=4242, deadline_s=60.0)
+    (rec,) = gov.owned_processes()
+    assert (rec["lease"], rec["owner"], rec["objective_id"], rec["pid"]) == (d.lease, "hermes", "obj-1", 4242)
+    assert rec["heartbeat"] and rec["deadline"] > rec["started"] and rec["kind"] == G.WORKER
+    assert gov.status()["owned"][0]["lease"] == d.lease
+    gov.release(d.lease)
+    assert gov.owned_processes() == []
+
+
+def test_pressure_stops_running_optional_work_but_not_workers():
+    gov, dial = make()
+    stopped = []
+    opt = gov.admit(G.OPTIONAL, label="digest", cleanup=lambda: stopped.append("digest"))
+    worker = gov.admit(G.WORKER, label="job", cleanup=lambda: stopped.append("job"))
+    assert opt.admitted and worker.admitted
+    dial.s = sample(cpu=90)
+    assert gov.pressure(fresh=True).level != G.NORMAL
+    assert stopped == ["digest"]
+    assert gov.active(G.OPTIONAL) == 0 and gov.active(G.WORKER) == 1
+    assert gov.reductions[-1]["lease"] == opt.lease and gov.reductions[-1]["released"]
+
+
+def test_high_pressure_evicts_a_resident_model_and_a_failed_cleanup_keeps_the_lease():
+    gov, dial = make()
+    gov.admit(G.MODEL, label="llama", cleanup=lambda: None)
+    dial.s = sample(cpu=90)
+    assert gov.pressure(fresh=True).level in (G.HIGH, G.CRITICAL)
+    assert gov.active(G.MODEL) == 0 and gov.owned_processes() == []
+
+    gov2, dial2 = make()
+
+    def stuck():
+        raise RuntimeError("stuck")
+
+    gov2.admit(G.MODEL, label="llama", cleanup=stuck)
+    dial2.s = sample(cpu=90)
+    gov2.pressure(fresh=True)
+    assert gov2.active(G.MODEL) == 1 and "cleanup failed" in gov2.reductions[-1]["reason"]
+    n = len(gov2.reductions)
+    gov2.pressure(fresh=True)
+    assert len(gov2.reductions) == n                # reported once, not every reading
+
+
+def test_work_past_its_deadline_or_silent_is_reaped_at_any_pressure():
+    gov, _ = make(heartbeat_stale_s=30.0, max_workers=5)
+    gone = []
+    late = gov.admit(G.WORKER, label="late", deadline_s=-1.0, cleanup=lambda: gone.append("late"))
+    quiet = gov.admit(G.WORKER, label="quiet", cleanup=lambda: gone.append("quiet"))
+    assert gov.heartbeat(quiet.lease)               # it reported in once, then went silent
+    gov._owned[quiet.lease].heartbeat -= 60.0
+    live = gov.admit(G.WORKER, label="live", cleanup=lambda: gone.append("live"))
+    gov.reduce_running()
+    assert sorted(gone) == ["late", "quiet"]
+    assert gov.heartbeat(late.lease) is False and gov.heartbeat(live.lease) is True

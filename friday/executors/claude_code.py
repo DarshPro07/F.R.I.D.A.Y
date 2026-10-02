@@ -20,6 +20,7 @@ Verification. "Done" with no diff and no passing test is a claim, not a result.
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import logging
@@ -370,12 +371,23 @@ class ClaudeCodeExecutor:
         # reason, recorded as a failed action - never silently started.
         from friday import governor as G
         decision = G.governor().admit(G.WORKER, label=f"claude:{bundle.goal[:40]}",
-                                      objective_id=bundle.run_id)
+                                      objective_id=bundle.run_id, owner="claude_code")
         if not decision.admitted:
             return run_ctx.record(c.failed(
                 started, f"governor {decision.decision}: {decision.reason}; "
                          f"nothing was run"))
         lease = decision.lease
+        # Section 55: how the governor stops this run under pressure. The
+        # cancel is scheduled on this loop, so it is safe from any thread.
+        loop = asyncio.get_running_loop()
+
+        def _stop_under_pressure() -> None:
+            run = self.run
+            if run is not None:
+                asyncio.run_coroutine_threadsafe(run.cancel(), loop)
+
+        G.governor().attach(lease, cleanup=_stop_under_pressure,
+                            deadline_s=timeout + 30.0)
         # Recorded before anything starts, so a run that dies during startup
         # still leaves something to recover. DuplicateRun is deliberately not
         # caught: one run means at most one process, and the caller decides.
@@ -394,6 +406,7 @@ class ClaudeCodeExecutor:
 
         try:
             async for event in self.run.events(timeout=timeout):
+                G.governor().heartbeat(lease)
                 if event.kind == "tool":
                     tool_calls += 1
                     if limit and tool_calls > limit:
@@ -409,6 +422,8 @@ class ClaudeCodeExecutor:
                 decided = self.progress.note(event, objective=bundle.goal)
                 if decided is not None:
                     self._log_prompt_decision(bundle.run_id, decided)
+                if event.kind == "init" and self.run.process is not None:
+                    G.governor().attach(lease, pid=self.run.process.pid)
                 if event.kind == "init" and event.session_id:
                     self._remember_session(bundle, event.session_id)
                     self.runs.running(

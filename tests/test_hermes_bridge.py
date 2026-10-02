@@ -426,3 +426,51 @@ def test_stop_closes_the_pipes_and_joins_the_readers(tmp_path, monkeypatch):
     assert proc.stdout.closed and proc.stdin.closed and proc.stderr.closed
     assert not reader.is_alive() and not err.is_alive()
     assert supervisor._reader is None and supervisor._stderr_reader is None
+
+
+def test_governor_stop_interrupts_the_real_session_without_blocking(tmp_path, monkeypatch):
+    """RES-001: the stop callback is attached only once the session id is
+    stored, sends session.interrupt with that id, and returns at once."""
+    from friday import governor as G
+    supervisor = make(tmp_path, monkeypatch, flags={'FAKE_HERMES_HANG': '1'})
+    try:
+        out = supervisor.delegate(hb.TaskBundle(goal='long job'))
+        run_id = out['work_run_id']
+        sid = supervisor.log.get(run_id)['hermes_session_id']
+        assert sid
+        sent = []
+        real_request = supervisor.request
+
+        def slow_request(method, params=None, timeout=30):
+            sent.append((method, params))
+            time.sleep(1.5)
+            return real_request(method, params, timeout=timeout)
+
+        monkeypatch.setattr(supervisor, 'request', slow_request)
+        cleanup = G.governor()._owned[supervisor._leases[run_id]].cleanup
+        assert cleanup is not None
+        began = time.monotonic()
+        cleanup()
+        assert time.monotonic() - began < 1.0
+        deadline = time.time() + 15
+        while time.time() < deadline and supervisor.log.get(run_id)['status'] != hb.PARTIAL:
+            time.sleep(0.1)
+        assert ('session.interrupt', {'session_id': sid}) in sent
+        assert supervisor.log.get(run_id)['status'] == hb.PARTIAL
+    finally:
+        supervisor.stop()
+
+
+def test_hermes_session_events_are_governor_heartbeats(tmp_path, monkeypatch):
+    from friday import governor as G
+    supervisor = make(tmp_path, monkeypatch, flags={'FAKE_HERMES_HANG': '1'})
+    try:
+        out = supervisor.delegate(hb.TaskBundle(goal='long job'))
+        owned = G.governor()._owned[supervisor._leases[out['work_run_id']]]
+        owned.beats = False
+        sid = supervisor.log.get(out['work_run_id'])['hermes_session_id']
+        supervisor._handle_event({'type': 'message.delta', 'session_id': sid,
+                                  'payload': {'text': 'x'}})
+        assert owned.beats is True
+    finally:
+        supervisor.stop()

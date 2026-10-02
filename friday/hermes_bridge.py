@@ -1520,6 +1520,10 @@ class HermesSupervisor:
 
         work_run_id = self._session_runs.get(sid)
         friday_event = EVENT_MAP.get(kind, kind)
+        lease = self._leases.get(work_run_id) if work_run_id else None
+        if lease:
+            from friday import governor as G
+            G.governor().heartbeat(lease)
 
         # Activity ledger for the stall classifier. Recorded for every
         # session event, from the structured stream itself.
@@ -1789,7 +1793,7 @@ class HermesSupervisor:
         # cannot read: the caller reports "queued under pressure" honestly.
         from friday import governor as G
         decision = G.governor().admit(G.WORKER, label=f"hermes:{bundle.goal[:40]}",
-                                      objective_id=friday_run_id)
+                                      objective_id=friday_run_id, owner="hermes_bridge")
         if not decision.admitted:
             raise G.Refused(decision)
 
@@ -1843,6 +1847,15 @@ class HermesSupervisor:
             model=eff_model, provider=eff_provider,
             route_reason=route_reason or "default: friday profile model",
             status=WORKING, **fb)
+        # Section 55: the governor can now stop this worker. Attached only
+        # once the session id is stored, because `interrupt` needs it; the
+        # stop runs on its own thread because the governor calls it from
+        # `reduce_running`, which must not wait on a 30 s gateway request.
+        G.governor().attach(
+            decision.lease,
+            cleanup=lambda: self._interrupt_async(work_run_id),
+            pid=self._proc.pid if self._proc is not None else None,
+            deadline_s=expires_in)
         self.state = WORKING
 
         self.request("prompt.submit",
@@ -2043,6 +2056,18 @@ class HermesSupervisor:
             return False
         self.log.update(work_run_id, failure_kind=self.ENVELOPE_EXPIRED)
         return True
+
+    def _interrupt_async(self, work_run_id: str) -> None:
+        """Stop a worker without blocking the caller (the governor's stop
+        callback). A failure is logged; the run stays visible and the
+        envelope timer retries."""
+        def _run() -> None:
+            try:
+                self.interrupt(work_run_id)
+            except Exception as exc:  # noqa: BLE001 - no caller to raise to on a daemon thread
+                logger.warning("governor stop of %s failed: %s", work_run_id, exc)
+        threading.Thread(target=_run, name=f"hermes-stop-{work_run_id}",
+                         daemon=True).start()
 
     def interrupt(self, work_run_id: str) -> dict:
         record = self.log.get(work_run_id)

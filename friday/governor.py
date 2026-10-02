@@ -77,7 +77,8 @@ SHED = "SHED"
 WORKER = "worker"            # a coding/specialist execution worker
 BROWSER = "browser"          # a browser automation session
 OPTIONAL = "optional"        # autolearn, benchmarks, background digests
-KINDS = (WORKER, BROWSER, OPTIONAL)
+MODEL = "model"              # a local model held resident in RAM/VRAM (MODEL-005)
+KINDS = (WORKER, BROWSER, OPTIONAL, MODEL)
 
 
 @dataclass(frozen=True)
@@ -122,6 +123,16 @@ class Thresholds:
     max_workers: int = 2                   # FR-013 / NFR-P09 default
     max_browsers: int = 2
     max_queue: int = 8
+    max_resident_models: int = 1           # local models held in memory at once
+    # GPU memory in use: a local model that no longer fits is pressure
+    gpu_memory_high: float = 90.0
+    gpu_memory_critical: float = 98.0
+    gpu_busy_high: float = 95.0
+    # throughput as a share of the fastest link that is up: a saturated link
+    # starves every network-bound worker, so optional work yields first
+    network_busy_share: float = 0.90
+    # a lease with no heartbeat for this long is presumed orphaned (section 55)
+    heartbeat_stale_s: float = 120.0
 
     def ram_floor(self, total_gb: float | None) -> float:
         """The least available RAM that is not an emergency on this machine."""
@@ -149,6 +160,15 @@ class Sample:
     #: runs out, allocations fail whatever physical memory is free.
     commit_available_gb: float | None = None
     commit_limit_gb: float | None = None
+    #: GPU memory in use (percent) on the busiest NVIDIA device, None when the
+    #: machine has none or the tool is absent - never guessed.
+    gpu_memory_percent: float | None = None
+    gpu_percent: float | None = None
+    #: Network throughput since the previous reading, megabits per second;
+    #: None on the first reading.
+    network_mbps: float | None = None
+    #: Fastest link among the interfaces that are up, megabits per second.
+    network_link_mbps: float | None = None
 
     def total_gb(self) -> float | None:
         if self.ram_total_gb:
@@ -163,6 +183,10 @@ class Sample:
                 "ram_total_gb": self.ram_total_gb,
                 "commit_available_gb": self.commit_available_gb,
                 "commit_limit_gb": self.commit_limit_gb,
+                "gpu_memory_percent": self.gpu_memory_percent,
+                "gpu_percent": self.gpu_percent,
+                "network_mbps": self.network_mbps,
+                "network_link_mbps": self.network_link_mbps,
                 "disk_free_gb": self.disk_free_gb,
                 "browser_processes": self.browser_processes,
                 "friday_rss_mb": self.friday_rss_mb}
@@ -217,6 +241,68 @@ def _commit() -> tuple[float | None, float | None]:
     return (info.CommitLimit - info.CommitTotal) * page_gb, info.CommitLimit * page_gb
 
 
+_net_last: tuple[float, int] | None = None         # (monotonic time, bytes sent+received)
+_net_lock = threading.Lock()
+
+
+def _network_mbps() -> float | None:
+    """Throughput since the previous call; None on the first call or where
+    the platform reports no counters."""
+    global _net_last
+    import psutil
+
+    counters = psutil.net_io_counters()
+    if counters is None:
+        return None
+    now, total = time.monotonic(), counters.bytes_sent + counters.bytes_recv
+    with _net_lock:
+        last, _net_last = _net_last, (now, total)
+    if last is None or now - last[0] <= 0 or total < last[1]:
+        return None
+    return (total - last[1]) * 8 / 1e6 / (now - last[0])
+
+
+def _link_mbps() -> float | None:
+    """Speed of the fastest interface that is up, None where unreported."""
+    import psutil
+
+    try:
+        stats = psutil.net_if_stats()
+    except OSError:
+        return None
+    speeds = [s.speed for s in stats.values() if s.isup and s.speed > 0]
+    return float(max(speeds)) if speeds else None
+
+
+def _gpu() -> tuple[float | None, float | None]:
+    """(memory percent, utilisation percent) of the busiest NVIDIA device via
+    nvidia-smi, else (None, None). A machine without one is not an error."""
+    import shutil
+    import subprocess
+
+    exe = shutil.which("nvidia-smi")
+    if not exe:
+        return None, None
+    try:
+        out = subprocess.run(
+            [exe, "--query-gpu=memory.used,memory.total,utilization.gpu",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=3, check=True).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("gpu unreadable: %s", exc)
+        return None, None
+    mem, util = None, None
+    for line in out.strip().splitlines():
+        try:
+            used, total, busy = (float(x) for x in line.split(","))
+        except ValueError:
+            continue
+        if total > 0:
+            mem = max(mem or 0.0, used / total * 100.0)
+        util = max(util or 0.0, busy)
+    return mem, util
+
+
 def sample_machine(*, cpu_interval: float = 0.0) -> Sample:
     """Measure. `cpu_interval=0` returns the CPU since the last reading,
     which is what a periodic sampler wants - at least `CPU_MIN_WINDOW_S` of
@@ -249,7 +335,10 @@ def sample_machine(*, cpu_interval: float = 0.0) -> Sample:
     except OSError as exc:
         logger.warning("commit charge unreadable: %s", exc)
         commit_available, commit_limit = None, None
-    return Sample(at=time.time(), cpu_percent=cpu,
+    gpu_memory, gpu_busy = _gpu()
+    return Sample(gpu_memory_percent=gpu_memory, gpu_percent=gpu_busy,
+                  network_mbps=_network_mbps(), network_link_mbps=_link_mbps(),
+at=time.time(), cpu_percent=cpu,
                   ram_percent=float(mem.percent),
                   ram_available_gb=mem.available / 1024**3,
                   disk_free_gb=disk_free, browser_processes=browsers,
@@ -396,6 +485,19 @@ def assess(sample: Sample, thresholds: Thresholds = Thresholds(), *,
         elif left <= t.trend_yellow_s:
             bump(ELEVATED, f"available RAM falling {falling * 60:.2f} GB/min: the floor in {left:.0f} s")
 
+    if sample.gpu_memory_percent is not None:
+        if sample.gpu_memory_percent >= t.gpu_memory_critical:
+            bump(CRITICAL, f"GPU memory {sample.gpu_memory_percent:.0f}% used")
+        elif sample.gpu_memory_percent >= t.gpu_memory_high:
+            bump(HIGH, f"GPU memory {sample.gpu_memory_percent:.0f}% used")
+
+    if sample.gpu_percent is not None and sample.gpu_percent >= t.gpu_busy_high:
+        bump(ELEVATED, f"GPU {sample.gpu_percent:.0f}% busy")
+    if sample.network_mbps is not None and sample.network_link_mbps:
+        if sample.network_mbps / sample.network_link_mbps >= t.network_busy_share:
+            bump(ELEVATED, f"network {sample.network_mbps:.0f} of "
+                           f"{sample.network_link_mbps:.0f} Mb/s in use")
+
     # Emergency guardrails: the only fixed lines.
     if sample.ram_percent >= t.ram_critical:
         bump(CRITICAL, f"RAM {sample.ram_percent:.0f}% used")
@@ -498,6 +600,36 @@ class Decision:
                 "active_workers": self.active_workers, "queued": self.queued}
 
 
+@dataclass
+class OwnedProcess:
+    """Section 55's record for work the governor admitted: who owns it, for
+    which objective, under which lease, when it last proved it is alive, by
+    when it must be done, and how to clean it up. `cleanup` is what the
+    governor calls to reduce or reap the work; without one the governor can
+    only report it."""
+
+    lease: str
+    kind: str
+    owner: str
+    objective_id: str
+    label: str
+    pid: int | None
+    started: float
+    heartbeat: float
+    deadline: float | None
+    cleanup: object = None            # Callable[[], None] | None
+    #: Set by the first `heartbeat()`: a lease whose owner never reports in
+    #: has no heartbeat to go stale, only a deadline.
+    beats: bool = False
+
+    def to_dict(self, now: float | None = None) -> dict:
+        return {"lease": self.lease, "kind": self.kind, "owner": self.owner,
+                "objective_id": self.objective_id, "label": self.label,
+                "pid": self.pid, "started": self.started,
+                "heartbeat": self.heartbeat, "deadline": self.deadline,
+                "cleanup": bool(self.cleanup)}
+
+
 class Governor:
     """The admission gate. One per process (`governor()` below).
 
@@ -523,6 +655,9 @@ class Governor:
         self._next = 0
         self.decisions: list[Decision] = []                      # bounded history
         self._parallel_justified: set[str] = set()
+        self._owned: dict[str, OwnedProcess] = {}
+        self._unreapable: set[str] = set()
+        self.reductions: list[dict] = []                         # bounded history
 
     # -- measurement --------------------------------------------------------
 
@@ -554,6 +689,7 @@ class Governor:
             p = Pressure(level=ELEVATED, reasons=[f"sample failed: {exc}"])
         with self._lock:
             self._last, self._last_at = p, now
+        self.reduce_running(p)
         return p
 
     # -- accounting ---------------------------------------------------------
@@ -572,6 +708,102 @@ class Governor:
         with self._lock:
             return len(self._queue)
 
+    def owned_processes(self) -> list[dict]:
+        """Section 55's record for every lease in flight."""
+        with self._lock:
+            return [o.to_dict() for o in self._owned.values()]
+
+    def heartbeat(self, lease: str) -> bool:
+        """The owner says the work is alive. False for a lease the governor
+        no longer holds (reaped or released) - the owner should stop."""
+        with self._lock:
+            owned = self._owned.get(lease)
+            if owned is None:
+                return False
+            owned.heartbeat = time.time()
+            owned.beats = True
+            return True
+
+    def attach(self, lease: str, *, pid: int | None = None, cleanup=None,
+               deadline_s: float | None = None) -> bool:
+        """Complete the owned-process record once the work exists: a worker's
+        pid and how to stop it are known only after it starts, after admission.
+        False for a lease the governor no longer holds.
+
+        `cleanup` runs inside `reduce_running`, which runs on every
+        `pressure()` and `admit()`: it must not block. A stop that needs I/O
+        starts it on its own thread and returns."""
+        with self._lock:
+            owned = self._owned.get(lease)
+            if owned is None:
+                return False
+            if pid is not None:
+                owned.pid = pid
+            if cleanup is not None:
+                owned.cleanup = cleanup
+            if deadline_s is not None:
+                owned.deadline = time.time() + deadline_s
+            return True
+
+    def reduce_running(self, p: Pressure | None = None) -> list[dict]:
+        """Under pressure, reduce work already running (not just refuse new
+        work): optional work is stopped at ELEVATED and above, a resident
+        model at HIGH and above; work past its deadline or without a heartbeat
+        is reaped at any level. Each victim's `cleanup` runs outside the lock;
+        a victim with no cleanup is reported, not released, because the
+        governor cannot stop what it was not told how to stop."""
+        p = p or self.pressure()
+        now = time.time()
+        stale = self.thresholds.heartbeat_stale_s
+        victims: list[tuple[OwnedProcess, str]] = []
+        with self._lock:
+            # Workers and browsers beyond the one allowed at HIGH are stopped
+            # newest first; the oldest keeps running, as admission does.
+            surplus: set[str] = set()
+            if p.level in (HIGH, CRITICAL):
+                for kind in (WORKER, BROWSER):
+                    running = sorted((o for o in self._owned.values() if o.kind == kind),
+                                     key=lambda o: o.started)
+                    surplus.update(o.lease for o in running[1:])
+            for o in self._owned.values():
+                if o.lease in self._unreapable:
+                    continue
+                if o.deadline is not None and now > o.deadline:
+                    victims.append((o, "past its deadline"))
+                elif o.beats and now - o.heartbeat > stale:
+                    victims.append((o, f"no heartbeat for {now - o.heartbeat:.0f}s"))
+                elif o.kind == OPTIONAL and p.level != NORMAL:
+                    victims.append((o, f"optional work stopped under {p.level} pressure"))
+                elif o.kind == MODEL and p.level in (HIGH, CRITICAL):
+                    victims.append((o, f"resident model evicted under {p.level} pressure"))
+                elif o.lease in surplus:
+                    victims.append((o, f"{o.kind} stopped: concurrency reduced to 1 "
+                                       f"under {p.level} pressure"))
+        done: list[dict] = []
+        for o, why in victims:
+            ok = True
+            if o.cleanup is not None:
+                try:
+                    o.cleanup()
+                except Exception as exc:  # noqa: BLE001 - a failed cleanup is recorded, the lease kept
+                    logger.warning("cleanup of %s failed: %s", o.lease, exc)
+                    ok, why = False, f"{why}; cleanup failed: {exc}"
+            else:
+                ok, why = False, f"{why}; no cleanup registered"
+            if ok:
+                self.release(o.lease, retire_queue=False)
+            else:
+                with self._lock:
+                    self._unreapable.add(o.lease)     # reported once, not on every reading
+            record = {"lease": o.lease, "kind": o.kind, "owner": o.owner,
+                      "objective_id": o.objective_id, "reason": why,
+                      "released": ok, "at": now}
+            done.append(record)
+            with self._lock:
+                self.reductions.append(record)
+                del self.reductions[:-200]
+        return done
+
     def justify_parallel(self, objective_id: str) -> None:
         """FR-013: concurrency scales only for demonstrably parallel work.
         A caller that has a plan with independent streams says so; this
@@ -581,7 +813,12 @@ class Governor:
 
     # -- admission ----------------------------------------------------------
 
-    def admit(self, kind: str, *, label: str = "", objective_id: str = "") -> Decision:
+    def admit(self, kind: str, *, label: str = "", objective_id: str = "",
+              owner: str = "", pid: int | None = None,
+              deadline_s: float | None = None, cleanup=None) -> Decision:
+        """`owner`, `pid`, `deadline_s` (seconds from now) and `cleanup` fill
+        section 55's owned-process record for an admitted lease; a caller
+        that omits `owner` is recorded under its label."""
         if kind not in KINDS:
             raise ValueError(f"unknown work kind {kind!r}; known: {KINDS}")
         p = self.pressure()
@@ -589,6 +826,7 @@ class Governor:
         with self._lock:
             workers = sum(1 for k, _, _ in self._leases.values() if k == WORKER)
             browsers = sum(1 for k, _, _ in self._leases.values() if k == BROWSER)
+            models = sum(1 for k, _, _ in self._leases.values() if k == MODEL)
             queued = len(self._queue)
             cap = t.max_workers + (1 if objective_id in self._parallel_justified else 0)
 
@@ -597,7 +835,14 @@ class Governor:
                 if decision == ADMIT:
                     self._next += 1
                     lease = f"lease-{self._next}"
-                    self._leases[lease] = (kind, time.time(), label)
+                    now = time.time()
+                    self._leases[lease] = (kind, now, label)
+                    self._owned[lease] = OwnedProcess(
+                        lease=lease, kind=kind, owner=owner or label,
+                        objective_id=objective_id, label=label, pid=pid,
+                        started=now, heartbeat=now,
+                        deadline=None if deadline_s is None else now + deadline_s,
+                        cleanup=cleanup)
                 elif decision == QUEUE:
                     self._queue.append((kind, label, time.time()))
                 d = Decision(decision, kind, reason, p.level, lease,
@@ -615,6 +860,12 @@ class Governor:
                 return out(ADMIT, "optional work admitted")
             if p.level == CRITICAL:
                 return out(SHED, f"CRITICAL pressure: {why}; no new {kind} started")
+            if kind == MODEL:
+                if p.level == HIGH:
+                    return out(SHED, f"HIGH pressure ({why}): no new local model loaded")
+                if models >= t.max_resident_models:
+                    return out(QUEUE, f"resident model cap {t.max_resident_models} reached")
+                return out(ADMIT, "model admitted")
             if kind == WORKER:
                 if workers >= cap:
                     if queued >= t.max_queue:
@@ -634,13 +885,18 @@ class Governor:
                 return out(QUEUE, f"HIGH pressure ({why}): one browser at a time")
             return out(ADMIT, "browser admitted")
 
-    def release(self, lease: str) -> None:
+    def release(self, lease: str, *, retire_queue: bool = True) -> None:
         with self._lock:
-            self._leases.pop(lease, None)
+            held = self._leases.pop(lease, None) is not None
+            self._owned.pop(lease, None)
+            self._unreapable.discard(lease)
             # Capacity returned: the queue is a record of what waited, not a
             # scheduler - callers re-run admit() themselves - so the oldest
             # waiting entry is retired here to keep the depth truthful.
-            if self._queue:
+            # Only when this call returned capacity: the owner's own release
+            # after the governor stopped its work is a second release of a
+            # lease already gone and must not retire another caller's entry.
+            if held and retire_queue and self._queue:
                 self._queue.pop(0)
 
     # -- reporting ----------------------------------------------------------
@@ -653,7 +909,11 @@ class Governor:
             "workers": self.active(WORKER),
             "browsers": self.active(BROWSER),
             "queued": self.queue_depth(),
-            "caps": {"workers": self.thresholds.max_workers,
+            "models": self.active(MODEL),
+            "owned": self.owned_processes(),
+            "reductions": list(self.reductions[-10:]),
+            "caps": {"models": self.thresholds.max_resident_models,
+"workers": self.thresholds.max_workers,
                      "browsers": self.thresholds.max_browsers,
                      "queue": self.thresholds.max_queue},
             "banner": self.banner(p),

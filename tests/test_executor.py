@@ -443,3 +443,37 @@ def test_the_launched_argv_carries_no_bypass_and_no_bare_shell():
     if '--disallowedTools' in granted:
         granted = granted[:granted.index('--disallowedTools')]
     assert not [tool for tool in granted if tool in SHELLS], f"an unqualified shell reached the command line: {granted}"
+
+
+def test_every_stream_event_is_a_governor_heartbeat(store, bundle, monkeypatch):
+    """RES-001: the heartbeat is how the governor tells a live run from a
+    silent one, so each event the run streams must refresh it."""
+    from friday import contracts as c
+    from friday import governor as G
+
+    events = [cli.Event("init", {"session_id": "s1"}),
+              cli.Event("tool", {}, name="Edit"),
+              cli.Event("text", {}, text="working"),
+              cli.Event("result", {"result": "done"})]
+
+    class FakeRun:
+        process = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        async def events(self, timeout=None):
+            for event in events:
+                yield event
+
+    beats: list[str] = []
+    gov = G.governor()
+    real = gov.heartbeat
+    monkeypatch.setattr(gov, "heartbeat", lambda lease: beats.append(lease) or real(lease))
+    monkeypatch.setattr(cli, "available", lambda: True)
+    monkeypatch.setattr(cli, "Run", FakeRun)
+    monkeypatch.setattr(ClaudeCodeExecutor, "finish",
+                        lambda self, b, started, final: started.finish(status=c.PARTIAL))
+    result = asyncio.run(executor(store).execute(bundle))
+    assert result.status == c.PARTIAL, result.error
+    assert len(beats) == len(events) and len(set(beats)) == 1
