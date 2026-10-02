@@ -2947,6 +2947,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Contract now records assumptions (understand) and open questions (still_blocking) at objective_start; admit_objective holds a request while a blocking question is unanswered (V7-D38) and the live loop asks it. (build run, commit 5168d9e99)',
         "next_action": 'GAPS: 3 failures in tests/test_voice_path.py (live TTS/STT, LiveKit placeholders in .env) are environmental, not from this change; understand() is only called for idea-shaped text and needs a model provider; with none, assumptions stay empty',
     }),
+    ('JIT-001', {
+        "status": PARTIAL,
+        "current_implementation": "Added an authority-probe seam to CapabilityRuntime: a capability's owner registers probes for authentication/target state; execute re-asks them at the moment of action and refuses 'JIT: ...' (a probe that raises also refuses). (build run, commit 14428552a)",
+        "next_action": 'GAPS: No probe is registered for any real capability yet; requires_auth capabilities still need their owners to register one; Envelopes from before fingerprints carry no hashes',
+    }),
 ]
 
 
