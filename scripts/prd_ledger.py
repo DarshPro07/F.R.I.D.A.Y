@@ -2902,6 +2902,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "A person's yes to a pending objective action is a lease on the plan it was given for: resume_after_approval records it with the objective's plan hash (each task's capability, arguments and dependencies, without the approval marker; objectives.plan_hash), its graph version (modification.graph_version) and an expiry (objectives.APPROVAL_TTL, 24 hours). The runtime honours it (capability_runtime._approval_on_record) only for the exact capability and arguments, while unexpired, and while the plan hash is unchanged: a task added or an argument amended afterwards, an expired yes, or a record from before leases (no plan hash) no longer authorises, and the run asks again. A standing permission stays a policy rule, not an approval. Gap: blast radius is not in the binding, because SIDE-002's blast-radius estimate does not exist yet.",
         "next_action": "RULING 2026-10-02 (controller, reversible): per-action blast radius derives from the capability's declared effect profile (CAP-004: read_only, consequential, reversible, idempotent, external_side_effect) combined with the action's target scope (how many targets, whose data); execution_economics.py classifies tasks for cost, not authority, and is not the source. So this no longer waits on SIDE-002: add blast_radius to the lease binding computed that way, make a change of blast radius a material change (the approval goes STALE), and test both. The lease binding (objective, version, plan hash, expiry) already holds - its 7 tests pass (re-run 2026-10-02).",
     }),
+    ('CTX-001', {
+        "status": PARTIAL,
+        "current_implementation": "The working set's context telemetry is now stored with the gateway's call row (context_sections column, migrated onto old ledgers), carried on the request from model.infer. (build run, commit 32225635e)",
+        "next_action": 'GAPS: no model route context profile sets a budget yet; Hermes task bundle and voice turn still assemble context outside the compiler; test_live_hermes_gateway_answers_without_an_agent_loop (live-marked) fails on TEST-ISOLATION-001 opening data/gateway_calls_live_test.sqlite3; not touched by this change',
+    }),
 ]
 
 
