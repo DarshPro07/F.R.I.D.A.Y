@@ -503,6 +503,34 @@ def still_blocking(text: str, *, db=None) -> tuple[str, list[dict]]:
         return "", []
     return project, outstanding(project, db=db)
 
+def ground_for(text: str, *, db=None) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """
+    (assumptions, open questions) an objective contract records for `text`.
+
+    Open questions are what `still_blocking` says this request needs and does
+    not have. Assumptions are the small decisions `understand` made on the
+    person's behalf when the request describes an idea. A reader that fails
+    leaves that side empty: the contract never costs the objective.
+    """
+    questions: list[str] = []
+    assumed: list[str] = []
+    try:
+        _, blocking = still_blocking(text, db=db)
+        questions.extend(str(row["question"]) for row in blocking)
+    except Exception:                                       # noqa: BLE001
+        logger.exception("requirements.ground blocking unreadable")
+    if is_an_idea(text):
+        try:
+            found = understand(text, db=db)
+        except Exception:                                   # noqa: BLE001
+            logger.exception("requirements.ground understand failed")
+        else:
+            assumed.extend(f"{item.question} -> {item.proposed}"
+                           for item in found.assumptions)
+            questions.extend(item.question for item in found.questions)
+    return tuple(dict.fromkeys(assumed)), tuple(dict.fromkeys(questions))
+
+
 ANSWER_SCHEMA = {
     'type': 'OBJECT',
     'properties': {

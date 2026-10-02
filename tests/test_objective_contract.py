@@ -85,3 +85,51 @@ def test_starting_an_objective_from_words_keeps_its_contract(store, monkeypatch)
         assert contract.exact_literals == ("reading.md", "Dune")
     finally:
         OT.reset_store(None)
+
+
+def test_the_contract_records_what_is_assumed_and_still_unanswered(store, monkeypatch):
+    """INTENT-001: assumptions and open questions are filled at compile."""
+    from friday import policy as PO
+    from friday import requirements as R
+    from friday.toolsets import memory as M
+    from friday.toolsets import objectives as OT
+
+    text = "build the lighthouse keeper game: create reading.md containing Dune"
+    R.ask("lighthouse-keeper", [R.Question("Which engine?", why="decides the build")],
+          db=store)
+    monkeypatch.setattr(R, "is_an_idea", lambda t: True)
+    monkeypatch.setattr(R, "understand", lambda t, project="", db=None: R.Understanding(
+        assumptions=[R.Question("Save format?", why="reversible", proposed="markdown")]))
+    M.reset_store(store)
+    OT.reset_store(store)
+    try:
+        result = OT.objective_start(c.Run.create(text), objective=text,
+                                    engine=PO.PolicyEngine(autonomy=PO.FULL))
+        assert result.status == c.SUCCEEDED, result.error
+        (row,) = store.objective_runs(limit=5)
+        contract = c.ObjectiveContract.from_dict(json.loads(row["contract"]))
+        assert contract.open_questions == ("Which engine?",)
+        assert contract.assumptions == ("Save format? -> markdown",)
+    finally:
+        OT.reset_store(None)
+        M.reset_store(None)
+
+
+def test_a_request_waits_for_the_question_it_needs_before_it_is_admitted(store):
+    """V7-D38: no run is started while a blocking question is unanswered."""
+    import agent_friday
+    from friday import requirements as R
+    from friday.toolsets import memory as M
+    from friday.toolsets import objectives as OT
+
+    text = "build the lighthouse keeper game, then create notes.md containing Dune and show me"
+    R.ask("lighthouse-keeper", [R.Question("Which engine?", why="decides the build")],
+          db=store)
+    M.reset_store(store)
+    OT.reset_store(store)
+    try:
+        assert agent_friday.admit_objective(text) is None
+        assert store.objective_runs(limit=5) == []
+    finally:
+        OT.reset_store(None)
+        M.reset_store(None)

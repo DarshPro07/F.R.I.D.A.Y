@@ -1064,8 +1064,12 @@ def governance_for(plan: Plan, text: str) -> dict:
     return governance
 
 
-def contract_for(plan: Plan, text: str):
+def contract_for(plan: Plan, text: str, *, assumptions: tuple[str, ...] = (),
+                 open_questions: tuple[str, ...] = ()):
     """
+    `assumptions` and `open_questions` come from requirements.ground_for: what
+    was decided on the person's behalf and what is still unanswered.
+
     The objective's contract, as this reading of `text` found it (PRD v7
     §10.3): the whole request as the goal, why (purpose), what must not
     happen and how the work must be done (hard constraints), how to speak
@@ -1089,6 +1093,8 @@ def contract_for(plan: Plan, text: str):
         exact_literals=tuple(literals),
         success_criteria=tuple(goal.intent.strip() for goal in plan.goals
                                if goal.capability),
+        assumptions=tuple(assumptions),
+        open_questions=tuple(open_questions),
         governance=governance_for(plan, text),
     )
 

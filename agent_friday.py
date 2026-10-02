@@ -1388,6 +1388,9 @@ class FridayAgent(Agent):
             raise_what_is_still_open(turn_ctx, user_text)
         else:
             ask_about_the_idea(turn_ctx, user_text)
+            if self._intent == "NEW_OBJECTIVE":
+                # Not admitted: either a sentence, or held for its questions.
+                raise_what_is_still_open(turn_ctx, user_text, admitted=False)
 
         # Record the turn as a durable objective (resume an open one, else
         # start it) before learning from it, so the run exists first and the
@@ -1997,7 +2000,8 @@ def capture_any_answers(user_text: str) -> None:
             question_id, confident, answer[:60])
 
 
-def raise_what_is_still_open(turn_ctx, user_text: str) -> None:
+def raise_what_is_still_open(turn_ctx, user_text: str, *,
+                             admitted: bool = True) -> None:
     """
     Bring back a question the boss never answered, at the moment it matters.
 
@@ -2027,9 +2031,14 @@ def raise_what_is_still_open(turn_ctx, user_text: str) -> None:
     if not questions:
         return
 
-    lines = [f"You asked about {project} and never got an answer. The work has "
-             f"started anyway - do not hold it up. Say, in one short sentence and "
-             f"in your own voice, what you are assuming and that they can change it:"]
+    if admitted:
+        lines = [f"You asked about {project} and never got an answer. The work has "
+                 f"started anyway - do not hold it up. Say, in one short sentence and "
+                 f"in your own voice, what you are assuming and that they can change it:"]
+    else:
+        lines = [f"You asked about {project} and never got an answer, and this "
+                 f"request needs it. The work has not started. Ask, in one short "
+                 f"question and in your own voice:"]
     # Two at most: a third open question read aloud is a list, and a list
     # is what the boss asked Friday never to do to him.
     for question in questions[:2]:
@@ -2305,6 +2314,20 @@ def admit_objective(user_text: str) -> str | None:
     if len(semantic.goals) < COMPOUND_TASKS:
         logger.info("objective.rejected reason=not_compound goals=%d needed=%d",
                     len(semantic.goals), COMPOUND_TASKS)
+        return None
+
+    # V7-D38: a question the person has not answered, and that this request
+    # needs, is asked before the plan is made - not after the work started.
+    from friday import requirements as REQ
+
+    try:
+        _, waiting = REQ.still_blocking(text)
+    except Exception:                                        # noqa: BLE001
+        logger.exception("could not check the open questions; admitting")
+        waiting = []
+    if waiting:
+        logger.info("objective.rejected reason=blocking_questions open=%d",
+                    len(waiting))
         return None
 
     from friday import contracts as c

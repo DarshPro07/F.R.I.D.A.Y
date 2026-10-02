@@ -432,7 +432,11 @@ def objective_start(run: c.Run, objective: str, *, tasks: str = "",
         specs = SP.task_specs(semantic)
         # The request as the intent compiler read it travels with the run,
         # and compile holds the plan to the literals in it (INTENT-001).
-        contract = SP.contract_for(semantic, text)
+        from friday import requirements as REQ
+
+        assumed, unanswered = REQ.ground_for(text)
+        contract = SP.contract_for(semantic, text, assumptions=assumed,
+                                   open_questions=unanswered)
         if not specs:
             return run.record(c.failed(
                 started,
