@@ -57,7 +57,9 @@ ALLOWED_TOOLS = ",".join(("Read", "Edit", "Write", "Glob", "Grep",
                           f"Bash({VENV_PY}:*)"))
 _PRIORITY = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 # Read-only scouting. The one write is the findings file, path-scoped.
-SCOUT_TOOLS = ",".join(("Read", "Glob", "Grep", "Write(.build/findings.json)",
+# A scout writes nothing: its findings are its final message (a path rule for
+# one file never matched the absolute path the Write tool uses).
+SCOUT_TOOLS = ",".join(("Read", "Glob", "Grep",
                         "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)"))
 # class -> (max turns, max budget USD, wall seconds)
 BUDGETS = {"SCOUT": (8, 0.75, 15 * 60), "MICRO": (12, 1.0, 20 * 60),
@@ -331,7 +333,7 @@ Summary: {row['summary']}
 ## Rules
 - Investigate only. You are read-only: do not edit code, do not commit, never touch data/.
 - Read budget: at most {READ_FILES['SCOUT']} files.
-- Finish by writing `.build/findings.json`:
+- Finish with your findings as your final message - only this JSON object:
   {{"requirement": "{row['id']}", "gap": "what is missing or wrong", "files": [],
    "tests": [], "acceptance_plan": "how it will be met and proven",
    "risk": "LOW|MEDIUM|HIGH", "budget_class": "MICRO|NORMAL|COMPLEX"}}
@@ -797,9 +799,25 @@ def _commit_run(run: Running, evidence: dict) -> tuple[str, list[str]]:
     return sha, _git(["diff", "--name-only", run.base_sha, sha], run.wt, 60).splitlines()
 
 
-def _scout_outcome(run: Running, runs_dir: Path) -> dict:
-    """Keep a valid findings file as runs_dir/<REQ>.scout.json; {} when missing or invalid."""
-    found = _evidence(run.wt, "findings.json")
+def _first_json_with(text: str, key: str) -> dict:
+    """The first JSON object in `text` that has `key`; {} when there is none."""
+    dec, i = json.JSONDecoder(), 0
+    while (i := text.find("{", i)) != -1:
+        try:
+            obj, end = dec.raw_decode(text, i)
+        except ValueError:
+            i += 1
+            continue
+        if isinstance(obj, dict) and key in obj:
+            return obj
+        i = end
+    return {}
+
+
+def _scout_outcome(run: Running, runs_dir: Path, final: str = "") -> dict:
+    """Keep valid findings as runs_dir/<REQ>.scout.json - from the scout's final
+    message, or a findings file an older packet asked for; {} when invalid."""
+    found = _first_json_with(final or "", "risk") or _evidence(run.wt, "findings.json")
     ok = bool(found) and found.get("risk") in ("LOW", "MEDIUM", "HIGH")
     if ok:
         (runs_dir / f"{run.req}.scout.json").write_text(json.dumps(found, indent=2) + "\n",
@@ -816,7 +834,7 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
     res = results[-1] if results else {}
     runs_dir.mkdir(parents=True, exist_ok=True)
     scout = run.mode == "SCOUT"
-    ev = _scout_outcome(run, runs_dir) if scout else _evidence(run.wt)
+    ev = _scout_outcome(run, runs_dir, str(res.get("result") or "")) if scout else _evidence(run.wt)
     if reason:
         state = reason
     elif run.proc.returncode != 0 or not res or res.get("is_error"):

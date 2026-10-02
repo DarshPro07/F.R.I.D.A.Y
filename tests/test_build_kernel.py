@@ -402,7 +402,10 @@ def test_scout_launch_plan_is_read_only_and_detached(tmp_path):
     tools = plan["command"][plan["command"].index("--allowedTools") + 1].split(",")
     assert plan["mode"] == "SCOUT" and plan["class"] == "SCOUT" and plan["branch"] == ""
     assert not {"Edit", "Write", f"Bash({K.VENV_PY}:*)"} & set(tools)
-    assert "Write(.build/findings.json)" in tools
+    # 2026-10-02: the rule Write(.build/findings.json) never matched the absolute
+    # path the Write tool uses, so DOMAIN-001's scout was denied twice. A scout
+    # writes nothing: its findings are its final message.
+    assert not any(t.startswith(("Write", "Edit", "NotebookEdit")) for t in tools)
     # acceptEdits would auto-approve Edit/Write anywhere in the worktree, allowlist or not.
     assert plan["command"][plan["command"].index("--permission-mode") + 1] == "default"
     ship = K.launch(row("S", "P1"), worktrees=tmp_path, dry_run=True)["command"]
@@ -425,7 +428,7 @@ def test_launch_scout_runs_detached_with_a_scout_packet(monkeypatch, repo, tmp_p
     monkeypatch.setattr(K, "_start", lambda cmd, wt: _Proc(None))
     run = K.launch(row("R-1"), worktrees=tmp_path / "wts", repo=repo, mode="SCOUT")
     assert _git(run.wt, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD" and run.wall_s == 900
-    assert "findings.json" in (run.wt / ".build" / "packet.md").read_text()
+    assert "final message" in (run.wt / ".build" / "packet.md").read_text()
 
 
 def test_read_metrics_counts_reads_bytes_and_reads_before_first_edit():
@@ -925,3 +928,20 @@ def test_repair_prompt_names_the_tests_that_failed_integration():
     text = K.repair_prompt({"requirement": "R-1", "result": "FAILED_INTEGRATION", "detail": "reset to pre_head",
                             "failures": ["FAILED tests/test_x.py::test_y - AssertionError: boom"]})
     assert "tests/test_x.py::test_y - AssertionError: boom" in text
+
+
+def test_a_scouts_findings_can_be_its_final_message(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path, mode="SCOUT")
+    found = {"requirement": "R-1", "gap": "g", "files": ["friday/x.py"], "tests": [],
+             "acceptance_plan": "p", "risk": "MEDIUM", "budget_class": "NORMAL"}
+    _stream(wt, {"type": "system", "subtype": "init", "session_id": "S1"},
+            {"type": "result", "subtype": "success", "session_id": "S1", "num_turns": 4,
+             "total_cost_usd": 0.1, "usage": {}, "result": "Findings:\n" + json.dumps(found)})
+    rec = K.finalize(run, None, tmp_path / "runs")
+    assert rec["state"] == "DONE" and rec["evidence"] == found
+    assert json.loads((tmp_path / "runs" / "R-1.scout.json").read_text()) == found
+
+
+def test_the_scout_packet_asks_for_the_findings_as_the_final_message():
+    text = K.scout_packet_text({"id": "R-1", "priority": "P0", "summary": "s"})
+    assert "final message" in text and ".build/findings.json" not in text
