@@ -2942,6 +2942,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Side-effecting calls get a task-stable idempotency_key (to ports that accept it), and O.replay_task_statuses rebuilds task statuses from events alone, treating a commit as SUCCEEDED. (build run, commit ea4da455b)',
         "next_action": 'GAPS: No production capability yet honours idempotency_key, so the call-returned-but-uncommitted instant still re-runs; Replay covers task statuses only and is not used to restore state; task rows remain the state',
     }),
+    ('INTENT-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Contract now records assumptions (understand) and open questions (still_blocking) at objective_start; admit_objective holds a request while a blocking question is unanswered (V7-D38) and the live loop asks it. (build run, commit 5168d9e99)',
+        "next_action": 'GAPS: 3 failures in tests/test_voice_path.py (live TTS/STT, LiveKit placeholders in .env) are environmental, not from this change; understand() is only called for idea-shaped text and needs a model provider; with none, assumptions stay empty',
+    }),
 ]
 
 
