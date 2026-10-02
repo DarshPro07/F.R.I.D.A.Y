@@ -241,6 +241,22 @@ consecutive readings of >= 3.5 GB available, then runs CORE-001's fresh Opus esc
 MEMORY_ADMISSION_TIMEOUT (not FAILED) and exits. If the escalation still misses the four conditions, CORE-001 stays
 parked with the new evidence and the program continues other P0 work.
 
+## v12 - parallel product build and the EXE gate (owner, 2026-10-02, `00-owner-directive-2026-10-02g.md`)
+
+- CORE-001 is PARKED_BY_OWNER (first-class non-terminal ledger state, 5b7a71c); the product lane runs through
+  `scripts/product_chain.py` (admission-gated, bounded runs, $45 total default).
+- Models: deterministic code for scheduling, tests and merges; Sonnet implementers; Opus for escalations, the advisor
+  step and trust-boundary verification; parallel workers only as memory admission allows (one at a time on this
+  host at ~1.7 GB predicted per P0 worker).
+- EXE states: EXE_NOT_BUILT, EXE_BUILDING, EXE_BUILT_UNVERIFIED, EXE_VALIDATING, EXE_BLOCKED_EXTERNAL, EXE_READY.
+  EXE_READY only after the release gate (launch without the source checkout, `--doctor` passing or naming accepted
+  external blockers, state outside the bundle and surviving restart, golden journeys through the exe, full
+  regression on the exact candidate, build identity recorded) - then `data/release/EXE_READY.json` and the owner is
+  told. A PyInstaller success alone is never EXE_READY.
+- Packaging lane: build candidate exes at checkpoints; packaging bugs are product bugs. Known release item:
+  `build_windows.py` marks a build dirty from `git status --porcelain`, so untracked `data/` outputs make every
+  build "344d62a+dirty" (channel dev) even with a clean tracked tree.
+
 ## Resume (fresh session)
 
 `git status`; read `data/build_state.json` (parked, escalations, stop_reason); `build_kernel.py concurrency`;
