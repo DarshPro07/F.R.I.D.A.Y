@@ -256,3 +256,46 @@ def test_a_healthy_run_completes_unflagged(tmp_path):
     run = _drive(store, run_id, CR.build_dispatch(engine=PO.PolicyEngine(autonomy=PO.FULL)))
     assert run["status"] == O.RUN_COMPLETED, run
     assert not [e for e in store.objective_events(run_id) if e["event"] == T.EVENT_FLAGGED]
+
+
+# -- alignment with the objective contract (INTENT-001) ----------------------------
+
+def test_a_started_step_the_contract_forbids_is_scope_creep():
+    trace = _Trace(3, capability="files_delete")
+    trace.succeeded("t0")
+    found = T.assess(trace.events, trace.tasks, governance={"forbidden": ["delete"]})
+    assert found.verdict == T.DRIFTING
+    assert any("beyond the objective's contract" in r and "delete was forbidden" in r
+               for r in found.reasons)
+    assert T.assess(trace.events, trace.tasks).verdict == T.ON_TRACK
+
+
+def test_more_side_effecting_steps_than_the_contract_allows_is_scope_creep():
+    trace = _Trace(4, capability="files_write")
+    for i in range(3):
+        trace.succeeded(f"t{i}")
+    over = T.assess(trace.events, trace.tasks, governance={"max_side_effects": 2})
+    assert over.verdict == T.DRIFTING
+    assert "3 steps with side effects against a limit of 2" in " ".join(over.reasons)
+    within = T.assess(trace.events, trace.tasks, governance={"max_side_effects": 3})
+    assert within.verdict == T.ON_TRACK
+
+
+def test_acting_while_the_contract_has_open_questions_is_flagged():
+    trace = _Trace(2, capability="files_write")
+    trace.succeeded("t0")
+    found = T.assess(trace.events, trace.tasks, open_questions=("which folder?",))
+    assert found.verdict == T.DRIFTING
+    assert found.signals["unanswered_questions"] == 1
+    read_only = _Trace(2)
+    read_only.succeeded("t0")
+    assert T.assess(read_only.events, read_only.tasks,
+                    open_questions=("which folder?",)).verdict == T.ON_TRACK
+
+
+def test_a_resume_clears_the_contract_signals_for_the_new_window():
+    trace = _Trace(2, capability="files_delete")
+    trace.succeeded("t0")
+    trace.events.append({"event": O.EVENT_RUN_RESUMED, "task_id": None, "detail": {}})
+    assert T.assess(trace.events, trace.tasks,
+                    governance={"forbidden": ["delete"]}).verdict == T.ON_TRACK
