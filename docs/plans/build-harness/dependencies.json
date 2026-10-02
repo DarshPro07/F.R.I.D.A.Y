@@ -55,6 +55,43 @@
     ],
     "ORCH-014": [
       "ORCH-009"
+    ],
+    "CAP-FORGE-001": [
+      "CAP-FORGE-002",
+      "CAP-FORGE-003",
+      "CAP-FORGE-004",
+      "CAP-FORGE-005",
+      "CAP-FORGE-007",
+      "CAP-FORGE-008"
+    ],
+    "CAP-FORGE-004": [
+      "CAP-FORGE-002",
+      "CAP-FORGE-011"
+    ],
+    "CAP-FORGE-005": [
+      "CAP-FORGE-003",
+      "CAP-FORGE-004"
+    ],
+    "CAP-FORGE-006": [
+      "CAP-FORGE-007"
+    ],
+    "CAP-FORGE-007": [
+      "CAP-FORGE-005"
+    ],
+    "CAP-FORGE-008": [
+      "CAP-FORGE-007"
+    ],
+    "CAP-FORGE-009": [
+      "CAP-FORGE-008"
+    ],
+    "CAP-FORGE-010": [
+      "CAP-FORGE-009"
+    ],
+    "CAP-FORGE-011": [
+      "CAP-FORGE-002"
+    ],
+    "CAP-FORGE-012": [
+      "CAP-FORGE-002"
     ]
   }
 }

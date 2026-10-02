@@ -8,11 +8,11 @@ no next action, or (v7) a VERIFIED row naming no test or a citation that
 does not resolve on the tree.
 
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
-- PRD sha256: `0557c9d9adcaa9ec07962f083a342862fb00ac6ff7a3134b59aac180800c3ab5`
-- PRD size: 8008 lines, 269029 bytes
-- Repository HEAD: `429ffb2ae326cce849d8aa6198952cc8b6b88da7`
+- PRD sha256: `f9ffaa8d4873efb25b8fef4084fe5628a06faf67692ddb1f55cd53a1ed8fe4a9`
+- PRD size: 8050 lines, 275030 bytes
+- Repository HEAD: `c161ba31a6ce58a78bbfe9c7c719a784b9105703`
 - Uncommitted paths at generation: 38
-- Generated: 2026-10-02T11:53:38+05:30
+- Generated: 2026-10-02T13:27:35+05:30
 
 ## Status vocabulary
 
@@ -27,16 +27,16 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| PARTIAL | 58 |
-| MISSING | 51 |
+| MISSING | 61 |
+| PARTIAL | 60 |
 | VERIFIED | 35 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
-| **total** | **155** |
+| **total** | **167** |
 
 Unresolved P0: 20 (CORE-001, INTENT-001, TRAJ-001, CTX-001, CTX-002, CTX-003, MEM-002, MEM-003, SEC-005, RES-001, EVAL-001, DOMAIN-001, ACT-001, MCP-001, CYBER-002, DUR-001, BCON-001, APPROVAL-001, JIT-001, RES-002)
 
-Unresolved P1: 82 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008, ORCH-001, ORCH-002, ORCH-003, ORCH-004, ORCH-005, ORCH-006, ORCH-007, ORCH-008, ORCH-009, ORCH-010, ORCH-011, ORCH-012, ORCH-013, ORCH-014)
+Unresolved P1: 94 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008, ORCH-001, ORCH-002, ORCH-003, ORCH-004, ORCH-005, ORCH-006, ORCH-007, ORCH-008, ORCH-009, ORCH-010, ORCH-011, ORCH-012, ORCH-013, ORCH-014, CAP-FORGE-001, CAP-FORGE-002, CAP-FORGE-003, CAP-FORGE-004, CAP-FORGE-005, CAP-FORGE-006, CAP-FORGE-007, CAP-FORGE-008, CAP-FORGE-009, CAP-FORGE-010, CAP-FORGE-011, CAP-FORGE-012)
 
 ## PRD section 0
 
@@ -462,6 +462,23 @@ Unresolved P1: 82 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MO
 | ORCH-012 | P1 | **MISSING** | Worker prompts keep a stable prefix and a dynamic suffix, so prompt caching holds. | Rules, role and tool definitions come first in a fixed order; nothing volatile sits in the prefix; the cache hit rate is measured per worker. | - | - | Order worker prompts as a stable prefix and a dynamic suffix; measure cache hits. |
 | ORCH-013 | P1 | **MISSING** | A finished task that invalidates an assumption cancels the running tasks built on it. | When a task's result invalidates an assumption later tasks depend on, the scheduler cancels those still running and replans them. | - | - | After ORCH-001: dependency invalidation events and cancellation. |
 | ORCH-014 | P1 | **MISSING** | FRIDAY's worker harness is measured against its own baseline for tokens and wall time at an equal or better verification rate. | On representative objectives the median model tokens fall at least 60%, and the wall time at least 40% on parallelisable work, against the recorded baseline, with the verification rate held. | - | - | After ORCH-009: record the baseline, then measure each harness change against it. |
+
+## PRD section 102
+
+| id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
+|---|---|---|---|---|---|---|---|
+| CAP-FORGE-001 | P1 | **MISSING** | A person gives FRIDAY a repository URL and FRIDAY evaluates and integrates its useful capabilities without anyone editing FRIDAY's source or configuration. | Given only a repository URL, FRIDAY produces a dossier, a classification and a decision (use directly, wrap, build adapter, extract pattern, reference only, reject) and, when it integrates, a verified capability usable by name - with no manual edit to FRIDAY source or configuration. | - | `friday/forge.py:145` | Ranked P1 behind the P0 burn-down (A8). After CAP-FORGE-002..008: wire the front door (dossier -> classify -> overlap -> quarantine -> recipe -> adapter -> journey -> registry) as one objective. |
+| CAP-FORGE-002 | P1 | **MISSING** | Before integration a repository is classified as skill, MCP, CLI, library, application, service, model, research corpus, capability pack or reference-only. | On a labelled set (a skill pack, an MCP server, a CLI, a Python library, a service, a model, a prompt corpus, a reference-only project) the classifier assigns the expected class; a prompt corpus is never classified as executable. | - | `friday/forge.py:145` | Ranked P1 behind the P0 burn-down (A8). Build the dossier (licence, languages, build system, entry points, manifests, permissions) and a deterministic classifier first; a model only for the summary. |
+| CAP-FORGE-003 | P1 | **MISSING** | A new repository is analysed outside the trusted runtime before it receives FRIDAY authority, secrets, user data or standing network access. | A repository under analysis has no secrets, no FRIDAY memory, no user files and no standing network; a planted repository that reads an environment secret or a user file is denied and the attempt recorded. | - | `friday/fabric.py` | Ranked P1 behind the P0 burn-down (A8). Quarantine root, empty environment and jailed execution through the existing execution policy; negative tests for secret, file and network reach. |
+| CAP-FORGE-004 | P1 | **MISSING** | FRIDAY derives the minimum viable integration: native call, CLI wrapper, MCP, service adapter, browser path or reference only. | Each plan names the simplest reliable path from a fixed set of recipe templates and records why the simpler paths were rejected; the model does not invent a new architecture per repository. | - | `friday/fabric.py` | Ranked P1 behind the P0 burn-down (A8). Recipe templates per class (capability manifest, permissions, tests, fallback, exposure) chosen deterministically from the classification. |
+| CAP-FORGE-005 | P1 | **PARTIAL** | Where an adapter is needed FRIDAY generates and tests the smallest one without the person writing code. | For a library with no adapter, FRIDAY generates the adapter, its tests and its manifest, and the tests run in the quarantine sandbox before any admission. | - | `friday/forge.py:145`, `friday/forge.py:262`, `friday/forge.py:449` | Ranked P1 behind the P0 burn-down (A8). Feed forge from CAP-FORGE-004 recipes; generated adapters follow the fabric adapter shape (DESCRIPTOR + start/stop/health/call). |
+| CAP-FORGE-006 | P1 | **MISSING** | A successfully integrated capability can produce a local skill describing correct use, limits and verified procedures. | A verified integration yields a DRAFT local skill that becomes ACTIVE only after real use passes, under the SKILL-004..007 lifecycle. | - | `friday/forge.py:535` | Ranked P1 behind the P0 burn-down (A8). Generate the DRAFT skill from the manifest and journey evidence; promote through the existing skill lifecycle. |
+| CAP-FORGE-007 | P1 | **MISSING** | An integration is complete only when a real representative capability journey passes with independently observed verification. | A representative journey passes with independently observed post-state (for a desktop driver: Calculator shows 42 after 4 and 2 are entered); an install that succeeds without the journey stays unadmitted. | - | `friday/forge.py:449` | Ranked P1 behind the P0 burn-down (A8). Journey per capability class with an independent observer (state read-back, not the integration's own report). |
+| CAP-FORGE-008 | P1 | **MISSING** | Only verified integrations become normal FRIDAY capabilities. | The registry admits only integrations whose manifest records origin commit, licence, permissions, scan and journey results; an unverified integration is never offered to planning. | - | `friday/fabric.py` | Ranked P1 behind the P0 burn-down (A8). Admission reads the CAP-FORGE manifest; planning sees only admitted capabilities (CAP-003 fields). |
+| CAP-FORGE-009 | P1 | **PARTIAL** | Integrated repository versions and source commits are tracked for updates and security or reliability changes. | Each admitted integration records its source commit; an upstream change is detected, scanned and its capability tests re-run in quarantine before promotion, under a recorded policy (notify, or automatic for low risk). | - | `scripts/upstream_lock.py` | Ranked P1 behind the P0 burn-down (A8). Extend the lock check into an update pipeline: diff/changelog, scan, quarantine tests, policy decision. |
+| CAP-FORGE-010 | P1 | **MISSING** | Updates keep a last-known-good integration and roll back automatically. | A failed or regressing update rolls back to the last known-good version without the person acting, and the bad version is marked so it is not retried. | - | `friday/fabric.py` | Ranked P1 behind the P0 burn-down (A8). Versioned integration directories with a known-good pointer; rollback on failed tests or a rising failure rate. |
+| CAP-FORGE-011 | P1 | **MISSING** | FRIDAY does not import a repository whose useful capabilities are already covered unless a measurement shows an improvement. | A repository whose capabilities an existing registered capability covers is recorded REFERENCE_ONLY, with the overlap evidence, unless a benchmark shows an improvement. | - | `friday/fabric.py` | Ranked P1 behind the P0 burn-down (A8). Compare the dossier's capabilities with the registry (CAP-003) before planning. |
+| CAP-FORGE-012 | P1 | **MISSING** | FRIDAY may adopt a repository's pattern without installing the repository when that is simpler or safer. | FRIDAY records an EXTRACT_PATTERN decision with the pattern described, and can implement it natively without the repository installed. | - | `friday/forge.py:145` | Ranked P1 behind the P0 burn-down (A8). An EXTRACT_PATTERN outcome in the decision set, handed to the build program as an ordinary requirement. |
 
 ## Owner direction recorded against a requirement
 

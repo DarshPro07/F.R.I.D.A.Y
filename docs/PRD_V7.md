@@ -1730,6 +1730,48 @@ working set, progressive disclosure and context health (CTX-001, CTX-002, CTX-00
 | ORCH-013 | P1 | A finished task that invalidates an assumption cancels the running tasks built on it. | When a task's result invalidates an assumption later tasks depend on, the scheduler cancels those still running and replans them. | Directive, "Early Cancel" |
 | ORCH-014 | P1 | FRIDAY's worker harness is measured against its own baseline for tokens and wall time at an equal or better verification rate. | On representative objectives the median model tokens fall at least 60%, and the wall time at least 40% on parallelisable work, against the recorded baseline, with the verification rate held. | Directive, "BUILD-EFF-001", "BUILD-EFF-002" |
 
+## 102. Amendment A8 (2026-10-02): Capability Forge - "Friday, learn this"
+
+> **Transcription note (added 2026-10-02; not part of the owner's text).** The owner's proposal is kept verbatim in
+> `docs/plans/build-harness/00-owner-directive-2026-10-02d.md`. §102.2 restates its twelve requirements with
+> acceptance evidence worded by the implementing agent. Ranked P1 (assumed from the owner's P0-first rule and the
+> Cua ruling; the owner may re-rank): the forge is a product feature and waits for the P0 burn-down. It extends,
+> rather than replaces, CAPB-001 (absent capability -> build -> return to the task), CAP-003 (registry fields),
+> SKILL-004..007 (skill trust, evaluation, provenance, lifecycle) and the capability fabric's pinning; Cua
+> (CUA-001..008) is its first intended real case after P0. The owner's claims about other projects (Repomix,
+> Serena, codebase-memory-mcp, SkillSpector) are the owner's research, not verified here.
+
+### 102.1 Decisions carried by this amendment (derived)
+
+- A repository URL is the front door; the person never needs to know whether it is a skill, MCP, CLI, library,
+  service, model or research corpus. FRIDAY decides: use directly, wrap, build adapter, extract pattern,
+  reference only, or reject.
+- Nothing from a repository touches the trusted runtime before quarantine, scanning and sandboxed tests; a static
+  scan PASS is never trust.
+- Integration patterns are deterministic recipe templates chosen from the classification; the simplest reliable
+  path wins and MCP is not the default.
+- An integration is complete only when a real capability journey passes with independently observed post-state;
+  "installed" is never "integrated".
+- Every integration is versioned with provenance and a last-known-good version, monitored upstream, and rolled back
+  automatically when an update regresses.
+
+### 102.2 Requirement matrix addendum (derived from the proposal; the verbatim text controls)
+
+| ID | Pri | Requirement | Acceptance evidence |
+|---|---|---|---|
+| CAP-FORGE-001 | P1 | A person gives FRIDAY a repository URL and FRIDAY evaluates and integrates its useful capabilities without anyone editing FRIDAY's source or configuration. | Given only a repository URL, FRIDAY produces a dossier, a classification and a decision (use directly, wrap, build adapter, extract pattern, reference only, reject) and, when it integrates, a verified capability usable by name - with no manual edit to FRIDAY source or configuration. |
+| CAP-FORGE-002 | P1 | Before integration a repository is classified as skill, MCP, CLI, library, application, service, model, research corpus, capability pack or reference-only. | On a labelled set (a skill pack, an MCP server, a CLI, a Python library, a service, a model, a prompt corpus, a reference-only project) the classifier assigns the expected class; a prompt corpus is never classified as executable. |
+| CAP-FORGE-003 | P1 | A new repository is analysed outside the trusted runtime before it receives FRIDAY authority, secrets, user data or standing network access. | A repository under analysis has no secrets, no FRIDAY memory, no user files and no standing network; a planted repository that reads an environment secret or a user file is denied and the attempt recorded. |
+| CAP-FORGE-004 | P1 | FRIDAY derives the minimum viable integration: native call, CLI wrapper, MCP, service adapter, browser path or reference only. | Each plan names the simplest reliable path from a fixed set of recipe templates and records why the simpler paths were rejected; the model does not invent a new architecture per repository. |
+| CAP-FORGE-005 | P1 | Where an adapter is needed FRIDAY generates and tests the smallest one without the person writing code. | For a library with no adapter, FRIDAY generates the adapter, its tests and its manifest, and the tests run in the quarantine sandbox before any admission. |
+| CAP-FORGE-006 | P1 | A successfully integrated capability can produce a local skill describing correct use, limits and verified procedures. | A verified integration yields a DRAFT local skill that becomes ACTIVE only after real use passes, under the SKILL-004..007 lifecycle. |
+| CAP-FORGE-007 | P1 | An integration is complete only when a real representative capability journey passes with independently observed verification. | A representative journey passes with independently observed post-state (for a desktop driver: Calculator shows 42 after 4 and 2 are entered); an install that succeeds without the journey stays unadmitted. |
+| CAP-FORGE-008 | P1 | Only verified integrations become normal FRIDAY capabilities. | The registry admits only integrations whose manifest records origin commit, licence, permissions, scan and journey results; an unverified integration is never offered to planning. |
+| CAP-FORGE-009 | P1 | Integrated repository versions and source commits are tracked for updates and security or reliability changes. | Each admitted integration records its source commit; an upstream change is detected, scanned and its capability tests re-run in quarantine before promotion, under a recorded policy (notify, or automatic for low risk). |
+| CAP-FORGE-010 | P1 | Updates keep a last-known-good integration and roll back automatically. | A failed or regressing update rolls back to the last known-good version without the person acting, and the bad version is marked so it is not retried. |
+| CAP-FORGE-011 | P1 | FRIDAY does not import a repository whose useful capabilities are already covered unless a measurement shows an improvement. | A repository whose capabilities an existing registered capability covers is recorded REFERENCE_ONLY, with the overlap evidence, unless a benchmark shows an improvement. |
+| CAP-FORGE-012 | P1 | FRIDAY may adopt a repository's pattern without installing the repository when that is simpler or safer. | FRIDAY records an EXTRACT_PATTERN decision with the pattern described, and can implement it natively without the repository installed. |
+
 ## Appendix C. Implementation controller, updated 2026-09-26 (owner's text, verbatim)
 
 ```text
