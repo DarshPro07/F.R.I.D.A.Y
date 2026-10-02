@@ -183,6 +183,35 @@ def test_pressure_stop(env):
     k = FakeKernel(level=0)
     res, _ = go(env, k)
     assert res["stop_reason"] == "pressure" and not k.launches
+    # Not a failed run: the program is waiting for resources, and says why.
+    st = state_of(env)
+    assert st["status"] == "WAITING_RESOURCES" and st["resources"] == "fake"
+
+
+def test_a_wave_is_capped_by_its_own_budget(env):
+    k = FakeKernel(ids=("A", "B"))
+    k.script = {i: [rec(i)] for i in "AB"}
+    go(env, k, max_usd=100.0, max_wave_usd=4.0, max_waves=1)
+    assert [x[0] for x in k.launches] == ["A"]  # NORMAL is $3: A fits, A+B ($6) does not
+
+
+def test_a_wave_cap_below_one_worker_still_lets_one_run(env):
+    # With the default $10 run the half-run wave cap is $5, below a P0 worker's
+    # $6: the cap must limit extra workers, never block the first.
+    k = FakeKernel(ids=("A", "B"), priority="P0")
+    k.script = {i: [rec(i)] for i in "AB"}
+    go(env, k, max_usd=10.0, max_waves=1)
+    assert [x[0] for x in k.launches] == ["A"]
+
+
+def test_a_costly_wave_without_progress_stops_the_program(env):
+    # A wave that spends a real share of the budget without closing a
+    # requirement, queueing a repair or naming a blocker stops to replan.
+    k = FakeKernel(ids=("A", "B"))
+    k.script = {"A": [rec("A", "FAILED", cost=5.0)], "B": [rec("B")]}
+    res, _ = go(env, k, max_usd=15.0, cap=1)
+    assert res["stop_reason"] == "costly wave without progress"
+    assert len(state_of(env)["waves"]) == 1
 
 
 def test_max_waves_stop(env):
@@ -416,7 +445,7 @@ def test_wave_is_trimmed_to_the_remaining_budget(env):
 def test_scout_rows_are_priced_at_the_scout_class(env):
     k = FakeKernel(ids=("A", "B"), modes={"A": "SCOUT", "B": "SCOUT"})
     k.script = {i: [rec(i, mode="SCOUT", cost=0.0)] for i in "AB"}
-    go(env, k, max_waves=1, cap=2, max_usd=1.6)  # 0.75 * 2 fits, NORMAL would not
+    go(env, k, max_waves=1, cap=2, max_usd=1.6, max_wave_usd=1.6)  # 0.75 * 2 fits, NORMAL would not
     assert len(k.launches) == 2
 
 
@@ -591,7 +620,8 @@ def test_cli_arguments(monkeypatch):
     seen = {}
     monkeypatch.setattr(BP, "run_program", lambda **kw: seen.update(kw) or {"stop_reason": "x"})
     assert BP.main(["--max-waves", "3", "--max-usd", "7", "--cap", "1", "--priority", "P0", "--dry-run"]) == 0
-    assert seen == {"max_waves": 3, "max_usd": 7.0, "cap": 1, "priority": "P0", "dry_run": True}
+    assert seen == {"max_waves": 3, "max_usd": 7.0, "cap": 1, "priority": "P0", "dry_run": True,
+                    "max_wave_usd": None}
 
 
 # ------------------------------------------------------------ real-git hazards

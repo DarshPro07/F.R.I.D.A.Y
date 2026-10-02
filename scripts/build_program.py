@@ -40,6 +40,9 @@ MAX_REPAIRS = 1
 # problem and an integrator refusal is a refusal, so neither is sent back.
 REPAIRABLE = ("VERIFIER_FAIL", "NOT_RED", "NOT_GREEN", "NO_TEST", "FAILED_INTEGRATION")
 NO_PROGRESS_WAVES = 2
+#: A wave without progress that spends this share of the run's budget stops
+#: the run to replan instead of spending the rest the same way.
+COSTLY_SHARE = 0.25
 GIT_S = 60
 LEDGER_S = 300
 IDENTITY = ("-c", "user.name=DarshPro07", "-c", "user.email=DarshPro07")
@@ -185,14 +188,17 @@ def class_of(row: dict, mode: str, k=build_kernel) -> str:
 
 
 def pick_wave(queue: list[dict], cap: int, n: int, remaining: float,
-              k=build_kernel) -> list[tuple[dict, str, str]]:
-    """First wave of the queue, limited to `n` rows and trimmed to the spend left."""
+              k=build_kernel, first_within: float | None = None) -> list[tuple[dict, str, str]]:
+    """First wave of the queue, limited to `n` rows and trimmed to the spend left.
+    `first_within` lets the wave's first row use that larger budget: a wave cap
+    limits how many workers run together, never whether one can run at all."""
     chosen, total = [], 0.0
     for row in k.waves(queue, cap)[0][:n]:
         mode = k.mode_for(row)
         klass = class_of(row, mode, k)
         cost = k.BUDGETS[klass][1]
-        if total + cost > remaining:
+        first_fits = not chosen and first_within is not None and cost <= first_within
+        if total + cost > remaining and not first_fits:
             break
         chosen.append((row, mode, klass))
         total += cost
@@ -299,6 +305,7 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
 
 
 def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_kernel.DEFAULT_CAP,
+                max_wave_usd: float | None = None,
                 priority: str | None = None, dry_run: bool = False, repo: Path = ROOT,
                 state_file: Path = STATE_FILE, state_doc: Path = STATE_DOC,
                 worktrees: Path | None = None, k=build_kernel, bi=build_integrate,
@@ -310,6 +317,7 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
     integrated: set[str] = set()
     resumed: set[str] = set()
     spent, idle, waves_run, stop = 0.0, 0, 0, None
+    wave_cap = max_usd / 2 if max_wave_usd is None else max_wave_usd
     while not stop:
         rows = k.load_rows()
         chosen, fixes = [], []
@@ -321,16 +329,22 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
         elif not (queue := queue_for(rows, state, integrated, worktrees, priority, k, not dry_run, resumed)) \
                 and not repairs:
             stop = "no ready work"
-        elif (n := k.concurrency(cap=cap)[0]) <= 0:
+        elif (slots := k.concurrency(cap=cap))[0] <= 0:
             stop = "pressure"
+            state["resources"] = slots[1]
         else:
-            left = max_usd - spent
+            n = slots[0]
+            left_run = max_usd - spent
+            left = min(left_run, wave_cap)
             for rid, klass in repairs[:n]:
-                if k.BUDGETS[klass][1] / 2 > left:
+                cost = k.BUDGETS[klass][1] / 2
+                if cost > left and (fixes or cost > left_run):
                     break
                 fixes.append((rid, klass))
-                left -= k.BUDGETS[klass][1] / 2
-            chosen = pick_wave(queue, cap, n - len(fixes), left, k) if n > len(fixes) else []
+                left -= cost
+            chosen = (pick_wave(queue, cap, n - len(fixes), left, k,
+                                first_within=None if fixes else left_run)
+                      if n > len(fixes) else [])
             if not fixes and not chosen:
                 stop = "spend"
         if stop:
@@ -355,6 +369,8 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
         state["waves"].append({"n": len(state["waves"]) + 1, "reqs": [rid for rid, _ in fixes] + [r["id"] for r, _, _ in chosen],
                                "results": results, "spend": round(wave_spend, 4)})
         stop = "no progress" if idle >= NO_PROGRESS_WAVES else None
+        if not progress and wave_spend >= COSTLY_SHARE * max_usd:
+            stop = "costly wave without progress"
         rows = k.load_rows()
         snap = snapshot(state, rows, next_ready(rows, state, integrated, cap, k), stop, repo, runner)
         # Only the untracked state file between waves: the next wave's
@@ -364,6 +380,10 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
     if dry_run:
         out(f"nothing to plan: {stop}")
         return {"stop_reason": stop, "waves": []}
+    # Waiting for memory is not a failed run: say what it waits for.
+    state["status"] = "WAITING_RESOURCES" if stop == "pressure" else "STOPPED"
+    if stop != "pressure":
+        state.pop("resources", None)
     snap = snapshot(state, rows, next_ready(rows, state, integrated, cap, k), stop, repo, runner)
     write_state(state_file, snap)
     write_doc(state_doc, snap)
@@ -407,11 +427,14 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--max-waves", type=int, default=5)
     ap.add_argument("--max-usd", type=float, default=10.0)
+    ap.add_argument("--max-wave-usd", type=float, default=None,
+                    help="budget one wave may plan for (default: half of --max-usd)")
     ap.add_argument("--cap", type=int, default=build_kernel.DEFAULT_CAP)
     ap.add_argument("--priority", choices=sorted(build_kernel._PRIORITY))
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     res = run_program(max_waves=a.max_waves, max_usd=a.max_usd, cap=a.cap,
+                      max_wave_usd=a.max_wave_usd,
                       priority=a.priority, dry_run=a.dry_run)
     print(f"stopped: {res['stop_reason']}")
     return 1 if res["stop_reason"] == "dirty tree" else 0

@@ -116,6 +116,14 @@ def test_high_pressure_never_admits_a_worker_the_ram_cannot_hold(tmp_path):
     assert n == 0 and "HIGH" in why
 
 
+@pytest.mark.parametrize("available,n", [(2.9, 0), (4.5, 1)])
+def test_high_pressure_is_a_ceiling_not_a_bypass(tmp_path, available, n):
+    # Owner's negative control for bf39d3d: HIGH caps concurrency at one, and
+    # every level still has to fit the worker in the RAM above the reserve.
+    got, why = K.concurrency(3, gov=FakeGov("HIGH", available=available), runs_dir=tmp_path)
+    assert got == n and "HIGH" in why
+
+
 @pytest.mark.parametrize("available,n", [(8.0, 2), (4.5, 2), (3.1, 1), (3.0, 1), (2.9, 0), (1.0, 0)])
 def test_concurrency_is_limited_by_the_ram_above_the_reserve(tmp_path, available, n):
     # reserve = ram_floor(16 GB) 0.5 + 1.0; one default worker = 1.5 GB
