@@ -234,6 +234,13 @@ The owner corrected the order: the build had been finishing its harness before b
   classification (ledger next action); CORE-001 escalates only after two consecutive readings of >= 3.5 GB
   available.
 
+Live at 17:33 2026-10-02: a detached chain (pid 1672, log `data/build_runs/core_chain.log`) waits for two
+consecutive readings of >= 3.5 GB available, then runs CORE-001's fresh Opus escalation with
+`core-001-escalation-packet.md`, `build_integrate.py CORE-001`, and `build_program.py --priority P0 --max-waves 6
+--max-usd 15`. While it waits, `data/build_state.json` records CORE-001 as WAITING_RESOURCES; after 6 h it records
+MEMORY_ADMISSION_TIMEOUT (not FAILED) and exits. If the escalation still misses the four conditions, CORE-001 stays
+parked with the new evidence and the program continues other P0 work.
+
 ## Resume (fresh session)
 
 `git status`; read `data/build_state.json` (parked, escalations, stop_reason); `build_kernel.py concurrency`;
