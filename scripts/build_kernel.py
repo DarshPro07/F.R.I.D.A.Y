@@ -69,7 +69,10 @@ ROLE_OF_KIND = {"SHIP": "IMPLEMENTER", "RESUME": "IMPLEMENTER", "SCOUT": "SCOUT"
 RETRY_GROWTH_MAX = 1.3
 ADVISOR_BUDGET = (15, 2.0, 20 * 60)  # turns, USD, wall seconds: a diagnosis, not a build
 #: What the n-th repair of a requirement is, counting repairs already spent.
-CASCADE = ("REPAIR", "ESCALATE", "ADVISOR", "IMPLEMENTER")
+# Owner v12 section 9: a strong model diagnoses, a normal model implements. A full strong-model
+# implementation (ESCALATE) hit the 40-turn cap twice on 2026-10-02 (ACT-001 $3.11, EVAL-001
+# $2.14) with nothing integrable, so it is a manual command, not an automatic step.
+CASCADE = ("REPAIR", "ADVISOR", "IMPLEMENTER")
 #: A first repair may resume the session only for a failure this small.
 LOCALIZED_FAILING_TESTS = 3
 DEFAULT_WALL_S = 45 * 60

@@ -41,7 +41,7 @@ DOCS_DIR = "docs/implementation"
 BEGIN = b"<!-- build-program:begin -->"
 END = b"<!-- build-program:end -->"
 MAX_ATTEMPTS = 2
-MAX_REPAIRS = len(build_kernel.CASCADE)  # repair, escalate, advisor, advised implementer
+MAX_REPAIRS = len(build_kernel.CASCADE)  # repair, advisor, advised implementer
 # Rejections a worker can answer by editing its own change; CONFLICT is a merge
 # problem and an integrator refusal is a refusal, so neither is sent back.
 REPAIRABLE = ("VERIFIER_FAIL", "NOT_RED", "NOT_GREEN", "NO_TEST", "FAILED_INTEGRATION")
@@ -469,6 +469,11 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
         blockers = (rec.get("evidence") or {}).get("blockers") or []
         park(state, req, "blocked", "blocked", "; ".join(map(str, blockers)) or "no blockers recorded")
         return "BLOCKED", spend, True
+    if req in state["cascade"] and state["repairs"].get(req, 0) < MAX_REPAIRS:
+        # A cascade step's worker failed (e.g. its turn cap): hand on to the next step
+        # rather than dropping out of the cascade with the work it left on disk.
+        state["repair_queue"][req] = {"result": f"WORKER_{st}", "at": now()}
+        return st, spend, False
     state["attempts"][req] = state["attempts"].get(req, 0) + 1
     if state["attempts"][req] >= MAX_ATTEMPTS:
         park(state, req, f"{st.lower()} x{state['attempts'][req]}", "attempts", f"{st} twice")
@@ -602,6 +607,10 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
         state.pop("resources", None)
     snap = snapshot(state, rows, next_ready(rows, state, integrated, cap, k), stop, repo, runner)
     write_state(state_file, snap)
+    if waves_run == 0:
+        # Nothing was built: only the untracked state file changes. Committing the
+        # doc here made an empty commit on every pressure stop.
+        return snap
     # The state doc, the ledger render and the docs commit write tracked files in the
     # shared checkout, so they take the same merge-queue turn as an integration: an
     # integrator checking for a clean tree must never see them half-written.

@@ -1392,8 +1392,8 @@ def test_agent_utility_resumes_only_a_localized_second_attempt_with_modest_growt
 
 
 @pytest.mark.parametrize("failures,step,escalate", [
-    (0, "REPAIR", "NONE"), (1, "ESCALATE", "ESCALATE"), (2, "ADVISOR", "ESCALATE"),
-    (3, "IMPLEMENTER", "NONE"), (4, "PARK", "PARK"), (9, "PARK", "PARK")])
+    (0, "REPAIR", "NONE"), (1, "ADVISOR", "ESCALATE"), (2, "IMPLEMENTER", "NONE"),
+    (3, "PARK", "PARK"), (9, "PARK", "PARK")])
 def test_agent_utility_walks_the_cascade_then_parks(failures, step, escalate):
     decision, _ = K.agent_utility(_full_row(), {"failures": failures})
     assert (decision["step"], decision["escalate"]) == (step, escalate)

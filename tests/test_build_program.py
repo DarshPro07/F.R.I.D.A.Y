@@ -256,6 +256,9 @@ def test_pressure_stop(env):
     # Not a failed run: the program is waiting for resources, and says why.
     st = state_of(env)
     assert st["status"] == "WAITING_RESOURCES" and st["resources"] == "fake"
+    # 2026-10-02: every pressure stop committed the state doc (only a timestamp
+    # changed) - five empty commits in five minutes. A run with no wave commits nothing.
+    assert not env.git.commits() and not env.doc.exists()
 
 
 def test_a_job_is_queued_before_admission_and_admission_before_spawn(env):
@@ -818,13 +821,14 @@ def test_a_rejected_change_is_repaired_once_then_integrated(env, verdict):
 
 def test_repeated_failure_climbs_the_cascade_then_parks(env):
     k = FakeKernel(ids=("A",))
-    k.script = {"A": [rec("A"), rec("A"), rec("A"), rec("A", kind="ADVISOR"), rec("A")]}
+    k.script = {"A": [rec("A"), rec("A"), rec("A", kind="ADVISOR"), rec("A")]}
     _, bi = go(env, k, bi=Sequence(k, {"A": ["VERIFIER_FAIL"]}))
     st = state_of(env)
-    assert k.steps == ["REPAIR", "ESCALATE", "ADVISOR", "IMPLEMENTER"]
-    assert bi.calls == ["A"] * 4  # the advisor's diagnosis is never integrated
+    # Owner v12 section 9: a strong-model advisor diagnoses, a normal implementer applies it.
+    assert k.steps == ["REPAIR", "ADVISOR", "IMPLEMENTER"]
+    assert bi.calls == ["A"] * 3  # the advisor's diagnosis is never integrated
     assert st["parked"]["A"] == "VERIFIER_FAIL" and st["repair_queue"] == {}
-    assert st["repairs"] == {"A": 4} and st["cascade"] == {"A": {"step": "IMPLEMENTER", "n": 4}}
+    assert st["repairs"] == {"A": 3} and st["cascade"] == {"A": {"step": "IMPLEMENTER", "n": 3}}
 
 
 def test_the_cascade_position_is_recorded_per_requirement(env):
@@ -836,10 +840,10 @@ def test_the_cascade_position_is_recorded_per_requirement(env):
 
 def test_a_failed_advisor_parks_instead_of_building_blind(env):
     k = FakeKernel(ids=("A",))
-    k.script = {"A": [rec("A"), rec("A"), rec("A"), rec("A", "FAILED", kind="ADVISOR")]}
+    k.script = {"A": [rec("A"), rec("A"), rec("A", "FAILED", kind="ADVISOR")]}
     go(env, k, bi=Sequence(k, {"A": ["VERIFIER_FAIL"]}))
     st = state_of(env)
-    assert k.steps == ["REPAIR", "ESCALATE", "ADVISOR"] and st["parked"]["A"] == "advisor failed"
+    assert k.steps == ["REPAIR", "ADVISOR"] and st["parked"]["A"] == "advisor failed"
     assert any(e["kind"] == "advisor" for e in st["escalations"])
 
 
@@ -1148,3 +1152,15 @@ def test_the_program_writes_tracked_files_only_inside_a_checkout_turn(env):
                    checkout_turn=lock)
     assert calls and all(where == "held" for where, _ in calls), calls
     assert lock.events[0].startswith("enter:program") and lock.events[-1].startswith("exit:program")
+
+
+
+def test_a_cascade_step_whose_worker_fails_hands_on_to_the_next_step(env):
+    # 2026-10-02: EVAL-001's escalation worker hit its turn cap (FAILED) and the
+    # requirement fell out of the cascade. A failed step queues the next one.
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A"), rec("A", "FAILED"), rec("A", kind="ADVISOR"), rec("A")]}
+    go(env, k, bi=Sequence(k, {"A": ["VERIFIER_FAIL"]}))
+    st = state_of(env)
+    assert k.steps == ["REPAIR", "ADVISOR", "IMPLEMENTER"]
+    assert st["parked"]["A"] == "VERIFIER_FAIL"
