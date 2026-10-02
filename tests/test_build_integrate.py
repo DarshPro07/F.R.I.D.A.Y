@@ -651,3 +651,20 @@ def test_integrate_records_a_test_timeout_with_detail_and_affected(tmp_path, mon
     assert out["result"] == "TEST_TIMEOUT" and head(repo) == before
     assert "chunk 2/3" in out["detail"] and out["affected"]
     assert json.loads((runs / "REQ-1.integration.json").read_text())["result"] == "TEST_TIMEOUT"
+
+
+def test_a_paid_verifier_is_a_line_in_the_invocation_ledger(tmp_path):
+    # 2026-10-02: the day closed at $49.66 against the owner's $45 cap partly
+    # because verifier calls (at least $1 each) were in no ledger a day total read.
+    import build_kernel
+    repo, runs, run, rows = setup(tmp_path, priority="P0")
+
+    def paid(cmd, prompt, cwd):
+        return json.dumps({"result": '{"verdict": "FAIL", "requirement_ids": ["REQ-1"]}',
+                           "total_cost_usd": 1.25})
+    go(repo, runs, rows, runner=paid)
+    lines = [e for e in build_kernel.ledger_entries(runs) if e["kind"] == "VERIFIER"]
+    assert len(lines) == 1 and lines[0]["req"] == "REQ-1" and lines[0]["cost_usd"] == 1.25
+    assert lines[0]["model"] in ("sonnet", "opus") and lines[0]["at"]
+    # The program adds verifier cost to its wave and run totals itself: never twice.
+    assert not lines[0].get("wave_id") and not lines[0].get("program_run_id")

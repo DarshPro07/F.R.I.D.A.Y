@@ -1,12 +1,14 @@
 """Keep the product lane moving without a controller session (owner, 2026-10-02: build the rest of FRIDAY).
 
-    python scripts/product_chain.py [--total-usd 45] [--run-usd 15] [--waves 6] [--wait-hours 6]
+    python scripts/product_chain.py [--day-usd 45] [--total-usd 45] [--run-usd 15] [--waves 6] [--wait-hours 6]
 
 Waits until memory admission allows a worker (two consecutive admits), runs one bounded P0 program, and repeats
 while it stops for reasons that a later run can clear (pressure, max waves, run spend). Stops for good on no ready
-work, no progress, an unrecovered crash, another program holding the lock, or the total spend cap. Waiting is
-recorded as WAITING_RESOURCES in data/build_state.json, never as a failure. Model tokens are spent only by the
-program's workers.
+work, no progress, an unrecovered crash, another program holding the lock, the chain's total spend cap, or the
+owner's day spend cap. The day cap counts every paid call of the local day in the invocation ledger, this chain's
+or not, verifiers included (2026-10-02: a chain's own cap never saw the day's earlier spend). Waiting is recorded
+as WAITING_RESOURCES in data/build_state.json, never as a failure. Model tokens are spent only by the program's
+workers.
 """
 from __future__ import annotations
 
@@ -19,8 +21,13 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+
+import build_kernel as K  # noqa: E402
+
 PY = sys.executable
 STATE = ROOT / "data" / "build_state.json"
+RUNS = K.RUNS_DIR
 AGAIN = ("pressure", "max waves", "spend")  # stop reasons another run can clear
 #: After a pressure stop that ran no wave, wait this long before probing again: the probe and the
 #: program's own check can disagree right at the memory threshold (2026-10-02: a run a minute).
@@ -84,6 +91,7 @@ def wait_for_admission(hours: float) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--day-usd", type=float, default=45.0)
     ap.add_argument("--total-usd", type=float, default=45.0)
     ap.add_argument("--run-usd", type=float, default=15.0)
     ap.add_argument("--waves", type=int, default=6)
@@ -96,9 +104,14 @@ def main(argv: list[str] | None = None) -> int:
             mark("STOPPED", f"total spend cap ${a.total_usd:.2f} reached (${used:.2f})")
             log(f"STOP total spend ${used:.2f}")
             return 0
+        today = K.day_cost(datetime.date.today(), RUNS)
+        if today >= a.day_usd:
+            mark("STOPPED", f"day spend cap ${a.day_usd:.2f} reached (${today:.2f} today)")
+            log(f"STOP day spend ${today:.2f}")
+            return 0
         if not wait_for_admission(a.wait_hours):
             return 0
-        run_usd = min(a.run_usd, a.total_usd - used)
+        run_usd = min(a.run_usd, a.total_usd - used, a.day_usd - today)
         waves_before = waves()
         mark("RUNNING", f"P0 program, up to {a.waves} waves, ${run_usd:.2f}")
         log(f"RUN P0 program (${run_usd:.2f}, {a.waves} waves); spent so far ${used:.2f}")

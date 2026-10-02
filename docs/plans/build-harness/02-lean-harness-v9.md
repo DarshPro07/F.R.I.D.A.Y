@@ -257,6 +257,24 @@ parked with the new evidence and the program continues other P0 work.
   `build_windows.py` marks a build dirty from `git status --porcelain`, so untracked `data/` outputs make every
   build "344d62a+dirty" (channel dev) even with a clean tracked tree.
 
+### Status 2026-10-02 22:35 - P0 lane out of ready work; day cap overrun found and closed
+
+- The third chain ran waves 28-54 and stopped on "no ready work": every open P0 is parked (owner decisions,
+  partial x2, refused, stale worktrees). Integrated today in that chain: CTX-001, CTX-003, BCON-001, CYBER-002,
+  INTENT-001, MEM-002, DUR-001, JIT-001, RES-001, TRAJ-001 (PARTIAL rows).
+- **Overspend.** The owner's cap is $45 per day; the invocation ledger shows $49.66 of worker calls on 2026-10-02,
+  plus at least $3.43 of verifier calls that no ledger recorded. Cause: `product_chain.py --total-usd` counted only
+  its own runs from its own start, and verifier calls were not in `invocations.jsonl`. Fix: the integrator records
+  every paid verifier call as a `VERIFIER` invocation (no wave or run id, so the program's own totals do not count
+  it twice); `build_kernel.day_cost(day)` sums a local day; `product_chain.py --day-usd 45` stops before a run when
+  the day is spent and caps each run at what is left. Verified live: the chain refuses to start at $49.66 today.
+- CTX-002 owner ruling (`00-owner-directive-2026-10-02h.md`): small local ONNX models (bge-small-en-v1.5,
+  ms-marco-MiniLM-L6-v2), downloaded by pin to `cache/models` and load-tested; the BLOCKED run's work is on
+  `wip/ctx-002-retrievers`; the ledger's next_action carries the design. Unparked with APPROVAL-001 (its worktree
+  was clean and stale, now removed), both for the next run once the day cap allows.
+- Harness gap, handled by hand today: an owner ruling that unblocks a BLOCKED run has no kernel path (`repair`
+  needs an integration record; `launch` refuses an existing worktree). See BACKLOG_CANDIDATES.
+
 ## Resume (fresh session)
 
 `git status`; read `data/build_state.json` (parked, escalations, stop_reason); `build_kernel.py concurrency`;

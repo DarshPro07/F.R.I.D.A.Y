@@ -21,6 +21,7 @@ a paired end-to-end benchmark (HARNESS-EVAL-001) shows it beats the current base
 | Cua | ComputerUseFabric backend | after P0 (owner ruling A5) |
 | Windows Job Objects per worker | exact peak memory of a worker's whole process tree; admission order available -> commit -> lease -> recheck -> job object -> spawn -> track peak -> class p95 -> release (owner, 2026-10-02) | build only when a measured run shows psutil tree sampling under-counting a worker's children |
 | Memory resource notifications (CreateMemoryResourceNotification) | event-driven wake instead of polling free memory | when polling cost or latency becomes a measured problem |
+| Kernel `unblock REQ` (owner ruling -> continue a BLOCKED run in its worktree) | a BLOCKED run's worktree makes the next run park it "stale worktree", and `repair` needs an integration record a BLOCKED run never has (CTX-002, APPROVAL-001, 2026-10-02: handled by hand with a `wip/` branch and a fresh launch) | build when a second owner ruling needs it |
 | Gas Town + Beads, Emdash, Claude Squad, DeepAgents, OpenHands SDK | orchestration / worktree UX | design references only - FRIDAY's kernel already covers them |
 | SWE-agent ACI, Superpowers, wshobson/agents, ECC, Awesome Claude Code | worker tool design, review flow, skills | pattern sources; cherry-pick single skills only after scan + eval |
 | HyperResearch, SkillSpector, SkillEvaluator, Laya, Jev, MiniCPM, Claude-Red, A2A, WebMCP, AgentGateway | product capabilities | product backlog after P0 = 0, separate scout wave |

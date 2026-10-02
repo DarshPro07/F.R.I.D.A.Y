@@ -23,8 +23,10 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -281,6 +283,20 @@ def run_verifier(row: dict, run: dict, rg: dict, *, repo: Path = ROOT, runner=No
         return {"verdict": "INSUFFICIENT_EVIDENCE", "requirement_ids": [],
                 "failing_criteria": [f"verifier did not run: {type(exc).__name__}"], "evidence_refs": []}
     return parse_receipt(out)
+
+
+def record_verifier(run: dict, verifier: dict, runs_dir: Path = RUNS_DIR) -> None:
+    """A paid verifier call is a line in the invocation ledger like any worker's,
+    so the day's spend is read from one place. It carries no wave or program-run
+    id: the program adds verifier cost to those totals itself."""
+    cost = verifier.get("cost_usd")
+    if not isinstance(cost, (int, float)) or cost <= 0:
+        return
+    build_kernel.ledger_append({
+        "attempt_id": f"verifier-{uuid.uuid4()}", "req": run["requirement"], "kind": "VERIFIER",
+        "model": verifier_model(list(run.get("files_changed") or [])), "cost_usd": float(cost),
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "state": verifier.get("verdict")},
+        Path(runs_dir))
 
 
 # ---------------------------------------------------------------- merge
@@ -664,6 +680,7 @@ def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, pytho
         return done("DRY_RUN", verifier_required=required)
     if required:
         out["verifier"] = verifier = run_verifier(row, run, rg, repo=repo, runner=runner)
+        record_verifier(run, verifier, runs_dir)
         if verifier["verdict"] != "PASS":
             return done("VERIFIER_FAIL")
     else:

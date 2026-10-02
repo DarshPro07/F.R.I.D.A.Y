@@ -1515,6 +1515,20 @@ def lifetime_cost(req: str, runs_dir: Path = RUNS_DIR) -> float:
     return _cost_where(runs_dir, req=req)
 
 
+def _local_day(at: str):
+    try:
+        return datetime.fromisoformat(at).astimezone().date()
+    except (TypeError, ValueError):
+        return None
+
+
+def day_cost(day, runs_dir: Path = RUNS_DIR) -> float:
+    """Every paid call on one of the owner's local days (the ledger stamps UTC),
+    inside a program or not: the owner's spend cap is per day (2026-10-02)."""
+    return round(sum(float(e.get("cost_usd") or 0.0) for e in ledger_entries(runs_dir)
+                     if _local_day(str(e.get("at") or "")) == day), 4)
+
+
 def _context_tokens(entry: dict) -> int:
     return sum(int(entry.get(k) or 0) for k in
                ("input_tokens", "cache_read_tokens", "cache_creation_tokens"))

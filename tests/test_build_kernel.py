@@ -1569,3 +1569,18 @@ def test_a_repair_never_inherits_the_strong_model_of_the_job_before_it(monkeypat
     assert cmds[0][cmds[0].index("--model") + 1] == "sonnet" and run.model == "sonnet"
     # A fresh relaunch is a new invocation: its one continuation is still unused.
     assert run.continued is False
+
+
+def test_day_cost_sums_the_invocations_of_one_local_day(tmp_path):
+    # 2026-10-02: the owner's $45 is a cap per day, and the ledger stamps UTC;
+    # the day a call belongs to is the owner's local day.
+    from datetime import date, datetime as dt, timezone as tz
+
+    def at(*when):
+        return dt(*when).astimezone().astimezone(tz.utc).isoformat(timespec="seconds")
+    calls = [((2026, 10, 1, 23, 50), 9.0), ((2026, 10, 2, 0, 30), 1.0),
+             ((2026, 10, 2, 23, 30), 2.5), ((2026, 10, 3, 0, 10), 4.0)]
+    for i, (when, cost) in enumerate(calls):
+        K.ledger_append({"attempt_id": f"a{i}", "req": "R", "kind": "SHIP", "cost_usd": cost,
+                         "at": at(*when)}, tmp_path)
+    assert K.day_cost(date(2026, 10, 2), tmp_path) == 3.5
