@@ -167,3 +167,172 @@ def test_an_edit_to_the_plan_is_held_to_the_same_contract(tmp_path):
 
     # What the contract does not rule out is still editable.
     assert M.amend_task(store, run_id, "delete old.txt", {"path": "older.txt"}).outcome == M.APPLIED
+
+
+def test_a_broken_invariant_stops_the_actions_that_depend_on_it(tmp_path):
+    """A result that breaks a data invariant fails its task, and what depends
+    on it is skipped rather than run on bad data."""
+    store = Store(tmp_path / "ada.sqlite3")
+    contract = c.ObjectiveContract(
+        goal="pay the invoice in USD, then file the receipt",
+        governance={"invariants": [{"field": "currency", "equals": "USD"}]})
+    tasks = [{"id": "t1", "capability": "files_create",
+              "arguments": {"path": "quote.txt", "content": "x"}},
+             {"id": "t2", "capability": "files_create", "dependencies": ["t1"],
+              "arguments": {"path": "receipt.txt", "content": "x"}}]
+    run_id = _compile(store, tasks, contract)["run_id"]
+    made: list[str] = []
+
+    async def port(capability, arguments):
+        made.append(arguments["path"])
+        return {"status": "succeeded", "output": {"currency": "EUR"}}
+
+    async def drive():
+        executor = ContinuousTaskExecutor(store, call_capability=port)
+        try:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 15
+            while loop.time() < deadline:
+                status = store.objective_run(run_id)["status"]
+                if status in O.RUN_TERMINAL or status in O.RUN_WAITING_STATUSES:
+                    return
+                await executor.start(run_id)
+                await asyncio.sleep(0.02)
+        finally:
+            executor.stop()
+
+    asyncio.run(drive())
+    by_id = {t["task_id"].rsplit("t", 1)[-1]: t for t in store.objective_tasks(run_id)}
+    assert made == ["quote.txt"], made
+    assert by_id["1"]["status"] == O.TaskStatus.FAILED
+    assert "INVARIANT" in str(by_id["1"]["evidence"]) and "EUR" in str(by_id["1"]["evidence"])
+    assert by_id["2"]["status"] == O.TaskStatus.SKIPPED
+
+
+def test_a_data_invariant_reads_arguments_and_results_alike():
+    governance = {"invariants": [{"field": "currency", "equals": "USD"}]}
+    assert c.broken_invariants(governance, {"amount": 5, "currency": "USD"}) == []
+    assert c.broken_invariants(governance, {"amount": 5}) == []
+    assert c.broken_invariants(governance, {"items": [{"currency": "EUR"}]})
+    assert c.broken_invariants({}, {"currency": "EUR"}) == []
+
+
+def _drive(store, run_id, port, *, through_retries=False):
+    async def go():
+        executor = ContinuousTaskExecutor(store, call_capability=port)
+        try:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 20
+            while loop.time() < deadline:
+                status = store.objective_run(run_id)["status"]
+                if status in O.RUN_TERMINAL:
+                    return
+                if status in O.RUN_WAITING_STATUSES and not through_retries:
+                    return
+                await executor.start(run_id)
+                await asyncio.sleep(0.02)
+        finally:
+            executor.stop()
+
+    asyncio.run(go())
+
+
+def test_invariants_and_recovery_are_read_from_the_request_text():
+    text = "send the invoices, currency must be USD, and retry only the failed ones"
+    contract = P.contract_for(P.plan_objective(text), text)
+    assert {"field": "currency", "equals": "USD"} in contract.governance["invariants"]
+    assert contract.governance["recovery"] == c.RESUME_FAILED_ITEMS_ONLY
+    plain = P.contract_for(P.plan_objective("create a.txt"), "create a.txt")
+    assert "invariants" not in plain.governance and "recovery" not in plain.governance
+    # Ordinary prose that only looks like an invariant is not one.
+    for prose in ("the email must be short", "this must be done today"):
+        said = P.contract_for(P.plan_objective(prose), prose)
+        assert "invariants" not in said.governance, (prose, said.governance)
+    text = "deploy it, the region stays eu-west-1"
+    region = P.contract_for(P.plan_objective(text), text)
+    assert region.governance["invariants"] == [{"field": "region", "equals": "eu-west-1"}]
+
+
+def test_resume_failed_items_only_retries_only_the_failed_items(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    contract = c.ObjectiveContract(
+        goal="file three reports, retry only the failed ones",
+        governance={"recovery": c.RESUME_FAILED_ITEMS_ONLY})
+    run_id = _compile(store, [{"id": "t1", "capability": "files_create",
+                               "arguments": {"items": ["a", "b", "c"]}}],
+                      contract)["run_id"]
+    calls: list[list[str]] = []
+
+    async def port(capability, arguments):
+        calls.append(list(arguments["items"]))
+        # "b" fails the first time it is tried and succeeds the second.
+        rows = [{"item": i, "ok": not (i == "b" and len(calls) == 1)}
+                for i in arguments["items"]]
+        return {"status": "succeeded", "output": {"items": rows}}
+
+    _drive(store, run_id, port, through_retries=True)
+    assert calls ==[["a", "b", "c"], ["b"]], calls
+    (task,) = store.objective_tasks(run_id)
+    assert task["status"] == O.TaskStatus.SUCCEEDED
+    assert task["detail"]["item_outcomes"] == {"a": True, "b": True, "c": True}
+
+
+def test_without_the_declared_recovery_a_retry_is_not_narrowed():
+    arguments = {"items": ["a", "b"]}
+    assert c.resume_arguments({}, arguments, {"a": True, "b": False}) is arguments
+    narrowed = c.resume_arguments({"recovery": c.RESUME_FAILED_ITEMS_ONLY},
+                                  arguments, {"a": True, "b": False})
+    assert narrowed == {"items": ["b"]}
+
+
+def test_a_state_precondition_holds_an_action_until_the_state_is_established(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    contract = c.ObjectiveContract(
+        goal="file the receipt once the invoice is approved",
+        governance={"requires": [{"field": "approved", "equals": True}]})
+    run_id = _compile(store, [{"id": "t1", "capability": "files_create",
+                               "arguments": {"path": "receipt.txt", "content": "x"}}],
+                      contract)["run_id"]
+    made: list[str] = []
+
+    async def port(capability, arguments):
+        made.append(arguments["path"])
+        return {"status": "succeeded", "output": {}}
+
+    _drive(store, run_id, port)
+    assert made == []
+    (task,) = store.objective_tasks(run_id)
+    assert task["status"] == O.TaskStatus.FAILED and "approved" in str(task["evidence"])
+    assert c.unmet_requirements(contract.governance, [{"approved": True}]) == []
+    assert c.unmet_requirements(contract.governance, [{"approved": False}])
+
+
+def test_the_step_that_establishes_a_state_precondition_is_not_held_by_it(tmp_path):
+    """A state precondition gates the change, not the read that checks it."""
+    store = Store(tmp_path / "ada.sqlite3")
+    contract = c.ObjectiveContract(
+        goal="check the invoice is approved, then file the receipt",
+        governance={"requires": [{"field": "approved", "equals": True}]})
+    tasks = [{"id": "t1", "capability": "files_read", "arguments": {"path": "invoice.txt"}},
+             {"id": "t2", "capability": "files_create", "dependencies": ["t1"],
+              "arguments": {"path": "receipt.txt", "content": "x"}}]
+    run_id = _compile(store, tasks, contract)["run_id"]
+    made: list[str] = []
+
+    async def port(capability, arguments):
+        made.append(capability)
+        return {"status": "succeeded", "output": {"approved": True}}
+
+    _drive(store, run_id, port)
+    assert made == ["files_read", "files_create"], made
+    assert all(t["status"] == O.TaskStatus.SUCCEEDED for t in store.objective_tasks(run_id))
+
+
+def test_a_state_precondition_can_name_the_actions_it_gates():
+    governance = {"requires": [{"field": "approved", "equals": True, "before": "delete"}]}
+    assert c.unmet_requirements(governance, [], capability="files_create") == []
+    assert c.unmet_requirements(governance, [], capability="files_delete")
+    assert c.unmet_requirements(governance, [], capability="files_read") == []
+    named = {"requires": [{"field": "approved", "equals": True, "before": "files_create"}]}
+    assert c.unmet_requirements(named, [], capability="files_create")
+    assert c.unmet_requirements(named, [], capability="files_write") == []

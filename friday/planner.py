@@ -957,14 +957,52 @@ _ANY_OBJECT = re.compile(
     r"posts?\b|it\b|them\b)", re.IGNORECASE)
 
 
+#: "currency must be USD", "keep the currency as USD", "the region stays eu-west-1".
+_INVARIANT = re.compile(
+    r"\b(?:keep\s+(?:the\s+)?(\w+)\s+(?:as|at|in)|(\w+)\s+(?:must\s+(?:be|stay)|"
+    r"has\s+to\s+(?:be|stay)|stays?|is\s+always))\s+"
+    r"(\"[^\"]+\"|'[^']+'|[A-Za-z0-9][\w.-]*)",
+    re.IGNORECASE)
+#: Words an invariant cannot be about: "this must be done", "it stays open".
+_NOT_A_FIELD = frozenset((
+    "it", "this", "that", "these", "those", "which", "what", "who", "there",
+    "everything", "anything", "something", "nothing", "all", "one", "i",
+    "you", "we", "they", "he", "she"))
+
+
+def _invariant(found: re.Match) -> dict | None:
+    """
+    An invariant from one _INVARIANT match, or None for ordinary prose ("the
+    email must be short"): the field must be a noun, not a pronoun, and the
+    value must look like a code - quoted, two or more capitals as written
+    ("USD"), or holding a digit ("eu-west-1").
+    """
+    name = (found.group(1) or found.group(2)).lower()
+    value = found.group(3).rstrip(".")
+    if name in _NOT_A_FIELD:
+        return None
+    if value[0] in "\"'":
+        return {"field": name, "equals": value[1:-1]}
+    if sum(ch.isupper() for ch in value) >= 2 or any(ch.isdigit() for ch in value):
+        return {"field": name, "equals": value}
+    return None
+#: "retry only the failed ones", "resume the failed items only".
+_RESUME_FAILED = re.compile(
+    r"\b(?:only\s+(?:retry|redo|resume)\s+(?:the\s+)?failed|"
+    r"(?:retry|redo|resume)\s+(?:only\s+)?(?:the\s+)?failed\s+(?:ones|items?))",
+    re.IGNORECASE)
+
+
 def governance_for(plan: Plan, text: str) -> dict:
     """
     What the person forbade or limited, in the form the objective enforces
     (BCON-001): an action class forbidden outright ("do not delete
     anything"), a named thing protected from one ("don't delete
-    config.yaml"), and a ceiling on changes ("at most 20 changes"). A
-    prohibition about something unnamed and specific ("don't touch my
-    photos") stays a recorded constraint.
+    config.yaml"), and a ceiling on changes ("at most 20 changes"); and what
+    must hold - a data invariant ("currency must be USD") and the declared
+    recovery ("retry only the failed ones"). A prohibition about something
+    unnamed and specific ("don't touch my photos") stays a recorded
+    constraint.
     """
     from friday import contracts as c
 
@@ -990,6 +1028,12 @@ def governance_for(plan: Plan, text: str) -> dict:
         elif not rest.strip() or _ANY_OBJECT.match(rest):
             if kind not in forbidden:
                 forbidden.append(kind)
+    invariants = [rule for rule in map(_invariant, _INVARIANT.finditer(text or ""))
+                  if rule]
+    if invariants:
+        governance["invariants"] = invariants
+    if _RESUME_FAILED.search(text or ""):
+        governance["recovery"] = c.RESUME_FAILED_ITEMS_ONLY
     if forbidden:
         governance["forbidden"] = sorted(forbidden)
     if protected:

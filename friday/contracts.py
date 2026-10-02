@@ -830,6 +830,122 @@ def action_class(words: str) -> str:
     return ""
 
 
+def _find_field(value, name: str):
+    """Every value `name` takes anywhere in a nested result."""
+    found = []
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            if key == name:
+                found.append(inner)
+            found += _find_field(inner, name)
+    elif isinstance(value, (list, tuple)):
+        for inner in value:
+            found += _find_field(inner, name)
+    return found
+
+
+def broken_invariants(governance: dict | None, data) -> list[str]:
+    """
+    Which data invariants in `governance["invariants"]` the data breaks
+    (BCON-001). An invariant is {"field": "currency", "equals": "USD"}: wherever
+    the field appears in the arguments (a precondition) or the result (a
+    postcondition) it must hold that value. A field that is absent is not
+    broken - the invariant constrains what is said, not what is omitted.
+    """
+    broken = []
+    for rule in (governance or {}).get("invariants") or ():
+        name, wanted = str(rule.get("field") or ""), rule.get("equals")
+        if not name:
+            continue
+        for seen in _find_field(data, name):
+            if seen != wanted:
+                broken.append(f"{name} is {seen!r}, the contract holds it at {wanted!r}")
+                break
+    return broken
+
+
+RESUME_FAILED_ITEMS_ONLY = "resume_failed_items_only"
+
+
+def _gated_by(rule: dict, capability: str | None) -> bool:
+    """Whether a state precondition holds back `capability` (None: any)."""
+    if capability is None:
+        return True
+    before = str(rule.get("before") or "")
+    if before:
+        return (action_class(capability) == before if before in ACTION_CLASSES
+                else capability == before)
+    from friday import trajectory
+
+    return trajectory._side_effecting(capability)
+
+
+def unmet_requirements(governance: dict | None, finished: list,
+                       capability: str | None = None) -> list[str]:
+    """
+    State preconditions (BCON-001): `governance["requires"]` lists
+    {"field", "equals"} facts that must already be true of the run before the
+    next action, read from the results of the steps finished so far. A fact no
+    finished step has established, or one established as something else, is
+    unmet - unlike a data invariant, silence here is not enough.
+
+    A precondition gates changes, not the reads that establish it: for a
+    `capability` it applies only to a side-effecting one, or, when the rule
+    names a "before" (an action class in ACTION_CLASSES or a capability id),
+    only to the actions that match it. Without a capability every rule is
+    checked.
+    """
+    unmet = []
+    for rule in (governance or {}).get("requires") or ():
+        name, wanted = str(rule.get("field") or ""), rule.get("equals")
+        if not name or not _gated_by(rule, capability):
+            continue
+        seen = [v for result in finished for v in _find_field(result, name)]
+        if wanted not in seen:
+            now = f"is {seen[-1]!r}" if seen else "is not established"
+            unmet.append(f"{name} {now}, the contract requires {wanted!r}")
+    return unmet
+
+
+def item_outcomes(result) -> dict[str, bool]:
+    """
+    Per-item state of a batch result (OBJ-004): {item: succeeded}, read from
+    the "items" of the result's "output" envelope (or of the result itself)
+    shaped {"item": ..., "ok": bool} or {"item": ..., "status":
+    "succeeded"|...}. Empty when the result reports no per-item outcomes.
+    """
+    outcomes: dict[str, bool] = {}
+    rows = None
+    if isinstance(result, dict):
+        output = result.get("output")
+        rows = output.get("items") if isinstance(output, dict) else None
+        if rows is None:
+            rows = result.get("items")
+    for row in rows if isinstance(rows, list) else ():
+        if not isinstance(row, dict) or "item" not in row:
+            continue
+        ok = row["ok"] if "ok" in row else str(row.get("status")).lower() in (
+            "succeeded", "success", "ok", "done")
+        outcomes[str(row["item"])] = bool(ok)
+    return outcomes
+
+
+def resume_arguments(governance: dict | None, arguments: dict,
+                     outcomes: dict[str, bool] | None) -> dict:
+    """
+    Declared recovery `resume_failed_items_only` (BCON-001): a retry of a
+    batch step carries only the items the last attempt failed, never the ones
+    it already did. Any other recovery, or no recorded per-item state, leaves
+    the arguments as they were.
+    """
+    if (governance or {}).get("recovery") != RESUME_FAILED_ITEMS_ONLY or not outcomes:
+        return arguments
+    items = arguments.get("items")
+    if not isinstance(items, list):
+        return arguments
+    return {**arguments, "items": [i for i in items if not outcomes.get(str(i), False)]}
+
+
 @dataclass(frozen=True)
 class ObjectiveContract:
     """

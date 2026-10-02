@@ -724,6 +724,24 @@ class ContinuousTaskExecutor:
             # The strategy change must reach the worker, not just the log: a
             # hint nobody reads is a blind retry with better bookkeeping.
             arguments = {**arguments, "strategy_hint": hint}
+        governance = self._governance(run_id)
+        # BCON-001 recovery: a retried batch carries only the items the last
+        # attempt failed (OBJ-004 per-item state, kept on the task).
+        arguments = c.resume_arguments(
+            governance, arguments,
+            (task.get("detail") or {}).get("item_outcomes"))
+        # BCON-001 preconditions: an action whose own arguments break a data
+        # invariant, or whose required state no finished step established, is
+        # not made.
+        finished = [t.get("result") for t in self.store.objective_tasks(run_id)
+                    if t["status"] == O.TaskStatus.SUCCEEDED]
+        broken = (c.broken_invariants(governance, arguments)
+                  + c.unmet_requirements(governance, finished,
+                                         str(task.get("capability") or "")))
+        if broken:
+            self._fail_task(run_id, task_id, O.FailureKind.STRUCTURAL,
+                            "INVARIANT: " + "; ".join(broken))
+            return
         try:
             result = await self._dispatch(task["capability"], arguments, task_run)
         except Exception as exc:
@@ -825,6 +843,26 @@ class ContinuousTaskExecutor:
             self._fail_task(run_id, task_id, kind, reason)
             return
 
+        # BCON-001 postcondition: a result that breaks a data invariant fails
+        # the task, so everything that depends on it is skipped, not run on it.
+        broken = c.broken_invariants(governance, result)
+        if broken:
+            self._fail_task(run_id, task_id, O.FailureKind.STRUCTURAL,
+                            "INVARIANT: " + "; ".join(broken))
+            return
+        # BCON-001 recovery: per-item outcomes are kept, and a batch with
+        # failed items is retried for those items alone.
+        outcomes = {**((task.get("detail") or {}).get("item_outcomes") or {}),
+                    **c.item_outcomes(result)}
+        pending = sorted(i for i, ok in outcomes.items() if not ok)
+        if pending and governance.get("recovery") == c.RESUME_FAILED_ITEMS_ONLY:
+            task = {**task, "detail": {**(task.get("detail") or {}),
+                                       "item_outcomes": outcomes}}
+            self._requeue_or_block(
+                run_id, task_id, task, kind=O.FailureKind.TRANSIENT,
+                reason="items failed: " + ", ".join(pending),
+                attempt=attempt, max_attempts=self._max_attempts_for(task))
+            return
         if trajectory._side_effecting(str(task.get("capability") or "")):
             # DUR-001: the first thing written once a side effect has
             # happened. If this process dies before the task is marked done,
@@ -838,6 +876,8 @@ class ContinuousTaskExecutor:
             task_id, status=O.TaskStatus.SUCCEEDED,
             result=result, evidence=json.dumps(result, default=str),
             finished_at=now_iso(),
+            # Every item's outcome across retries, not just the last attempt's.
+            **({"detail": {"item_outcomes": outcomes}} if outcomes else {}),
         )
         self.store.append_objective_event(
             run_id, O.EVENT_TASK_SUCCEEDED, task_id=task_id,
@@ -845,6 +885,16 @@ class ContinuousTaskExecutor:
         self._ledger_evidence(run_id, task_id, task, result, passed=True)
         self._cascade_skips(run_id)
         self._check_invariant(run_id)
+
+    def _governance(self, run_id: str) -> dict:
+        """The governance of the objective's stored contract; empty when it has
+        none or the row cannot be read."""
+        raw = (self.store.objective_run(run_id) or {}).get("contract")
+        try:
+            return dict((json.loads(raw) if raw else {}).get("governance") or {})
+        except (ValueError, TypeError, AttributeError):
+            logger.exception("objective %s: its stored contract cannot be read", run_id)
+            return {}
 
     def _ledger_evidence(self, run_id: str, task_id: str, task: dict,
                          result, *, passed: bool, reason: str = "") -> None:
