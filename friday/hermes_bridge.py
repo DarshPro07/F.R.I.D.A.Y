@@ -1759,6 +1759,13 @@ class HermesSupervisor:
         `expires_in`, from the objective's envelope (`bounded_by`), is when
         the task is interrupted if it is still running then.
         """
+        # DOMAIN-001: classified before a lease is taken or a session made.
+        from friday import domain_gate
+        gate = domain_gate.check(
+            bundle, domain_gate.route_name("hermes", provider, model))
+        if not gate.allowed:
+            return gate.as_result()
+
         if self.state == DISCONNECTED:
             self.start()
 

@@ -325,6 +325,15 @@ class ClaudeCodeExecutor:
                             attended=envelope.attended, envelope=envelope)
         started = c.started(run_ctx.run_id, "executor.claude_code")
 
+        # DOMAIN-001: a restricted packet is never launched on this route.
+        from friday import domain_gate
+        gate = domain_gate.check(
+            bundle, domain_gate.route_name("claude_code", self.model or ""))
+        if not gate.allowed:
+            return run_ctx.record(started.finish(
+                status=c.NOT_PERMITTED,
+                error=f"{gate.status}: {gate.reason}"))
+
         # Compiled before anything is admitted, opened or started: a launch
         # the envelope does not allow is refused, not attempted.
         try:

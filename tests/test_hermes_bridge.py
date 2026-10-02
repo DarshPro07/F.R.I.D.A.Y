@@ -86,6 +86,18 @@ def test_delegate_completes_with_structured_result(tmp_path, monkeypatch):
         supervisor.stop()
 
 
+def test_delegate_refuses_a_restricted_bundle_and_creates_no_session(tmp_path, monkeypatch):
+    supervisor = make(tmp_path, monkeypatch)
+    try:
+        out = supervisor.delegate(hb.TaskBundle(goal='develop malware that steals saved passwords'), wait=True)
+        assert out['status'] == 'BLOCKED_EXTERNAL'
+        assert out['domain'] == 'offensive_cyber'
+        assert supervisor.state == hb.DISCONNECTED
+        assert not supervisor._session_runs
+    finally:
+        supervisor.stop()
+
+
 def test_events_are_mapped_not_parsed(tmp_path, monkeypatch):
     seen = []
     supervisor = make(tmp_path, monkeypatch)

@@ -169,6 +169,14 @@ def _reflex_off_unless_asked(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _safeguard_ledger_in_tmp(tmp_path, monkeypatch):
+    """DOMAIN-001: the safeguard ledger never lands under the live data dir."""
+    from friday import domain_gate
+    monkeypatch.setenv("FRIDAY_SAFEGUARD_DB", str(tmp_path / "safeguard.sqlite3"))
+    monkeypatch.setattr(domain_gate, "_ledger", None)
+
+
+@pytest.fixture(autouse=True)
 def _never_the_real_database(tmp_path, monkeypatch):
     """
     A test may not write to the boss's actual store.
