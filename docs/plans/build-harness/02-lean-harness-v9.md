@@ -199,6 +199,19 @@ chunks exercised only in unit tests (this host runs one). CORE-001's measured 1.
 `data/build_runs/peaks.jsonl` (it predated the history) so admission stays conservative until BH-J predicts per
 requirement. Product amendments recorded meanwhile: A8 Capability Forge (083ca38), A9 Workflow Fabric (472d561).
 
+### Status 2026-10-02 15:45 - harness complete through BH-J; DOMAIN-001 in; CORE-001 ready to escalate
+
+- BH-J memory admission v2 (36711f4) + the admit-lease test (79c5b0e). DOMAIN-001 INTEGRATED (0e92e8c, PARTIAL:
+  the restricted-domain phrase list is an assumption awaiting the owner; refusal recording not wired to a live
+  provider path). A8/A9 had broken tests/test_prd_ledger.py's pinned count - fixed in de18900.
+- CORE-001: branch build/core-001 rebased onto de18900 (e49549f, no conflicts; its tests + DOMAIN-001's: 72 passed);
+  `.worktrees/core-001/.build/run.json` base_sha updated. Next: `build_kernel.py escalate CORE-001 --model opus
+  --packet docs/plans/build-harness/core-001-escalation-packet.md`, started with Start-Process when
+  `build_kernel.py concurrency` shows a slot (needs ~3.2 GB available). The harness's slot watch was reaped for low
+  memory at 15:45; nothing else was running.
+- Then: `build_program.py --priority P0 --max-waves 6 --max-usd 15` (Start-Process). ACT-001 parked (verifier: five
+  honesty-audit defects) is a cascade candidate.
+
 ## Resume (fresh session)
 
 `git status`; read `data/build_state.json` (parked, escalations, stop_reason); `build_kernel.py concurrency`;
