@@ -383,6 +383,14 @@ class CapabilityRuntime:
                     error=f"JIT: {capability_id} has changed since this objective "
                           "was planned; it is revalidated before it runs"))
 
+        # JIT-001: what the capability says it needs (a live authentication,
+        # a target in a compatible state) is asked again now, not trusted
+        # from planning time. A probe that cannot answer refuses.
+        refusal = authority_refusal(capability_id, arguments)
+        if refusal:
+            return run.record(started.finish(
+                status=c.NOT_PERMITTED, error=f"JIT: {refusal}"))
+
         resolution = resolutions().get(capability_id)
         if resolution is None:
             return run.record(started.finish(
@@ -581,6 +589,35 @@ def fingerprint(capability_id: str) -> str:
     payload = json.dumps({"entry": entry, "resolution": where, "source": source},
                          sort_keys=True, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+#: capability id -> probe(arguments) returning "" when what the capability
+#: needs holds right now, otherwise the reason it does not. Registered by the
+#: owner of the capability (its authentication, its target); a capability with
+#: no probe has said it needs nothing that can be re-checked generically.
+_authority_probes: dict[str, list] = {}
+
+
+def register_authority_probe(capability_id: str, probe) -> None:
+    """Let a capability say what it needs at the moment of action."""
+    _authority_probes.setdefault(capability_id, []).append(probe)
+
+
+def authority_refusal(capability_id: str, arguments: dict) -> str:
+    """
+    The first reason a registered probe gives for not acting now, "" when
+    every probe agrees. A probe that raises refuses: authority that cannot be
+    confirmed is not assumed.
+    """
+    for probe in _authority_probes.get(capability_id, ()):
+        try:
+            reason = probe(dict(arguments))
+        except Exception as exc:  # noqa: BLE001 - a failed check must refuse, with the cause named
+            return (f"{capability_id}: could not confirm authority before acting "
+                    f"({type(exc).__name__}: {exc})")
+        if reason:
+            return f"{capability_id}: {reason}"
+    return ""
 
 
 def lineage_refusal(capability_id: str, provenance: str):

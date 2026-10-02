@@ -116,3 +116,41 @@ def test_compile_records_the_versions_on_an_envelope_it_is_handed(tmp_path):
     assert stored.capability_hashes == {"system_get_info": CR.fingerprint("system_get_info")}
     with pytest.raises(c.ContractError, match="version"):
         compile_with("OBJ-JIT-2", {"system_get_info": "f" * 64})
+
+
+@pytest.fixture
+def probes(monkeypatch):
+    monkeypatch.setattr(CR, "_authority_probes", {})
+    return CR
+
+
+def _execute(arguments=None):
+    return CR.CapabilityRuntime(engine=PO.PolicyEngine(autonomy=PO.FULL)).execute(
+        "system_get_info", arguments or {})
+
+
+def test_a_capability_with_no_probe_runs(probes):
+    assert _execute().status == c.SUCCEEDED
+
+
+def test_authentication_lost_since_the_plan_is_refused_at_execution(probes):
+    probes.register_authority_probe("system_get_info", lambda args: "the session has expired")
+    result = _execute()
+    assert result.status == c.NOT_PERMITTED
+    assert result.error.startswith("JIT:") and "session has expired" in result.error
+
+
+def test_a_target_that_changed_is_refused_using_the_arguments(probes):
+    probes.register_authority_probe(
+        "system_get_info", lambda args: "target is locked" if args.get("target") == "x" else "")
+    assert _execute({}).status == c.SUCCEEDED
+    assert _execute({"target": "x"}).status == c.NOT_PERMITTED
+
+
+def test_a_probe_that_cannot_answer_refuses(probes):
+    def broken(args):
+        raise TimeoutError("auth service silent")
+
+    probes.register_authority_probe("system_get_info", broken)
+    result = _execute()
+    assert result.status == c.NOT_PERMITTED and "auth service silent" in result.error
