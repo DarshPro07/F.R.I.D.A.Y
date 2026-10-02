@@ -2937,6 +2937,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added cyber_lab.run_routed: a domain_gate cyber_lab decision is the only route that reaches a lab provider; other routes or unknown providers yield hash-bound refusal evidence. Contract and tier gating unchanged. (build run, commit f9ca71f8c)',
         "next_action": 'GAPS: Not wired into fabric descriptors or a live executor; nothing outside tests calls run_routed yet',
     }),
+    ('DUR-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Side-effecting calls get a task-stable idempotency_key (to ports that accept it), and O.replay_task_statuses rebuilds task statuses from events alone, treating a commit as SUCCEEDED. (build run, commit ea4da455b)',
+        "next_action": 'GAPS: No production capability yet honours idempotency_key, so the call-returned-but-uncommitted instant still re-runs; Replay covers task statuses only and is not used to restore state; task rows remain the state',
+    }),
 ]
 
 
