@@ -124,6 +124,31 @@ CORE-001's killed run is still on disk, resumable.
   (CORE-001's measured peak; BH-F 409 MB, BROW-001 776 MB) -> 0 slots. Chrome held ~7 GB. Owner choices: free
   memory, accept a smaller reserve, or run on REFERENCE-B. The gate is not overridden by the controller.
 
+## BH-OPT-05 - owner research and memory guidance (2026-10-02, `00-owner-research-2026-10-02.md`)
+
+Landed now (owner asked for them before the P0 run): HIGH-pressure negative controls (2.9 GB -> 0, 4.5 GB -> 1);
+a per-wave budget (default half the run budget; it limits extra workers, never the first); a costly wave without
+progress (>= 25% of the run budget, nothing settled) stops the run; a pressure stop is recorded as
+`status: WAITING_RESOURCES` with the governor's reason, not as a failure.
+
+Next, in order (build-harness obligations, not PRD product rows):
+1. Memory admission v2 (after the first P0 wave runs, as the owner sequenced it): physical AND commit headroom;
+   predicted peak per requirement (its last measured run) else per worker class (p95) else default, with
+   predicted-vs-actual error in each run record; a memory lease (check -> lease -> recheck -> spawn, released
+   or replaced by measured use) so two kernels cannot spend the same headroom. Until it lands: `--cap 1`.
+2. TEST-IMPACT-001: pytest-testmon spike in .venv-build against `scripts/test_impact.py` on real changes
+   (recall of the tests that actually failed, time saved); full suite still at every checkpoint; pytest-xdist
+   only with a governor-chosen worker count, never `-n auto`.
+3. ORIENT-001/002: orientation bake-off on the same real tasks - capsule arm data from `build_kernel.py roi`
+   first, then Serena, codebase-memory-mcp and an Aider-style repo map in isolated sandboxes (never the live
+   environment); keep one primary and one fallback, remove the losers.
+4. HARNESS-EVAL-001: every claimed token/time saving is judged on paired end-to-end tasks, never on a tool's own
+   counter. Ponytail is an A/B candidate; RTK stays rejected (FRIDAY's own measurement and JetBrains' paired
+   benchmark agree) unless a paired FRIDAY benchmark reverses it.
+Then stop harness work and drive P0 to zero. References only (design mines, not installs): GitNexus, Repomix,
+code2prompt, Gas Town/Beads, Emdash, Claude Squad, DeepAgents, SWE-agent ACI, wshobson/agents, Superpowers,
+Context7, OpenHands SDK.
+
 ## Resume (fresh session)
 
 `git status`; read `data/build_state.json` (parked, escalations, stop_reason); `build_kernel.py concurrency`;
