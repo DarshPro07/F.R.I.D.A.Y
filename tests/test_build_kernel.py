@@ -1532,3 +1532,24 @@ def test_every_invocation_starts_without_the_previous_runs_evidence(tmp_path, mo
     assert not (wt / ".build" / "evidence.json").exists()
     kept = list((wt / ".build").glob("evidence.prev-*.json"))
     assert len(kept) == 1 and json.loads(kept[0].read_text())["summary"] == "old"
+
+
+
+def test_an_advisor_out_of_turns_gets_one_write_it_now_continuation(tmp_path, monkeypatch):
+    # 2026-10-02: EVAL-001's Opus advisor read for all 15 turns and hit the cap
+    # with no diagnosis written ($0.68 lost). It resumes once, briefly, to write it.
+    wt = tmp_path / "wt"
+    _stream(wt, {"type": "system", "subtype": "init", "session_id": "ADV1"},
+            {"type": "result", "subtype": "error_max_turns", "is_error": True, "session_id": "ADV1",
+             "num_turns": 16, "total_cost_usd": 0.68, "result": ""})
+    started = []
+    monkeypatch.setattr(K, "_start", lambda cmd, w: started.append(cmd) or _Proc(None))
+    run = K.Running("EVAL-001", _Proc(1), wt, mode="SHIP", base_sha="abc", branch="build/eval-001",
+                    model="opus", kind="ADVISOR")
+    assert K.continuation(run) is True and run.continued
+    cmd = started[0]
+    assert cmd[cmd.index("--resume") + 1] == "ADV1"
+    assert int(cmd[cmd.index("--max-turns") + 1]) <= K.WRITE_NOW_TURNS
+    assert cmd[cmd.index("--allowedTools") + 1] == K.SCOUT_TOOLS
+    assert K.WRITE_NOW_PROMPT in cmd
+    assert K.continuation(run) is False  # once only

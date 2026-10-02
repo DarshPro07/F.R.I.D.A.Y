@@ -92,6 +92,11 @@ BUDGETS = {"SCOUT": (8, 0.75, 15 * 60), "MICRO": (12, 1.0, 20 * 60),
            "P0": (40, 6.0, 75 * 60)}
 READ_FILES = {"SCOUT": 12, "MICRO": 6, "NORMAL": 8, "COMPLEX": 12, "P0": 12}
 WORKER_PROMPT = "Read .build/packet.md and carry out the requirement it describes."
+#: A read-only job (advisor, scout) that ran out of turns has read what it needed; it gets one
+#: short resume to write its result (2026-10-02: EVAL-001's advisor hit its cap with nothing written).
+WRITE_NOW_TURNS = 3
+WRITE_NOW_PROMPT = ("Stop reading. From what you have already read, write your final message now: the "
+                    "complete packet your instructions asked for. Do not open more files.")
 CONTINUE_PROMPT = ("Continue the requirement in .build/packet.md; "
                    "finish and write .build/evidence.json.")
 LOCK_NAME = ".worktree.lock"
@@ -1628,10 +1633,30 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
     return rec
 
 
+def _write_now(run: Running) -> bool:
+    """One short resume for a read-only job that hit its turn or budget cap with
+    nothing written: the same session, read-only tools, WRITE_NOW_TURNS turns."""
+    res = _stream_facts(run.wt / ".build" / "stream.jsonl")
+    sid = res.get("session_id")
+    if not str(res.get("subtype", "")).startswith("error_max") or not sid:
+        return False
+    if str(res.get("result") or "").strip():
+        return False
+    cmd = worker_command(run.model or "sonnet", WRITE_NOW_TURNS, 0.5, tools=SCOUT_TOOLS,
+                         resume=sid, prompt=WRITE_NOW_PROMPT)
+    run.proc = _start(cmd, run.wt)
+    run.continued = True
+    return True
+
+
 def continuation(run: Running) -> bool:
     """Resume a SHIP worker that ran out of turns/budget with work on disk and
     no verdict, once, at half its class limits. True when it was restarted."""
-    if run.continued or run.mode != "SHIP" or not run.base_sha:
+    if run.continued:
+        return False
+    if getattr(run, "kind", "") == "ADVISOR" or run.mode == "SCOUT":
+        return _write_now(run)
+    if run.mode != "SHIP" or not run.base_sha:
         return False
     res = _stream_facts(run.wt / ".build" / "stream.jsonl")
     sid = res.get("session_id")
