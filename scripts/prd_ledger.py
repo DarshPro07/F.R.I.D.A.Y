@@ -2839,6 +2839,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "First build attempt (branch attic/core-001-v1, commit 0cb6741): a Hermes COMPLETE meets FRIDAY's verifier when a verify command is supplied (verify_command or FRIDAY_DELEGATION_VERIFY_COMMAND); otherwise it is relayed COMPLETE with verification NOT_VERIFIED. Rejected twice by the fresh verifier; not integrated.",
         "next_action": "EXTEND per OWNER RULING 2026-10-02: when a delegation carries no verify command, a model derives a check from the objective's free-text acceptance. Guardrails: the derived check is a command from an allowlist of test runners only (e.g. pytest, npm test, cargo test), executed through FRIDAY's execution policy inside the delegation workspace jail (no network), recorded with provenance 'derived' in the verdict; if no check can be derived or it fails, the result is NOT_VERIFIED and the objective is not done. Also fix what the verifier found in attempt 1: the verdict must be written to the objective store (not only the hermes run record); the verifier must not run on the gateway reader thread; find why an audit.sqlite3 appears in the delegation workspace (audit isolation). Reuse attempt 1's code from attic/core-001-v1 where it fits.",
     }),
+    ('DOMAIN-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Added friday/domain_gate.py: deterministic restricted-domain classifier, persisted safeguard-event ledger, bounded provider-refusal count then switch_route. Wired into HermesSupervisor.delegate and ClaudeCodeExecutor.execute before any lease/session/launch. (build run, commit 0e92e8ce0)',
+        "next_action": 'GAPS: Restricted-domain phrase list (cbrn, offensive_cyber) is an ASSUMPTION pending owner ruling; one tuple per domain in domain_gate.RESTRICTED_DOMAINS.; record_provider_refusal is not yet called from a live provider-failure path; only the gate side (refuse after 2) is wired.; provider_health.py and store.py untouched; ledger is its own sqlite file (FRIDAY_SAFEGUARD_DB or data/safeguard_events.sqlite3).',
+    }),
 ]
 
 
