@@ -1772,6 +1772,44 @@ working set, progressive disclosure and context health (CTX-001, CTX-002, CTX-00
 | CAP-FORGE-011 | P1 | FRIDAY does not import a repository whose useful capabilities are already covered unless a measurement shows an improvement. | A repository whose capabilities an existing registered capability covers is recorded REFERENCE_ONLY, with the overlap evidence, unless a benchmark shows an improvement. |
 | CAP-FORGE-012 | P1 | FRIDAY may adopt a repository's pattern without installing the repository when that is simpler or safer. | FRIDAY records an EXTRACT_PATTERN decision with the pattern described, and can implement it natively without the repository installed. |
 
+## 103. Amendment A9 (2026-10-02): Workflow Fabric - intelligence for novel work, automation for repeated work
+
+> **Transcription note (added 2026-10-02; not part of the owner's text).** The owner's proposal is kept verbatim in
+> `docs/plans/build-harness/00-owner-directive-2026-10-02e.md`; §103.2 restates its ten requirements with acceptance
+> evidence worded by the implementing agent. Ranked P1 behind the P0 burn-down (assumed from the owner's P0-first
+> rule; the owner may re-rank). The owner's licence and product claims (Activepieces MIT core and 760+ apps, n8n
+> Sustainable Use License, Windmill AGPL, Node-RED Apache-2.0) are the owner's research, checked through the fabric's
+> licence gate when a provider is adopted.
+
+### 103.1 Decisions carried by this amendment (derived)
+
+- Two kinds of workflow stay separate: FRIDAY's own durable work (objectives, restarts, approvals) belongs to the
+  objective engine and DUR-001 and never depends on an automation engine being up; user and business automation
+  runs on workflow providers behind one interface.
+- Providers are interchangeable adapters in the capability fabric; none is core. Owner's order: Activepieces first,
+  n8n optional, Windmill for code and data jobs; Node-RED, Kestra, Temporal may plug in later.
+- Levels, cheapest adequate first: L0 direct action, L1 procedure, L2 managed workflow, L3 agentic workflow
+  (deterministic skeleton with model decision nodes), L4 objective.
+- A verified workflow is a capability like any other; a repeated deterministic trajectory may be compiled into one
+  so routine work stops costing model tokens - but only when its recurrence and savings justify it.
+- Workflow engines never hold FRIDAY's credentials wholesale: scopes per workflow through the secret broker, and
+  workflow changes pass the same policy and JIT authority checks.
+
+### 103.2 Requirement matrix addendum (derived from the proposal; the verbatim text controls)
+
+| ID | Pri | Requirement | Acceptance evidence |
+|---|---|---|---|
+| WF-001 | P1 | FRIDAY runs reusable user and business automations through interchangeable workflow providers, never depending on one workflow product; FRIDAY's own durable execution never depends on one. | One workflow interface serves at least two providers registered through the capability fabric (each licence-checked; copyleft only in isolated modes); a provider that is down reports UNAVAILABLE and no FRIDAY objective, memory or durable-execution path depends on it. |
+| WF-002 | P1 | A person describes a recurring process and FRIDAY creates, tests and activates the workflow without anyone configuring nodes. | From a plain-language description FRIDAY produces a workflow on a provider, fires a test event, observes the real result, repairs errors, and activates it only after the test passes. |
+| WF-003 | P1 | FRIDAY chooses the workflow backend by connectors, durability, task type, privacy, resources and the person's policy. | Given requests of different kinds (app automation, code/data job, one-off action, long objective) the router picks the expected level and provider and records why; a one-off action never becomes a workflow, a long FRIDAY objective never leaves the objective engine. |
+| WF-004 | P1 | A verified workflow becomes callable as a FRIDAY capability. | An activated workflow appears in the capability registry with provenance, permissions and health, and planning can call it by capability name (CAP-001 closed-world resolution). |
+| WF-005 | P1 | FRIDAY detects repeated successful agent trajectories and proposes, or under the person's policy compiles, a deterministic workflow for them. | After a configurable number of matching successful trajectories FRIDAY proposes the workflow with the expected savings; a compiled workflow reproduces the trajectory's verified result on a test event without model calls, and exceptions still reach FRIDAY. |
+| WF-006 | P1 | FRIDAY monitors workflow executions and detects degraded or broken workflows and providers. | Each workflow records last run, success rate, latency, failures and dependencies; a planted failing run moves it to DEGRADED and a dead provider to UNAVAILABLE, visible to the router. |
+| WF-007 | P1 | FRIDAY diagnoses and repairs a broken workflow, with rollback and verification. | A planted breaking change (an expired connector, a renamed field) is diagnosed, a repaired version passes its test event before replacing the old one, and a failed repair rolls back to the last known-good version. |
+| WF-008 | P1 | While a workflow is broken FRIDAY can complete eligible urgent runs through its normal capabilities. | With a workflow broken, an eligible pending run is completed through ordinary capabilities with the same verification, and the person is told which path ran. |
+| WF-009 | P1 | A workflow engine receives only the credential scopes its workflow needs, through the secret broker. | A workflow's connections are issued per workflow through the secret broker; a planted workflow asking for an unrelated credential (e.g. a marketing flow asking for banking) is refused and the refusal logged; workflow changes pass the policy and JIT authority checks. |
+| WF-010 | P1 | FRIDAY promotes a task to a workflow only when recurrence, reliability and expected savings justify it. | Promotion records frequency, current model tokens and time, expected error reduction against build and maintenance cost; a task below the threshold is not converted and the reason is recorded. |
+
 ## Appendix C. Implementation controller, updated 2026-09-26 (owner's text, verbatim)
 
 ```text
