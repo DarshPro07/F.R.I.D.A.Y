@@ -186,6 +186,19 @@ Then stop harness work and drive P0 to zero. References only (design mines, not 
 code2prompt, Gas Town/Beads, Emdash, Claude Squad, DeepAgents, SWE-agent ACI, wshobson/agents, Superpowers,
 Context7, OpenHands SDK.
 
+### Status 2026-10-02 14:30 - BH-G, BH-H, BH-I landed; BH-J running
+
+| Worker | Commit | Cost | Verified by |
+|---|---|---|---|
+| BH-G chunked gate, crash recovery, per-run spend, peak history | c161ba3 | $0.89 | 4/4 mutations, RED/GREEN |
+| BH-H invocation ledger, fresh repair, escalate, program lock | 9181ca5 | $1.67 | 3/3 mutations, 251 harness tests, RED/GREEN |
+| BH-I sparse agent fabric: job records + adoption, agent_utility, cascade to ADVISOR, wide impact, merge queue | 6abc63e | $5.14 | 4/4 mutations, replaced tests checked for weakening, RED/GREEN |
+
+BH-I's own gaps: QUEUED/WAITING_RESOURCES job states defined but not written (folded into BH-J); parallel gate
+chunks exercised only in unit tests (this host runs one). CORE-001's measured 1.7 GB peak was restored into
+`data/build_runs/peaks.jsonl` (it predated the history) so admission stays conservative until BH-J predicts per
+requirement. Product amendments recorded meanwhile: A8 Capability Forge (083ca38), A9 Workflow Fabric (472d561).
+
 ## Resume (fresh session)
 
 `git status`; read `data/build_state.json` (parked, escalations, stop_reason); `build_kernel.py concurrency`;
