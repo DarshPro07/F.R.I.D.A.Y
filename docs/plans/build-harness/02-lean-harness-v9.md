@@ -141,6 +141,18 @@ Next, in order (build-harness obligations, not PRD product rows):
 1b. Model escalation (v10 §17/§18): when a requirement's repair is rejected again, one fresh attempt on a
    stronger model with the verifier's findings before it is parked (ACT-001: five concrete honesty-audit defects
    after its repair).
+1c. BH-G (running 2026-10-02): the program crashed integrating DOMAIN-001 - ~all of tests/ selected, one
+   900 s subprocess, TimeoutExpired uncaught, an unverified cherry-pick left on the branch (the controller reset
+   it to dbc237c; the work is on build/domain-001). BH-G: chunked gate runs + TEST_TIMEOUT, the program resets
+   and parks on any integrator crash, per-run accounting by stream offset, append-only peak history.
+1d. BH-H (owner guidance `00-owner-directive-2026-10-02b.md`): attempt identity - an append-only invocation
+   ledger (attempt_id, run_id, wave_id, req, cost, tokens, peak) that spend/ROI are projections of, with the
+   owner's six regression cases; INVOCATION / WAVE / RUN / LIFETIME cost kept apart; retry context growth
+   recorded; repair policy - attempt 2 may resume, attempt 3+ is a fresh session with a structured failure
+   packet; `escalate REQ` - fresh session, stronger model, packet from the integration record; a program lock
+   so a second program cannot start (master controller §3). Then CORE-001 runs through `escalate` with the
+   owner's four-item packet: jailed derived check, audit.sqlite3 root cause, no acceptance contract is never
+   COMPLETE, verdict persisted only when correlated to the objective run.
 2. TEST-IMPACT-001: pytest-testmon spike in .venv-build against `scripts/test_impact.py` on real changes
    (recall of the tests that actually failed, time saved); full suite still at every checkpoint; pytest-xdist
    only with a governor-chosen worker count, never `-n auto`.
