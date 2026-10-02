@@ -609,6 +609,9 @@ def repair_prompt(integration: dict) -> str:
             lines.append("Tests: " + ", ".join(str(t) for t in rg["tests"]))
         if rg.get("tail"):
             lines += ["Test output tail:", str(rg["tail"])]
+    if integration.get("failures"):
+        lines.append("Tests that fail with your change (they pass without it):")
+        lines += [f"- {f}" for f in integration["failures"]]
     if integration.get("detail"):
         lines.append(f"Detail: {integration['detail']}")
     lines.append("Fix every finding you can in code and tests. A finding that needs something "

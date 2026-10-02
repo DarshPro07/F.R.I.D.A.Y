@@ -16,6 +16,7 @@ import ast
 import contextlib
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -39,6 +40,10 @@ VERDICTS = ("PASS", "FAIL", "INSUFFICIENT_EVIDENCE")
 VERIFIER_TOOLS = ",".join(("Read", "Glob", "Grep", "Bash(git diff:*)",
                            "Bash(git log:*)", "Bash(git show:*)"))
 PATCH_CAP = 40 * 1024
+#: The project's deterministic gate (AGENTS.md): live tests need the network or
+#: a running service, slow ones wall-clock time - neither proves a change.
+GATE = ("-m", "not live and not slow")
+_FAILED = re.compile(r"^(?:FAILED|ERROR) (\S+)")
 VERIFIER_FLOOR_USD = 1.0
 VERIFIER_TURNS = 15
 GIT_S = 120
@@ -116,7 +121,7 @@ def temp_worktree(repo: Path, sha: str):
 
 def run_pytest(python: str, cwd: Path, files: list[str]) -> tuple[int, str]:
     try:
-        res = subprocess.run([python, "-m", "pytest", *files, "-q", "--tb=line", "-p", "no:cacheprovider"],
+        res = subprocess.run([python, "-m", "pytest", *files, *GATE, "-q", "--tb=line", "-p", "no:cacheprovider"],
                              cwd=cwd, capture_output=True, text=True, encoding="utf-8",
                              errors="replace", timeout=TEST_S)
     except subprocess.TimeoutExpired as exc:
@@ -273,12 +278,19 @@ def merge(run: dict, tests_extra: list[str], repo: Path = ROOT, python: str = VE
         return {"result": "CONFLICT", "pre_head": pre_head, "detail": pick.stderr.strip()[-300:]}
     integrated = rev(repo, "HEAD")
     tests = [t for t in affected(run, tests_extra, repo) if (repo / t).is_file()]
-    res = subprocess.run([python, str(PYTEST_BRIEF), "--", *tests], cwd=repo, capture_output=True,
-                         text=True, encoding="utf-8", errors="replace", timeout=TEST_S)
-    summary = res.stdout.strip().splitlines()[:12]
-    if res.returncode == 0:
-        return {"result": "INTEGRATED", "pre_head": pre_head, "integrated_commit": integrated,
-                "affected": tests, "summary": summary}
+    ok = {"result": "INTEGRATED", "pre_head": pre_head, "integrated_commit": integrated,
+          "affected": tests, "summary": [], "pre_existing": []}
+    if not tests:  # pytest with no paths would run the whole suite
+        return ok
+    rc, lines = gate_run(python, repo, tests)
+    ok["summary"] = lines[:12]
+    if rc in (0, 5):  # 5: everything affected is live/slow, nothing to run
+        return ok
+    failing = failed_ids(lines)
+    pre = still_failing(failing, pre_head, repo, python)
+    if failing and set(failing) <= pre:
+        return {**ok, "pre_existing": sorted(pre)}
+    failures = [ln for ln in lines if (m := _FAILED.match(ln)) and m.group(1) not in pre][:20]
     parent = git(repo, "rev-parse", "HEAD^").stdout.strip()
     if parent == pre_head:
         git(repo, "reset", "--hard", pre_head, check=True)
@@ -286,7 +298,38 @@ def merge(run: dict, tests_extra: list[str], repo: Path = ROOT, python: str = VE
     else:
         reset = "NOT reset: HEAD^ is not pre_head; inspect by hand"
     return {"result": "FAILED_INTEGRATION", "pre_head": pre_head, "integrated_commit": "",
-            "affected": tests, "summary": summary, "reset": reset}
+            "affected": tests, "summary": lines[:12], "reset": reset,
+            "failures": failures or lines[:12], "pre_existing": sorted(pre)}
+
+
+def gate_run(python: str, cwd: Path, tests: list[str]) -> tuple[int, list[str]]:
+    """Run tests under the gate markers via pytest_brief; return the exit code
+    and the full output's lines (the brief caps its failure list, the log does not)."""
+    res = subprocess.run([python, str(PYTEST_BRIEF), "--", *GATE, *tests], cwd=cwd, capture_output=True,
+                         text=True, encoding="utf-8", errors="replace", timeout=TEST_S)
+    out = res.stdout
+    log = next((ln.split("full log: ", 1)[1].strip() for ln in out.splitlines()
+                if ln.startswith("full log: ")), "")
+    if log and Path(log).is_file():
+        out = Path(log).read_text(encoding="utf-8", errors="replace")
+    return res.returncode, [ln.strip() for ln in out.splitlines()]
+
+
+def failed_ids(lines: list[str]) -> list[str]:
+    return sorted({m.group(1) for ln in lines if (m := _FAILED.match(ln))})
+
+
+def still_failing(ids: list[str], sha: str, repo: Path, python: str) -> set[str]:
+    """Which of these tests fail at `sha` too - without the change. A test the
+    change added does not exist there, so it is never excused."""
+    if not ids:
+        return set()
+    with temp_worktree(repo, sha) as wt:
+        present = [i for i in ids if (wt / i.split("::")[0]).is_file()]
+        if not present:
+            return set()
+        _, lines = gate_run(python, wt, present)
+    return set(failed_ids(lines)) & set(present)
 
 
 # ---------------------------------------------------------------- ledger
@@ -334,7 +377,9 @@ def evidence_text(run: dict, rg: dict, merged: dict, verifier: dict | None) -> s
     parts = [f"build run {run['requirement']}, commit {merged['integrated_commit'][:9]}",
              f"RED ({rg.get('red_kind')}) at {run['base_sha'][:9]} and GREEN at the commit for "
              + ", ".join(rg.get("tests") or []),
-             f"affected tests {counts.strip()}"]
+             f"affected tests {counts.strip()}"
+             + (f" (failing before the change too: {', '.join(merged['pre_existing'])})"
+                if merged.get("pre_existing") else "")]
     if verifier:
         cost = verifier.get("cost_usd")
         parts.append(f"fresh verifier {verifier.get('verdict')}"
@@ -430,8 +475,11 @@ def integrate(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR, ledger_
         verifier = None
     merged = merge(run, tests, repo, python)
     if merged["result"] != "INTEGRATED":
-        return done(merged["result"], detail=merged.get("detail") or merged.get("reset", ""))
+        return done(merged["result"], detail=merged.get("detail") or merged.get("reset", ""),
+                    failures=merged.get("failures", []), affected=merged.get("affected", []),
+                    pre_existing_failures=merged.get("pre_existing", []))
     out["integrated_commit"] = merged["integrated_commit"]
+    out["pre_existing_failures"] = merged.get("pre_existing", [])
     if not no_ledger:
         status, gaps = decide_status(run, rg, merged, required, verifier)
         impl = f"{(run.get('evidence') or {}).get('summary', '')} (build run, commit {merged['integrated_commit'][:9]})"

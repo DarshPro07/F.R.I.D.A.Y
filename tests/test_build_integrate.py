@@ -51,12 +51,15 @@ def write(repo: Path, rel: str, text: str) -> None:
     p.write_bytes(text.encode())
 
 
-def make_repo(tmp_path: Path, files: dict[str, str], *, ledger: str = LEDGER_SRC) -> tuple[Path, str]:
+def make_repo(tmp_path: Path, files: dict[str, str], *, ledger: str = LEDGER_SRC,
+              base_extra: dict[str, str] | None = None) -> tuple[Path, str]:
     repo = tmp_path / "repo"
     repo.mkdir()
     sh(repo, "init", "-q", "-b", "main")
     write(repo, "calc.py", "def add(a, b):\n    return a + b\n")
     write(repo, "tests/test_old.py", OLD_TEST)
+    for rel, text in (base_extra or {}).items():
+        write(repo, rel, text)
     write(repo, "scripts/prd_ledger.py", ledger)
     sh(repo, "add", "-A")
     sh(repo, "commit", "-q", "-m", "base")
@@ -75,8 +78,9 @@ GOOD = {"calc.py": "def add(a, b):\n    return a + b\n\n\ndef twice(x):\n    ret
         "tests/test_twice.py": "from calc import twice\n\n\ndef test_twice():\n    assert twice(2) == 4\n"}
 
 
-def setup(tmp_path, files=None, *, state="DONE", files_changed=None, priority="P1", acceptance_met=True):
-    repo, shas = make_repo(tmp_path, files or GOOD)
+def setup(tmp_path, files=None, *, state="DONE", files_changed=None, priority="P1", acceptance_met=True,
+          base_extra=None):
+    repo, shas = make_repo(tmp_path, files or GOOD, base_extra=base_extra)
     base, commit = shas.split()
     runs = tmp_path / "runs"
     runs.mkdir()
@@ -260,6 +264,27 @@ def test_failing_affected_tests_reset_to_pre_head(tmp_path):
     assert out["result"] == "FAILED_INTEGRATION"
     assert head(repo) == before and "add(a, b):\n    return a + b\n" in (repo / "calc.py").read_text()
     assert out["ledger_status"] == ""
+    # The repair worker is shown what broke, not just that something did.
+    assert any("tests/test_old.py::test_old" in f for f in out["failures"])
+
+
+def test_live_tests_are_not_part_of_the_integration_gate(tmp_path):
+    # 2026-10-02: CORE-001 was rejected twice because an affected @live test
+    # needs a running Hermes gateway; the project's own gate is
+    # -m "not live and not slow".
+    live = {"tests/test_net.py": "import pytest\nfrom calc import add\n\n\n@pytest.mark.live\n"
+                                 "def test_net():\n    assert False\n"}
+    repo, runs, run, rows = setup(tmp_path, base_extra=live)
+    out = go(repo, runs, rows)
+    assert out["result"] == "INTEGRATED"
+
+
+def test_a_failure_that_predates_the_change_is_recorded_not_blamed(tmp_path):
+    broken = {"tests/test_broken.py": "from calc import add\n\n\ndef test_broken():\n    assert add(1, 1) == 3\n"}
+    repo, runs, run, rows = setup(tmp_path, base_extra=broken)
+    out = go(repo, runs, rows)
+    assert out["result"] == "INTEGRATED"
+    assert out["pre_existing_failures"] == ["tests/test_broken.py::test_broken"]
 
 
 def test_reset_is_skipped_when_head_parent_is_not_pre_head(tmp_path, monkeypatch):

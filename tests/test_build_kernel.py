@@ -919,3 +919,9 @@ def test_repair_refuses_without_worktree_session_or_integration(monkeypatch, rep
     monkeypatch.setattr(K, "_start", lambda cmd, w: pytest.fail("must not relaunch"))
     with pytest.raises(K.KernelError):
         K.repair("R-1", worktrees=root, runs_dir=runs, repo=repo)
+
+
+def test_repair_prompt_names_the_tests_that_failed_integration():
+    text = K.repair_prompt({"requirement": "R-1", "result": "FAILED_INTEGRATION", "detail": "reset to pre_head",
+                            "failures": ["FAILED tests/test_x.py::test_y - AssertionError: boom"]})
+    assert "tests/test_x.py::test_y - AssertionError: boom" in text
