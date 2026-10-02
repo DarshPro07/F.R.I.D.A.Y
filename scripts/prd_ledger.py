@@ -2879,6 +2879,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Hermes sessions now count provider safety refusals against the admitted route (same ledger/key the gate reads), closing the Hermes refusal-hook gap. CLI executor and neighbouring executor suites run green. (build run, commit 520383799)',
         "next_action": 'GAPS: Cyber Lab route is still a label only: no Cyber Lab executor or authorization-contract module exists; its contents need an owner decision',
     }),
+    ('MCP-001', {
+        "status": PARTIAL,
+        "current_implementation": "Firewall now pins the handshake server name/version (change suspends), types a non-loopback server's tool output as untrusted via a result resolver, and builds the MCP client through mcp_firewall.server(). (build run, commit 15aff6531)",
+        "next_action": 'GAPS: 3 failures in tests/test_voice_path.py are an invalid OpenAI API key (401) in this environment, unrelated; TLS identity is still not pinned; MCP servers used by Hermes/Claude Code workers are configured outside FRIDAY and not seen; wrapped output is a JSON envelope the model is told to treat as data; the runtime does not enforce it beyond that',
+    }),
 ]
 
 
