@@ -2874,6 +2874,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'contracts.ActionResult refuses status succeeded without a verification at construction; honesty.py matches claims to evidence. Gap: the per-type proof set (file hash/readback, code diff and tests, web post-state, email message id, simulation artifact) and the full correlation key are not demonstrated as a whole.',
         "next_action": "PARKED after five build attempts (2026-10-02); branch build/act-001 (9739a8d) holds the library work and the live wiring, not integrated. The verifier accepts the library (typed proof shapes keyed to the real ids executor.claude_code*, executor.hermes, cad.generate; correlation enforced; failure claims need a recorded attempt). Open: (1) BUG on the wired voice path - a capability that raises records its FAILED attempt but is never added to _acted_this_turn (agent_friday.py:1102-1115), so an honest failure report is refused; add the browser path's test (a failure claim matching a recorded failure passes) for voice; (2) live audits run strict_proof=False because the live paths only hold tool text - per-type proof needs tools and executors to emit structured proof tokens (sha256=, diff_files=, tests_passed=, post_state=, message_id=); (3) executors do not record test results, so a real executor.claude_code success cannot satisfy the code proof shape. (2)+(3) are a cross-cutting design change: resume ACT-001 with an advisor (strong model) design packet for structured tool proof, then a fresh implementer on top of the branch.",
     }),
+    ('DOMAIN-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Hermes sessions now count provider safety refusals against the admitted route (same ledger/key the gate reads), closing the Hermes refusal-hook gap. CLI executor and neighbouring executor suites run green. (build run, commit 520383799)',
+        "next_action": 'GAPS: Cyber Lab route is still a label only: no Cyber Lab executor or authorization-contract module exists; its contents need an owner decision',
+    }),
 ]
 
 
