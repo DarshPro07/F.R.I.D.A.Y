@@ -37,6 +37,8 @@ AUTHORITY = "AUTHORITY"
 #: How much of a failure reason a fact keeps. The pointer is the task; the
 #: full reason stays in its row.
 REASON_CHARS = 160
+#: modification.GRAPH_EDIT: the event a plan amendment is recorded as.
+GRAPH_EDIT = "graph_edited"
 #: How much of a step's arguments a fact keeps; the task row holds them all.
 ARGUMENT_CHARS = 200
 
@@ -131,6 +133,17 @@ def for_objective(store, run_id: str) -> CriticalFactSet:
             target = f" {record['target']}" if record.get("target") else ""
             decisions.append(f"{DECISION}: {record.get('decided_by') or 'the person'} "
                              f"approved {record.get('operation')}{target}")
+
+    for event in store.objective_events(run_id):
+        if event["event"] != GRAPH_EDIT:
+            continue
+        detail = event.get("detail") or {}
+        if isinstance(detail, str):
+            detail = json.loads(detail)
+        decisions.append(
+            f"{DECISION}: plan {detail.get('action')} (graph v{detail.get('graph_version')}): "
+            f"{_squash(str(detail.get('reason') or ''))}; the person said "
+            f"{_squash(str(detail.get('source_turn') or ''))[:REASON_CHARS]!r}")
 
     evidence, avoid, next_action = [], [], []
     for task in store.objective_tasks(run_id):

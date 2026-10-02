@@ -278,7 +278,7 @@ class ContinuityManager:
             conn.execute('UPDATE run_wakes SET generation=?, kind=?, task_id=?, due_at=?, detail=?, signal_key=?, created_at=? WHERE run_id=?', (generation, wake.kind, task_id, _iso(due_at) if due_at else None, wake.detail, wake.signal_key, now, claim.run_id))
             conn.execute("UPDATE run_portions SET status='checkpointed', finished_at=? WHERE portion_id=?", (now, claim.portion_id))
             version = int(control['checkpoint_version']) + 1
-            conn.execute('INSERT INTO run_checkpoints (run_id, version, portion_id, current_task_id, completed_tasks, evidence_refs, wake_generation, summary, created_at) VALUES (?,?,?,?,?,?,?,?,?)', (claim.run_id, version, claim.portion_id, task_id, json.dumps(list(completed_task_ids)), json.dumps(list(evidence_refs)), generation, summary[:2000], now))
+            conn.execute('INSERT INTO run_checkpoints (run_id, version, portion_id, current_task_id, completed_tasks, evidence_refs, wake_generation, summary, created_at) VALUES (?,?,?,?,?,?,?,?,?)', (claim.run_id, version, claim.portion_id, task_id, json.dumps(list(completed_task_ids)), json.dumps(list(evidence_refs)), generation, summary, now))
             self._event(conn, claim.run_id, 'checkpointed', summary[:400], task_id=task_id, portion_id=claim.portion_id, evidence_refs=evidence_refs, at=now)
             self._validate(conn, claim.run_id)
         return self.status(claim.run_id)

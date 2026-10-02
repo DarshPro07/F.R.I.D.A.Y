@@ -94,6 +94,11 @@ class DevelopmentRun:
     changed: tuple[str, ...] = ()
     error: str = ""
     seconds: float = 0.0
+    #: The durable objective this run serves and the store that holds it
+    #: (CTX-003). With both, `execute` reads the objective's critical facts
+    #: itself, so the packet cannot be built without them.
+    store: "object | None" = field(default=None, repr=False)
+    objective_id: str = ""
 
     def ready(self, *, scope: str = '', db=None) -> product.Readiness:
         """
@@ -202,6 +207,7 @@ class DevelopmentRun:
                       verifier: evaluation.Verifier | None = None,
                       iteration_budget: int = 3,
                       envelope: c.Envelope | None = None,
+                      facts=None,
                       **kwargs):
         """
         Run the coding agent inside the boundary.
@@ -225,6 +231,12 @@ class DevelopmentRun:
         and what "done" means here - the agent gets told the same bar it
         will be held to. Without one, a single derived acceptance line
         stands in, marked so nobody mistakes it for a real criterion.
+
+        `facts` (a `compaction.CriticalFactSet`, CTX-003) is the objective's
+        record. The coding agent starts from the packet alone, so the binding
+        facts go in verbatim and what tools recorded goes in as quoted data;
+        a packet that would drop one is refused, not sent. Under an envelope
+        that did not come from the person, nothing is binding.
         """
         from friday.executors.claude_code import TaskBundle
 
@@ -255,6 +267,29 @@ class DevelopmentRun:
             known_facts=self.context_for(),
             assumptions=self._assumptions())
         self.run_id = bundle.run_id
+
+        if facts is None and self.store is not None and self.objective_id:
+            from friday import compaction
+
+            facts = compaction.for_objective(self.store, self.objective_id)
+        if facts is not None:
+            from dataclasses import replace
+
+            from friday import compaction
+
+            binding = (facts.binding() if envelope is None
+                       or envelope.provenance == c.PERSON else ())
+            bundle = replace(bundle, critical_facts=binding,
+                             recorded_state=tuple(line for line in facts.lines()
+                                                  if line not in binding))
+            try:
+                compaction.validate(bundle.prompt(), facts)
+            except compaction.LossyCompaction as exc:
+                self.stage = FAILED
+                self.error = f"LOSSY_COMPACTION: {exc}"
+                logger.warning("development run %s refused: %s",
+                               bundle.run_id, self.error)
+                return None
 
         held: dict = {}
         if envelope is not None:
@@ -532,9 +567,12 @@ def _diff_against(workspace: str, base_commit: str, changed: tuple[str, ...]) ->
 
 
 def for_goal(goal: str, root: str | Path, *, project: str = "",
-             strategy_hint: str = "") -> DevelopmentRun:
-    """A run that has already understood the repository and chosen a team."""
+             strategy_hint: str = "", store=None,
+             objective_id: str = "") -> DevelopmentRun:
+    """A run that has already understood the repository and chosen a team.
+    Given the objective it serves, its packet carries that objective's facts."""
     run = DevelopmentRun(goal=goal, project=project or Path(root).name,
                          root=str(Path(root).resolve()),
-                         strategy_hint=strategy_hint or "")
+                         strategy_hint=strategy_hint or "",
+                         store=store, objective_id=objective_id)
     return run.understand().staff()

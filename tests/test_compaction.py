@@ -153,3 +153,97 @@ def test_a_step_line_keeps_its_arguments_bounded(tmp_path):
         manifest=capabilities.as_dicts(), provenance=c.PERSON, attended=True)
     (line,) = K.for_objective(store, created["run_id"]).next_action
     assert len(line) <= K.ARGUMENT_CHARS + 60, len(line)
+
+
+class _CodingAgent:
+    """The Claude Code executor contract, recording the packet it is sent."""
+
+    def __init__(self):
+        self.saw = None
+
+    async def execute(self, bundle, *, timeout=1800.0, **kwargs):
+        self.saw = bundle
+        return type("R", (), {"status": "succeeded", "output": {}})()
+
+
+def _development_run(tmp_path):
+    from friday import development
+
+    return development.DevelopmentRun(goal="tidy the old drafts", project="p",
+                                      root=str(tmp_path))
+
+
+def test_the_development_packet_carries_every_critical_fact(objective, tmp_path):
+    import asyncio
+
+    store, run_id = objective
+    facts = K.for_objective(store, run_id)
+    agent = _CodingAgent()
+    asyncio.run(_development_run(tmp_path).execute(agent, facts=facts))
+    prompt = agent.saw.prompt()
+    assert K.missing(prompt, facts) == []
+    # what tools recorded is quoted data, apart from what the person gave
+    assert "> ALREADY FAILED:" in prompt and "- EXACT: Q3 report.md" in prompt
+
+
+def test_a_development_packet_that_would_drop_a_critical_fact_is_not_sent(
+        objective, tmp_path, monkeypatch):
+    import asyncio
+
+    from friday.executors import claude_code
+
+    store, run_id = objective
+    facts = K.for_objective(store, run_id)
+    prompt = claude_code.TaskBundle.prompt
+    monkeypatch.setattr(claude_code.TaskBundle, "prompt", lambda self, **kw: "\n".join(
+        line for line in prompt(self, **kw).splitlines() if not line.startswith("- EXACT:")))
+    agent, run = _CodingAgent(), _development_run(tmp_path)
+    assert asyncio.run(run.execute(agent, facts=facts)) is None
+    assert agent.saw is None
+    assert run.error.startswith("LOSSY_COMPACTION") and "Q3 report.md" in run.error
+
+
+def test_a_plan_amendment_is_recorded_as_a_decision(objective):
+    from friday import modification
+
+    store, run_id = objective
+    edit = modification.amend_task(store, run_id, "draft2", {"path": "draft3.txt"},
+                                   said="use draft3 instead of draft2")
+    assert edit.outcome == modification.APPLIED
+    facts = K.for_objective(store, run_id)
+    amended = [d for d in facts.decisions if "plan amend" in d]
+    assert len(amended) == 1 and "use draft3 instead of draft2" in amended[0]
+    assert amended[0] in facts.binding()
+    # a packet that forgets the amendment is refused
+    packet = "\n".join(line for line in facts.lines() if line != amended[0])
+    assert K.missing(packet, facts) == [amended[0]]
+
+
+def test_a_development_run_for_an_objective_reads_its_facts_itself(objective, tmp_path):
+    import asyncio
+
+    from friday import development
+
+    store, run_id = objective
+    run = development.DevelopmentRun(goal="tidy the old drafts", project="p",
+                                     root=str(tmp_path), store=store,
+                                     objective_id=run_id)
+    agent = _CodingAgent()
+    asyncio.run(run.execute(agent))
+    assert K.missing(agent.saw.prompt(), K.for_objective(store, run_id)) == []
+    assert "- EXACT: Q3 report.md" in agent.saw.prompt()
+
+
+def test_a_checkpoint_summary_is_kept_whole(tmp_path):
+    from datetime import datetime, timezone
+
+    from friday import continuity as C
+
+    store = Store(tmp_path / "ada.sqlite3")
+    manager = C.ContinuityManager(store, clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc))
+    started = manager.start_run("long audit", initial_task="inspect")
+    claim = manager.claim_run(started.run_id, "worker-a")
+    summary = "kept: " + "x" * 5000 + " END"
+    manager.checkpoint(claim, summary=summary, wake=C.WakeCondition.immediate())
+    again = manager.claim_run(started.run_id, "worker-b")
+    assert again.checkpoint_summary == summary
