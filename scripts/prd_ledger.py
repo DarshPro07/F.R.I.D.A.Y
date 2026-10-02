@@ -2972,6 +2972,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "memory_remember, memory_record_decision and brain_remember now fail closed: a direct MCP client that omits from_read_material is treated as read material; only an explicit False (set by the voice agent) is the person's voice. (build run, commit 4b705d3a6)",
         "next_action": "GAPS: Taint is per turn and conservative: any capability result marks the turn read.; Agent-level wiring is covered by a constant check, not an end-to-end use_capability test.; A direct client now cannot write the person's preferences or decisions via these tools unless it passes from_read_material=false explicitly.",
     }),
+    ('RES-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Governor samples GPU/network, governs model residency, stops running optional/surplus work, and records section 55 fields; Hermes/Claude send heartbeats, stop is non-blocking, double release keeps the queue, stress test stops a real helper. (build run, commit 4e6096455)',
+        "next_action": 'GAPS: GPU is read only through nvidia-smi.; No worker operation exists to unload a resident local model.; HIGH/CRITICAL reduction is tested only with synthetic samples.',
+    }),
 ]
 
 
