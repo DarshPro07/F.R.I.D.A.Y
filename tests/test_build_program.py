@@ -14,6 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import build_kernel as BK  # noqa: E402
 import build_program as BP  # noqa: E402
 import prd_ledger as PL  # noqa: E402
 
@@ -27,6 +28,7 @@ class FakeKernel:
     BUDGETS = {"SCOUT": (8, 0.75, 1), "MICRO": (12, 1.0, 1), "NORMAL": (25, 3.0, 1),
                "COMPLEX": (40, 6.0, 1), "P0": (40, 6.0, 1)}
     VENV_PY = "py"
+    RUNS_DIR = Path("unused-runs")
     DEFAULT_CAP = 2
     _PRIORITY = {"P0": 0, "P1": 1}
 
@@ -43,6 +45,12 @@ class FakeKernel:
         self.repairs: list[str] = []
         self.repair_errors: dict[str, str] = {}
         self.ledger: list[dict] = []
+        self.steps: list[str] = []  # the cascade step each repair launch took
+        self.planted_jobs: list[dict] = []
+        self.adopted: list[str] = []
+        self.finalized: list[str] = []
+        self.closed_jobs: list[tuple[str, str]] = []
+        self.finished = False  # whether an adopted dead job's stream holds a result
 
     def load_rows(self):
         return [r for r in self.rows]
@@ -66,11 +74,42 @@ class FakeKernel:
         self.resumes.append(req)
         return SimpleNamespace(req=req)
 
-    def repair(self, req, *, worktrees):
+    def repair(self, req, *, worktrees, advice=""):
         if req in self.repair_errors:
             raise KErr(self.repair_errors[req])
         self.repairs.append(req)
+        self.steps.append("IMPLEMENTER" if advice else "REPAIR")
         return SimpleNamespace(req=req)
+
+    def escalate(self, req, *, worktrees):
+        self.steps.append("ESCALATE")
+        return SimpleNamespace(req=req)
+
+    def advise(self, req, *, worktrees):
+        self.steps.append("ADVISOR")
+        return SimpleNamespace(req=req)
+
+    def load_advice(self, req):
+        return f"advice for {req}"
+
+    agent_utility = staticmethod(BK.agent_utility)
+
+    def jobs(self, runs_dir):
+        return list(self.planted_jobs)
+
+    def adopt(self, job, *, alive, runs_dir, repo):
+        self.adopted.append(job["req"])
+        return SimpleNamespace(req=job["req"], wt=Path(job["worktree"]), stream_offset=0)
+
+    def has_result(self, wt, offset=0):
+        return self.finished
+
+    def finalize(self, run, reason, runs_dir):
+        self.finalized.append(run.req)
+        return rec(run.req)
+
+    def job_close(self, attempt_id, state, reason="", runs_dir=None):
+        self.closed_jobs.append((attempt_id, state))
 
     def mode_for(self, row):
         return self.modes.get(row["id"], "SHIP")
@@ -87,7 +126,7 @@ class FakeKernel:
         self.launches.append((row["id"], mode, capsule))
         return SimpleNamespace(req=row["id"])
 
-    def watch(self, runs):
+    def watch(self, runs, runs_dir=None):
         self.watched += 1
         recs = [self.script[r.req].pop(0) for r in runs]
         for r in recs:  # what the real kernel's finalize appends to the invocation ledger
@@ -145,8 +184,8 @@ class FakeGit:
         return [c for c in self.cmds if "commit" in c]
 
 
-def rec(req, state="DONE", mode="SHIP", cost=0.5, blockers=None):
-    return {"requirement": req, "state": state, "mode": mode, "cost_usd": cost,
+def rec(req, state="DONE", mode="SHIP", cost=0.5, blockers=None, kind=""):
+    return {"requirement": req, "state": state, "mode": mode, "cost_usd": cost, "kind": kind,
             "evidence": {"blockers": blockers or []}}
 
 
@@ -271,7 +310,8 @@ def test_parked_requirements_do_not_stop_the_program(env, outcome):
         k.script = {i: [rec(i, "BLOCKED")] for i in "ABC"}
         bi = FakeIntegrator(k)
     else:
-        k.script = {i: [rec(i), rec(i)] for i in "ABC"}
+        # the build, then repair, escalation, advisor and advised implementer
+        k.script = {i: [rec(i), rec(i), rec(i), rec(i, kind="ADVISOR"), rec(i)] for i in "ABC"}
         bi = FakeIntegrator(k, results={i: "VERIFIER_FAIL" for i in "ABC"})
     res, _ = go(env, k, bi=bi, cap=1, max_waves=20)
     assert res["stop_reason"] == "no ready work"
@@ -317,7 +357,7 @@ def test_non_integrated_result_parks_with_escalation(env, result):
     k = FakeKernel(ids=("A",))
     k.script = {"A": [rec("A")]}
     env.state.parent.mkdir(parents=True, exist_ok=True)
-    env.state.write_text(json.dumps({"repairs": {"A": 1}}), encoding="utf-8")  # its one repair is spent
+    env.state.write_text(json.dumps({"repairs": {"A": 4}}), encoding="utf-8")  # the whole cascade is spent
     go(env, k, bi=FakeIntegrator(k, {"A": result}))
     st = state_of(env)
     assert st["parked"] == {"A": result}
@@ -716,12 +756,70 @@ def test_a_rejected_change_is_repaired_once_then_integrated(env, verdict):
     assert st["repairs"] == {"A": 1} and st["repair_queue"] == {}
 
 
-def test_a_change_is_repaired_only_once(env):
+def test_repeated_failure_climbs_the_cascade_then_parks(env):
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A"), rec("A"), rec("A"), rec("A", kind="ADVISOR"), rec("A")]}
+    _, bi = go(env, k, bi=Sequence(k, {"A": ["VERIFIER_FAIL"]}))
+    st = state_of(env)
+    assert k.steps == ["REPAIR", "ESCALATE", "ADVISOR", "IMPLEMENTER"]
+    assert bi.calls == ["A"] * 4  # the advisor's diagnosis is never integrated
+    assert st["parked"]["A"] == "VERIFIER_FAIL" and st["repair_queue"] == {}
+    assert st["repairs"] == {"A": 4} and st["cascade"] == {"A": {"step": "IMPLEMENTER", "n": 4}}
+
+
+def test_the_cascade_position_is_recorded_per_requirement(env):
     k = FakeKernel(ids=("A",))
     k.script = {"A": [rec("A"), rec("A")]}
+    go(env, k, bi=Sequence(k, {"A": ["VERIFIER_FAIL", "INTEGRATED"]}))
+    assert state_of(env)["cascade"] == {"A": {"step": "REPAIR", "n": 1}}
+
+
+def test_a_failed_advisor_parks_instead_of_building_blind(env):
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A"), rec("A"), rec("A"), rec("A", "FAILED", kind="ADVISOR")]}
     go(env, k, bi=Sequence(k, {"A": ["VERIFIER_FAIL"]}))
     st = state_of(env)
-    assert k.repairs == ["A"] and st["parked"]["A"] == "VERIFIER_FAIL" and st["repair_queue"] == {}
+    assert k.steps == ["REPAIR", "ESCALATE", "ADVISOR"] and st["parked"]["A"] == "advisor failed"
+    assert any(e["kind"] == "advisor" for e in st["escalations"])
+
+
+def test_a_rebase_required_candidate_is_parked_with_a_rebase_escalation(env):
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+    go(env, k, bi=FakeIntegrator(k, {"A": "REBASE_REQUIRED"}))
+    st = state_of(env)
+    assert k.repairs == [] and st["parked"] == {"A": "REBASE_REQUIRED"}
+    assert st["escalations"][0]["kind"] == "rebase"
+
+
+def planted(attempt_id="job-1", req="A", pid=None):
+    return {"attempt_id": attempt_id, "req": req, "role": "IMPLEMENTER", "state": "STARTED",
+            "pid": os.getpid() if pid is None else pid, "worktree": "wt"}
+
+
+def test_a_started_job_with_a_live_pid_is_watched_not_relaunched(env, tmp_path):
+    k = FakeKernel(ids=("A",))
+    k.planted_jobs = [planted()]
+    k.script = {"A": [rec("A")]}
+    res, bi = go(env, k, runs_dir=tmp_path / "runs")
+    assert k.adopted == ["A"] and k.launches == [] and bi.calls == ["A"]
+    assert k.finalized == []
+
+
+def test_a_dead_job_with_a_finished_stream_is_finalized_not_relaunched(env, tmp_path, monkeypatch):
+    monkeypatch.setattr(BP, "pid_alive", lambda pid: False)
+    k = FakeKernel(ids=("A",))
+    k.planted_jobs, k.finished = [planted(pid=99999999)], True
+    _, bi = go(env, k, runs_dir=tmp_path / "runs")
+    assert k.finalized == ["A"] and bi.calls == ["A"] and k.launches == []
+
+
+def test_a_dead_job_without_a_result_is_marked_failed_for_the_resume_path(env, tmp_path, monkeypatch):
+    monkeypatch.setattr(BP, "pid_alive", lambda pid: False)
+    k = FakeKernel(ids=("A",))
+    k.planted_jobs = [planted(pid=99999999)]
+    go(env, k, runs_dir=tmp_path / "runs", max_waves=0)
+    assert k.closed_jobs == [("job-1", "FAILED")] and k.finalized == [] and k.adopted == ["A"]
 
 
 @pytest.mark.parametrize("verdict", ["CONFLICT", "REFUSED"])

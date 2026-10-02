@@ -293,6 +293,8 @@ def repo(tmp_path):
 
 
 class _Proc:
+    pid = 4242
+
     def __init__(self, code=0):
         self.returncode = code
 
@@ -426,7 +428,8 @@ def test_launch_ship_uses_class_budget_and_records_base(monkeypatch, repo, tmp_p
 
 def test_launch_scout_runs_detached_with_a_scout_packet(monkeypatch, repo, tmp_path):
     monkeypatch.setattr(K, "_start", lambda cmd, wt: _Proc(None))
-    run = K.launch(row("R-1"), worktrees=tmp_path / "wts", repo=repo, mode="SCOUT")
+    run = K.launch(row("R-1"), worktrees=tmp_path / "wts", repo=repo, mode="SCOUT",
+                   runs_dir=tmp_path / "runs")
     assert _git(run.wt, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD" and run.wall_s == 900
     assert "final message" in (run.wt / ".build" / "packet.md").read_text()
 
@@ -1222,3 +1225,138 @@ def test_peak_history_window_is_the_last_entries_and_records_are_the_fallback(tm
     other = tmp_path / "other"
     _peak_record(other, "R", 2048, 1)
     assert K.worker_gb(other) == 2.0
+
+
+# ------------------------------------------------------- sparse agent fabric
+
+def _full_row(**more):
+    return {**row("R-1", "P1", files=("friday/a.py",)), "tests": ["tests/test_a.py"], **more}
+
+
+def test_agent_utility_decides_every_axis_from_the_row_and_context():
+    decision, why = K.agent_utility(_full_row(), {})
+    assert decision == {"orient": "SHIP", "verify": "SKIP_VERIFY", "session": "FRESH",
+                        "parallel": "SEQUENTIAL", "escalate": "NONE", "step": "REPAIR"} and why
+    assert K.agent_utility(row("R-1", files=()), {})[0]["orient"] == "SCOUT"
+    assert K.agent_utility(row("R-1", files=()), {"has_findings": True})[0]["orient"] == "SHIP"
+    assert K.agent_utility(_full_row(priority="P0"), {})[0]["verify"] == "VERIFY"
+    assert K.agent_utility(_full_row(), {"protected": True})[0]["verify"] == "VERIFY"
+    assert K.agent_utility(_full_row(), {"slots": 2})[0]["parallel"] == "PARALLEL"
+    assert K.agent_utility(_full_row(), {"slots": 2, "overlap": True})[0]["parallel"] == "SEQUENTIAL"
+
+
+def test_agent_utility_resumes_only_a_localized_second_attempt_with_modest_growth():
+    resume = {"attempt": 2, "localized": True}
+    assert K.agent_utility(_full_row(), resume)[0]["session"] == "RESUME"
+    assert K.agent_utility(_full_row(), {**resume, "retry_context_growth": 1.3})[0]["session"] == "RESUME"
+    decision, why = K.agent_utility(_full_row(), {**resume, "retry_context_growth": 1.31})
+    assert decision["session"] == "FRESH" and any("1.31" in w for w in why)
+    assert K.agent_utility(_full_row(), {"attempt": 3, "localized": True})[0]["session"] == "FRESH"
+
+
+@pytest.mark.parametrize("failures,step,escalate", [
+    (0, "REPAIR", "NONE"), (1, "ESCALATE", "ESCALATE"), (2, "ADVISOR", "ESCALATE"),
+    (3, "IMPLEMENTER", "NONE"), (4, "PARK", "PARK"), (9, "PARK", "PARK")])
+def test_agent_utility_walks_the_cascade_then_parks(failures, step, escalate):
+    decision, _ = K.agent_utility(_full_row(), {"failures": failures})
+    assert (decision["step"], decision["escalate"]) == (step, escalate)
+
+
+def test_mode_for_goes_through_agent_utility(monkeypatch, tmp_path):
+    seen = []
+    real = K.agent_utility
+    monkeypatch.setattr(K, "agent_utility", lambda r, c=None: seen.append(c) or real(r, c))
+    assert K.mode_for(row("R-1", files=()), tmp_path) == "SCOUT"
+    assert seen == [{"has_findings": False}]
+
+
+def test_launch_writes_a_started_job_and_finalize_closes_it(monkeypatch, repo, tmp_path):
+    monkeypatch.setattr(K, "_start", lambda cmd, wt: _Proc(None))
+    runs = tmp_path / "runs"
+    run = K.launch(_full_row(), worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
+    job = json.loads((runs / "jobs" / f"{run.attempt_id}.json").read_text())
+    assert job["state"] == "STARTED" and job["role"] == "IMPLEMENTER" and job["pid"] == _Proc.pid
+    assert job["req"] == "R-1" and job["worktree"] == str(run.wt) and job["started"] and not job["ended"]
+    run.proc = _Proc(0)
+    _stream(run.wt, {"type": "system", "session_id": "S1"},
+            {"type": "result", "subtype": "success", "session_id": "S1", "num_turns": 1,
+             "total_cost_usd": 0.1, "usage": {}})
+    K.finalize(run, "TIMEOUT", runs)
+    done = K.jobs(runs)[0]
+    assert done["state"] == "FAILED" and done["ended"] and "TIMEOUT" in done["reason"]
+
+
+def test_repair_escalate_and_advise_each_write_their_own_job(monkeypatch, repo, tmp_path):
+    wt, runs = _repairable(repo, tmp_path)
+    monkeypatch.setattr(K, "_start", lambda cmd, w: _Proc(None))
+    for fn in (K.repair, K.escalate, K.advise):
+        fn("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
+    got = {j["role"]: j for j in K.jobs(runs)}
+    assert set(got) == {"REPAIR", "ESCALATE", "ADVISOR"}
+    assert got["ESCALATE"]["model"] == "opus" and got["REPAIR"]["state"] == "STARTED"
+    assert "no edits" in got["ADVISOR"]["reason"]
+
+
+def test_a_repair_goes_fresh_when_retry_context_outgrew_its_predecessor(monkeypatch, repo, tmp_path):
+    wt, runs = _repairable(repo, tmp_path)
+    K.ledger_append({"attempt_id": "x", "req": "R-1", "kind": "SCOUT", "retry_context_growth": 1.5}, runs)
+    cmds = []
+    monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
+    K.repair("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
+    assert "--resume" not in cmds[0]
+    assert K.jobs(runs)[0]["reason"].startswith("FRESH")
+
+
+def test_an_advised_implementer_is_fresh_on_the_normal_model_with_the_packet(monkeypatch, repo, tmp_path):
+    wt, runs = _repairable(repo, tmp_path)
+    cmds = []
+    monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
+    K.repair("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo, advice="THE DIAGNOSIS")
+    cmd = cmds[0]
+    assert "--resume" not in cmd and "THE DIAGNOSIS" in cmd and cmd[cmd.index("--model") + 1] == "sonnet"
+
+
+def test_the_advisor_is_read_only_and_its_final_message_is_the_packet(monkeypatch, repo, tmp_path):
+    wt, runs = _repairable(repo, tmp_path)
+    before = (runs / "R-1.json").read_text()
+    cmds = []
+    monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
+    run = K.advise("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
+    cmd = cmds[0]
+    tools = cmd[cmd.index("--allowedTools") + 1]
+    assert cmd[cmd.index("--model") + 1] == "opus" and run.kind == "ADVISOR"
+    assert tools == K.SCOUT_TOOLS and not {"Edit", "Write"} & set(tools.split(","))
+    run.proc, run.stream_offset = _Proc(0), 0  # _stream rewrites the log, so nothing precedes it
+    _stream(wt, {"type": "system", "session_id": "S2"},
+            {"type": "result", "subtype": "success", "session_id": "S2", "num_turns": 2,
+             "total_cost_usd": 0.4, "usage": {}, "result": "root cause: stale cache in a.py:3"})
+    rec = K.finalize(run, None, runs)
+    assert rec["state"] == "DONE" and rec["kind"] == "ADVISOR" and not rec["commit"]
+    assert "stale cache" in K.load_advice("R-1", runs)
+    assert (runs / "R-1.json").read_text() == before
+    assert [j["state"] for j in K.jobs(runs) if j["role"] == "ADVISOR"] == ["COMPLETE"]
+
+
+def test_an_advisor_with_an_empty_final_message_fails(monkeypatch, repo, tmp_path):
+    wt, runs = _repairable(repo, tmp_path)
+    monkeypatch.setattr(K, "_start", lambda cmd, w: _Proc(None))
+    run = K.advise("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
+    run.proc, run.stream_offset = _Proc(0), 0
+    _stream(wt, {"type": "system", "session_id": "S2"},
+            {"type": "result", "subtype": "success", "session_id": "S2", "num_turns": 1,
+             "total_cost_usd": 0.1, "usage": {}, "result": "  "})
+    assert K.finalize(run, None, runs)["state"] == "FAILED" and K.load_advice("R-1", runs) == ""
+
+
+def test_adopt_rebuilds_a_running_from_a_job_and_the_run_meta(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    K._write_run_meta(wt, {"req": "R-1", "mode": "SHIP", "klass": "COMPLEX", "base_sha": run.base_sha,
+                           "branch": "build/r-1", "model": "sonnet", "started": 123.0, "stream_offset": 0})
+    job = {"attempt_id": "a1", "req": "R-1", "role": "REPAIR", "model": "sonnet", "pid": 77,
+           "worktree": str(wt), "reason": "why"}
+    got = K.adopt(job, alive=lambda pid: pid == 77, runs_dir=tmp_path / "runs", repo=repo)
+    assert got.attempt_id == "a1" and got.kind == "REPAIR" and got.klass == "COMPLEX" and got.started == 123.0
+    assert got.proc.poll() is None and got.proc.pid == 77
+    got.proc._alive = lambda pid: False
+    assert got.proc.poll() == 0
+    assert K.has_result(wt) is True and K.has_result(tmp_path / "nowhere") is False

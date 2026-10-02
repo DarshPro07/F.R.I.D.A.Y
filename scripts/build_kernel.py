@@ -59,7 +59,17 @@ PEAKS_FILE = "peaks.jsonl"
 #: Append-only invocation ledger: one line per launch/resume/repair/escalate.
 #: Every cost and ROI figure is a projection of it, never of a run record.
 INVOCATIONS_FILE = "invocations.jsonl"
-KINDS = ("SHIP", "SCOUT", "RESUME", "REPAIR", "ESCALATE")
+KINDS = ("SHIP", "SCOUT", "RESUME", "REPAIR", "ESCALATE", "ADVISOR")
+JOBS_DIR = "jobs"
+JOB_STATES = ("QUEUED", "STARTED", "WAITING_RESOURCES", "COMPLETE", "FAILED")
+ROLE_OF_KIND = {"SHIP": "IMPLEMENTER", "RESUME": "IMPLEMENTER", "SCOUT": "SCOUT",
+                "REPAIR": "REPAIR", "ESCALATE": "ESCALATE", "ADVISOR": "ADVISOR"}
+#: A resumed session whose context grew past this multiple of its predecessor's
+#: re-reads too much transcript: start fresh from a capsule instead.
+RETRY_GROWTH_MAX = 1.3
+ADVISOR_BUDGET = (15, 2.0, 20 * 60)  # turns, USD, wall seconds: a diagnosis, not a build
+#: What the n-th repair of a requirement is, counting repairs already spent.
+CASCADE = ("REPAIR", "ESCALATE", "ADVISOR", "IMPLEMENTER")
 #: A first repair may resume the session only for a failure this small.
 LOCALIZED_FAILING_TESTS = 3
 DEFAULT_WALL_S = 45 * 60
@@ -112,11 +122,61 @@ def code_map(row: dict, runs_dir: Path = RUNS_DIR) -> str:
 def mode_for(row: dict, runs_dir: Path = RUNS_DIR) -> str:
     """SCOUT when the row is too vague to build (no known surface, no cited
     tests, blank acceptance) and no scout has reported yet; otherwise SHIP."""
-    if load_findings(row["id"], runs_dir) is not None:
-        return "SHIP"
-    if not surface(row) or not row.get("tests") or not str(row.get("acceptance", "")).strip():
-        return "SCOUT"
-    return "SHIP"
+    decision, _ = agent_utility(row, {"has_findings": load_findings(row["id"], runs_dir) is not None})
+    return decision["orient"]
+
+
+def cascade_step(repairs: int) -> str:
+    """The step the next repair is, given how many were already spent; PARK past the last."""
+    return CASCADE[repairs] if 0 <= repairs < len(CASCADE) else "PARK"
+
+
+def agent_utility(row: dict, context: dict | None = None) -> tuple[dict, list[str]]:
+    """The one place that decides how an agent job is shaped. Pure: the row and
+    the context in, a decision per axis and the reasons out.
+
+    context keys (all optional): has_findings (a scout reported), protected
+    (the change touches protected files), attempt (the attempt about to run),
+    localized (the failure is small), retry_context_growth (last retry's context
+    over its predecessor's), slots (free worker slots), overlap (the file set
+    collides with a running job), failures (repairs already spent)."""
+    ctx = context or {}
+    reasons: list[str] = []
+    known = bool(surface(row)) and bool(row.get("tests")) and bool(str(row.get("acceptance", "")).strip())
+    if ctx.get("has_findings"):
+        orient = "SHIP"
+        reasons.append("a scout already reported")
+    elif not known:
+        orient = "SCOUT"
+        reasons.append("surface, tests or acceptance unknown")
+    else:
+        orient = "SHIP"
+        reasons.append("surface, tests and acceptance known")
+    if row.get("priority") == "P0" or ctx.get("protected"):
+        verify = "VERIFY"
+        reasons.append("P0 or protected files: verification pays")
+    else:
+        verify = "SKIP_VERIFY"
+    growth = ctx.get("retry_context_growth")
+    if int(ctx.get("attempt") or 1) == 2 and ctx.get("localized") and not (growth and growth > RETRY_GROWTH_MAX):
+        session = "RESUME"
+        reasons.append("attempt 2 and the failure is localized")
+    else:
+        session = "FRESH"
+        if growth and growth > RETRY_GROWTH_MAX:
+            reasons.append(f"retry context grew x{growth}")
+    if int(ctx.get("slots") or 1) > 1 and not ctx.get("overlap"):
+        parallel = "PARALLEL"
+    else:
+        parallel = "SEQUENTIAL"
+        reasons.append("file overlap" if ctx.get("overlap") else "one slot")
+    failures = int(ctx.get("failures") or 0)
+    step = cascade_step(failures)
+    escalate = "PARK" if step == "PARK" else "ESCALATE" if failures and step in ("ESCALATE", "ADVISOR") else "NONE"
+    if failures:
+        reasons.append(f"{failures} repair(s) spent: next step {step}")
+    return {"orient": orient, "verify": verify, "session": session, "parallel": parallel,
+            "escalate": escalate, "step": step}, reasons
 
 
 def budget_class(row: dict, findings: dict | None = None) -> str:
@@ -413,9 +473,98 @@ class Running:
     peak_rss_mb: float | None = None
     stream_offset: int = 0  # bytes of stream.jsonl that belong to earlier runs
     kind: str = ""  # ledger kind; "" means SHIP (or SCOUT for a scout)
+    reason: str = ""  # why agent_utility shaped this job as it did
     attempt_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     program_run_id: str = field(default_factory=lambda: os.environ.get("FRIDAY_BUILD_RUN_ID", ""))
     wave_id: str = field(default_factory=lambda: os.environ.get("FRIDAY_BUILD_WAVE_ID", ""))
+
+
+# ----------------------------------------------------------------- jobs
+
+def _iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def job_path(attempt_id: str, runs_dir: Path = RUNS_DIR) -> Path:
+    return runs_dir / JOBS_DIR / f"{attempt_id}.json"
+
+
+def job_write(job: dict, runs_dir: Path = RUNS_DIR) -> dict:
+    path = job_path(job["attempt_id"], runs_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(job, indent=2) + "\n", encoding="utf-8", newline="\n")
+    os.replace(tmp, path)
+    return job
+
+
+def jobs(runs_dir: Path = RUNS_DIR) -> list[dict]:
+    """Every job record, oldest first; unreadable files are skipped."""
+    out = [j for p in sorted((runs_dir / JOBS_DIR).glob("*.json")) if (j := _read_json(p)).get("attempt_id")]
+    return sorted(out, key=lambda j: str(j.get("started") or ""))
+
+
+def job_open(run: "Running", runs_dir: Path = RUNS_DIR, state: str = "STARTED") -> dict:
+    """The durable record of one agent job: written as the process starts."""
+    return job_write({"attempt_id": run.attempt_id, "req": run.req,
+                      "role": ROLE_OF_KIND[run.kind or ("SCOUT" if run.mode == "SCOUT" else "SHIP")],
+                      "model": run.model, "state": state, "pid": run.proc.pid,
+                      "worktree": str(run.wt), "started": _iso(), "ended": "",
+                      "reason": run.reason, "program_run_id": run.program_run_id,
+                      "wave_id": run.wave_id}, runs_dir)
+
+
+def job_close(attempt_id: str, state: str, reason: str = "", runs_dir: Path = RUNS_DIR) -> dict | None:
+    """Move a job to COMPLETE or FAILED; None when it has no record."""
+    job = _read_json(job_path(attempt_id, runs_dir))
+    if not job.get("attempt_id"):
+        return None
+    job.update(state=state, ended=_iso())
+    if reason:
+        job["reason"] = "; ".join(x for x in (job.get("reason"), reason) if x)
+    return job_write(job, runs_dir)
+
+
+class PidProc:
+    """The slice of Popen the watcher needs, for a worker this process did not
+    start: it only knows the pid, and cannot read an exit code."""
+
+    def __init__(self, pid: int, alive):
+        self.pid, self._alive, self.returncode = pid, alive, None
+
+    def poll(self):
+        if self.returncode is None and not self._alive(self.pid):
+            self.returncode = 0
+        return self.returncode
+
+    def wait(self, timeout=None):
+        return self.poll()
+
+    def kill(self):
+        kill_tree(self)
+
+
+def adopt(job: dict, *, alive, runs_dir: Path = RUNS_DIR, repo: Path = ROOT) -> "Running":
+    """A Running for a STARTED job a dead controller left behind, so it can be
+    watched or finalized instead of relaunched."""
+    wt = Path(job["worktree"])
+    meta = _run_meta(wt)
+    mode = meta.get("mode") or ("SCOUT" if job.get("role") == "SCOUT" else "SHIP")
+    klass = meta.get("klass") or ("SCOUT" if mode == "SCOUT" else "NORMAL")
+    started = float(meta.get("started") or time.time())
+    return Running(job["req"], PidProc(int(job["pid"]), alive), wt, started=started, mode=mode,
+                   klass=klass, base_sha=meta.get("base_sha", ""), branch=meta.get("branch", ""),
+                   model=job.get("model") or meta.get("model") or "sonnet",
+                   wall_s=BUDGETS[klass][2], repo=repo, continued=True,
+                   capsule=bool(meta.get("capsule")), stream_offset=int(meta.get("stream_offset") or 0),
+                   kind="" if job.get("role") in ("IMPLEMENTER", "SCOUT") else str(job.get("role")),
+                   reason=str(job.get("reason") or ""), attempt_id=job["attempt_id"],
+                   program_run_id=job.get("program_run_id", ""), wave_id=job.get("wave_id", ""))
+
+
+def has_result(wt: Path, offset: int = 0) -> bool:
+    """Whether the worker's stream already holds its own result event."""
+    return bool(_own_results(_events(wt / ".build" / "stream.jsonl", offset)))
 
 
 # ------------------------------------------------------------ worktrees
@@ -558,9 +707,13 @@ def launch(row: dict, *, worktrees: Path | None = None, model: str = "sonnet",
                          "branch": branch, "model": model, "started": started,
                          "capsule": bool(capsule), "stream_offset": offset})
     proc = _start(cmd, wt)
-    return Running(row["id"], proc, wt, started=started, mode=mode, klass=klass,
-                   base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
-                   capsule=bool(capsule), stream_offset=offset)
+    decision, reasons = agent_utility(row, {"has_findings": findings is not None})
+    run = Running(row["id"], proc, wt, started=started, mode=mode, klass=klass,
+                  base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
+                  capsule=bool(capsule), stream_offset=offset,
+                  reason=f"{decision['orient']}: {'; '.join(reasons)}")
+    job_open(run, runs_dir)
+    return run
 
 
 def _write_run_meta(wt: Path, meta: dict) -> None:
@@ -616,11 +769,13 @@ def resume(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
     _write_run_meta(wt, meta)
     cmd = worker_command(model or meta.get("model") or "sonnet", max(1, turns // 2), budget / 2,
                          resume=sid, prompt=CONTINUE_PROMPT)
-    return Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
-                   base_sha=meta["base_sha"], branch=meta["branch"],
-                   model=model or meta.get("model") or "sonnet", wall_s=wall, repo=repo,
-                   continued=True, capsule=bool(meta.get("capsule")), stream_offset=offset,
-                   kind="RESUME")
+    run = Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
+                  base_sha=meta["base_sha"], branch=meta["branch"],
+                  model=model or meta.get("model") or "sonnet", wall_s=wall, repo=repo,
+                  continued=True, capsule=bool(meta.get("capsule")), stream_offset=offset,
+                  kind="RESUME", reason="RESUME: a killed worker continues its own session")
+    job_open(run, runs_dir)
+    return run
 
 
 def _read_json(path: Path) -> dict:
@@ -741,13 +896,32 @@ def attempts_made(req: str, runs_dir: Path = RUNS_DIR) -> int:
     return sum(e.get("req") == req and e.get("kind") != "SCOUT" for e in ledger_entries(runs_dir))
 
 
+def advice_path(req: str, runs_dir: Path = RUNS_DIR) -> Path:
+    return runs_dir / f"{req}.advice.md"
+
+
+def load_advice(req: str, runs_dir: Path = RUNS_DIR) -> str:
+    """The advisor's diagnosis packet for `req`, or ''."""
+    try:
+        return advice_path(req, runs_dir).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _last_growth(req: str, runs_dir: Path) -> float | None:
+    grown = [e["retry_context_growth"] for e in ledger_entries(runs_dir)
+             if e.get("req") == req and e.get("retry_context_growth")]
+    return grown[-1] if grown else None
+
+
 def repair(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR,
-           repo: Path = ROOT, model: str | None = None) -> Running:
+           repo: Path = ROOT, model: str | None = None, advice: str = "") -> Running:
     """Repair a rejected change in its worktree at half its class limits. The
     first repair (attempt 2) resumes the worker's own session when the failure
-    is localized; any other, and every repair from attempt 3, is a FRESH session
-    whose prompt is a Failure Capsule, because a resumed session re-reads its
-    whole transcript and costs more each time."""
+    is localized and its context has not outgrown RETRY_GROWTH_MAX; any other,
+    and every repair from attempt 3, is a FRESH session whose prompt is a
+    Failure Capsule (or, after an advisor, its diagnosis packet), because a
+    resumed session re-reads its whole transcript and costs more each time."""
     wt = (worktrees or _worktrees_root()) / req.lower()
     if not wt.is_dir():
         raise KernelError(f"{req} has no worktree at {wt}")
@@ -766,29 +940,38 @@ def repair(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
     turns, budget, wall = BUDGETS[klass]
     attempt = max(attempts_made(req, runs_dir), 1) + 1
     model = model or meta.get("model") or "sonnet"
-    if attempt == 2 and localized(integration):
-        cmd = worker_command(model, max(1, turns // 2), budget / 2, resume=str(sid),
-                             prompt=repair_prompt(integration))
+    decision, reasons = agent_utility(
+        {"id": req}, {"attempt": attempt, "localized": localized(integration),
+                      "retry_context_growth": _last_growth(req, runs_dir)})
+    if advice.strip():
+        prompt = advice.strip()
+        reasons.append("fresh implementer from the advisor's packet")
+    elif decision["session"] == "RESUME":
+        prompt = repair_prompt(integration)
     else:
-        cmd = worker_command(model, max(1, turns // 2), budget / 2,
-                             prompt=failure_capsule(req, integration, run_rec, wt, base_sha, attempt))
+        prompt = failure_capsule(req, integration, run_rec, wt, base_sha, attempt)
+    resume = str(sid) if decision["session"] == "RESUME" and not advice.strip() else None
+    cmd = worker_command(model, max(1, turns // 2), budget / 2, resume=resume, prompt=prompt)
     return _relaunch(req, wt, cmd, meta, run_rec, kind="REPAIR", klass=klass, model=model,
-                     base_sha=base_sha, wall=wall, repo=repo, repairs=1)
+                     base_sha=base_sha, wall=wall, repo=repo, repairs=1, runs_dir=runs_dir,
+                     reason=f"{decision['session']}: {'; '.join(reasons)}")
 
 
 def _relaunch(req: str, wt: Path, cmd: list[str], meta: dict, run_rec: dict, *, kind: str,
               klass: str, model: str, base_sha: str, wall: float, repo: Path,
-              repairs: int = 0) -> Running:
+              repairs: int = 0, runs_dir: Path = RUNS_DIR, reason: str = "") -> Running:
     started = time.time()
     offset = _stream_size(wt)
     branch = meta.get("branch") or run_rec.get("branch", "")
     _write_run_meta(wt, {**meta, "req": req, "mode": "SHIP", "klass": klass,
                          "base_sha": base_sha, "branch": branch, "model": model,
                          "started": started, "stream_offset": offset})
-    return Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
-                   base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
-                   continued=True, repairs=repairs, capsule=bool(meta.get("capsule")),
-                   stream_offset=offset, kind=kind)
+    run = Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
+                  base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
+                  continued=True, repairs=repairs, capsule=bool(meta.get("capsule")),
+                  stream_offset=offset, kind=kind, reason=reason)
+    job_open(run, runs_dir)
+    return run
 
 
 def escalate(req: str, *, model: str = "opus", capsule_extra: str = "",
@@ -821,7 +1004,38 @@ def escalate(req: str, *, model: str = "opus", capsule_extra: str = "",
     turns, budget, wall = BUDGETS["P0"]
     cmd = worker_command(model, turns, budget, prompt=prompt)
     return _relaunch(req, wt, cmd, meta, run_rec, kind="ESCALATE", klass="P0", model=model,
-                     base_sha=base_sha, wall=wall, repo=repo)
+                     base_sha=base_sha, wall=wall, repo=repo, runs_dir=runs_dir,
+                     reason=f"ESCALATE: attempt {attempt} is a fresh {model} session")
+
+
+ADVISOR_PROMPT = ("You are the advisor for a requirement that failed repeatedly. Do NOT edit "
+                  "anything: you have read-only tools. Diagnose the root cause from the failure "
+                  "capsule below, then end with a diagnosis packet as your final message: the "
+                  "cause, the exact files and lines to change, the design to follow, and the "
+                  "tests that prove it. A fresh implementer will receive only that message.\n\n")
+
+
+def advise(req: str, *, model: str = "opus", worktrees: Path | None = None,
+           runs_dir: Path = RUNS_DIR, repo: Path = ROOT) -> Running:
+    """A strong-model, read-only job that diagnoses a repeatedly failing
+    requirement in its worktree. Its final message is saved as the advice
+    packet (finalize); the next repair is a fresh implementer on that packet."""
+    wt = (worktrees or _worktrees_root()) / req.lower()
+    if not wt.is_dir():
+        raise KernelError(f"{req} has no worktree at {wt}")
+    run_rec = _read_json(runs_dir / f"{req}.json")
+    integration = _read_json(runs_dir / f"{req}.integration.json")
+    meta = _run_meta(wt)
+    base_sha = meta.get("base_sha") or run_rec.get("base_sha")
+    if not base_sha:
+        raise KernelError(f"{req} has no base commit to advise against")
+    attempt = attempts_made(req, runs_dir) + 1
+    prompt = ADVISOR_PROMPT + failure_capsule(req, integration, run_rec, wt, base_sha, attempt)
+    turns, budget, wall = ADVISOR_BUDGET
+    cmd = worker_command(model, turns, budget, tools=SCOUT_TOOLS, prompt=prompt)
+    return _relaunch(req, wt, cmd, meta, run_rec, kind="ADVISOR", klass=meta.get("klass") or "NORMAL",
+                     model=model, base_sha=base_sha, wall=wall, repo=repo, runs_dir=runs_dir,
+                     reason=f"ADVISOR: attempt {attempt}, read-only {model} diagnosis, no edits")
 
 
 # ---------------------------------------------------------------- watch
@@ -1081,11 +1295,15 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
     res = results[-1] if results else {}
     runs_dir.mkdir(parents=True, exist_ok=True)
     scout = run.mode == "SCOUT"
-    ev = _scout_outcome(run, runs_dir, str(res.get("result") or "")) if scout else _evidence(run.wt)
+    advisor = run.kind == "ADVISOR"
+    ev = (_scout_outcome(run, runs_dir, str(res.get("result") or "")) if scout
+          else {} if advisor else _evidence(run.wt))
     if reason:
         state = reason
     elif run.proc.returncode != 0 or not res or res.get("is_error"):
         state = "FAILED"
+    elif advisor:
+        state = "DONE" if str(res.get("result") or "").strip() else "FAILED"
     elif scout:
         state = "DONE" if ev else "FAILED"
     elif ev.get("status") in ("DONE", "BLOCKED"):
@@ -1094,7 +1312,10 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
         state = "FAILED"
     summary = ev.get("gap" if scout else "summary", "")
     commit, files, commit_error = "", [], ""
-    if state == "DONE" and not scout:
+    if advisor and state == "DONE":
+        advice_path(run.req, runs_dir).write_text(str(res["result"]).strip() + "\n",
+                                                  encoding="utf-8", newline="\n")
+    if state == "DONE" and not scout and not advisor:
         try:
             commit, files = _commit_run(run, ev)
         except KernelError as exc:
@@ -1132,6 +1353,9 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
         entry["retry_context_growth"] = round(_context_tokens(entry) / _context_tokens(prior[-1]), 3)
     ledger_append(entry, runs_dir)
     rec["attempt_id"] = run.attempt_id
+    rec["kind"] = entry["kind"]
+    job_close(run.attempt_id, "COMPLETE" if state in ("DONE", "BLOCKED") else "FAILED",
+              "" if state in ("DONE", "BLOCKED") else state, runs_dir)
     rec["cumulative_cost_usd"] = lifetime_cost(run.req, runs_dir)
     if commit_error:
         rec["commit_error"] = commit_error
@@ -1140,10 +1364,11 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
             fh.write(json.dumps({"req": run.req, "mode": run.mode, "budget_class": run.klass,
                                  "peak_rss_mb": run.peak_rss_mb,
                                  "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}) + "\n")
-    (runs_dir / f"{run.req}.json").write_text(json.dumps(rec, indent=2) + "\n",
-                                              encoding="utf-8", newline="\n")
+    if not advisor:  # an advisor edits nothing: the last build's record stays the one to repair from
+        (runs_dir / f"{run.req}.json").write_text(json.dumps(rec, indent=2) + "\n",
+                                                  encoding="utf-8", newline="\n")
     if log.exists():
-        stem = f"{run.req}.scout" if scout else run.req
+        stem = f"{run.req}.scout" if scout else f"{run.req}.advisor" if advisor else run.req
         shutil.copyfile(log, runs_dir / f"{stem}.stream.jsonl")
     if scout and run.base_sha:
         _remove_worktree(run.repo, run.wt)

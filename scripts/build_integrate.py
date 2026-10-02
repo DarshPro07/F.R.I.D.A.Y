@@ -16,18 +16,24 @@ import ast
 import contextlib
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 
-from build_kernel import ROOT, RUNS_DIR, VENV_PY, KernelError, load_rows  # noqa: E402
+import build_kernel  # noqa: E402
+from build_kernel import (ROOT, RUNS_DIR, VENV_PY, KernelError, agent_utility,  # noqa: E402
+                          concurrency, load_rows)
 import test_impact  # noqa: E402
 
 LEDGER = ROOT / "scripts" / "prd_ledger.py"
@@ -49,6 +55,11 @@ VERIFIER_TURNS = 15
 GIT_S = 120
 TEST_S = 900
 GATE_CHUNK = 40
+WIDE_IMPACT_FILES = 60  # an affected set larger than this is its own, chunked job
+QUEUE_FILE = "merge_queue.jsonl"
+QUEUE_LOCK = "merge_queue.lock"
+QUEUE_WAIT_S = 1800
+QUEUE_POLL_S = 1.0
 TIMEOUT = -999  # gate_run's rc when a chunk outlived TEST_S
 VERIFIER_S = 900
 
@@ -158,7 +169,8 @@ def _protected(path: str) -> bool:
 
 
 def needs_verifier(row: dict, files: list[str]) -> bool:
-    return row.get("priority") == "P0" or any(_protected(f) for f in files)
+    decision, _ = agent_utility(row, {"protected": any(_protected(f) for f in files)})
+    return decision["verify"] == "VERIFY"
 
 
 def verifier_prompt(row: dict, run: dict, rg: dict, repo: Path = ROOT) -> str:
@@ -289,8 +301,11 @@ def merge(run: dict, tests_extra: list[str], repo: Path = ROOT, python: str = VE
         return {"result": "CONFLICT", "pre_head": pre_head, "detail": pick.stderr.strip()[-300:]}
     integrated = rev(repo, "HEAD")
     tests = [t for t in affected(run, tests_extra, repo) if (repo / t).is_file()]
+    chunks = -(-len(tests) // GATE_CHUNK)
     ok = {"result": "INTEGRATED", "pre_head": pre_head, "integrated_commit": integrated,
-          "affected": tests, "summary": [], "pre_existing": []}
+          "affected": tests, "summary": [], "pre_existing": [],
+          "impact": "WIDE" if len(tests) > WIDE_IMPACT_FILES else "NORMAL",
+          "gate_chunks": chunks, "gate_workers": gate_workers(len(tests))}
     if not tests:  # pytest with no paths would run the whole suite
         return ok
     rc, lines = gate_run(python, repo, tests)
@@ -313,6 +328,7 @@ def merge(run: dict, tests_extra: list[str], repo: Path = ROOT, python: str = VE
         reset = "NOT reset: HEAD^ is not pre_head; inspect by hand"
     return {"result": "TEST_TIMEOUT" if timed_out else "FAILED_INTEGRATION", "pre_head": pre_head,
             "integrated_commit": "", "affected": tests, "summary": lines[:12], "reset": reset,
+            "impact": ok["impact"], "gate_chunks": chunks, "gate_workers": ok["gate_workers"],
             "failures": failures or (lines[-1:] if timed_out else lines[:12]),
             "pre_existing": sorted(pre), **({"detail": f"{lines[-1]} ({len(tests)} affected); {reset}"}
                                             if timed_out else {})}
@@ -334,14 +350,29 @@ def gate_chunk(python: str, cwd: Path, tests: list[str]) -> tuple[int, list[str]
     return res.returncode, [ln.strip() for ln in out.splitlines()]
 
 
+def gate_workers(n_tests: int) -> int:
+    """Chunks the gate may run at once: only a WIDE set runs in parallel, and never
+    more than the host governor's concurrency() slots (1 on this host)."""
+    if n_tests <= WIDE_IMPACT_FILES:
+        return 1
+    slots, _ = concurrency()
+    return max(1, min(slots, -(-n_tests // GATE_CHUNK)))
+
+
 def gate_run(python: str, cwd: Path, tests: list[str]) -> tuple[int, list[str]]:
     """Run tests under the gate markers in chunks of GATE_CHUNK files so one huge
     affected set cannot outlive TEST_S. rc is 0 only when every chunk is 0 or 5;
     a chunk timeout stops the run with TIMEOUT and a line naming the chunk."""
     chunks = [tests[i:i + GATE_CHUNK] for i in range(0, len(tests), GATE_CHUNK)]
     worst, all_lines = 0, []
+    workers = gate_workers(len(tests))
+    if workers > 1:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            outcomes = list(pool.map(lambda c: gate_chunk(python, cwd, c), chunks))
+    else:
+        outcomes = None
     for n, chunk in enumerate(chunks, 1):
-        rc, got = gate_chunk(python, cwd, chunk)
+        rc, got = outcomes[n - 1] if outcomes else gate_chunk(python, cwd, chunk)
         all_lines += got
         if rc == TIMEOUT:
             all_lines.append(f"TIMEOUT: chunk {n}/{len(chunks)} ({len(chunk)} files) exceeded {TEST_S}s")
@@ -473,9 +504,129 @@ def remove_worker(run: dict, repo: Path = ROOT) -> None:
 
 # ---------------------------------------------------------------- driver
 
+class MergeQueue:
+    """Integrations run one at a time, first finished first, from an append-only
+    log (runs_dir/merge_queue.jsonl). An entry whose process died drops out, so a
+    crashed integrator cannot hold the line. The lock is held while a candidate
+    is cherry-picked and gated."""
+
+    def __init__(self, runs_dir: Path, wait_s: float = QUEUE_WAIT_S, poll_s: float = QUEUE_POLL_S):
+        self.dir, self.wait_s, self.poll_s = Path(runs_dir), wait_s, poll_s
+        self.log, self.lock = self.dir / QUEUE_FILE, self.dir / QUEUE_LOCK
+
+    def _events(self) -> list[dict]:
+        try:
+            text = self.log.read_text(encoding="utf-8")
+        except OSError:
+            return []
+        out = []
+        for ln in text.splitlines():
+            try:
+                ev = json.loads(ln)
+            except ValueError:
+                continue
+            if isinstance(ev, dict) and ev.get("req"):
+                out.append(ev)
+        return out
+
+    def _append(self, ev: dict) -> None:
+        self.dir.mkdir(parents=True, exist_ok=True)
+        with open(self.log, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(ev) + "\n")
+
+    @staticmethod
+    def _alive(pid: int) -> bool:
+        psutil = build_kernel.psutil
+        return pid == os.getpid() or psutil is None or psutil.pid_exists(pid)
+
+    def enqueue(self, req: str, completed: float) -> None:
+        if all(e["req"] != req for e in self.pending()):
+            self._append({"req": req, "event": "ENQUEUED", "completed": completed,
+                          "pid": os.getpid(), "at": time.time()})
+
+    def pending(self) -> list[dict]:
+        """Waiting integrations, FIFO by completion time (enqueue order breaks ties)."""
+        waiting: dict[str, dict] = {}
+        for ev in self._events():
+            if ev.get("event") == "ENQUEUED":
+                waiting[ev["req"]] = ev
+            else:
+                waiting.pop(ev["req"], None)
+        live = [e for e in waiting.values() if self._alive(int(e.get("pid") or 0))]
+        return sorted(live, key=lambda e: (e.get("completed", 0.0), e.get("at", 0.0)))
+
+    def finish(self, req: str, result: str) -> None:
+        self._append({"req": req, "event": "DONE", "result": result, "at": time.time()})
+
+    def _take_lock(self) -> bool:
+        self.dir.mkdir(parents=True, exist_ok=True)
+        for _ in range(2):
+            try:
+                fd = os.open(self.lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    holder = int(json.loads(self.lock.read_text(encoding="utf-8")).get("pid") or 0)
+                except (OSError, ValueError, AttributeError):
+                    holder = 0
+                if holder and self._alive(holder):
+                    return False
+                try:
+                    self.lock.unlink()
+                except FileNotFoundError:
+                    pass
+                continue
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump({"pid": os.getpid()}, fh)
+            return True
+        return False
+
+    @contextmanager
+    def turn(self, req: str):
+        """Wait until `req` heads the queue and the lock is free, then hold it."""
+        deadline = time.monotonic() + self.wait_s
+        while True:
+            head = next(iter(self.pending()), None)
+            if head and head["req"] == req and self._take_lock():
+                break
+            if time.monotonic() >= deadline:
+                raise KernelError(f"merge queue: {req} waited {self.wait_s:.0f}s behind "
+                                  f"{head['req'] if head else 'a held lock'}")
+            time.sleep(self.poll_s)
+        try:
+            yield
+        finally:
+            try:
+                self.lock.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def integrate(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR, ledger_path: Path = LEDGER,
               python: str = VENV_PY, rows: list[dict] | None = None, runner=None,
-              dry_run: bool = False, no_ledger: bool = False) -> dict:
+              dry_run: bool = False, no_ledger: bool = False, queue: MergeQueue | None = None) -> dict:
+    """Integrate one finished run through the merge queue (a dry run touches nothing)."""
+    kw = dict(repo=repo, runs_dir=runs_dir, ledger_path=ledger_path, python=python, rows=rows,
+              runner=runner, dry_run=dry_run, no_ledger=no_ledger)
+    if dry_run:
+        return _integrate(req, **kw)
+    queue = queue or MergeQueue(Path(runs_dir))
+    try:
+        completed = (Path(runs_dir) / f"{req}.json").stat().st_mtime
+    except OSError:
+        completed = time.time()
+    queue.enqueue(req, completed)
+    result = "ERROR"
+    try:
+        with queue.turn(req):
+            out = _integrate(req, **kw)
+            result = out["result"]
+            return out
+    finally:
+        queue.finish(req, result)
+
+
+def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, python: str,
+               rows: list[dict] | None, runner, dry_run: bool, no_ledger: bool) -> dict:
     run = load_run(req, runs_dir)
     why = refuse_reason(run, repo)
     if why:
@@ -493,9 +644,12 @@ def integrate(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR, ledger_
                 json.dumps(out, indent=2), encoding="utf-8", newline="\n")
         return out
 
-    clash = collision(run, repo)
-    if clash:
-        return done("CONFLICT", detail=f"HEAD changed {clash} since {run['base_sha'][:10]}")
+    try:
+        clash = collision(run, repo)
+    except KernelError as exc:  # the base is no longer an ancestor of HEAD
+        return done("REBASE_REQUIRED", detail=str(exc))
+    if clash:  # park it with its worktree kept: the worker rebases onto HEAD
+        return done("REBASE_REQUIRED", detail=f"HEAD changed {clash} since {run['base_sha'][:10]}")
     tests = commit_test_files(run, repo)
     out["red_green"] = rg = red_green(run, tests, repo, python)
     if rg["result"] != "OK":
@@ -510,6 +664,8 @@ def integrate(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR, ledger_
     else:
         verifier = None
     merged = merge(run, tests, repo, python)
+    out.update(impact=merged.get("impact", "NORMAL"), gate_chunks=merged.get("gate_chunks", 0),
+               gate_workers=merged.get("gate_workers", 1))
     if merged["result"] != "INTEGRATED":
         return done(merged["result"], detail=merged.get("detail") or merged.get("reset", ""),
                     failures=merged.get("failures", []), affected=merged.get("affected", []),
@@ -542,7 +698,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{out['requirement']}: {out['result']} red_green={out['red_green'].get('result')} "
           f"verifier={(out['verifier'] or {}).get('verdict', '-')} commit={out['integrated_commit'][:9] or '-'} "
           f"ledger={out['ledger_status'] or '-'}")
-    return {"INTEGRATED": 0, "DRY_RUN": 0, "CONFLICT": 3}.get(out["result"], 1)
+    return {"INTEGRATED": 0, "DRY_RUN": 0, "CONFLICT": 3, "REBASE_REQUIRED": 3}.get(out["result"], 1)
 
 
 if __name__ == "__main__":

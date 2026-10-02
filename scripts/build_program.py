@@ -39,7 +39,7 @@ DOCS_DIR = "docs/implementation"
 BEGIN = b"<!-- build-program:begin -->"
 END = b"<!-- build-program:end -->"
 MAX_ATTEMPTS = 2
-MAX_REPAIRS = 1
+MAX_REPAIRS = len(build_kernel.CASCADE)  # repair, escalate, advisor, advised implementer
 # Rejections a worker can answer by editing its own change; CONFLICT is a merge
 # problem and an integrator refusal is a refusal, so neither is sent back.
 REPAIRABLE = ("VERIFIER_FAIL", "NOT_RED", "NOT_GREEN", "NO_TEST", "FAILED_INTEGRATION")
@@ -155,6 +155,7 @@ def load_state(path: Path) -> dict:
             "attempts": dict(old.get("attempts") or {}),
             "repairs": dict(old.get("repairs") or {}),
             "repair_queue": dict(old.get("repair_queue") or {}),
+            "cascade": dict(old.get("cascade") or {}),
             "partials": dict(old.get("partials") or {}),
             "capsule_decision": old.get("capsule_decision"),
             "escalations": list(old.get("escalations") or []),
@@ -306,22 +307,59 @@ def pending_repairs(rows: list[dict], state: dict, integrated: set[str],
         row = by_id.get(rid)
         if priority and (row or {}).get("priority") != priority:
             continue
-        out.append((rid, k.budget_class(row) if row else "NORMAL"))
+        strong = state["repairs"].get(rid, 0) in (1, 2)  # the escalation and the advisor run on P0 limits
+        out.append((rid, "P0" if strong else k.budget_class(row) if row else "NORMAL"))
     return out
 
 
 def launch_repairs(repairs: list[tuple[str, str]], state: dict, k=build_kernel,
                    worktrees: Path | None = None) -> list:
-    """Resume each queued requirement's own session with the integrator's findings."""
+    """Launch each queued requirement's next cascade step: repair (resume when
+    localized, else fresh), a fresh strong-model escalation, a read-only advisor,
+    then a fresh normal-model implementer on the advisor's packet. Each step is
+    one job; the position is recorded in state['cascade']."""
     runs = []
     for rid, _ in repairs:
         state["repair_queue"].pop(rid, None)
-        state["repairs"][rid] = state["repairs"].get(rid, 0) + 1
+        spent = state["repairs"].get(rid, 0)
+        state["repairs"][rid] = spent + 1
+        step = k.agent_utility({"id": rid}, {"failures": spent})[0]["step"]
+        state["cascade"][rid] = {"step": step, "n": spent + 1}
         try:
-            runs.append(k.repair(rid, worktrees=worktrees))
+            if step == "ESCALATE":
+                runs.append(k.escalate(rid, worktrees=worktrees))
+            elif step == "ADVISOR":
+                runs.append(k.advise(rid, worktrees=worktrees))
+            elif step == "IMPLEMENTER":
+                runs.append(k.repair(rid, worktrees=worktrees, advice=k.load_advice(rid)))
+            elif step == "REPAIR":
+                runs.append(k.repair(rid, worktrees=worktrees))
+            else:
+                park(state, rid, "cascade exhausted", "cascade", f"{spent} repairs spent")
         except k.KernelError as exc:
-            park(state, rid, "repair failed", "repair", str(exc))
+            park(state, rid, f"{step.lower()} failed", "repair", str(exc))
     return runs
+
+
+def adopt_jobs(k=build_kernel, runs_dir: Path | None = None, repo: Path = ROOT) -> tuple[list, list[dict]]:
+    """Take over the STARTED jobs a dead controller left behind, never relaunching
+    one. A live pid is returned to be watched; a dead pid whose stream holds a
+    result is finalized (its record returned); a dead pid with no result is marked
+    FAILED and, when resumable, the queue resumes it from its session."""
+    runs_dir = runs_dir or k.RUNS_DIR
+    live, finished = [], []
+    for job in k.jobs(runs_dir):
+        if job.get("state") != "STARTED":
+            continue
+        if pid_alive(int(job.get("pid") or 0)):
+            live.append(k.adopt(job, alive=pid_alive, runs_dir=runs_dir, repo=repo))
+            continue
+        run = k.adopt(job, alive=pid_alive, runs_dir=runs_dir, repo=repo)
+        if k.has_result(run.wt, run.stream_offset):
+            finished.append(k.finalize(run, None, runs_dir))
+        else:
+            k.job_close(job["attempt_id"], "FAILED", "controller died; process gone before a result", runs_dir)
+    return live, finished
 
 
 def recover_crash(state: dict, req: str, head: str, exc: Exception, repo: Path, runner=sh) -> str:
@@ -361,6 +399,12 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
     spend = 0.0
     if st == "DONE" and rec.get("mode") == "SCOUT":
         return "SCOUT_DONE", spend, True
+    if rec.get("kind") == "ADVISOR":  # a diagnosis, never integrated: the implementer is next
+        if st == "DONE":
+            state["repair_queue"][req] = {"result": "ADVISED", "at": now()}
+            return "ADVISED", spend, True
+        park(state, req, f"advisor {st.lower()}", "advisor", f"the advisor job ended {st}")
+        return "ADVISOR_FAILED", spend, False
     if st == "DONE":
         head = git_out(repo, "rev-parse", "HEAD", runner=runner)
         try:
@@ -383,7 +427,7 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
         if res["result"] in REPAIRABLE and state["repairs"].get(req, 0) < MAX_REPAIRS:
             state["repair_queue"][req] = {"result": res["result"], "at": now()}
             return res["result"], spend, True
-        kind = "test_timeout" if res["result"] == "TEST_TIMEOUT" else "integration"
+        kind = {"TEST_TIMEOUT": "test_timeout", "REBASE_REQUIRED": "rebase"}.get(res["result"], "integration")
         park(state, req, res["result"], kind, json.dumps(res, default=str)[:300])
         return res["result"], spend, True
     if st == "BLOCKED":
@@ -401,7 +445,8 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
                 priority: str | None = None, dry_run: bool = False, repo: Path = ROOT,
                 state_file: Path = STATE_FILE, state_doc: Path = STATE_DOC,
                 worktrees: Path | None = None, k=build_kernel, bi=build_integrate,
-                runner=sh, out=print, lock_file: Path | None = None) -> dict:
+                runner=sh, out=print, lock_file: Path | None = None,
+                runs_dir: Path | None = None) -> dict:
     lock = lock_file or state_file.parent / LOCK_FILE.name
     if not acquire_lock(lock):
         return {"stop_reason": BUSY, "waves": []}
@@ -412,7 +457,8 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
         return _run_locked(run_id, max_waves=max_waves, max_usd=max_usd, cap=cap,
                            max_wave_usd=max_wave_usd, priority=priority, dry_run=dry_run,
                            repo=repo, state_file=state_file, state_doc=state_doc,
-                           worktrees=worktrees, k=k, bi=bi, runner=runner, out=out)
+                           worktrees=worktrees, k=k, bi=bi, runner=runner, out=out,
+                           runs_dir=runs_dir)
     finally:
         for key, val in saved.items():
             if val is None:
@@ -423,13 +469,18 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
 
 
 def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority, dry_run, repo,
-                state_file, state_doc, worktrees, k, bi, runner, out) -> dict:
+                state_file, state_doc, worktrees, k, bi, runner, out, runs_dir=None) -> dict:
     if tree_dirty(repo, runner):
         return {"stop_reason": "dirty tree", "waves": []}
     worktrees = worktrees or k._worktrees_root()
     state = load_state(state_file)
     integrated: set[str] = set()
     resumed: set[str] = set()
+    if not dry_run:  # jobs a dead controller left STARTED are adopted, never relaunched
+        live, adopted = adopt_jobs(k, runs_dir, repo)
+        adopted += k.watch(live, runs_dir=runs_dir or k.RUNS_DIR) if live else []
+        for rec in adopted:
+            settle(rec, state, integrated, k, bi, repo, runner)
     verifier_spent = 0.0  # verifier invocations are not in the worker ledger
     spent, idle, waves_run, stop = 0.0, 0, 0, None
     wave_cap = max_usd / 2 if max_wave_usd is None else max_wave_usd

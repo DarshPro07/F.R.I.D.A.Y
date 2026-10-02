@@ -191,14 +191,134 @@ def test_refuses_a_dirty_checkout_but_ignores_untracked(tmp_path):
 
 # ---------------------------------------------------------------- collision
 
-def test_collision_is_conflict_and_leaves_tree_untouched(tmp_path):
+def test_overlap_since_base_is_rebase_required_and_leaves_tree_untouched(tmp_path):
     repo, runs, run, rows = setup(tmp_path)
     write(repo, "calc.py", "def add(a, b):\n    return b + a\n")
     sh(repo, "commit", "-q", "-am", "moved")
     before = head(repo)
     out = go(repo, runs, rows)
-    assert out["result"] == "CONFLICT" and "calc.py" in out["detail"]
+    assert out["result"] == "REBASE_REQUIRED" and "calc.py" in out["detail"]
     assert head(repo) == before and sh(repo, "status", "--porcelain") == ""
+    assert json.loads((runs / "REQ-1.integration.json").read_text())["result"] == "REBASE_REQUIRED"
+
+
+def test_a_base_that_is_not_an_ancestor_is_rebase_required_not_an_error(tmp_path):
+    repo, runs, run, rows = setup(tmp_path)
+    (runs / "REQ-1.json").write_text(json.dumps(dict(run, base_sha=run["commit"])), encoding="utf-8")
+    before = head(repo)
+    out = go(repo, runs, rows)
+    assert out["result"] == "REBASE_REQUIRED" and "not an ancestor" in out["detail"]
+    assert head(repo) == before
+
+
+def test_a_rebase_required_candidate_keeps_its_worktree(tmp_path, monkeypatch):
+    repo, runs, run, rows = setup(tmp_path)
+    write(repo, "calc.py", "def add(a, b):\n    return b + a\n")
+    sh(repo, "commit", "-q", "-am", "moved")
+    removed = []
+    monkeypatch.setattr(bi, "remove_worker", lambda r, repo=None: removed.append(r))
+    assert go(repo, runs, rows)["result"] == "REBASE_REQUIRED" and removed == []
+
+
+# ---------------------------------------------------------------- merge queue
+
+def test_the_merge_queue_is_fifo_by_completion_time(tmp_path):
+    q = bi.MergeQueue(tmp_path)
+    q.enqueue("B", 200.0)
+    q.enqueue("A", 100.0)
+    q.enqueue("C", 300.0)
+    assert [e["req"] for e in q.pending()] == ["A", "B", "C"]
+    q.finish("A", "INTEGRATED")
+    assert [e["req"] for e in q.pending()] == ["B", "C"]
+    q.enqueue("B", 1.0)  # already waiting: not queued twice
+    assert [e["req"] for e in q.pending()] == ["B", "C"]
+
+
+def test_a_candidate_waits_for_the_head_of_the_queue(tmp_path):
+    q = bi.MergeQueue(tmp_path, wait_s=0.2, poll_s=0.05)
+    q.enqueue("A", 1.0)
+    q.enqueue("B", 2.0)
+    with pytest.raises(KernelError, match="waited"):
+        with q.turn("B"):
+            pytest.fail("B must not run before A")
+    with q.turn("A"):
+        assert (tmp_path / bi.QUEUE_LOCK).exists()
+    assert not (tmp_path / bi.QUEUE_LOCK).exists()
+
+
+def test_a_held_lock_blocks_the_head_and_a_dead_holder_is_replaced(tmp_path, monkeypatch):
+    q = bi.MergeQueue(tmp_path, wait_s=0.2, poll_s=0.05)
+    q.enqueue("A", 1.0)
+    (tmp_path / bi.QUEUE_LOCK).write_text(json.dumps({"pid": 4242}))
+    monkeypatch.setattr(bi.MergeQueue, "_alive", staticmethod(lambda pid: True))
+    with pytest.raises(KernelError):
+        with q.turn("A"):
+            pytest.fail("the lock is held")
+    monkeypatch.setattr(bi.MergeQueue, "_alive", staticmethod(lambda pid: pid != 4242))
+    with q.turn("A"):
+        pass
+
+
+def test_a_dead_process_drops_out_of_the_queue(tmp_path, monkeypatch):
+    q = bi.MergeQueue(tmp_path)
+    q.enqueue("A", 1.0)
+    monkeypatch.setattr(bi.MergeQueue, "_alive", staticmethod(lambda pid: False))
+    assert q.pending() == []
+
+
+def test_integrate_goes_through_the_queue_and_leaves_it_empty(tmp_path):
+    repo, runs, run, rows = setup(tmp_path)
+    out = go(repo, runs, rows, runner=pass_runner())
+    assert out["result"] == "INTEGRATED"
+    events = [json.loads(ln) for ln in (runs / bi.QUEUE_FILE).read_text().splitlines()]
+    assert [e["event"] for e in events] == ["ENQUEUED", "DONE"] and events[1]["result"] == "INTEGRATED"
+    assert bi.MergeQueue(runs).pending() == [] and not (runs / bi.QUEUE_LOCK).exists()
+
+
+def test_integrate_blocked_behind_an_earlier_candidate_does_not_cut_in(tmp_path):
+    repo, runs, run, rows = setup(tmp_path)
+    q = bi.MergeQueue(runs, wait_s=0.2, poll_s=0.05)
+    q.enqueue("OTHER", 0.0)  # finished earlier than REQ-1
+    before = head(repo)
+    with pytest.raises(KernelError, match="waited"):
+        go(repo, runs, rows, queue=q)
+    assert head(repo) == before
+    assert [e["req"] for e in q.pending()] == ["OTHER"]
+
+
+# ---------------------------------------------------------------- wide impact
+
+def test_a_wide_affected_set_is_recorded_with_its_chunk_count(tmp_path, monkeypatch):
+    repo, runs, run, rows = setup(tmp_path)
+    many = [f"tests/test_w{i}.py" for i in range(bi.WIDE_IMPACT_FILES + 1)]
+    for t in many:
+        write(repo, t, "def test_x():\n    pass\n")
+    monkeypatch.setattr(bi, "affected", lambda run, extra, repo=None: many)
+    monkeypatch.setattr(bi, "gate_run", lambda python, cwd, tests: (0, ["ok"]))
+    out = go(repo, runs, rows, runner=pass_runner())
+    assert out["impact"] == "WIDE" and out["gate_chunks"] == 2 and out["gate_workers"] == 1
+
+
+def test_a_narrow_set_is_not_wide(tmp_path):
+    repo, runs, run, rows = setup(tmp_path)
+    out = go(repo, runs, rows, runner=pass_runner())
+    assert out["impact"] == "NORMAL" and out["gate_chunks"] >= 1
+
+
+def test_gate_workers_never_exceed_the_governor(monkeypatch):
+    monkeypatch.setattr(bi, "concurrency", lambda: (1, "one slot"))
+    assert bi.gate_workers(500) == 1
+    monkeypatch.setattr(bi, "concurrency", lambda: (3, "ok"))
+    assert bi.gate_workers(500) == 3 and bi.gate_workers(bi.WIDE_IMPACT_FILES) == 1
+    assert bi.gate_workers(bi.WIDE_IMPACT_FILES + 1) == 2  # only two chunks exist
+    monkeypatch.setattr(bi, "concurrency", lambda: (0, "pressure"))
+    assert bi.gate_workers(500) == 1  # the gate still has to run
+
+
+def test_needs_verifier_goes_through_agent_utility():
+    assert bi.needs_verifier({"priority": "P0"}, []) is True
+    assert bi.needs_verifier({"priority": "P1"}, ["friday/secrets_x.py"]) is True
+    assert bi.needs_verifier({"priority": "P1"}, ["calc.py"]) is False
 
 
 def test_base_must_be_an_ancestor(tmp_path):
@@ -482,6 +602,7 @@ def test_gate_run_chunks_the_tests_and_aggregates(monkeypatch, tmp_path):
         return _Done(next(codes))
 
     monkeypatch.setattr(bi.subprocess, "run", fake_run)
+    monkeypatch.setattr(bi, "gate_workers", lambda n: 1)  # the host's slots must not reorder chunks
     tests = [f"tests/test_{i}.py" for i in range(bi.GATE_CHUNK * 3 + 1)]
     rc, _ = bi.gate_run("py", tmp_path, tests)
     assert [len(c) for c in seen] == [bi.GATE_CHUNK] * 3 + [1]
