@@ -82,8 +82,13 @@ BROKEN = "BROKEN"                        # implemented, demonstrably not working
 DUPLICATED = "DUPLICATED"                # two implementations of one concern
 SUPERSEDED = "SUPERSEDED"                # built to a contract v7 replaced
 
+# The owner paused it: still owed and never terminal, but the scheduler leaves
+# it alone until the owner resumes it (2026-10-02, CORE-001).
+PARKED_BY_OWNER = "PARKED_BY_OWNER"
+
 WORKING = frozenset({PARTIAL, EXISTING_UNVERIFIED, MISSING, IMPLEMENTING,
-                     TESTING, NOT_AUDITED, BROKEN, DUPLICATED, SUPERSEDED})
+                     TESTING, NOT_AUDITED, BROKEN, DUPLICATED, SUPERSEDED,
+                     PARKED_BY_OWNER})
 
 ALL_STATES = TERMINAL | WORKING
 
@@ -2848,6 +2853,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "status": PARTIAL,
         "current_implementation": 'Added friday/domain_gate.py: deterministic restricted-domain classifier, persisted safeguard-event ledger, bounded provider-refusal count then switch_route. Wired into HermesSupervisor.delegate and ClaudeCodeExecutor.execute before any lease/session/launch. (build run, commit 0e92e8ce0)',
         "next_action": "OWNER RULING 2026-10-02 (docs/plans/build-harness/00-owner-directive-2026-10-02f.md, message 2): replace the worker's assumed labels. Top-level domains are 'cbrne' (keep 'cbrn' as an alias) and 'cyber_sensitive' - never 'offensive_cyber'. Cyber gets a second, separate classification of intent and authority: defensive (normal secure route), authorized_testing (Cyber Lab + authorization contract), malicious_or_abusive (deny/restrict), unknown (bounded; ask for scope when needed). Phrases ('kali', 'nmap', 'offensive security') are signals only, combined with task intent, target ownership/authorization, requested action and execution environment; the final routing decision is deterministic policy, not model prose. Tests, positive and negative controls: (1) a SQL-injection code review is defensive, not malicious; (2) a pentest of the person's own staging server with a stated scope is cyber_sensitive + authorized_testing -> Cyber Lab; (3) breaking into a third-party server is malicious_or_abusive -> restricted; (4) the history of CBRN arms-control treaties is informational, not weapon enablement, despite the keyword; (5) a CBRNE-sensitive request without the literal keyword is still classified by the semantic path - use an injectable classifier and a synthetic stand-in fixture, never real enablement content in the repository; (6) 'Offensive Security conference notes' is not malicious cyber. Still open from the build run: record_provider_refusal is not called from a live provider-failure path.",
+    }),
+    ('CORE-001', {
+        "status": PARKED_BY_OWNER,
+        "current_implementation": "First build attempt (branch attic/core-001-v1, commit 0cb6741): a Hermes COMPLETE meets FRIDAY's verifier when a verify command is supplied (verify_command or FRIDAY_DELEGATION_VERIFY_COMMAND); otherwise it is relayed COMPLETE with verification NOT_VERIFIED. Rejected twice by the fresh verifier; not integrated.",
+        "next_action": "PARKED_BY_OWNER 2026-10-02 (docs/plans/build-harness/00-owner-directive-2026-10-02f.md and the product-first override): not cancelled, not verified. Resume only on the owner's word, or when other important product work is exhausted and memory admits it. Then: build_kernel.py escalate CORE-001 --model opus --packet docs/plans/build-harness/core-001-escalation-packet.md (fresh session, the four unresolved conditions only: jailed derived check, audit.sqlite3 root cause, no acceptance contract is never COMPLETE, verdict persisted only when correlated to the objective run). State kept: branch build/core-001 (e49549f, rebased on de18900), worktree .worktrees/core-001, three verifier receipts in data/build_runs/.",
     }),
 ]
 

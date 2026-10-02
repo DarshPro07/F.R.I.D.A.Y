@@ -208,7 +208,9 @@ def load_deps(path: Path = DEPS_FILE) -> dict[str, list[str]]:
 
 
 def waiting_on_owner(row: dict) -> bool:
-    return str(row.get("next_action", "")).lstrip().startswith("OWNER:")
+    """The owner holds it: parked by the owner, or its next action is the owner's."""
+    return (row.get("status") == PL.PARKED_BY_OWNER
+            or str(row.get("next_action", "")).lstrip().startswith("OWNER:"))
 
 
 def ready(rows: list[dict], deps: dict[str, list[str]], order: list[str] | None = None,

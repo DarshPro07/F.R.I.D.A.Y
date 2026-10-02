@@ -1508,3 +1508,13 @@ def test_admit_itself_counts_a_live_lease(tmp_path):
     assert K.reserve("att-1", "A", "COMPLEX", cap=3, gov=FakeGov(available=3.5), runs_dir=tmp_path)[0]
     got, why = K.admit([({"id": "B"}, "SHIP", "COMPLEX")], cap=3, gov=FakeGov(available=3.5), runs_dir=tmp_path)
     assert got == [] and "leased" in why
+
+
+def test_a_row_parked_by_the_owner_is_owed_but_never_scheduled():
+    # Owner, 2026-10-02: CORE-001 is parked - not cancelled, not verified, and
+    # it must not keep re-entering the ready queue.
+    assert PL.PARKED_BY_OWNER in PL.WORKING and PL.PARKED_BY_OWNER not in PL.TERMINAL
+    parked, other = row("CORE-001", status=PL.PARKED_BY_OWNER), row("ACT-001")
+    assert [r["id"] for r in K.ready([parked, other], {})] == ["ACT-001"]
+    assert K.waiting_on_owner(parked)
+    assert "CORE-001" in [r["id"] for r in K.ready([parked, other], {}, include_owner=True)]

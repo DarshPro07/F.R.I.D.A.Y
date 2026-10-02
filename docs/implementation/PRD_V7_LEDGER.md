@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `c45176a9f87d519ccdf6fdf84bef665187612c5d1ede2afa74785989cfd38203`
 - PRD size: 8088 lines, 280524 bytes
-- Repository HEAD: `ad3c265628b13f46492f923c50460fea63899a20`
+- Repository HEAD: `53912d51381b8c7376f15d31d37b8c24654b6c66`
 - Uncommitted paths at generation: 37
-- Generated: 2026-10-02T17:24:02+05:30
+- Generated: 2026-10-02T17:45:59+05:30
 
 ## Status vocabulary
 
@@ -28,10 +28,11 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 | state | count |
 |---|---:|
 | MISSING | 70 |
-| PARTIAL | 61 |
+| PARTIAL | 60 |
 | VERIFIED | 35 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
+| PARKED_BY_OWNER | 1 |
 | **total** | **177** |
 
 Unresolved P0: 20 (CORE-001, INTENT-001, TRAJ-001, CTX-001, CTX-002, CTX-003, MEM-002, MEM-003, SEC-005, RES-001, EVAL-001, DOMAIN-001, ACT-001, MCP-001, CYBER-002, DUR-001, BCON-001, APPROVAL-001, JIT-001, RES-002)
@@ -55,7 +56,7 @@ Unresolved P1: 104 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| CORE-001 | P0 | **PARTIAL** | FRIDAY remains sole user-facing product control plane. | Delegated work returns through FRIDAY objective/policy/evidence contracts. | FR-TRU-001, FR-AGT-003 | `friday/hermes_bridge.py:221`, `friday/hermes_bridge.py:691`, `friday/tools/hermes_control.py:113-120` | 2026-09-26: GUARDED autonomy -> hermes_delegate returns failed with APPROVAL_REQUIRED and the supervisor never starts; FULL -> working, started. The mutation removing the verdict check (hermes_control.py:118) turned the test red. |
+| CORE-001 | P0 | **PARKED_BY_OWNER** | FRIDAY remains sole user-facing product control plane. | Delegated work returns through FRIDAY objective/policy/evidence contracts. | FR-TRU-001, FR-AGT-003 | `friday/hermes_bridge.py:221`, `friday/hermes_bridge.py:691`, `friday/tools/hermes_control.py:113-120` | 2026-09-26: GUARDED autonomy -> hermes_delegate returns failed with APPROVAL_REQUIRED and the supervisor never starts; FULL -> working, started. The mutation removing the verdict check (hermes_control.py:118) turned the test red. |
 
 ## PRD section 10
 
