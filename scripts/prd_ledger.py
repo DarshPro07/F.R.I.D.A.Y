@@ -2952,6 +2952,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Added an authority-probe seam to CapabilityRuntime: a capability's owner registers probes for authentication/target state; execute re-asks them at the moment of action and refuses 'JIT: ...' (a probe that raises also refuses). (build run, commit 14428552a)",
         "next_action": 'GAPS: No probe is registered for any real capability yet; requires_auth capabilities still need their owners to register one; Envelopes from before fingerprints carry no hashes',
     }),
+    ('DUR-001', {
+        "status": PARTIAL,
+        "current_implementation": "The production objective port now honours idempotency_key: it records a successful call's result as a call.returned event under the key and replays it on re-run, so a death between call return and the executor's commit no longer repeats the side effect. (build run, commit 0c0f39049)",
+        "next_action": "GAPS: A crash between the external effect and the port's call.returned write still re-runs the call; only a capability that dedupes by key itself closes that; Replay covers task statuses only and is not used to restore state; task rows remain the state",
+    }),
 ]
 
 
