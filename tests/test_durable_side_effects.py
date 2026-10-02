@@ -140,6 +140,46 @@ def test_a_side_effecting_call_gets_a_key_that_survives_the_rerun(tmp_path):
     assert keys == [f"{run_id}:{task['task_id']}"] * 2
 
 
+def test_the_production_port_does_not_repeat_a_call_that_already_returned(tmp_path):
+    """The call returned but the executor died before its commit: the port
+    itself recorded the result under the key, so the re-run replays it."""
+    import agent_friday
+
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store)
+    effects: list[str] = []
+
+    async def local(capability, arguments, run=None):
+        effects.append(capability)
+        return {"status": "succeeded", "output": {"path": "note.txt"},
+                "side_effects": ["wrote note.txt"]}
+
+    port = agent_friday.objective_port(local, router_of=lambda: None,
+                                       call_via_router=None, store=store)
+
+    real_append = store.append_objective_event
+
+    def dies_before_the_commit(rid, event, **kw):
+        if event == O.EVENT_SIDE_EFFECT_COMMITTED:
+            raise _Died()
+        return real_append(rid, event, **kw)
+
+    store.append_objective_event = dies_before_the_commit
+    first = ContinuousTaskExecutor(store, call_capability=port, executor_id="first")
+    first.stop()
+    with pytest.raises(_Died):
+        asyncio.run(first.start(run_id))
+    store.append_objective_event = real_append
+    assert effects == ["files_create"]
+    assert not [e for e in store.objective_events(run_id)
+                if e["event"] == O.EVENT_SIDE_EFFECT_COMMITTED]
+
+    _expire_lease(store, run_id)
+    asyncio.run(_recover(store, run_id, port))
+    assert effects == ["files_create"], "the side effect was done a second time"
+    assert store.objective_run(run_id)["status"] == O.RUN_COMPLETED
+
+
 def test_the_event_log_alone_says_what_each_task_is(tmp_path):
     store = Store(tmp_path / "ada.sqlite3")
     run_id = _compile(store)

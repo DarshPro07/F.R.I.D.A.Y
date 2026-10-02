@@ -204,6 +204,22 @@ def idempotency_key(run_id: str, task_id: str) -> str:
     the same key, so a capability that honours it makes the change once."""
     return f"{run_id}:{task_id}"
 
+
+#: A side-effecting call returned successfully; written by the port the moment
+#: it has the result, keyed by idempotency key, so a re-run under that key
+#: gets the recorded result instead of making the change again.
+EVENT_CALL_RETURNED = "call.returned"
+
+
+def recorded_call(events: list[dict], key: str) -> dict | None:
+    """The result a call under `key` already returned, if one was recorded."""
+    for event in events:
+        detail = event.get("detail")
+        if (event.get("event") == EVENT_CALL_RETURNED and isinstance(detail, dict)
+                and detail.get("key") == key and isinstance(detail.get("result"), dict)):
+            return detail["result"]
+    return None
+
 UNMAPPED_CAPABILITY = 'objective.unmapped'
 
 #: A task id may only be referenced by dependencies after it is defined.

@@ -1166,15 +1166,17 @@ class FridayAgent(Agent):
         server's own driver or a CLI child - whoever acquires first drives.
         """
         if self._objective_engine is None:
+            objective_store = objective_cli._db()
             call_capability = objective_port(
                 objective_cli.build_dispatch(),
                 router_of=lambda: getattr(self, "_router", None),
-                call_via_router=self._call_capability)
+                call_via_router=self._call_capability,
+                store=objective_store)
 
             from friday import hermes_health as hh
 
             self._objective_engine = ContinuousTaskExecutor(
-                objective_cli._db(),
+                objective_store,
                 call_capability=call_capability,
                 executor_id=f"agent-{os.getpid()}",
                 # Connectivity failures are diagnosed against the live
@@ -1576,7 +1578,7 @@ class FridayAgent(Agent):
 RUN_BOUND_TOOLS = frozenset({"hermes_delegate"})
 
 
-def objective_port(local_dispatch, *, router_of, call_via_router):
+def objective_port(local_dispatch, *, router_of, call_via_router, store=None):
     """
     The port the agent's objective engine calls.
 
@@ -1599,7 +1601,34 @@ def objective_port(local_dispatch, *, router_of, call_via_router):
                 and str(result.get("status") or "").lower()
                 in ("not_configured", "unsupported"))
 
-    async def call_capability(capability: str, arguments: dict, *, run=None):
+    from friday import objectives as O
+
+    def _ledger_ids(key, run):
+        envelope = getattr(run, "envelope", None)
+        run_id = getattr(envelope, "objective_id", "") or ""
+        if store is None or not key or not run_id or not key.startswith(run_id + ":"):
+            return None
+        return run_id, key[len(run_id) + 1:]
+
+    async def call_capability(capability: str, arguments: dict, *, run=None,
+                              idempotency_key=None):
+        # DUR-001: honour the task's idempotency key. A call that already
+        # returned under this key is not made again; its result is replayed.
+        ids = _ledger_ids(idempotency_key, run)
+        if ids is not None:
+            done = O.recorded_call(store.objective_events(ids[0], limit=100000),
+                                   idempotency_key)
+            if done is not None:
+                return done
+        result = await _dispatch(capability, arguments, run)
+        if (ids is not None and isinstance(result, dict)
+                and str(result.get("status") or "").lower() == "succeeded"):
+            store.append_objective_event(
+                ids[0], O.EVENT_CALL_RETURNED, task_id=ids[1],
+                detail={"key": idempotency_key, "result": result})
+        return result
+
+    async def _dispatch(capability: str, arguments: dict, run):
         result = await local_dispatch(capability, arguments, run=run)
         if _adapter_gap(result):
             router = router_of()
