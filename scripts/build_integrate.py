@@ -162,9 +162,15 @@ def needs_verifier(row: dict, files: list[str]) -> bool:
 def verifier_prompt(row: dict, run: dict, rg: dict, repo: Path = ROOT) -> str:
     stat = git(repo, "diff", "--stat", run["base_sha"], run["commit"]).stdout
     patch = git(repo, "diff", run["base_sha"], run["commit"]).stdout
-    clipped = patch.encode("utf-8")[:PATCH_CAP].decode("utf-8", errors="ignore")
+    raw = patch.encode("utf-8")
+    clipped = raw[:PATCH_CAP].decode("utf-8", errors="ignore")
+    note = ""
+    if len(raw) > PATCH_CAP:
+        files = git(repo, "diff", "--name-only", run["base_sha"], run["commit"]).stdout.split()
+        note = (f"\nTRUNCATED: the patch is {len(raw) // 1024} KB and only the first {PATCH_CAP // 1024} KB "
+                "is shown. Read the changed files in this worktree before judging: " + ", ".join(files) + "\n")
     return f"""You are an independent verifier. Judge whether this change meets the requirement.
-Use only the material below and read-only tools. Reply with ONE JSON object and nothing else:
+Use the material below and read-only tools (read any file you need). Reply with ONE JSON object and nothing else:
 {{"verdict": "PASS|FAIL|INSUFFICIENT_EVIDENCE", "requirement_ids": [...], "failing_criteria": [...], "evidence_refs": ["file:line", ...]}}
 
 ## Requirement {row['id']}
@@ -172,6 +178,9 @@ Use only the material below and read-only tools. Reply with ONE JSON object and 
 
 ## Acceptance
 {row.get('acceptance', '')}
+
+## Next action in the ledger (owner rulings here are binding)
+{row.get('next_action', '') or '(none)'}
 
 ## RED/GREEN result
 {json.dumps(rg, indent=1)}
@@ -183,7 +192,7 @@ Use only the material below and read-only tools. Reply with ONE JSON object and 
 {stat}
 ## Patch (first {PATCH_CAP // 1024} KB)
 {clipped}
-"""
+{note}"""
 
 
 def verifier_model(files: list[str]) -> str:

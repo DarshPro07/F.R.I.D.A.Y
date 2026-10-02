@@ -366,7 +366,19 @@ def test_patch_is_capped(tmp_path):
            "big.txt": "y" * (bi.PATCH_CAP * 2)}
     repo, runs, run, rows = setup(tmp_path, big)
     prompt = bi.verifier_prompt(rows[0], run, {}, repo)
-    assert prompt.count("y") <= bi.PATCH_CAP
+    assert prompt.count("y") <= bi.PATCH_CAP + 50
+    # 2026-10-02: CORE-001's verifier judged a cut-off patch without reading
+    # the rest. It is told the patch is truncated and which files to read.
+    assert "TRUNCATED" in prompt and "big.txt" in prompt.split("TRUNCATED", 1)[1]
+
+
+def test_the_verifier_sees_the_owner_rulings_in_the_next_action(tmp_path):
+    # CORE-001's verifier called the case the owner had ruled on "a policy call
+    # the material does not settle": the ruling lives in the row's next action.
+    repo, runs, run, rows = setup(tmp_path)
+    rows[0]["next_action"] = "OWNER RULING 2026-10-02: derive a check from the acceptance"
+    prompt = bi.verifier_prompt(rows[0], run, {}, repo)
+    assert "OWNER RULING 2026-10-02: derive a check from the acceptance" in prompt
 
 
 @pytest.mark.parametrize("text,verdict", [
