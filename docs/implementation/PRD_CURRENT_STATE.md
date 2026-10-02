@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: f3c48ce on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T13:47:29+00:00
+- HEAD: 6298d15 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T13:55:41+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 70, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
 - Unresolved P0: 19
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (18): MCP-001=REFUSED
-- Parked: CORE-001 (PARKED_BY_OWNER), ACT-001 (stale worktree), DOMAIN-001 (partial x2), EVAL-001 (stale worktree), MCP-001 (integration refused)
-- Open escalations: 14
-  - DOMAIN-001 attempts: FAILED twice
-  - DOMAIN-001 resolved: unparked: scout write denied by a harness permission bug (fixed in the scout commit)
-  - CORE-001 resolved: unparked: rejected for an @live test that fails without the change (fixed in d6242e9)
-  - CORE-001 integration: {"requirement": "CORE-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["test
+- Last wave (20): ACT-001=ADVISOR_FAILED
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), MCP-001 (integration refused), EVAL-001 (advisor failed), ACT-001 (advisor failed)
+- Open escalations: 18
   - CORE-001 parked_by_owner: owner: stop waiting on CORE-001, build the rest of the product; resume only on the owner's word or w
   - ACT-001 resolved: unparked so the escalation cascade (fresh strong model, then advisor) handles its five concrete veri
   - ACT-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\act-001 already exists
   - DOMAIN-001 partial: integrated twice without closing its gaps
   - EVAL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\eval-001 already exists
   - MCP-001 integration: refusing MCP-001: run has no commit
+  - EVAL-001 resolved: re-queued at ADVISOR: the automatic ESCALATE step is retired (owner v12 section 9)
+  - ACT-001 resolved: re-queued at ADVISOR: the automatic ESCALATE step is retired (owner v12 section 9)
+  - EVAL-001 advisor: the advisor job ended FAILED
+  - ACT-001 advisor: the advisor job ended FAILED
 - Next ready: APPROVAL-001, BCON-001
 <!-- build-program:end -->
