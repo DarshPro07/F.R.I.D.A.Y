@@ -2977,6 +2977,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Governor samples GPU/network, governs model residency, stops running optional/surplus work, and records section 55 fields; Hermes/Claude send heartbeats, stop is non-blocking, double release keeps the queue, stress test stops a real helper. (build run, commit 4e6096455)',
         "next_action": 'GAPS: GPU is read only through nvidia-smi.; No worker operation exists to unload a resident local model.; HIGH/CRITICAL reduction is tested only with synthetic samples.',
     }),
+    ('TRAJ-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Trajectory check now reads the objective contract: forbidden action classes started, side-effect count over max_side_effects, and side-effecting steps started while contract questions are open flag the run DRIFTING. (build run, commit 361b426b8)',
+        "next_action": 'GAPS: user-amendment and worker-conflict signals (no amendment event exists yet); non-pause actions (fresh worker, stronger model, lower concurrency); executor still only pauses and asks; no executor-level test of a contract-flagged pause; only assess/for_run inputs covered by unit tests',
+    }),
 ]
 
 
