@@ -22,6 +22,9 @@ ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
 STATE = ROOT / "data" / "build_state.json"
 AGAIN = ("pressure", "max waves", "spend")  # stop reasons another run can clear
+#: After a pressure stop that ran no wave, wait this long before probing again: the probe and the
+#: program's own check can disagree right at the memory threshold (2026-10-02: a run a minute).
+PRESSURE_BACKOFF_S = 300
 
 
 def log(msg: str) -> None:
@@ -33,6 +36,13 @@ def spent() -> float:
         return float(json.loads(STATE.read_text(encoding="utf-8")).get("spend_usd_total") or 0.0)
     except (OSError, ValueError):
         return 0.0
+
+
+def waves() -> int:
+    try:
+        return len(json.loads(STATE.read_text(encoding="utf-8")).get("waves") or [])
+    except (OSError, ValueError):
+        return 0
 
 
 def mark(status: str, detail: str) -> None:
@@ -89,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         if not wait_for_admission(a.wait_hours):
             return 0
         run_usd = min(a.run_usd, a.total_usd - used)
+        waves_before = waves()
         mark("RUNNING", f"P0 program, up to {a.waves} waves, ${run_usd:.2f}")
         log(f"RUN P0 program (${run_usd:.2f}, {a.waves} waves); spent so far ${used:.2f}")
         r = subprocess.run([PY, "scripts/build_program.py", "--priority", "P0", "--max-waves", str(a.waves),
@@ -100,6 +111,9 @@ def main(argv: list[str] | None = None) -> int:
         if reason not in AGAIN:
             mark("STOPPED", f"program stopped: {reason}")
             return 0
+        if reason == "pressure" and waves() == waves_before:
+            mark("WAITING_RESOURCES", f"pressure stop with no wave; backing off {PRESSURE_BACKOFF_S}s")
+            time.sleep(PRESSURE_BACKOFF_S)
 
 
 if __name__ == "__main__":
