@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `c45176a9f87d519ccdf6fdf84bef665187612c5d1ede2afa74785989cfd38203`
 - PRD size: 8088 lines, 280524 bytes
-- Repository HEAD: `083ca38e329f628f3be65dea4fabf880d1e8c6f2`
-- Uncommitted paths at generation: 38
-- Generated: 2026-10-02T13:30:09+05:30
+- Repository HEAD: `ad3c265628b13f46492f923c50460fea63899a20`
+- Uncommitted paths at generation: 37
+- Generated: 2026-10-02T17:24:02+05:30
 
 ## Status vocabulary
 
@@ -27,8 +27,8 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 71 |
-| PARTIAL | 60 |
+| MISSING | 70 |
+| PARTIAL | 61 |
 | VERIFIED | 35 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
@@ -346,7 +346,7 @@ Unresolved P1: 104 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| DOMAIN-001 | P0 | **MISSING** | Work is classified by provider-safeguard domain before delegation; restricted domains run as separate bounded programs and the general build carries only their boundaries. | A general-engineering work packet carries no restricted-domain operational detail; a restricted packet goes to its own program or is marked BLOCKED_EXTERNAL, never retried on the same route. | - | - | Owner, Amendment A5: a provider safety check that keeps failing is a route-health signal - bounded retry, then persist state and switch route or start a fresh session, never retry indefinitely. Add a domain classifier on the work-packet path (CLI gateway, Hermes TaskBundle) with a deterministic restricted-domain list, a recorded safeguard event, and a refusal to retry the same route; test both the refusal and that general packets pass. |
+| DOMAIN-001 | P0 | **PARTIAL** | Work is classified by provider-safeguard domain before delegation; restricted domains run as separate bounded programs and the general build carries only their boundaries. | A general-engineering work packet carries no restricted-domain operational detail; a restricted packet goes to its own program or is marked BLOCKED_EXTERNAL, never retried on the same route. | - | - | OWNER RULING 2026-10-02 (docs/plans/build-harness/00-owner-directive-2026-10-02f.md, message 2): replace the worker's assumed labels. Top-level domains are 'cbrne' (keep 'cbrn' as an alias) and 'cyber_sensitive' - never 'offensive_cyber'. Cyber gets a second, separate classification of intent and authority: defensive (normal secure route), authorized_testing (Cyber Lab + authorization contract), malicious_or_abusive (deny/restrict), unknown (bounded; ask for scope when needed). Phrases ('kali', 'nmap', 'offensive security') are signals only, combined with task intent, target ownership/authorization, requested action and execution environment; the final routing decision is deterministic policy, not model prose. Tests, positive and negative controls: (1) a SQL-injection code review is defensive, not malicious; (2) a pentest of the person's own staging server with a stated scope is cyber_sensitive + authorized_testing -> Cyber Lab; (3) breaking into a third-party server is malicious_or_abusive -> restricted; (4) the history of CBRN arms-control treaties is informational, not weapon enablement, despite the keyword; (5) a CBRNE-sensitive request without the literal keyword is still classified by the semantic path - use an injectable classifier and a synthetic stand-in fixture, never real enablement content in the repository; (6) 'Offensive Security conference notes' is not malicious cyber. Still open from the build run: record_provider_refusal is not called from a live provider-failure path. |
 | MODEL-006 | P1 | **PARTIAL** | Model registry records policy/safeguard compatibility and known task restrictions; dispatch ends ALLOW/FALLBACK/LOCAL_ONLY/ASK_USER/BLOCKED and never retries an incompatible route. | A recorded safeguard intervention changes the next route instead of repeating it. | - | `friday/model_gateway.py:482-512`, `friday/model_gateway.py:745-772`, `friday/model_gateway.py:892-969` | EXTEND the route registry with per-route domain restrictions and a safeguard-event outcome that excludes the route for that domain; test that a second attempt takes the fallback or BLOCKED. |
 | CTX-007 | P1 | **MISSING** | Context payload classes and one Compression Coordinator with transformation provenance; LOSSLESS_REQUIRED never lossy, failures fail closed. | Lossless literals pass raw; stacked transformations lose no critical fact; every transformed artifact is recoverable by hash. | - | - | Build after CTX-003 (critical fact set): classify payloads, record source/transformed hashes and a recovery pointer per transformation, refuse lossy transforms of LOSSLESS_REQUIRED. |
 | CTX-008 | P2 | **MISSING** | Caveman only as a compression backend behind the coordinator, after per-subcomponent licence review, benchmarked OFF/OUTPUT_ONLY/ENGINE/FULL. | Licence review recorded before any embedding; benchmark report. | - | - | After CTX-007: pin the upstream, review each subcomponent's licence, add a fabric adapter reporting UNAVAILABLE when absent, then benchmark the four modes. |

@@ -212,6 +212,28 @@ requirement. Product amendments recorded meanwhile: A8 Capability Forge (083ca38
 - Then: `build_program.py --priority P0 --max-waves 6 --max-usd 15` (Start-Process). ACT-001 parked (verifier: five
   honesty-audit defects) is a cascade candidate.
 
+## Dual track (owner, 2026-10-02, `00-owner-directive-2026-10-02f.md`) - FRIDAY is the product
+
+The owner corrected the order: the build had been finishing its harness before building FRIDAY. From now on:
+
+- Three lanes: PRODUCT (PRD requirements, P0 first), HARNESS (defects in the build machinery), RESEARCH
+  (narrow, when a product decision needs it). Target rolling share: product 70-80 %, harness 20-25 %, research
+  0-10 %. On a one-slot machine the lanes interleave; with two slots one is reserved for product while P0 work
+  is runnable.
+- A harness task outranks product only when it prevents a crash, corruption, an authority failure, wrong budget
+  enforcement, unsafe admission, broken integration/rollback, or blocks all ready product work. Every harness task
+  records its measured problem, product impact, expected gain, acceptance test and the product task that will
+  dogfood it - and is judged on that real task, not on synthetic tests.
+- HARNESS_CORE_READY (declared 2026-10-02, provisional until CORE-001 exercises fresh-session escalation): the
+  program survives failures (BH-G), budget accounting is correct (BH-H), admission is safe (BH-J), workers are
+  isolated (kernel worktrees), integration rolls back (build_integrate + BH-G), fresh-session escalation exists
+  (BH-H). After it, harness work is reactive by default; BH-OPT-05 items 2-4 (testmon, orientation bake-off,
+  Ponytail A/B) run only when a measured product problem asks for them. Lane-share accounting is built only if
+  harness work starts competing with product again.
+- Owner rulings in force: DOMAIN-001 uses `cbrne` and `cyber_sensitive` with a separate cyber intent/authority
+  classification (ledger next action); CORE-001 escalates only after two consecutive readings of >= 3.5 GB
+  available.
+
 ## Resume (fresh session)
 
 `git status`; read `data/build_state.json` (parked, escalations, stop_reason); `build_kernel.py concurrency`;
