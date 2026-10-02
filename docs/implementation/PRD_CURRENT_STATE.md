@@ -153,13 +153,17 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 2ccccc9 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-01T17:57:15+00:00
+- HEAD: 429ffb2 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T06:23:35+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 51, "PARTIAL": 58, "VERIFIED": 35}
 - Unresolved P0: 20
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (2): CORE-001=VERIFIER_FAIL
-- Parked: CORE-001 (VERIFIER_FAIL)
-- Open escalations: 1
+- Last wave (8): DOMAIN-001=FAILED
+- Parked: CORE-001 (FAILED_INTEGRATION), ACT-001 (VERIFIER_FAIL), DOMAIN-001 (failed x2)
+- Open escalations: 5
   - CORE-001 integration: {"requirement": "CORE-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["test
-- Next ready: ACT-001, DOMAIN-001
+  - CORE-001 resolved: owner ruling: derive a check from acceptance; unparked with the ruling in its next action
+  - CORE-001 integration: {"requirement": "CORE-001", "result": "FAILED_INTEGRATION", "red_green": {"result": "OK", "tests": [
+  - ACT-001 integration: {"requirement": "ACT-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tests
+  - DOMAIN-001 attempts: FAILED twice
+- Next ready: MCP-001
 <!-- build-program:end -->
