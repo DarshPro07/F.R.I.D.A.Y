@@ -136,6 +136,11 @@ Next, in order (build-harness obligations, not PRD product rows):
    predicted peak per requirement (its last measured run) else per worker class (p95) else default, with
    predicted-vs-actual error in each run record; a memory lease (check -> lease -> recheck -> spawn, released
    or replaced by measured use) so two kernels cannot spend the same headroom. Until it lands: `--cap 1`.
+   Keep an append-only peak history per requirement: run records are overwritten per requirement, so
+   CORE-001's 1.7 GB peak vanished when its next (lighter) run replaced the record.
+1b. Model escalation (v10 §17/§18): when a requirement's repair is rejected again, one fresh attempt on a
+   stronger model with the verifier's findings before it is parked (ACT-001: five concrete honesty-audit defects
+   after its repair).
 2. TEST-IMPACT-001: pytest-testmon spike in .venv-build against `scripts/test_impact.py` on real changes
    (recall of the tests that actually failed, time saved); full suite still at every checkpoint; pytest-xdist
    only with a governor-chosen worker count, never `-n auto`.
