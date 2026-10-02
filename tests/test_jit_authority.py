@@ -154,3 +154,22 @@ def test_a_probe_that_cannot_answer_refuses(probes):
     probes.register_authority_probe("system_get_info", broken)
     result = _execute()
     assert result.status == c.NOT_PERMITTED and "auth service silent" in result.error
+
+
+def test_a_file_that_vanished_since_the_plan_is_refused_by_its_probe(tmp_path, monkeypatch):
+    from friday.toolsets import files as F
+
+    target = tmp_path / "note.txt"
+    target.write_text("old", encoding="utf-8")
+    monkeypatch.setattr(F, "_jail", F.FileJail(roots=(tmp_path,)))
+    probe = F._target_state_probe("path")
+    assert probe({"path": str(target)}) == ""
+    target.unlink()
+    assert "no longer exists" in probe({"path": str(target)})
+
+
+def test_the_file_capabilities_register_a_probe():
+    from friday.toolsets import files as F  # noqa: F401 - registers on import
+
+    for capability in ("files_edit", "files_copy", "files_move", "files_recycle", "files_delete"):
+        assert CR._authority_probes.get(capability), capability

@@ -32,6 +32,7 @@ from pathlib import Path
 
 from friday import confirmation
 from friday import contracts as c
+from friday.capability_runtime import register_authority_probe
 
 from friday.fsjail import FileJail, JailError, is_reparse_point
 
@@ -852,3 +853,30 @@ def files_delete(run: c.Run, path: str, *, permanent: bool = False,
 # ---------------------------------------------------------------------------
 # Writes (ASK-gated). Each verifies by reading back.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# JIT authority (PRD v7 JIT-001). A plan names a file; by the time the action
+# runs it may be gone or moved out of the jail. The runtime asks again at the
+# moment of action.
+# ---------------------------------------------------------------------------
+
+def _target_state_probe(argument: str):
+    def probe(arguments: dict) -> str:
+        raw = arguments.get(argument)
+        if not isinstance(raw, str) or not raw:
+            return ""  # nothing named; the tool rejects that itself
+        try:
+            path = jail().resolve(raw)
+        except JailError as exc:
+            return "the target is no longer reachable: " + str(exc)
+        if not path.exists():
+            return "the target no longer exists: " + raw
+        return ""
+    return probe
+
+
+for _capability, _argument in (("files_edit", "path"), ("files_copy", "source"),
+                               ("files_move", "source"), ("files_recycle", "path"),
+                               ("files_delete", "path")):
+    register_authority_probe(_capability, _target_state_probe(_argument))
