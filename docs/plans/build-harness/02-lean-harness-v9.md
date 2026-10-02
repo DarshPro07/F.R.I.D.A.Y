@@ -153,6 +153,26 @@ Next, in order (build-harness obligations, not PRD product rows):
    so a second program cannot start (master controller §3). Then CORE-001 runs through `escalate` with the
    owner's four-item packet: jailed derived check, audit.sqlite3 root cause, no acceptance contract is never
    COMPLETE, verdict persisted only when correlated to the objective run.
+1e. BH-I - Sparse Agent Fabric (owner, `00-owner-directive-2026-10-02c.md`), after BH-H, before the memory
+   lease and before CORE-001's escalation. Agents are short-lived compute units under the code controller; one
+   RAM slot limits concurrency, not specialisation (sequential fresh specialists on this laptop, parallel on
+   REFERENCE-B, same scheduler). Bounded scope - what the harness does not already have:
+   - AgentJob records on the BH-H invocation ledger with roles (SCOUT, IMPLEMENTER, REPAIR, VERIFIER,
+     ADVISOR) and durable states (QUEUED, STARTED, WAITING_RESOURCES, COMPLETE, FAILED) so a restarted
+     program adopts running/finished jobs instead of re-launching them;
+   - ScoutCapsule (likely files, symbols, tests, risk) handed to the builder - never the scout's transcript;
+     FailureCapsule (failed / expected / observed / ruled out / reproduction / files / diff / tests) for every
+     fresh repair; attempt 2 resumes only when the failure is localized, attempt 3+ is always fresh;
+   - model cascade on repeated failure: normal -> same tier, different approach -> fresh strong model ->
+     ADVISOR (strong model writes a diagnosis packet, a normal implementer applies it);
+   - AgentUtilityScore: one deterministic function, with its reasons recorded per job, deciding scout or not,
+     verifier or not, fresh or resume, parallel or sequential;
+   - TestJob: a WIDE_IMPACT_CHANGE classification when the affected set is large, run as governor-sized chunks
+     (BH-G gives the chunking); coding agents never wait on test runs;
+   - MergeQueue: integrations serialized with base-staleness checks -> REBASE_REQUIRED instead of a blind pick.
+   Already in place (not rebuilt): deterministic DAG/ready/waves, governor-derived concurrency, worktree
+   isolation, model-free watcher, RED/GREEN + affected tests as subprocesses, one verifier only when warranted.
+   After P0 runs reliably: orientation arena, testmon, Ponytail A/B - then freeze the harness.
 2. TEST-IMPACT-001: pytest-testmon spike in .venv-build against `scripts/test_impact.py` on real changes
    (recall of the tests that actually failed, time saved); full suite still at every checkpoint; pytest-xdist
    only with a governor-chosen worker count, never `-n auto`.
