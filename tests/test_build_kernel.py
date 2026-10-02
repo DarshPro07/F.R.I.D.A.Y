@@ -109,6 +109,13 @@ def test_concurrency_is_one_at_high_whatever_the_cap(tmp_path):
     assert K.concurrency(3, gov=FakeGov("HIGH", available=64.0), runs_dir=tmp_path)[0] == 1
 
 
+def test_high_pressure_never_admits_a_worker_the_ram_cannot_hold(tmp_path):
+    # 2026-10-02: HIGH returned 1 before the RAM slots were counted, so a
+    # pressured host with 2.5 GB free was offered a worker that NORMAL refused.
+    n, why = K.concurrency(3, gov=FakeGov("HIGH", available=2.5), runs_dir=tmp_path)
+    assert n == 0 and "HIGH" in why
+
+
 @pytest.mark.parametrize("available,n", [(8.0, 2), (4.5, 2), (3.1, 1), (3.0, 1), (2.9, 0), (1.0, 0)])
 def test_concurrency_is_limited_by_the_ram_above_the_reserve(tmp_path, available, n):
     # reserve = ram_floor(16 GB) 0.5 + 1.0; one default worker = 1.5 GB

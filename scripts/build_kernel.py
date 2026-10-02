@@ -222,14 +222,13 @@ def worker_gb(runs_dir: Path = RUNS_DIR) -> float:
 
 
 def concurrency(cap: int = DEFAULT_CAP, *, gov=None, runs_dir: Path = RUNS_DIR) -> tuple[int, str]:
-    """How many workers to start now, and why: none at CRITICAL, one at HIGH,
-    else as many as the available RAM above the reserve holds, up to the caps."""
+    """How many workers to start now, and why: none at CRITICAL; otherwise as
+    many as the available RAM above the reserve holds, up to the caps - and at
+    most one at HIGH. The RAM slots bound every level: pressure only lowers."""
     gov = gov or host_governor()
     pressure = gov.pressure()
     if pressure.level == "CRITICAL":
         return 0, "pressure CRITICAL"
-    if pressure.level == "HIGH":
-        return 1, "pressure HIGH"
     sample = pressure.sample
     if sample is None:
         return 0, "no memory reading"
@@ -237,10 +236,11 @@ def concurrency(cap: int = DEFAULT_CAP, *, gov=None, runs_dir: Path = RUNS_DIR) 
     reserve = limits.ram_floor(sample.total_gb()) + 1.0
     per_worker = worker_gb(runs_dir)
     slots = max(0, int((sample.ram_available_gb - reserve) // per_worker))
-    n = min(cap, limits.max_workers, slots)
-    return n, (f"{sample.ram_available_gb:.1f} GB available, {reserve:.1f} GB reserve, "
-               f"{per_worker:.1f} GB per worker -> {slots} slots (cap {cap}, "
-               f"max_workers {limits.max_workers})")
+    level_cap = 1 if pressure.level == "HIGH" else cap
+    n = min(cap, level_cap, limits.max_workers, slots)
+    return n, (f"pressure {pressure.level}: {sample.ram_available_gb:.1f} GB available, "
+               f"{reserve:.1f} GB reserve, {per_worker:.1f} GB per worker -> {slots} slots "
+               f"(cap {cap}, max_workers {limits.max_workers})")
 
 
 # --------------------------------------------------------------- launch
