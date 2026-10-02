@@ -153,15 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 740abfc on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T14:03:47+00:00
+- HEAD: 2b24806 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T14:20:20+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 70, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
 - Unresolved P0: 19
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (21): EVAL-001=FAILED, ACT-001=FAILED
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), MCP-001 (integration refused), EVAL-001 (failed x2), ACT-001 (failed x2)
-- Open escalations: 22
-  - EVAL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\eval-001 already exists
-  - MCP-001 integration: refusing MCP-001: run has no commit
+- Last wave (27): CTX-001=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), MCP-001 (integration refused), EVAL-001 (failed x2), ACT-001 (failed x2), APPROVAL-001 (blocked), BCON-001 (stale worktree)
+- Open escalations: 24
   - EVAL-001 resolved: re-queued at ADVISOR: the automatic ESCALATE step is retired (owner v12 section 9)
   - ACT-001 resolved: re-queued at ADVISOR: the automatic ESCALATE step is retired (owner v12 section 9)
   - EVAL-001 advisor: the advisor job ended FAILED
@@ -170,5 +168,7 @@ That is the first implementation target of this program.
   - ACT-001 resolved: advisor diagnosis written by a write-now resume; queued for the implementer
   - EVAL-001 attempts: FAILED twice
   - ACT-001 attempts: FAILED twice
-- Next ready: APPROVAL-001, BCON-001
+  - APPROVAL-001 blocked: SIDE-002 (PARTIAL in docs/implementation/PRD_V7_LEDGER.md:378) has no per-action blast-radius estima
+  - BCON-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\bcon-001 already exists
+- Next ready: CTX-002, CTX-003
 <!-- build-program:end -->
