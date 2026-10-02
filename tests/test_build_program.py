@@ -3,6 +3,7 @@ no real ledger or state file."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -220,6 +221,7 @@ def go(env, k, bi=None, decision=None, **kw):
         env.state.write_text(json.dumps({"capsule_decision": decision}), encoding="utf-8")
     kw.setdefault("max_waves", 5)
     kw.setdefault("max_usd", 100.0)
+    kw.setdefault("checkout_turn", lambda label: contextlib.nullcontext())
     res = BP.run_program(repo=Path("."), state_file=env.state, state_doc=env.doc, worktrees=env.wt,
                          k=k, bi=bi, runner=env.git, out=lambda *_: None, **kw)
     return res, bi
@@ -1104,3 +1106,45 @@ def test_main_exits_3_when_another_program_is_running(monkeypatch, capsys):
     monkeypatch.setattr(BP, "run_program", lambda **kw: {"stop_reason": BP.BUSY, "waves": []})
     assert BP.main([]) == 3
     assert "another program is running" in capsys.readouterr().out
+
+
+class RecordingLock:
+    """Records when the checkout turn is held, for the race test below."""
+
+    def __init__(self):
+        self.events: list[str] = []
+
+    def __call__(self, label):
+        lock = self
+
+        class _Turn:
+            def __enter__(self):
+                lock.events.append(f"enter:{label}")
+
+            def __exit__(self, *exc):
+                lock.events.append(f"exit:{label}")
+                return False
+        return _Turn()
+
+
+def test_the_program_writes_tracked_files_only_inside_a_checkout_turn(env):
+    # 2026-10-02: ACT-001's integration got its queue turn while the program's
+    # finish() was re-rendering the ledger docs - outside the queue - saw the
+    # half-written tree and refused. The program's tracked writes take the same turn.
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+    lock = RecordingLock()
+    calls = []
+
+    class Recording(FakeGit):
+        def __call__(self, cmd, cwd, timeout=60):
+            if "commit" in cmd or "prd_ledger.py" in " ".join(cmd):
+                calls.append(("held" if lock.events and lock.events[-1].startswith("enter") else "free", cmd[1]))
+            return super().__call__(cmd, cwd, timeout)
+
+    env.git = Recording()
+    BP.run_program(repo=Path("."), state_file=env.state, state_doc=env.doc, worktrees=env.wt, k=k,
+                   bi=FakeIntegrator(k), runner=env.git, out=lambda *_: None, max_waves=1, max_usd=100.0,
+                   checkout_turn=lock)
+    assert calls and all(where == "held" for where, _ in calls), calls
+    assert lock.events[0].startswith("enter:program") and lock.events[-1].startswith("exit:program")

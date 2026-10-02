@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import contextlib
+import time
 import json
 import os
 import subprocess
@@ -479,7 +481,7 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
                 state_file: Path = STATE_FILE, state_doc: Path = STATE_DOC,
                 worktrees: Path | None = None, k=build_kernel, bi=build_integrate,
                 runner=sh, out=print, lock_file: Path | None = None,
-                runs_dir: Path | None = None) -> dict:
+                runs_dir: Path | None = None, checkout_turn=None) -> dict:
     lock = lock_file or state_file.parent / LOCK_FILE.name
     if not acquire_lock(lock):
         return {"stop_reason": BUSY, "waves": []}
@@ -491,7 +493,7 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
                            max_wave_usd=max_wave_usd, priority=priority, dry_run=dry_run,
                            repo=repo, state_file=state_file, state_doc=state_doc,
                            worktrees=worktrees, k=k, bi=bi, runner=runner, out=out,
-                           runs_dir=runs_dir)
+                           runs_dir=runs_dir, checkout_turn=checkout_turn)
     finally:
         for key, val in saved.items():
             if val is None:
@@ -502,7 +504,7 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
 
 
 def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority, dry_run, repo,
-                state_file, state_doc, worktrees, k, bi, runner, out, runs_dir=None) -> dict:
+                state_file, state_doc, worktrees, k, bi, runner, out, runs_dir=None, checkout_turn=None) -> dict:
     if tree_dirty(repo, runner):
         return {"stop_reason": "dirty tree", "waves": []}
     worktrees = worktrees or k._worktrees_root()
@@ -600,14 +602,30 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
         state.pop("resources", None)
     snap = snapshot(state, rows, next_ready(rows, state, integrated, cap, k), stop, repo, runner)
     write_state(state_file, snap)
-    write_doc(state_doc, snap)
-    return finish(snap, state, repo, state_file, state_doc, runner)
+    # The state doc, the ledger render and the docs commit write tracked files in the
+    # shared checkout, so they take the same merge-queue turn as an integration: an
+    # integrator checking for a clean tree must never see them half-written.
+    with (checkout_turn or merge_queue_turn)(f"program:{os.getpid()}"):
+        write_doc(state_doc, snap)
+        return finish(snap, state, repo, state_file, state_doc, runner)
 
 
 def next_ready(rows: list[dict], state: dict, integrated: set[str], cap: int, k=build_kernel) -> list[str]:
     cfg = k.load_config()
     return [r["id"] for r in k.ready(rows, cfg["depends"], cfg["order"])
             if r["id"] not in state["parked"] and r["id"] not in integrated][:cap]
+
+
+@contextlib.contextmanager
+def merge_queue_turn(label: str):
+    """Hold the integrations' merge-queue turn while the program writes tracked files."""
+    queue = build_integrate.MergeQueue(build_kernel.RUNS_DIR)
+    queue.enqueue(label, time.time())
+    try:
+        with queue.turn(label):
+            yield
+    finally:
+        queue.finish(label, "DONE")
 
 
 def finish(snap: dict, state: dict, repo: Path, state_file: Path, state_doc: Path,
