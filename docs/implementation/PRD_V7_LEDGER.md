@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `c45176a9f87d519ccdf6fdf84bef665187612c5d1ede2afa74785989cfd38203`
 - PRD size: 8088 lines, 280524 bytes
-- Repository HEAD: `2b248068a7ef562c62782390b2b42c6343d4fe25`
+- Repository HEAD: `8cc7f351104cdca1a2dca09a8a0f16be0e58038e`
 - Uncommitted paths at generation: 37
-- Generated: 2026-10-02T19:50:23+05:30
+- Generated: 2026-10-02T20:17:48+05:30
 
 ## Status vocabulary
 
@@ -382,7 +382,7 @@ Unresolved P1: 104 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 | EVAL-005 | P1 | **MISSING** | Token productivity tracked as verified useful work per 100K tokens. | A productivity report per run. | - | - | Join gateway usage with verified task outcomes per objective and report work per 100K tokens. |
 | BROW-003 | P1 | **PARTIAL** | User-approved, dedicated or temporary browser profiles only; OTP/passkey/hardware-key/human-verification steps are handed to the person and resumed. | An unapproved profile is refused; an OTP step pauses for the person. | - | `friday/browser_capability.py:46`, `friday/browser_capability.py:131` | Test resume after an auth hand-off and add a temporary-profile path. |
 | UX-002 | P2 | **VERIFIED** | Long tasks report meaningful milestones at a user-chosen level. | A milestone stream at each level. | - | `friday/progress_digest.py:41`, `friday/progress_digest.py:79` | 2026-09-27: test_milestone_detail_levels passes and asserts that critical-only carries only the result, balanced adds the worker and detailed adds the task, for the same run. |
-| CYBER-002 | P0 | **PARTIAL** | The general build implements the Cyber Lab only as generic boundaries: provider interface, authorization contract schema, sandbox tier abstraction, registry integration, audit/evidence contract, network-scope representation, mock provider, deterministic policy tests. | A mock provider aimed at an unauthorized host is blocked; an expired contract refuses. | - | `friday/trust.py:123`, `friday/trust.py:200`, `friday/contracts.py:486` | Add the provider interface, tier abstraction and a mock provider behind the existing authorization contract, with deterministic policy tests only (domain partition, section 95.2). \| Carried from DOMAIN-001 (2026-10-02): domain_gate routes cyber_sensitive + authorized_testing packets to a 'cyber_lab' label, but no Cyber Lab executor or authorization-contract module exists yet - build them here. |
+| CYBER-002 | P0 | **PARTIAL** | The general build implements the Cyber Lab only as generic boundaries: provider interface, authorization contract schema, sandbox tier abstraction, registry integration, audit/evidence contract, network-scope representation, mock provider, deterministic policy tests. | A mock provider aimed at an unauthorized host is blocked; an expired contract refuses. | - | `friday/trust.py:123`, `friday/trust.py:200`, `friday/contracts.py:486` | GAPS: Not wired into fabric descriptors or a live executor; cyber_lab domain_gate label has no caller yet |
 | CYBER-003 | P1 | **DEFERRED_BY_PRD** | Operational Cyber Lab work belongs to a separate authorized program, not the general build. | Deferred from the general build by sections 95.1 and 95.2. | - | - | - |
 
 ## PRD section 96

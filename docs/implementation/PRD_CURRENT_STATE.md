@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 2b24806 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T14:20:20+00:00
+- HEAD: 8cc7f35 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T14:47:45+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 70, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
 - Unresolved P0: 19
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (27): CTX-001=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), MCP-001 (integration refused), EVAL-001 (failed x2), ACT-001 (failed x2), APPROVAL-001 (blocked), BCON-001 (stale worktree)
-- Open escalations: 24
-  - EVAL-001 resolved: re-queued at ADVISOR: the automatic ESCALATE step is retired (owner v12 section 9)
-  - ACT-001 resolved: re-queued at ADVISOR: the automatic ESCALATE step is retired (owner v12 section 9)
-  - EVAL-001 advisor: the advisor job ended FAILED
-  - ACT-001 advisor: the advisor job ended FAILED
-  - EVAL-001 resolved: advisor diagnosis written by a write-now resume; queued for the implementer
+- Last wave (33): CYBER-002=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), MCP-001 (integration refused), EVAL-001 (failed x2), ACT-001 (failed x2), APPROVAL-001 (stale worktree), CTX-001 (partial x2), CTX-002 (blocked)
+- Open escalations: 29
   - ACT-001 resolved: advisor diagnosis written by a write-now resume; queued for the implementer
   - EVAL-001 attempts: FAILED twice
   - ACT-001 attempts: FAILED twice
   - APPROVAL-001 blocked: SIDE-002 (PARTIAL in docs/implementation/PRD_V7_LEDGER.md:378) has no per-action blast-radius estima
   - BCON-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\bcon-001 already exists
-- Next ready: CTX-002, CTX-003
+  - BCON-001 resolved: implementer step re-queued: its run used the pre-1a89758 kernel (inherited Opus, no continuation)
+  - APPROVAL-001 resolved: unparked between runs: controller ruling - blast radius from the CAP-004 effect profile
+  - APPROVAL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\approval-001 already exists
+  - CTX-001 partial: integrated twice without closing its gaps
+  - CTX-002 blocked: Owner target needs a learned embedding/reranker model (or relabelled dev split); decide whether to a
+- Next ready: DUR-001, INTENT-001
 <!-- build-program:end -->
