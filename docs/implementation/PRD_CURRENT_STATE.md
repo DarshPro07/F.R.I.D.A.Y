@@ -153,15 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 50b41f9 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T15:40:15+00:00
+- HEAD: 6e4d223 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T16:11:22+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 70, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
 - Unresolved P0: 19
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (45): MEM-003=NOT_RED
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), MCP-001 (integration refused), EVAL-001 (failed x2), ACT-001 (failed x2), APPROVAL-001 (stale worktree), CTX-001 (partial x2), CTX-002 (blocked), BCON-001 (partial x2), CTX-003 (integration refused), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2)
-- Open escalations: 35
-  - APPROVAL-001 resolved: unparked between runs: controller ruling - blast radius from the CAP-004 effect profile
-  - APPROVAL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\approval-001 already exists
+- Last wave (51): RES-001=ADVISED
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), MCP-001 (integration refused), EVAL-001 (failed x2), ACT-001 (failed x2), APPROVAL-001 (stale worktree), CTX-001 (partial x2), CTX-002 (blocked), BCON-001 (partial x2), CTX-003 (integration refused), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2)
+- Open escalations: 37
   - CTX-001 partial: integrated twice without closing its gaps
   - CTX-002 blocked: Owner target needs a learned embedding/reranker model (or relabelled dev split); decide whether to a
   - BCON-001 partial: integrated twice without closing its gaps
@@ -170,5 +168,7 @@ That is the first implementation target of this program.
   - DUR-001 partial: integrated twice without closing its gaps
   - INTENT-001 integration: refusing INTENT-001: run has no commit
   - JIT-001 partial: integrated twice without closing its gaps
-- Next ready: MEM-003, RES-001
+  - MEM-003 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\mem-003 already exists
+  - MEM-002 partial: integrated twice without closing its gaps
+- Next ready: RES-001, SEC-005
 <!-- build-program:end -->
