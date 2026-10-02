@@ -150,6 +150,143 @@ def test_worker_size_is_the_largest_peak_of_the_last_ten_measured_records(tmp_pa
     assert got == 0  # 4.4 - 1.5 reserve = 2.9 GB < one 5.5 GB worker
 
 
+@pytest.fixture(autouse=True)
+def _no_pending_attempts():
+    K._PENDING_ATTEMPTS.clear()
+    yield
+    K._PENDING_ATTEMPTS.clear()
+
+
+def _peaks(runs_dir, *items):
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    (runs_dir / K.PEAKS_FILE).write_text(
+        "".join(json.dumps({"req": r, "mode": "SHIP", "budget_class": c, "peak_rss_mb": mb, "at": "t"}) + "\n"
+                for r, c, mb in items), encoding="utf-8")
+
+
+def _heavy(runs_dir, req="CORE-001"):
+    _peaks(runs_dir, (req, "COMPLEX", 1741))  # 1.7 GB
+
+
+def test_predict_prefers_the_requirements_own_last_peak(tmp_path):
+    _peaks(tmp_path, ("X", "NORMAL", 3000), ("A", "NORMAL", 400), ("X", "NORMAL", 800))
+    assert K.predict_gb("X", "NORMAL", "SHIP", tmp_path) == (800 / 1024, "requirement")
+
+
+def test_predict_uses_the_class_p95_from_three_samples(tmp_path):
+    _peaks(tmp_path, ("A", "NORMAL", 400), ("B", "NORMAL", 440), ("C", "NORMAL", 460), ("D", "COMPLEX", 1700))
+    gb, source = K.predict_gb("Z", "NORMAL", "SHIP", tmp_path)
+    assert source == "class" and gb == 460 / 1024  # the heavy class does not tax a light one
+
+
+def test_predict_falls_back_to_all_peaks_then_the_default(tmp_path):
+    _peaks(tmp_path, ("A", "NORMAL", 400), ("B", "COMPLEX", 1700))
+    assert K.predict_gb("Z", "MICRO", "SHIP", tmp_path) == (1700 / 1024, "history")
+    assert K.predict_gb("Z", "MICRO", "SHIP", tmp_path / "none") == (K.DEFAULT_WORKER_GB, "default")
+
+
+def test_admit_charges_each_candidate_against_what_was_admitted_before_it(tmp_path):
+    gov = FakeGov(available=5.0, thresholds=Thresholds(max_workers=5))  # 3.5 GB above the 1.5 GB reserve
+    _peaks(tmp_path, ("A", "NORMAL", 1741), ("B", "NORMAL", 1741), ("C", "NORMAL", 1741))
+    cands = [({"id": r}, "SHIP", "NORMAL") for r in "ABC"]
+    got, why = K.admit(cands, 3, gov, tmp_path)
+    assert [r["id"] for r, _ in got] == ["A", "B"] and "C needs 1.7 GB" in why
+
+
+@pytest.mark.parametrize("available,n", [(2.9, 0), (4.5, 1)])
+def test_admit_high_pressure_negative_controls(tmp_path, available, n):
+    _heavy(tmp_path)
+    got, _ = K.admit([({"id": "CORE-001"}, "SHIP", "COMPLEX")] * 3, 3, FakeGov("HIGH", available=available),
+                     tmp_path)
+    assert len(got) == n  # HIGH caps at one even with room for more, and never past the RAM
+
+
+def test_admit_critical_admits_nothing(tmp_path):
+    assert K.admit([({"id": "A"}, "SHIP", "NORMAL")], 3, FakeGov("CRITICAL", available=64.0), tmp_path)[0] == []
+
+
+def test_a_light_job_admits_while_a_heavy_one_waits_at_2_6_gb(tmp_path):
+    _peaks(tmp_path, ("LIGHT", "MICRO", 512), ("CORE-001", "COMPLEX", 1741))
+    gov = FakeGov(available=2.6)  # 1.1 GB above the reserve
+    assert len(K.admit([({"id": "LIGHT"}, "SHIP", "MICRO")], 3, gov, tmp_path)[0]) == 1
+    got, why = K.admit([({"id": "CORE-001"}, "SHIP", "COMPLEX")], 3, gov, tmp_path)
+    assert got == [] and "needs 1.7 GB" in why
+
+
+def test_admit_also_needs_commit_headroom(tmp_path):
+    gov = FakeGov(available=8.0)
+    gov._pressure.sample.commit_available_gb = 2.0  # physical RAM is free, the commit charge is not
+    assert K.admit([({"id": "A"}, "SHIP", "NORMAL")], 3, gov, tmp_path)[0] == []
+    gov._pressure.sample.commit_available_gb = 4.0
+    assert len(K.admit([({"id": "A"}, "SHIP", "NORMAL")], 3, gov, tmp_path)[0]) == 1
+
+
+def test_two_kernels_seeing_the_same_headroom_cannot_both_spend_it(tmp_path):
+    _heavy(tmp_path, "A")
+    _peaks(tmp_path, ("A", "COMPLEX", 1741), ("B", "COMPLEX", 1741))
+    first = K.reserve("att-1", "A", "COMPLEX", cap=3, gov=FakeGov(available=3.5), runs_dir=tmp_path)
+    second = K.reserve("att-2", "B", "COMPLEX", cap=3, gov=FakeGov(available=3.5), runs_dir=tmp_path)
+    assert first[0] and not second[0]
+    assert [x["attempt_id"] for x in K._leases_load(tmp_path)] == ["att-1"]
+
+
+def test_the_recheck_refuses_when_the_fresh_sample_no_longer_fits(tmp_path, monkeypatch):
+    _heavy(tmp_path, "A")
+    _peaks(tmp_path, ("A", "COMPLEX", 1741))
+    gov = FakeGov(available=5.0)
+    calls = iter([5.0, 2.0])  # the check sees 5 GB; the sample taken under the lease sees 2 GB
+
+    def pressure():
+        gov._pressure.sample.ram_available_gb = next(calls)
+        return gov._pressure
+    gov.pressure = pressure
+    ok, why = K.reserve("att-1", "A", "COMPLEX", cap=3, gov=gov, runs_dir=tmp_path)
+    assert not ok and why.startswith("recheck") and K._leases_load(tmp_path) == []
+    assert "A" not in K._PENDING_ATTEMPTS
+
+
+def test_a_lease_counts_only_what_its_process_has_not_yet_consumed(tmp_path, monkeypatch):
+    lease = {"attempt_id": "x", "req": "A", "gb": 1.7, "pid": 77, "at": time.time(), "wall_s": 600}
+    K._leases_store([lease], tmp_path)
+    monkeypatch.setattr(K, "_pid_gone", lambda pid: False)
+    monkeypatch.setattr(K, "tree_rss_mb", lambda pid: 1024.0)
+    assert round(K.leased_gb(tmp_path), 3) == 0.7
+    monkeypatch.setattr(K, "tree_rss_mb", lambda pid: 4096.0)
+    assert K.leased_gb(tmp_path) == 0.0
+
+
+def test_a_dead_pid_or_an_expired_lease_is_stale(tmp_path, monkeypatch):
+    now = time.time()
+    K._leases_store([{"attempt_id": "dead", "gb": 1.0, "pid": 5, "at": now, "wall_s": 600},
+                     {"attempt_id": "old", "gb": 1.0, "pid": 0, "at": now - 700, "wall_s": 600},
+                     {"attempt_id": "live", "gb": 1.0, "pid": 0, "at": now, "wall_s": 600}], tmp_path)
+    monkeypatch.setattr(K, "_pid_gone", lambda pid: pid == 5)
+    assert K.leased_gb(tmp_path) == 1.0
+
+
+def test_closing_a_job_releases_its_lease_and_job_states_are_written(tmp_path):
+    aid = K.job_queue("A", "NORMAL", "SHIP", tmp_path)
+    assert K._read_json(K.job_path(aid, tmp_path))["state"] == "QUEUED"
+    K.job_wait(aid, "no room", tmp_path)
+    job = K._read_json(K.job_path(aid, tmp_path))
+    assert job["state"] == "WAITING_RESOURCES" and job["reason"] == "no room"
+    K._leases_store([{"attempt_id": aid, "gb": 1.0, "pid": 0, "at": time.time(), "wall_s": 600}], tmp_path)
+    K.job_close(aid, "FAILED", "x", tmp_path)
+    assert K._leases_load(tmp_path) == []
+
+
+def test_finalize_records_the_prediction_and_its_error(tmp_path):
+    wt = tmp_path / "wt"
+    (wt / ".build").mkdir(parents=True)
+    runs = tmp_path / "runs"
+    _peaks(runs, ("A", "NORMAL", 1024))
+    run = K.Running("A", SimpleNamespace(returncode=1, pid=0), wt, peak_rss_mb=1536.0)
+    rec = K.finalize(run, "FAILED", runs)
+    assert rec["predicted_gb"] == 1.0 and rec["error_gb"] == 0.5
+    entry = K.ledger_entries(runs)[-1]
+    assert entry["predicted_gb"] == 1.0 and entry["error_gb"] == 0.5
+
+
 def test_host_governor_uses_a_matching_profile_and_ignores_a_moved_one(monkeypatch, tmp_path):
     from friday import hardware_profile as HP
     monkeypatch.setattr(HP, "stored", lambda path=None: SimpleNamespace(baseline=None))

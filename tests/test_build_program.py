@@ -51,6 +51,8 @@ class FakeKernel:
         self.finalized: list[str] = []
         self.closed_jobs: list[tuple[str, str]] = []
         self.finished = False  # whether an adopted dead job's stream holds a result
+        self.refused: set[str] = set()  # requirements whose admission or lease recheck fails
+        self.events: list[tuple] = []  # job-state writes and lease attempts, in order
 
     def load_rows(self):
         return [r for r in self.rows]
@@ -66,6 +68,19 @@ class FakeKernel:
 
     def concurrency(self, cap=2):
         return min(self.level, cap), "fake"
+
+    def job_queue(self, req, klass, mode="SHIP", runs_dir=None, reason=""):
+        self.events.append(("QUEUED", req))
+        return f"att-{req}"
+
+    def reserve(self, attempt_id, req, klass, mode="SHIP", *, cap=2, runs_dir=None):
+        self.events.append(("RESERVE", req))
+        if req in self.refused:
+            return False, f"{req} needs 1.7 GB; 0.9 GB free above the reserve"
+        return True, "fake"
+
+    def job_wait(self, attempt_id, reason, runs_dir=None):
+        self.events.append(("WAITING_RESOURCES", attempt_id, reason))
 
     def resumable(self, wt):
         return "S1" if wt.name in self.resumable_ids else None
@@ -121,6 +136,7 @@ class FakeKernel:
         return f"map-{row['id']}"
 
     def launch(self, row, *, mode, capsule=""):
+        self.events.append(("SPAWN", row["id"]))
         if row["id"] in self.launch_errors:
             raise KErr(self.launch_errors[row["id"]])
         self.launches.append((row["id"], mode, capsule))
@@ -238,6 +254,48 @@ def test_pressure_stop(env):
     # Not a failed run: the program is waiting for resources, and says why.
     st = state_of(env)
     assert st["status"] == "WAITING_RESOURCES" and st["resources"] == "fake"
+
+
+def test_a_job_is_queued_before_admission_and_admission_before_spawn(env):
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+    go(env, k, max_waves=1)
+    assert k.events[:3] == [("QUEUED", "A"), ("RESERVE", "A"), ("SPAWN", "A")]
+
+
+def test_a_refused_job_waits_with_its_reason_and_spawns_nothing(env):
+    k = FakeKernel(ids=("A",))
+    k.refused = {"A"}
+    res, _ = go(env, k)
+    assert res["stop_reason"] == "pressure" and not k.launches
+    assert ("WAITING_RESOURCES", "att-A", "A needs 1.7 GB; 0.9 GB free above the reserve") in k.events
+    assert "SPAWN" not in [e[0] for e in k.events]
+    assert state_of(env)["status"] == "WAITING_RESOURCES"
+
+
+def test_a_refused_job_does_not_stop_the_admitted_one_beside_it(env):
+    k = FakeKernel(ids=("A", "B"))
+    k.refused = {"A"}
+    k.script = {"B": [rec("B")]}
+    go(env, k, max_waves=1)
+    assert [x[0] for x in k.launches] == ["B"]
+
+
+def test_a_refused_repair_stays_queued_and_consumes_no_attempt(env):
+    k = FakeKernel(ids=())
+    k.refused = {"A"}
+    state = {"repair_queue": {"A": {"at": "1"}}, "repairs": {}, "cascade": {}, "parked": {}}
+    assert BP.launch_repairs([("A", "NORMAL")], state, k, env.wt) == []
+    assert "A" in state["repair_queue"] and state["repairs"] == {} and not k.repairs
+
+
+def test_adopt_jobs_closes_queued_and_waiting_jobs_nothing_spawned_for(env):
+    k = FakeKernel()
+    k.planted_jobs = [{"attempt_id": "q1", "req": "A", "state": "QUEUED"},
+                      {"attempt_id": "w1", "req": "B", "state": "WAITING_RESOURCES"}]
+    live, done = BP.adopt_jobs(k, env.wt)
+    assert (live, done) == ([], []) and k.closed_jobs == [("q1", "FAILED"), ("w1", "FAILED")]
+    assert not k.adopted
 
 
 def test_a_wave_is_capped_by_its_own_budget(env):

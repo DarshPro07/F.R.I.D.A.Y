@@ -277,11 +277,31 @@ def capsule_arm(req: str, state: dict) -> bool:
     return hashlib.sha256(req.encode("utf-8")).digest()[0] % 2 == 1
 
 
+def gate(k, req: str, klass: str, mode: str, state: dict, runs_dir: Path | None = None,
+         cap: int = build_kernel.DEFAULT_CAP) -> str | None:
+    """QUEUED -> admission -> memory lease for one chosen job. Returns its attempt
+    id when it may spawn; None (job WAITING_RESOURCES, reason in state) when not."""
+    runs_dir = runs_dir or k.RUNS_DIR
+    attempt_id = k.job_queue(req, klass, mode, runs_dir)
+    ok, why = k.reserve(attempt_id, req, klass, mode, cap=cap, runs_dir=runs_dir)
+    if ok:
+        return attempt_id
+    k.job_wait(attempt_id, why, runs_dir)
+    state["resources"] = why
+    state.setdefault("waiting", {})[req] = why
+    return None
+
+
 def launch_all(chosen, state: dict, k=build_kernel, worktrees: Path | None = None,
-               resumed: set[str] | None = None) -> list:
+               resumed: set[str] | None = None, runs_dir: Path | None = None,
+               cap: int = build_kernel.DEFAULT_CAP) -> list:
     runs = []
     for row, mode, klass in chosen:
         rid = row["id"]
+        attempt_id = gate(k, rid, klass, mode, state, runs_dir, cap)
+        if attempt_id is None:
+            continue
+        state.get("waiting", {}).pop(rid, None)
         try:
             if worktrees is not None and (worktrees / rid.lower()).exists():
                 runs.append(k.resume(rid, worktrees=worktrees))
@@ -292,6 +312,7 @@ def launch_all(chosen, state: dict, k=build_kernel, worktrees: Path | None = Non
             capsule = k.code_map(row) if mode == "SHIP" and capsule_arm(rid, state) else ""
             runs.append(k.launch(row, mode=mode, capsule=capsule))
         except k.KernelError as exc:
+            k.job_close(attempt_id, "FAILED", f"launch failed: {exc}", runs_dir or k.RUNS_DIR)
             park(state, row["id"], "launch failed", "launch", str(exc))
     return runs
 
@@ -313,17 +334,24 @@ def pending_repairs(rows: list[dict], state: dict, integrated: set[str],
 
 
 def launch_repairs(repairs: list[tuple[str, str]], state: dict, k=build_kernel,
-                   worktrees: Path | None = None) -> list:
+                   worktrees: Path | None = None, runs_dir: Path | None = None,
+                   cap: int = build_kernel.DEFAULT_CAP) -> list:
     """Launch each queued requirement's next cascade step: repair (resume when
     localized, else fresh), a fresh strong-model escalation, a read-only advisor,
     then a fresh normal-model implementer on the advisor's packet. Each step is
     one job; the position is recorded in state['cascade']."""
     runs = []
-    for rid, _ in repairs:
-        state["repair_queue"].pop(rid, None)
+    for rid, klass in repairs:
         spent = state["repairs"].get(rid, 0)
-        state["repairs"][rid] = spent + 1
         step = k.agent_utility({"id": rid}, {"failures": spent})[0]["step"]
+        attempt_id = None
+        if step in ("ESCALATE", "ADVISOR", "IMPLEMENTER", "REPAIR"):
+            attempt_id = gate(k, rid, klass, "SHIP", state, runs_dir, cap)
+            if attempt_id is None:  # stays queued: no repair has been consumed
+                continue
+        state.get("waiting", {}).pop(rid, None)
+        state["repair_queue"].pop(rid, None)
+        state["repairs"][rid] = spent + 1
         state["cascade"][rid] = {"step": step, "n": spent + 1}
         try:
             if step == "ESCALATE":
@@ -337,6 +365,7 @@ def launch_repairs(repairs: list[tuple[str, str]], state: dict, k=build_kernel,
             else:
                 park(state, rid, "cascade exhausted", "cascade", f"{spent} repairs spent")
         except k.KernelError as exc:
+            k.job_close(attempt_id, "FAILED", f"{step.lower()} failed: {exc}", runs_dir or k.RUNS_DIR)
             park(state, rid, f"{step.lower()} failed", "repair", str(exc))
     return runs
 
@@ -349,6 +378,10 @@ def adopt_jobs(k=build_kernel, runs_dir: Path | None = None, repo: Path = ROOT) 
     runs_dir = runs_dir or k.RUNS_DIR
     live, finished = [], []
     for job in k.jobs(runs_dir):
+        if job.get("state") in ("QUEUED", "WAITING_RESOURCES"):
+            # nothing was spawned: the controller that queued it is gone, the next wave re-queues
+            k.job_close(job["attempt_id"], "FAILED", "controller died before the job spawned", runs_dir)
+            continue
         if job.get("state") != "STARTED":
             continue
         if pid_alive(int(job.get("pid") or 0)):
@@ -524,7 +557,12 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
         results, wave_verifier, progress = {}, 0.0, False
         wave_id = f"{run_id}-w{len(state['waves']) + 1}"
         os.environ["FRIDAY_BUILD_WAVE_ID"] = wave_id
-        runs = launch_repairs(fixes, state, k, worktrees) + launch_all(chosen, state, k, worktrees, resumed)
+        runs = (launch_repairs(fixes, state, k, worktrees, runs_dir, cap)
+                + launch_all(chosen, state, k, worktrees, resumed, runs_dir, cap))
+        if not runs and any(rid in state.get("waiting", {})
+                            for rid in [r for r, _ in fixes] + [r["id"] for r, _, _ in chosen]):
+            stop = "pressure"  # admission or the lease recheck refused every job: wait, spawn nothing
+            break
         crashed = False
         for rec in k.watch(runs):
             res, cost, ok = settle(rec, state, integrated, k, bi, repo, runner)

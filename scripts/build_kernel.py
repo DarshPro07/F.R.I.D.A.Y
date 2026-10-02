@@ -309,26 +309,236 @@ def worker_gb(runs_dir: Path = RUNS_DIR) -> float:
     return max(recent) / 1024 if recent else DEFAULT_WORKER_GB
 
 
-def concurrency(cap: int = DEFAULT_CAP, *, gov=None, runs_dir: Path = RUNS_DIR) -> tuple[int, str]:
-    """How many workers to start now, and why: none at CRITICAL; otherwise as
-    many as the available RAM above the reserve holds, up to the caps - and at
-    most one at HIGH. The RAM slots bound every level: pressure only lowers."""
+CLASS_WINDOW = 20  # per-class peaks the class prediction looks back over
+MIN_CLASS_SAMPLES = 3
+LEASES_FILE = "leases.json"
+LEASE_LOCK_WAIT_S = 15.0
+LEASE_LOCK_STALE_S = 60.0
+#: req -> attempt_id of a job whose memory lease is taken and whose process is
+#: about to spawn; the Running built for that req adopts the id.
+_PENDING_ATTEMPTS: dict[str, str] = {}
+
+
+def _peak_history(runs_dir: Path = RUNS_DIR) -> list[dict]:
+    """Measured worker peaks, oldest first: the peak history, else the run
+    records (by modification time) until a history exists."""
+    out = []
+    try:
+        for line in (runs_dir / PEAKS_FILE).read_text(encoding="utf-8").splitlines():
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            peak = item.get("peak_rss_mb") if isinstance(item, dict) else None
+            if isinstance(peak, (int, float)) and not isinstance(peak, bool):
+                out.append(item)
+    except OSError:
+        pass
+    if out:
+        return out
+    recs = []
+    for p in run_records(runs_dir):
+        data = _read_json(p)
+        peak = data.get("peak_rss_mb")
+        if isinstance(peak, (int, float)) and not isinstance(peak, bool):
+            recs.append((p.stat().st_mtime, {"req": data.get("requirement"), "mode": data.get("mode"),
+                                             "budget_class": data.get("budget_class"),
+                                             "peak_rss_mb": peak}))
+    return [item for _, item in sorted(recs, key=lambda t: t[0])]
+
+
+def _p95_gb(items: list[dict]) -> float:
+    peaks = sorted(float(i["peak_rss_mb"]) for i in items)
+    return peaks[max(0, -(-95 * len(peaks) // 100) - 1)] / 1024
+
+
+def predict_gb(req: str, klass: str, mode: str, runs_dir: Path = RUNS_DIR) -> tuple[float, str]:
+    """What one worker is expected to hold at its peak, and where the number
+    came from: the requirement's own last peak, else the p95 of its budget class
+    (>= MIN_CLASS_SAMPLES samples), else the p95 of recent peaks, else the default."""
+    history = _peak_history(runs_dir)
+    own = [h for h in history if req and h.get("req") == req]
+    if own:
+        return float(own[-1]["peak_rss_mb"]) / 1024, "requirement"
+    same = [h for h in history if h.get("budget_class") == klass
+            and h.get("mode") in (None, mode)][-CLASS_WINDOW:]
+    if len(same) >= MIN_CLASS_SAMPLES:
+        return _p95_gb(same), "class"
+    if history:
+        return _p95_gb(history[-RSS_WINDOW:]), "history"
+    return DEFAULT_WORKER_GB, "default"
+
+
+# ---------------------------------------------------------- memory leases
+
+def _pid_gone(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if psutil is not None:
+        return not psutil.pid_exists(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _leases_load(runs_dir: Path) -> list[dict]:
+    try:
+        data = json.loads((runs_dir / LEASES_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [x for x in data if isinstance(x, dict) and x.get("attempt_id")] if isinstance(data, list) else []
+
+
+def _leases_store(leases: list[dict], runs_dir: Path) -> None:
+    path = runs_dir / LEASES_FILE
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(leases, indent=2) + "\n", encoding="utf-8", newline="\n")
+    os.replace(tmp, path)
+
+
+def _leases_live(leases: list[dict], now: float | None = None) -> list[dict]:
+    """Leases that still hold memory: a dead pid or one older than its class wall limit is stale."""
+    now = time.time() if now is None else now
+    return [x for x in leases if not _pid_gone(int(x.get("pid") or 0))
+            and now - float(x.get("at") or 0) <= float(x.get("wall_s") or DEFAULT_WALL_S)]
+
+
+def lease_unconsumed_gb(lease: dict) -> float:
+    """The part of a lease the host has not yet seen as used: what was predicted
+    minus what the job's process tree already holds."""
+    gb = float(lease.get("gb") or 0.0)
+    pid = int(lease.get("pid") or 0)
+    held = tree_rss_mb(pid) if pid > 0 else None
+    return max(0.0, gb - held / 1024) if held is not None else gb
+
+
+def leased_gb(runs_dir: Path = RUNS_DIR) -> float:
+    return sum(lease_unconsumed_gb(x) for x in _leases_live(_leases_load(runs_dir)))
+
+
+def _headroom(sample, reserve: float) -> list[float]:
+    """Free memory above the reserve, physical and (when the sample has it) commit."""
+    out = [sample.ram_available_gb - reserve]
+    commit = getattr(sample, "commit_available_gb", None)
+    if isinstance(commit, (int, float)) and not isinstance(commit, bool):
+        out.append(commit - reserve)
+    return out
+
+
+def _candidate(item, runs_dir: Path) -> tuple[dict, str, str]:
+    if isinstance(item, tuple):
+        return item[0], item[1], item[2]
+    return (item, item.get("mode") or "SHIP",
+            item.get("klass") or budget_class(item, load_findings(item.get("id", ""), runs_dir)))
+
+
+def admit(candidates: list, cap: int = DEFAULT_CAP, gov=None,
+          runs_dir: Path = RUNS_DIR) -> tuple[list[tuple[dict, float]], str]:
+    """Walk the candidates in order and admit each whose predicted memory fits
+    the headroom left by the reserve, every live lease and everything admitted so
+    far - on physical RAM and on commit alike. A candidate is a row or a
+    (row, mode, class) tuple. CRITICAL admits none; HIGH at most one."""
     gov = gov or host_governor()
     pressure = gov.pressure()
     if pressure.level == "CRITICAL":
-        return 0, "pressure CRITICAL"
+        return [], "pressure CRITICAL"
     sample = pressure.sample
     if sample is None:
-        return 0, "no memory reading"
+        return [], "no memory reading"
     limits = gov.thresholds
     reserve = limits.ram_floor(sample.total_gb()) + 1.0
-    per_worker = worker_gb(runs_dir)
-    slots = max(0, int((sample.ram_available_gb - reserve) // per_worker))
-    level_cap = 1 if pressure.level == "HIGH" else cap
-    n = min(cap, level_cap, limits.max_workers, slots)
-    return n, (f"pressure {pressure.level}: {sample.ram_available_gb:.1f} GB available, "
-               f"{reserve:.1f} GB reserve, {per_worker:.1f} GB per worker -> {slots} slots "
-               f"(cap {cap}, max_workers {limits.max_workers})")
+    leased = leased_gb(runs_dir)
+    ceiling = min(cap, limits.max_workers, 1 if pressure.level == "HIGH" else cap)
+    admitted: list[tuple[dict, float]] = []
+    taken, why = 0.0, ""
+    for item in candidates:
+        row, mode, klass = _candidate(item, runs_dir)
+        gb, source = predict_gb(row.get("id", ""), klass, mode, runs_dir)
+        if len(admitted) >= ceiling:
+            why = why or f"{len(admitted)} admitted, the ceiling for pressure {pressure.level}"
+            break
+        if min(_headroom(sample, reserve)) - leased - taken < gb:
+            why = (f"{row.get('id') or 'a worker'} needs {gb:.1f} GB ({source}); "
+                   f"{min(_headroom(sample, reserve)) - leased - taken:.1f} GB free above the reserve")
+            break
+        admitted.append((row, gb))
+        taken += gb
+    return admitted, (f"pressure {pressure.level}: {sample.ram_available_gb:.1f} GB available, "
+                      f"{reserve:.1f} GB reserve, {leased:.1f} GB leased, {taken:.1f} GB admitted "
+                      f"-> {len(admitted)} slots (cap {cap}, max_workers {limits.max_workers})"
+                      + (f"; {why}" if why else ""))
+
+
+def concurrency(cap: int = DEFAULT_CAP, *, gov=None, runs_dir: Path = RUNS_DIR) -> tuple[int, str]:
+    """How many default workers admission would start now, and why: the CLI view
+    of admit(). The RAM slots bound every level: pressure only lowers."""
+    default = ({"id": ""}, "SHIP", "NORMAL")
+    got, why = admit([default] * max(0, cap), cap, gov, runs_dir)
+    return len(got), why
+
+
+def lease_release(attempt_id: str, runs_dir: Path = RUNS_DIR) -> None:
+    for req in [r for r, a in _PENDING_ATTEMPTS.items() if a == attempt_id]:
+        _PENDING_ATTEMPTS.pop(req, None)
+    if not (runs_dir / LEASES_FILE).exists():
+        return
+    with creation_lock(runs_dir, LEASE_LOCK_WAIT_S, LEASE_LOCK_STALE_S):
+        leases = _leases_load(runs_dir)
+        kept = [x for x in leases if x["attempt_id"] != attempt_id]
+        if len(kept) != len(leases):
+            _leases_store(kept, runs_dir)
+
+
+def lease_bind(attempt_id: str, pid: int, runs_dir: Path = RUNS_DIR) -> None:
+    """Record the spawned pid on a job's lease; no lease, no write."""
+    if not (runs_dir / LEASES_FILE).exists():
+        return
+    with creation_lock(runs_dir, LEASE_LOCK_WAIT_S, LEASE_LOCK_STALE_S):
+        leases = _leases_load(runs_dir)
+        for x in leases:
+            if x["attempt_id"] == attempt_id:
+                x["pid"] = pid
+        _leases_store(leases, runs_dir)
+
+
+def lease_of(attempt_id: str, runs_dir: Path = RUNS_DIR) -> dict | None:
+    return next((x for x in _leases_load(runs_dir) if x["attempt_id"] == attempt_id), None)
+
+
+def reserve(attempt_id: str, req: str, klass: str, mode: str = "SHIP", *, cap: int = DEFAULT_CAP,
+            gov=None, runs_dir: Path = RUNS_DIR) -> tuple[bool, str]:
+    """CHECK (admit) -> LEASE -> RECHECK for one job, before it spawns. The
+    recheck takes a fresh governor sample under the lease lock and subtracts every
+    live lease, this one included; a failure releases the lease. On success the
+    next Running built for `req` carries `attempt_id`."""
+    gov = gov or host_governor()
+    got, why = admit([({"id": req}, mode, klass)], cap, gov, runs_dir)
+    if not got:
+        return False, why
+    gb = got[0][1]
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    with creation_lock(runs_dir, LEASE_LOCK_WAIT_S, LEASE_LOCK_STALE_S):
+        leases = _leases_live(_leases_load(runs_dir))
+        leases.append({"attempt_id": attempt_id, "req": req, "gb": round(gb, 3), "pid": 0,
+                       "at": time.time(), "wall_s": BUDGETS[klass][2]})
+        _leases_store(leases, runs_dir)
+        pressure = gov.pressure()
+        sample = pressure.sample
+        reserve_gb = gov.thresholds.ram_floor(sample.total_gb()) + 1.0 if sample is not None else 0.0
+        short = ("pressure CRITICAL" if pressure.level == "CRITICAL" else
+                 "no memory reading" if sample is None else
+                 "" if min(_headroom(sample, reserve_gb)) - sum(map(lease_unconsumed_gb, leases)) >= 0
+                 else f"{gb:.1f} GB lease no longer fits: {sample.ram_available_gb:.1f} GB available, "
+                      f"{reserve_gb:.1f} GB reserve, leases hold {sum(map(lease_unconsumed_gb, leases)):.1f} GB")
+        if short:
+            _leases_store([x for x in leases if x["attempt_id"] != attempt_id], runs_dir)
+            return False, f"recheck: {short}"
+    _PENDING_ATTEMPTS[req] = attempt_id
+    return True, why
 
 
 # --------------------------------------------------------------- launch
@@ -478,6 +688,11 @@ class Running:
     program_run_id: str = field(default_factory=lambda: os.environ.get("FRIDAY_BUILD_RUN_ID", ""))
     wave_id: str = field(default_factory=lambda: os.environ.get("FRIDAY_BUILD_WAVE_ID", ""))
 
+    def __post_init__(self):
+        leased = _PENDING_ATTEMPTS.pop(self.req, None)  # the id the job's memory lease was taken under
+        if leased:
+            self.attempt_id = leased
+
 
 # ----------------------------------------------------------------- jobs
 
@@ -506,6 +721,7 @@ def jobs(runs_dir: Path = RUNS_DIR) -> list[dict]:
 
 def job_open(run: "Running", runs_dir: Path = RUNS_DIR, state: str = "STARTED") -> dict:
     """The durable record of one agent job: written as the process starts."""
+    lease_bind(run.attempt_id, run.proc.pid, runs_dir)
     return job_write({"attempt_id": run.attempt_id, "req": run.req,
                       "role": ROLE_OF_KIND[run.kind or ("SCOUT" if run.mode == "SCOUT" else "SHIP")],
                       "model": run.model, "state": state, "pid": run.proc.pid,
@@ -514,8 +730,30 @@ def job_open(run: "Running", runs_dir: Path = RUNS_DIR, state: str = "STARTED") 
                       "wave_id": run.wave_id}, runs_dir)
 
 
+def job_queue(req: str, klass: str, mode: str = "SHIP", runs_dir: Path = RUNS_DIR,
+              reason: str = "") -> str:
+    """Record a chosen job as QUEUED, before admission; returns its attempt id."""
+    attempt_id = str(uuid.uuid4())
+    job_write({"attempt_id": attempt_id, "req": req,
+               "role": ROLE_OF_KIND["SCOUT" if mode == "SCOUT" else "SHIP"], "model": "",
+               "state": "QUEUED", "pid": 0, "worktree": "", "started": _iso(), "ended": "",
+               "reason": reason or f"{klass} {mode}", "program_run_id": os.environ.get("FRIDAY_BUILD_RUN_ID", ""),
+               "wave_id": os.environ.get("FRIDAY_BUILD_WAVE_ID", "")}, runs_dir)
+    return attempt_id
+
+
+def job_wait(attempt_id: str, reason: str, runs_dir: Path = RUNS_DIR) -> dict | None:
+    """Admission or the lease recheck refused the job: WAITING_RESOURCES, with why."""
+    job = _read_json(job_path(attempt_id, runs_dir))
+    if not job.get("attempt_id"):
+        return None
+    job.update(state="WAITING_RESOURCES", reason=reason)
+    return job_write(job, runs_dir)
+
+
 def job_close(attempt_id: str, state: str, reason: str = "", runs_dir: Path = RUNS_DIR) -> dict | None:
-    """Move a job to COMPLETE or FAILED; None when it has no record."""
+    """Move a job to COMPLETE or FAILED and release its memory lease; None when it has no record."""
+    lease_release(attempt_id, runs_dir)
     job = _read_json(job_path(attempt_id, runs_dir))
     if not job.get("attempt_id"):
         return None
@@ -1294,6 +1532,10 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
     results = _own_results(events)
     res = results[-1] if results else {}
     runs_dir.mkdir(parents=True, exist_ok=True)
+    leased = lease_of(run.attempt_id, runs_dir)  # read before job_close releases it
+    predicted = (float(leased["gb"]) if leased else predict_gb(run.req, run.klass, run.mode, runs_dir)[0])
+    error = None if run.peak_rss_mb is None else round(run.peak_rss_mb / 1024 - predicted, 3)
+    predicted = round(predicted, 3)
     scout = run.mode == "SCOUT"
     advisor = run.kind == "ADVISOR"
     ev = (_scout_outcome(run, runs_dir, str(res.get("result") or "")) if scout
@@ -1335,8 +1577,9 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
            "branch": run.branch, "commit": commit, "files_changed": files,
            "evidence": ev, "continued": run.continued,
            "session_id": res.get("session_id", ""), "reads": read_metrics(events),
-           "capsule": run.capsule, "peak_rss_mb": run.peak_rss_mb}
-    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+           "capsule": run.capsule, "peak_rss_mb": run.peak_rss_mb,
+           "predicted_gb": predicted, "error_gb": error}
+    at =datetime.now(timezone.utc).isoformat(timespec="seconds")
     prior = [e for e in ledger_entries(runs_dir) if e["req"] == run.req
              and e["attempt_id"] != run.attempt_id and _context_tokens(e) > 0]
     entry = {"attempt_id": run.attempt_id, "req": run.req,
@@ -1347,7 +1590,7 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
              "cache_read_tokens": rec["cache_read_tokens"],
              "cache_creation_tokens": rec["cache_creation_tokens"], "turns": rec["turns"],
              "wall_seconds": rec["wall_seconds"], "peak_rss_mb": run.peak_rss_mb, "at": at,
-             "state": state, "budget_class": run.klass, "capsule": run.capsule,
+             "predicted_gb": predicted, "error_gb": error, "state": state, "budget_class": run.klass, "capsule": run.capsule,
              "mode": run.mode, "reads": rec["reads"]}
     if entry["kind"] in ("REPAIR", "RESUME") and prior and _context_tokens(prior[-1]):
         entry["retry_context_growth"] = round(_context_tokens(entry) / _context_tokens(prior[-1]), 3)
