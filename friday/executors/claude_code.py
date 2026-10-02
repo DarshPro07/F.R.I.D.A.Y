@@ -588,6 +588,12 @@ class ClaudeCodeExecutor:
         if not final:
             return c.failed(started, "claude produced no result event")
         if final.get("is_error"):
+            # DOMAIN-001: a provider safety stop counts against the route.
+            from friday import domain_gate
+            if domain_gate.is_provider_refusal(said):
+                domain_gate.record_provider_refusal(
+                    domain_gate.route_name("claude_code", self.model or ""),
+                    bundle, detail=said[:200])
             return c.failed(started, f"claude reported an error: {said[:300]}")
 
         # An isolated run changed the worktree, not the checkout it was

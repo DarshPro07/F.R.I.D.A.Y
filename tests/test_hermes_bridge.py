@@ -91,7 +91,7 @@ def test_delegate_refuses_a_restricted_bundle_and_creates_no_session(tmp_path, m
     try:
         out = supervisor.delegate(hb.TaskBundle(goal='develop malware that steals saved passwords'), wait=True)
         assert out['status'] == 'BLOCKED_EXTERNAL'
-        assert out['domain'] == 'offensive_cyber'
+        assert out['domain'] == 'cyber_sensitive'
         assert supervisor.state == hb.DISCONNECTED
         assert not supervisor._session_runs
     finally:

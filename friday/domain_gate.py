@@ -9,10 +9,15 @@ A provider safety check that keeps failing is a route-health signal, not
 something to retry: after `MAX_SAFEGUARD_FAILURES` on one route the gate
 refuses that route and says to switch route or start a fresh session.
 
-Deterministic on purpose: a fixed phrase list, no model call. The list is an
-assumption (offensive cyber, bio/chem weapons, CBRN) pending the owner's
-ruling; it is one tuple per domain so the ruling is a one-line edit. Phrases
-are deliberately specific so ordinary security *defence* work still passes.
+Deterministic on purpose: the final routing decision is fixed policy over
+phrase signals, never model prose. Owner ruling 2026-10-02: the top-level
+domains are `cbrne` (`cbrn` is kept as an alias) and `cyber_sensitive`.
+Cyber gets a second classification of intent and authority (defensive,
+authorized_testing, malicious_or_abusive, unknown); a tool name such as
+"nmap" or a phrase such as "offensive security" is only a signal, weighed
+with the task intent, target ownership/authorization and requested action.
+An optional injectable semantic classifier catches what the phrases miss; its
+label is one more signal, and the routing is still decided here.
 """
 from __future__ import annotations
 
@@ -23,26 +28,68 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 BLOCKED_EXTERNAL = "BLOCKED_EXTERNAL"
+NEEDS_SCOPE = "NEEDS_SCOPE"
 
 #: Failures one route may take before it is refused (bounded retry).
 MAX_SAFEGUARD_FAILURES = 2
 
-RESTRICTED_DOMAINS: dict[str, tuple[str, ...]] = {
-    "cbrn": (
-        "nerve agent", "chemical weapon", "biological weapon", "bioweapon",
-        "nuclear weapon", "radiological weapon", "dirty bomb",
-        "weaponize anthrax", "weaponise anthrax", "sarin synthesis",
-        "enhance pathogen transmissibility", "gain-of-function",
-    ),
-    "offensive_cyber": (
-        "write ransomware", "build ransomware", "deploy ransomware",
-        "develop malware", "write a keylogger", "botnet command and control",
-        "weaponized exploit", "weaponised exploit", "exploit for unpatched",
-        "zero-day exploit chain", "credential stuffing campaign",
-    ),
-}
+CBRNE = "cbrne"
+CYBER = "cyber_sensitive"
+_ALIASES = {"cbrn": CBRNE, "cbrne": CBRNE, "cyber_sensitive": CYBER}
+
+DEFENSIVE = "defensive"
+AUTHORIZED_TESTING = "authorized_testing"
+MALICIOUS = "malicious_or_abusive"
+UNKNOWN = "unknown"
+
+# Phrases are deliberately specific so ordinary defence work still passes.
+CBRNE_SIGNALS: tuple[str, ...] = (
+    "nerve agent", "chemical weapon", "biological weapon", "bioweapon",
+    "nuclear weapon", "radiological weapon", "dirty bomb", "anthrax",
+    "sarin", "enhance pathogen transmissibility", "gain-of-function",
+    "cbrn",
+)
+#: Asking for the capability (not about it): with a signal this is enablement.
+CBRNE_ENABLEMENT: tuple[str, ...] = (
+    "synthesi", "manufactur", "weaponi", "produce", "enhance", "acquire",
+    "culture ", "scale up", "deliver", "step-by-step", "build a", "make a",
+)
+INFORMATIONAL: tuple[str, ...] = (
+    "history of", "treaty", "treaties", "arms control", "conference",
+    "notes", "course", "glossary", "overview of", "policy analysis",
+)
+
+CYBER_SIGNALS: tuple[str, ...] = (
+    "kali", "nmap", "metasploit", "pentest", "penetration test",
+    "offensive security", "red team", "exploit", "sql injection", "xss",
+    "ransomware", "malware", "keylogger", "botnet", "break into", "hack into",
+    "credential stuffing", "brute force", "vulnerability scan",
+)
+CYBER_ABUSE: tuple[str, ...] = (
+    "ransomware", "keylogger", "botnet", "break into", "hack into",
+    "credential stuffing", "steal credentials", "without permission",
+    "without authorization", "without authorisation", "third-party server",
+    "someone else's", "their server", "develop malware", "weaponized exploit",
+    "weaponised exploit", "exploit for unpatched", "zero-day exploit chain",
+)
+CYBER_TEST_ACTIONS: tuple[str, ...] = (
+    "pentest", "penetration test", "red team", "nmap", "kali", "metasploit",
+    "vulnerability scan", "exploit", "brute force",
+)
+CYBER_OWNERSHIP: tuple[str, ...] = (
+    "my own", "our own", "we own", "i own", "my staging", "our staging",
+)
+CYBER_SCOPE: tuple[str, ...] = (
+    "scope", "authorized targets", "authorised targets", "rules of engagement",
+)
+CYBER_DEFENSIVE: tuple[str, ...] = (
+    "code review", "review", "harden", "fix", "patch", "mitigat", "sanitiz",
+    "parameteriz", "parameteris", "detect", "defend", "regression test",
+    "secure",
+)
 
 
 @dataclass(frozen=True)
@@ -50,17 +97,76 @@ class DomainVerdict:
     restricted: bool
     domain: str = ""
     matched: str = ""
+    #: Cyber only: defensive | authorized_testing | malicious_or_abusive | unknown.
+    intent: str = ""
+    #: normal | restricted | cyber_lab | ask_scope
+    route: str = "normal"
 
 
 GENERAL = DomainVerdict(False)
 
+#: packet text -> a domain name ("" when general). Injected, never a default.
+SemanticClassifier = Callable[[str], str]
+_semantic: SemanticClassifier | None = None
+
+
+def set_semantic_classifier(fn: SemanticClassifier | None) -> None:
+    global _semantic
+    _semantic = fn
+
+
+def _has(low: str, phrases: tuple[str, ...]) -> str:
+    for phrase in phrases:
+        if phrase in low:
+            return phrase
+    return ""
+
+
+def _cbrne(low: str) -> DomainVerdict:
+    signal = _has(low, CBRNE_SIGNALS)
+    if not signal:
+        return GENERAL
+    if _has(low, INFORMATIONAL) and not _has(low, CBRNE_ENABLEMENT):
+        return GENERAL
+    return DomainVerdict(True, CBRNE, signal, route="restricted")
+
+
+def cyber_intent(low: str) -> str:
+    """The second classification: what is being asked, and with what authority."""
+    if _has(low, CYBER_ABUSE):
+        return MALICIOUS
+    action = _has(low, CYBER_TEST_ACTIONS)
+    if action and _has(low, CYBER_OWNERSHIP):
+        return AUTHORIZED_TESTING if _has(low, CYBER_SCOPE) else UNKNOWN
+    if _has(low, INFORMATIONAL) or _has(low, CYBER_DEFENSIVE):
+        return DEFENSIVE
+    return UNKNOWN
+
+
+_CYBER_ROUTE = {DEFENSIVE: "normal", AUTHORIZED_TESTING: "cyber_lab",
+                MALICIOUS: "restricted", UNKNOWN: "ask_scope"}
+
+
+def _cyber(low: str, signal: str) -> DomainVerdict:
+    intent = cyber_intent(low)
+    route = _CYBER_ROUTE[intent]
+    return DomainVerdict(route != "normal", CYBER, signal, intent, route)
+
 
 def classify_text(text: str) -> DomainVerdict:
     low = " ".join(text.lower().split())
-    for domain, phrases in RESTRICTED_DOMAINS.items():
-        for phrase in phrases:
-            if phrase in low:
-                return DomainVerdict(True, domain, phrase)
+    verdict = _cbrne(low)
+    if verdict.restricted:
+        return verdict
+    signal = _has(low, CYBER_SIGNALS)
+    if signal:
+        return _cyber(low, signal)
+    if _semantic is not None:
+        label = _ALIASES.get(str(_semantic(text) or "").strip().lower(), "")
+        if label == CBRNE:
+            return DomainVerdict(True, CBRNE, "semantic", route="restricted")
+        if label == CYBER:
+            return _cyber(low, "semantic")
     return GENERAL
 
 
@@ -154,12 +260,14 @@ class GateDecision:
     status: str = ""
     domain: str = ""
     reason: str = ""
-    #: "program" (own bounded program), "switch_route" or "fresh_session".
+    #: "program", "deny", "cyber_lab", "ask_scope", "switch_route" or "fresh_session".
     next_step: str = ""
+    intent: str = ""
 
     def as_result(self) -> dict:
         return {"status": self.status, "blocked": True, "domain": self.domain,
-                "reason": self.reason, "next_step": self.next_step}
+                "reason": self.reason, "next_step": self.next_step,
+                "intent": self.intent}
 
 
 ALLOW = GateDecision(True)
@@ -170,15 +278,34 @@ def check(bundle, route: str, *, led: SafeguardLedger | None = None) -> GateDeci
     led = led or ledger()
     verdict = classify(bundle)
     digest = _digest(bundle)
-    if verdict.restricted:
+    if verdict.route == "restricted":
         repeat = led.seen(route, digest)
         led.record(route, "restricted_packet", domain=verdict.domain,
-                   packet=digest, detail=verdict.matched)
+                   packet=digest, detail=verdict.intent or verdict.matched)
         why = (f"restricted domain '{verdict.domain}': belongs to its own bounded "
                "program, not the general build")
+        if verdict.intent == MALICIOUS:
+            why = "malicious or abusive cyber request: denied"
         if repeat:
             why += "; already refused on this route, not retried"
-        return GateDecision(False, BLOCKED_EXTERNAL, verdict.domain, why, "program")
+        return GateDecision(False, BLOCKED_EXTERNAL, verdict.domain, why,
+                            "deny" if verdict.intent == MALICIOUS else "program",
+                            verdict.intent)
+    if verdict.route == "cyber_lab":
+        led.record(route, "cyber_lab_routed", domain=verdict.domain,
+                   packet=digest, detail=verdict.matched)
+        return GateDecision(
+            False, BLOCKED_EXTERNAL, verdict.domain,
+            "authorized security testing: runs in the Cyber Lab under an "
+            "authorization contract, not in the general build",
+            "cyber_lab", verdict.intent)
+    if verdict.route == "ask_scope":
+        led.record(route, "scope_requested", domain=verdict.domain,
+                   packet=digest, detail=verdict.matched)
+        return GateDecision(
+            False, NEEDS_SCOPE, verdict.domain,
+            "security-sensitive request with no stated target ownership and "
+            "scope: ask for scope before any work", "ask_scope", verdict.intent)
     failures = led.count(route, "provider_refusal")
     if failures >= MAX_SAFEGUARD_FAILURES:
         return GateDecision(
@@ -209,3 +336,14 @@ def record_provider_refusal(route: str, bundle=None, *, detail: str = "",
 
 def route_name(*parts: str) -> str:
     return ":".join(p for p in parts if p) or "default"
+
+
+#: What a provider says when its own safety check stopped the run.
+_REFUSAL_MARKERS = ("usage policy", "safety policy", "safety system",
+                    "content policy", "violates our", "safeguard",
+                    "cannot assist with that request", "stop_reason: refusal")
+
+
+def is_provider_refusal(text: str) -> bool:
+    low = (text or "").lower()
+    return any(m in low for m in _REFUSAL_MARKERS)
