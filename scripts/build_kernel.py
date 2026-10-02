@@ -905,7 +905,12 @@ def _stream_size(wt: Path) -> int:
 
 
 def _start(cmd: list[str], wt: Path) -> subprocess.Popen:
-    """Start a worker appending to the stream log, so a continuation keeps it."""
+    """Start a worker appending to the stream log, so a continuation keeps it.
+    The previous invocation's evidence is archived first: a run's verdict must be
+    its own, never a DONE left behind by the attempt before it."""
+    ev = wt / ".build" / "evidence.json"
+    if ev.exists():
+        ev.replace(ev.with_name(f"evidence.prev-{time.time_ns()}.json"))
     kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
           else {"start_new_session": True})
     with open(wt / ".build" / "stream.jsonl", "ab") as log:

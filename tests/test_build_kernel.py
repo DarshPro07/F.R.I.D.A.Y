@@ -1518,3 +1518,17 @@ def test_a_row_parked_by_the_owner_is_owed_but_never_scheduled():
     assert [r["id"] for r in K.ready([parked, other], {})] == ["ACT-001"]
     assert K.waiting_on_owner(parked)
     assert "CORE-001" in [r["id"] for r in K.ready([parked, other], {}, include_owner=True)]
+
+
+def test_every_invocation_starts_without_the_previous_runs_evidence(tmp_path, monkeypatch):
+    # 2026-10-02: ACT-001's escalation hit max turns, but the repair before it had
+    # left .build/evidence.json saying DONE - the stale verdict blocked the one
+    # continuation and could pass for the new run's own. A run's verdict must be its own.
+    wt = tmp_path / "wt"
+    (wt / ".build").mkdir(parents=True)
+    (wt / ".build" / "evidence.json").write_text(json.dumps({"status": "DONE", "summary": "old"}))
+    monkeypatch.setattr(K.subprocess, "Popen", lambda *a, **kw: _Proc(None))
+    K._start(["claude"], wt)
+    assert not (wt / ".build" / "evidence.json").exists()
+    kept = list((wt / ".build").glob("evidence.prev-*.json"))
+    assert len(kept) == 1 and json.loads(kept[0].read_text())["summary"] == "old"
