@@ -734,8 +734,8 @@ class FridayAgent(Agent):
     def __init__(self, stt, llm, tts) -> None:
         self._toolset = mcp.MCPToolset(
             id=CLOUD_TOOLSET_ID,
-            mcp_server=mcp.MCPServerHTTP(
-                url=mcp_sse_url(),
+            mcp_server=mcp_firewall.server(
+                mcp_sse_url(),
                 transport_type="sse",
                 client_session_timeout_seconds=MCP_TIMEOUT_SECONDS,
             ),
@@ -1308,7 +1308,8 @@ class FridayAgent(Agent):
 
         # MCP-001: a tool server FRIDAY does not run itself is held to what
         # was pinned; a change nobody asked for withholds all of its tools.
-        tools, self._tools_suspended = mcp_firewall.admitted_tools(mcp_sse_url(), tools)
+        tools, self._tools_suspended = mcp_firewall.admitted_tools(
+            mcp_sse_url(), tools, identity=mcp_firewall.identity_of(self._toolset))
         if self._tools_suspended:
             self._tools_offline = True
             self._router.load([])
