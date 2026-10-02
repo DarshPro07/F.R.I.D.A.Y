@@ -58,7 +58,8 @@ def register(mcp):
 
     @mcp.tool()
     def brain_remember(fact: str, provenance: str, entity: str = "",
-                       kind: str = "fact", ttl: str = "") -> dict:
+                       kind: str = "fact", ttl: str = "",
+                       from_read_material: bool = False) -> dict:
         """
         Save ONE durable fact to the shared Friday/Hermes brain: verified
         project facts, architecture decisions, root-cause lessons,
@@ -67,12 +68,14 @@ def register(mcp):
         (those are refused before ingestion). kind: fact | event |
         preference | commitment | belief. Optional ttl like '30d'.
         """
-        from friday.brain import PERSON_ORIGIN, AdmissionRefused
+        from friday.brain import PERSON_ORIGIN, READ_ORIGIN, AdmissionRefused
 
         try:
-            # Conversation acts for the person (its own lineage is V7-D28).
+            # The voice agent sets `from_read_material` from what the turn
+            # consumed; such a turn is refused the ledger (MEM-002, V7-D28).
             out = brain().remember(fact, provenance=provenance,
-                                   origin=PERSON_ORIGIN,
+                                   origin=(READ_ORIGIN if from_read_material
+                                           else PERSON_ORIGIN),
                                    entity=entity, kind=kind, ttl=ttl)
         except AdmissionRefused as refusal:
             return {"status": "refused", "reason": str(refusal)}

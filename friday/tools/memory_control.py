@@ -31,8 +31,14 @@ def _get_engine() -> PolicyEngine:
     return _engine
 
 
-def _execute(request: str, fn, *args, **kwargs) -> dict:
-    run = c.Run.create(request, capability="memory")
+def _execute(request: str, fn, *args, from_read_material: bool = False,
+             **kwargs) -> dict:
+    # The voice agent sets `from_read_material` from what the turn consumed
+    # (it overwrites whatever the model passed); a turn that read a page or a
+    # tool result writes read material, not the person's words (MEM-002).
+    run = c.Run.create(request, capability="memory",
+                       provenance=c.READ_MATERIAL if from_read_material
+                       else c.PERSON)
     result = fn(run, *args, engine=_get_engine(), **kwargs)
     run.transition("completed" if run.all_succeeded else "partial",
                    None if run.all_succeeded else (result.error or "not verified"))
@@ -49,7 +55,8 @@ def register(mcp):
     def memory_remember(subject: str, value: str, kind: str = FACT,
                         source: str = "user stated it",
                         confidence: float = 1.0, memory_type: str = "semantic",
-                        project: str = "", source_ref: str = "") -> dict:
+                        project: str = "", source_ref: str = "",
+                        from_read_material: bool = False) -> dict:
         """
         Store something durably so it survives a restart.
 
@@ -67,7 +74,8 @@ def register(mcp):
         return _execute(f"remember {subject}", M.memory_remember, subject, value,
                         kind=kind, source=source, confidence=confidence,
                         memory_type=memory_type, project=project,
-                        source_ref=source_ref)
+                        source_ref=source_ref,
+                        from_read_material=from_read_material)
 
     @mcp.tool()
     def memory_provenance(memory_id: int) -> dict:
@@ -119,10 +127,12 @@ def register(mcp):
 
     @mcp.tool()
     def memory_record_decision(project: str, decision: str,
-                               rationale: str = "") -> dict:
+                               rationale: str = "",
+                               from_read_material: bool = False) -> dict:
         """Record a project decision and why it was made."""
         return _execute(f"decision for {project}", M.project_record_decision,
-                        project, decision, rationale=rationale or None)
+                        project, decision, rationale=rationale or None,
+                        from_read_material=from_read_material)
 
     @mcp.tool()
     def memory_project_context(project: str) -> dict:

@@ -727,6 +727,8 @@ class FridayAgent(Agent):
     #: Capabilities that ACTED this turn, for the completion gate in
     #: `tts_node`. Reset per turn alongside `_already_read`.
     _acted_this_turn: tuple[str, ...] = ()
+    #: Whether this turn consumed a tool result or a page; reset per turn.
+    _read_this_turn: bool = False
     #: Why the tool server's tools are withheld while the MCP firewall has it
     #: suspended (MCP-001); "" otherwise.
     _tools_suspended: str = ""
@@ -1082,6 +1084,10 @@ class FridayAgent(Agent):
                 "received": arguments[:200],
             })
 
+        if capability in MEMORY_WRITES:
+            # Lineage is decided here from what the turn consumed, never from
+            # an argument the model (or a page behind it) supplied.
+            parsed["from_read_material"] = self._read_this_turn
         logger.info("use_capability %s(%s)", capability, sorted(parsed))
         self._keep_group_open(capability)
         self._router.note_used(capability)
@@ -1094,6 +1100,11 @@ class FridayAgent(Agent):
                 "error": f"{capability} failed: {type(exc).__name__}: {exc}",
                 "may_claim_completion": False,
             })
+        # A result now sits in the turn's context, so what the model writes to
+        # memory from here on is read material (MEM-002). A memory write's own
+        # result is the person's request being answered, not something read.
+        if capability not in MEMORY_WRITES:
+            self._read_this_turn = True
         # What actually ACTED this turn, for the completion gate in tts_node.
         # Recorded after the call returned without raising: a capability that
         # threw is handled above and never reaches here, so it can never back
@@ -1468,6 +1479,7 @@ class FridayAgent(Agent):
         """
         self._already_read = ()
         self._acted_this_turn = ()
+        self._read_this_turn = False
         self._spoke_this_turn = False
         if await stop_or_resume(
                 text,
@@ -1487,6 +1499,7 @@ class FridayAgent(Agent):
         read = await check_what_he_asserted(
             turn_ctx, text, project=project) or read
         if read:
+            self._read_this_turn = True
             self.stop_re_reading()
         self.prepare_turn(turn_ctx, text)
 
@@ -1743,6 +1756,8 @@ def watch_from_the_side(user_text: str, run_id: str = "") -> None:
 
 # Restored from the .pyc oracle: proven by a LOAD_CONST/STORE_NAME
 # pair in the running system's bytecode, present in no source candidate.
+#: The conversation's own durable-memory writes; each takes `from_read_material`.
+MEMORY_WRITES = frozenset({'memory_remember', 'memory_record_decision', 'brain_remember'})
 ALREADY_READ = ('web_search', 'web_deep_research', 'web_answer', 'web_fetch', 'web_news', 'web_crawl')
 
 

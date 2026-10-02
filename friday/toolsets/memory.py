@@ -133,6 +133,22 @@ def memory_remember(
             started, f"unknown memory kind {kind!r}; known: {list(MEMORY_KINDS)}"
         ))
 
+    # A turn that consumed a tool result or a page writes read material
+    # (MEM-002, V7-D28): remembered, never in the person's voice.
+    read = run.provenance == c.READ_MATERIAL
+    if read:
+        from friday.memory_promotion import PERSON_SCOPES
+        if kind == PREFERENCE or scope in PERSON_SCOPES:
+            return run.record(c.failed(
+                started, "refused: this turn read material, and read material "
+                         "cannot set a preference or speak for the person; ask "
+                         "them to state it"))
+        if any(row.get("trust_class") != c.READ_MATERIAL
+               for row in store().recall(subject.strip())):
+            return run.record(c.failed(
+                started, "refused: read material cannot overrule what the "
+                         "person said about this subject; kept theirs"))
+
     try:
         row_id = store().remember(
             subject.strip(), value.strip(), kind=kind, source=source,
@@ -140,6 +156,7 @@ def memory_remember(
             memory_type=memory_type or "semantic",
             project_scope=(project or "").strip(),
             source_ref=(source_ref or "").strip(),
+            trust_class=c.READ_MATERIAL if read else "",
         )
     except ValueError as exc:
         return run.record(c.failed(started, str(exc)))
@@ -338,6 +355,10 @@ def project_record_decision(
 
     if not (project or "").strip() or not (decision or "").strip():
         return run.record(c.failed(started, "project and decision are required"))
+    if run.provenance == c.READ_MATERIAL:
+        return run.record(c.failed(
+            started, "refused: this turn read material, and read material "
+                     "cannot record a decision; a decision is the person's"))
 
     row_id = store().record_decision(
         project.strip(), decision.strip(), source=source,
