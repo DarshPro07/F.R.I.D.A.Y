@@ -2962,6 +2962,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Registered real JIT target-state probes for files_edit/copy/move/recycle/delete: a file gone or outside the jail at execution is refused 'JIT: ...'. Hash-change acceptance already covered by existing tests. (build run, commit e691d993f)",
         "next_action": 'GAPS: requires_auth capabilities other than files_* still have no probe; there is no live-session signal to probe for them; Envelopes from before fingerprints carry no hashes',
     }),
+    ('MEM-002', {
+        "status": PARTIAL,
+        "current_implementation": 'The voice agent now tracks whether a turn consumed a tool result or page and sets from_read_material on memory_remember/memory_record_decision/brain_remember; such writes are READ_MATERIAL, refused as preference/decision/overrule, and the ledger refuses them. (build run, commit e7eb76773)',
+        "next_action": "GAPS: Only the agent's use_capability path sets the flag; a client calling the MCP memory tools directly can still omit it (fail-open). Taint is per turn and conservative: any capability result marks the turn read.; Agent-level wiring is covered by a constant check, not an end-to-end use_capability test.",
+    }),
 ]
 
 
