@@ -885,7 +885,7 @@ def test_repair_prompt_carries_every_finding_and_the_rule():
     assert "tests/t.py" in q and "E assert 1" in q
 
 
-def _repairable(repo, tmp_path, integration=True, session="S1"):
+def _repairable(repo, tmp_path, integration=True, session="S1", result="FAILED_INTEGRATION", **more):
     run, wt = _done_run(repo, tmp_path)
     (wt / "a.py").write_text("a = 1\n")
     _evidence_done(wt)
@@ -898,7 +898,7 @@ def _repairable(repo, tmp_path, integration=True, session="S1"):
                            "base_sha": run.base_sha, "branch": "build/r-1", "model": "sonnet"})
     if integration:
         (runs / "R-1.integration.json").write_text(json.dumps(
-            {"requirement": "R-1", "result": "NO_TEST", "detail": "no test touched"}))
+            {"requirement": "R-1", "result": result, "detail": "no test touched", **more}))
     return wt, runs
 
 
@@ -910,8 +910,229 @@ def test_repair_resumes_the_recorded_session_at_half_budget(monkeypatch, repo, t
     cmd = cmds[0]
     assert cmd[cmd.index("--resume") + 1] == "S1"
     assert cmd[cmd.index("--max-turns") + 1] == "12" and cmd[cmd.index("--max-budget-usd") + 1] == "1.5"
-    assert any("NO_TEST" in c and "no test touched" in c for c in cmd)
-    assert run.repairs == 1 and run.base_sha and run.wt == wt
+    assert any("FAILED_INTEGRATION" in c and "no test touched" in c for c in cmd)
+    assert run.repairs == 1 and run.base_sha and run.wt == wt and run.kind == "REPAIR"
+
+
+def _repair_cmd(monkeypatch, repo, tmp_path, **kw):
+    wt, runs = _repairable(repo, tmp_path, **kw)
+    cmds = []
+    monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
+    K.repair("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
+    return cmds[0], runs
+
+
+def test_an_unlocalized_first_repair_is_a_fresh_session_with_a_capsule(monkeypatch, repo, tmp_path):
+    cmd, _ = _repair_cmd(monkeypatch, repo, tmp_path, result="NO_TEST")
+    assert "--resume" not in cmd
+    prompt = cmd[cmd.index("-p") + 1]
+    assert prompt.startswith("# Failure capsule: R-1 (attempt 2)") and "NO_TEST" in prompt
+    assert "## Already ruled out" in prompt and "## Current diff stat" in prompt and "a.py" in prompt
+
+
+@pytest.mark.parametrize("failing,resumes", [(3, True), (4, False)])
+def test_not_green_resumes_only_up_to_three_failing_tests(monkeypatch, repo, tmp_path, failing, resumes):
+    cmd, _ = _repair_cmd(monkeypatch, repo, tmp_path, result="NOT_GREEN",
+                         failures=[f"t{i}" for i in range(failing)])
+    assert ("--resume" in cmd) is resumes
+
+
+def test_every_repair_from_attempt_three_is_fresh_and_never_the_transcript(monkeypatch, repo, tmp_path):
+    wt, runs = _repairable(repo, tmp_path)
+    K.ledger_append({"attempt_id": "x1", "req": "R-1", "kind": "REPAIR", "cost_usd": 1.0}, runs)
+    cmds = []
+    monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
+    K.repair("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
+    assert "--resume" not in cmds[0] and "(attempt 3)" in cmds[0][cmds[0].index("-p") + 1]
+
+
+def test_failure_capsule_names_failures_reproduction_and_ruled_out(repo, tmp_path):
+    wt = tmp_path / "wts" / "r-1"
+    base = K.create_worktree(wt, "r-1", repo=repo)
+    (wt / "n.py").write_text("n = 1\n")
+    cap = K.failure_capsule(
+        "R-1", {"result": "NOT_GREEN", "failures": ["FAILED tests/t.py::test_a - boom"],
+                "verifier": {"verdict": "FAIL", "failing_criteria": ["crit"], "evidence_refs": ["f.py:2"]},
+                "red_green": {"tests": ["tests/t.py"], "tail": "E boom"}},
+        {"evidence": {"summary": "I fixed it", "gaps": ["live"]}, "files_changed": ["n.py"]},
+        wt, base, 3)
+    for text in ("NOT_GREEN", "tests/t.py::test_a - boom", "crit", "f.py:2", "E boom", "I fixed it",
+                 "known gap: live", "pytest_brief.py -- tests/t.py", "- n.py"):
+        assert text in cap
+
+
+def test_escalate_is_a_fresh_stronger_session_with_the_p0_budget(monkeypatch, repo, tmp_path):
+    wt, runs = _repairable(repo, tmp_path, result="NO_TEST")
+    cmds = []
+    monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
+    run = K.escalate("R-1", capsule_extra="OWNER NOTE", worktrees=tmp_path / "wts",
+                     runs_dir=runs, repo=repo)
+    cmd = cmds[0]
+    assert "--resume" not in cmd and cmd[cmd.index("--model") + 1] == "opus"
+    assert cmd[cmd.index("--max-turns") + 1] == "40" and cmd[cmd.index("--max-budget-usd") + 1] == "6.0"
+    prompt = cmd[cmd.index("-p") + 1]
+    assert "# Failure capsule: R-1" in prompt and prompt.endswith("OWNER NOTE")
+    assert run.kind == "ESCALATE" and run.klass == "P0" and run.wt == wt
+
+
+def test_escalate_makes_a_worktree_from_head_when_there_is_none(monkeypatch, repo, tmp_path):
+    cmds = []
+    monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
+    run = K.escalate("R-9", model="sonnet", worktrees=tmp_path / "wts", runs_dir=tmp_path / "runs",
+                     repo=repo, row=row("R-9"))
+    assert (run.wt / ".build" / "packet.md").exists() and run.base_sha
+    assert cmds[0][cmds[0].index("--model") + 1] == "sonnet"
+
+
+def test_escalate_cli_reads_the_packet_file(monkeypatch, tmp_path, capsys):
+    packet = tmp_path / "p.md"
+    packet.write_text("EXTRA", encoding="utf-8")
+    seen = {}
+    monkeypatch.setattr(K, "escalate", lambda req, **kw: seen.update(req=req, **kw) or "run")
+    monkeypatch.setattr(K, "watch", lambda runs: [{"requirement": "R-1", "state": "DONE"}])
+    assert K.main(["escalate", "R-1", "--model", "sonnet", "--packet", str(packet)]) == 0
+    assert seen == {"req": "R-1", "model": "sonnet", "capsule_extra": "EXTRA"}
+    assert "R-1: DONE" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------ invocation ledger
+
+def _attempt(wt, run, *events, offset=True):
+    """Append one invocation's events to the shared stream and aim `run` at them."""
+    if offset:
+        run.stream_offset = K._stream_size(wt)
+    with open(wt / ".build" / "stream.jsonl", "a", encoding="utf-8") as fh:
+        for e in events:
+            fh.write(json.dumps(e) + "\n")
+
+
+def _inv(sid, cost, turns=1, inp=10, **kw):
+    return [{"type": "system", "subtype": "init", "session_id": sid},
+            {"type": "result", "subtype": "success", "session_id": sid, "num_turns": turns,
+             "total_cost_usd": cost, "usage": {"input_tokens": inp}, **kw}]
+
+
+def _new_run(wt, repo, **kw):
+    return K.Running("R-1", _Proc(0), wt, base_sha="", repo=repo, **kw)
+
+
+def test_ledger_line_carries_the_attempt_identity(repo, tmp_path, monkeypatch):
+    monkeypatch.setenv("FRIDAY_BUILD_RUN_ID", "run1")
+    monkeypatch.setenv("FRIDAY_BUILD_WAVE_ID", "run1-w2")
+    run, wt = _done_run(repo, tmp_path)
+    K.finalize(run, None, tmp_path / "runs")
+    (entry,) = K.ledger_entries(tmp_path / "runs")
+    assert entry["attempt_id"] == run.attempt_id and entry["kind"] == "SHIP"
+    assert (entry["req"], entry["program_run_id"], entry["wave_id"]) == ("R-1", "run1", "run1-w2")
+    assert (entry["model"], entry["session_id"], entry["cost_usd"], entry["turns"]) == ("sonnet", "S1", 0.2, 3)
+    for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens",
+                "wall_seconds", "peak_rss_mb", "at"):
+        assert key in entry
+    run2 = _new_run(wt, repo)
+    assert run2.attempt_id != run.attempt_id
+
+
+def test_ledger_defaults_run_and_wave_to_empty_without_a_program(repo, tmp_path, monkeypatch):
+    monkeypatch.delenv("FRIDAY_BUILD_RUN_ID", raising=False)
+    monkeypatch.delenv("FRIDAY_BUILD_WAVE_ID", raising=False)
+    run, _ = _done_run(repo, tmp_path)
+    K.finalize(run, None, tmp_path / "runs")
+    (entry,) = K.ledger_entries(tmp_path / "runs")
+    assert entry["program_run_id"] == "" and entry["wave_id"] == ""
+
+
+def test_case1_an_earlier_invocations_cost_in_the_stream_is_not_charged_again(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    _attempt(wt, run, {"type": "result", "session_id": "S1", "num_turns": 9, "total_cost_usd": 3.0, "usage": {}})
+    run.stream_offset = K._stream_size(wt)
+    _attempt(wt, run, *_inv("S1", 1.0, turns=2), offset=False)
+    K.finalize(run, None, tmp_path / "runs")
+    assert K.invocation_cost(run.attempt_id, tmp_path / "runs") == 1.0
+
+
+def test_case2_each_of_three_resumes_owns_only_its_events(repo, tmp_path):
+    runs = tmp_path / "runs"
+    run, wt = _done_run(repo, tmp_path)
+    K.finalize(run, None, runs)  # the first invocation owns the $0.2 already in the stream
+    owned = []
+    for i, cost in enumerate((1.0, 2.0, 4.0)):
+        nxt = _new_run(wt, repo, kind="RESUME")
+        _attempt(wt, nxt, *_inv("S1", cost, turns=i + 5))
+        K.finalize(nxt, None, runs)
+        owned.append(K.invocation_cost(nxt.attempt_id, runs))
+    assert owned == [1.0, 2.0, 4.0] and K.lifetime_cost("R-1", runs) == 7.2
+
+
+def test_case3_refinalizing_the_same_attempt_does_not_double_count(repo, tmp_path):
+    runs = tmp_path / "runs"
+    run, wt = _done_run(repo, tmp_path)
+    K.finalize(run, None, runs)
+    K.finalize(run, None, runs)  # a controller restart mid-attempt finalizes it again
+    assert len(K.ledger_entries(runs)) == 1 and K.lifetime_cost("R-1", runs) == 0.2
+    assert K.ledger_append(dict(K.ledger_entries(runs)[0]), runs) is False
+
+
+def test_case4_a_duplicate_result_event_is_counted_once(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    _attempt(wt, run, *_inv("S1", 1.0, turns=4), _inv("S1", 1.0, turns=4)[1])
+    rec = K.finalize(run, None, tmp_path / "runs")
+    assert rec["cost_usd"] == 1.0 and rec["turns"] == 4
+    run2 = _new_run(wt, repo)
+    _attempt(wt, run2, {"type": "result", "uuid": "u1", "total_cost_usd": 2.0, "usage": {}},
+             {"type": "result", "uuid": "u1", "total_cost_usd": 2.0, "usage": {}})
+    assert K.finalize(run2, None, tmp_path / "runs")["cost_usd"] == 2.0
+
+
+def test_case5_another_requirements_cost_in_the_stream_is_ignored(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    _attempt(wt, run, *_inv("S1", 1.0), {"type": "result", "session_id": "OTHER", "num_turns": 3,
+                                         "total_cost_usd": 5.0, "usage": {}})
+    assert K.finalize(run, None, tmp_path / "runs")["cost_usd"] == 1.0
+
+
+def test_case6_projections_rebuilt_from_the_ledger_equal_the_incremental_totals(repo, tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    run, wt = _done_run(repo, tmp_path)
+    monkeypatch.setenv("FRIDAY_BUILD_RUN_ID", "r1")
+    incremental = {"r1-w1": 0.0, "r1-w2": 0.0}
+    for wave, cost in (("r1-w1", 0.5), ("r1-w1", 0.25), ("r1-w2", 1.0)):
+        monkeypatch.setenv("FRIDAY_BUILD_WAVE_ID", wave)
+        nxt = _new_run(wt, repo)
+        _attempt(wt, nxt, *_inv("S1", cost, turns=int(cost * 100)))
+        rec = K.finalize(nxt, None, runs)
+        incremental[wave] += rec["cost_usd"]
+    assert K.wave_cost("r1-w1", runs) == incremental["r1-w1"] == 0.75
+    assert K.wave_cost("r1-w2", runs) == incremental["r1-w2"] == 1.0
+    assert K.run_cost("r1", runs) == 1.75 and K.wave_cost("", runs) == 0.0
+    assert K.lifetime_cost("R-1", runs) == 1.75
+
+
+def test_retry_context_growth_is_input_plus_cache_over_the_previous_attempt(repo, tmp_path):
+    runs = tmp_path / "runs"
+    run, wt = _done_run(repo, tmp_path)
+    first = _new_run(wt, repo)
+    _attempt(wt, first, *_inv("S1", 1.0, turns=11, inp=100))
+    K.finalize(first, None, runs)
+    for kind, inp, turns in (("REPAIR", 150, 12), ("RESUME", 300, 13)):
+        nxt = _new_run(wt, repo, kind=kind)
+        _attempt(wt, nxt, *_inv("S1", 1.0, turns=turns, inp=inp))
+        K.finalize(nxt, None, runs)
+    ledger = K.ledger_entries(runs)
+    assert "retry_context_growth" not in ledger[0]
+    assert [e["retry_context_growth"] for e in ledger[1:]] == [1.5, 2.0]
+
+
+def test_roi_is_rebuilt_from_the_ledger(repo, tmp_path):
+    runs = tmp_path / "runs"
+    for i, (state, cost) in enumerate((("DONE", 1.0), ("FAILED", 3.0))):
+        K.ledger_append({"attempt_id": f"a{i}", "req": f"R-{i}", "kind": "SHIP", "mode": "SHIP",
+                         "state": state, "cost_usd": cost, "capsule": True,
+                         "budget_class": "NORMAL", "turns": 4}, runs)
+    _rec(runs, "R-9.json", requirement="R-9", state="DONE", capsule=False, cost_usd=0.5, mode="SHIP")
+    _rec(runs, "R-0.json", requirement="R-0", state="DONE", capsule=False, cost_usd=99.0, mode="SHIP")
+    g = K.roi_groups(runs)
+    assert g["capsule"]["on"]["runs"] == 2 and g["capsule"]["on"]["cost"] == 2.0
+    assert g["capsule"]["off"]["runs"] == 1  # only R-9, which predates the ledger
 
 
 @pytest.mark.parametrize("missing", ["worktree", "session", "integration"])
@@ -966,7 +1187,7 @@ def test_finalize_counts_only_the_events_after_the_runs_stream_offset(repo, tmp_
     assert rec["cost_usd"] == 0.75 and rec["turns"] == 3 and rec["output_tokens"] == 20
     assert rec["cumulative_cost_usd"] == 0.75
     again = K.finalize(run, None, tmp_path / "runs")
-    assert again["cumulative_cost_usd"] == 1.5  # previous record's cumulative + this run
+    assert again["cumulative_cost_usd"] == 0.75  # the same attempt re-finalized is not counted twice
 
 
 def test_stream_size_marks_where_a_run_starts(tmp_path):

@@ -4,6 +4,7 @@ no real ledger or state file."""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -41,6 +42,7 @@ class FakeKernel:
         self.resumes: list[str] = []
         self.repairs: list[str] = []
         self.repair_errors: dict[str, str] = {}
+        self.ledger: list[dict] = []
 
     def load_rows(self):
         return [r for r in self.rows]
@@ -87,7 +89,18 @@ class FakeKernel:
 
     def watch(self, runs):
         self.watched += 1
-        return [self.script[r.req].pop(0) for r in runs]
+        recs = [self.script[r.req].pop(0) for r in runs]
+        for r in recs:  # what the real kernel's finalize appends to the invocation ledger
+            self.ledger.append({"program_run_id": os.environ.get("FRIDAY_BUILD_RUN_ID", ""),
+                                "wave_id": os.environ.get("FRIDAY_BUILD_WAVE_ID", ""),
+                                "cost_usd": float(r.get("cost_usd") or 0.0)})
+        return recs
+
+    def wave_cost(self, wave_id):
+        return sum(e["cost_usd"] for e in self.ledger if e["wave_id"] == wave_id)
+
+    def run_cost(self, run_id):
+        return sum(e["cost_usd"] for e in self.ledger if e["program_run_id"] == run_id)
 
     def _worktrees_root(self):
         raise AssertionError("tests pass worktrees")
@@ -831,3 +844,107 @@ def test_a_test_timeout_parks_as_test_timeout_and_is_not_repaired(env):
     go(env, k, FakeIntegrator(k, results={"A": "TEST_TIMEOUT"}))
     st = state_of(env)
     assert st["escalations"][0]["kind"] == "test_timeout" and not st["repair_queue"]
+
+
+# ------------------------------------------------------- ledger-based spend
+
+class LedgerKernel(FakeKernel):
+    """The ledger says what each invocation cost, whatever the run record claims."""
+
+    def __init__(self, *a, ledger_cost=0.5, **kw):
+        super().__init__(*a, **kw)
+        self.ledger_cost, self.seen_env = ledger_cost, []
+
+    def watch(self, runs):
+        recs = [self.script[r.req].pop(0) for r in runs]
+        self.seen_env.append((os.environ.get("FRIDAY_BUILD_RUN_ID"), os.environ.get("FRIDAY_BUILD_WAVE_ID")))
+        for _ in recs:
+            self.ledger.append({"program_run_id": os.environ["FRIDAY_BUILD_RUN_ID"],
+                                "wave_id": os.environ["FRIDAY_BUILD_WAVE_ID"],
+                                "cost_usd": self.ledger_cost})
+        return recs
+
+
+def test_spend_comes_from_the_ledger_not_the_run_record(env):
+    k = LedgerKernel(ids=("A",))
+    k.script = {"A": [rec("A", cost=99.0)]}
+    go(env, k, bi=FakeIntegrator(k, verifier_cost=0.25), max_waves=1)
+    st = state_of(env)
+    assert st["spend_usd_total"] == 0.75 and st["waves"][0]["spend"] == 0.75
+
+
+def test_the_run_stops_on_ledger_spend_not_record_spend(env):
+    k = LedgerKernel(ids=("A", "B", "C"), ledger_cost=6.0)
+    k.script = {i: [rec(i, cost=0.0)] for i in "ABC"}
+    res, _ = go(env, k, max_usd=10.0, cap=1)
+    assert res["stop_reason"] == "spend" and len(state_of(env)["waves"]) == 2
+
+
+def test_waves_carry_the_run_and_wave_ids_and_the_env_is_restored(env, monkeypatch):
+    monkeypatch.delenv("FRIDAY_BUILD_RUN_ID", raising=False)
+    monkeypatch.delenv("FRIDAY_BUILD_WAVE_ID", raising=False)
+    k = LedgerKernel(ids=("A", "B"))
+    k.script = {"A": [rec("A")], "B": [rec("B")]}
+    go(env, k, cap=1)
+    (r1, w1), (r2, w2) = k.seen_env
+    assert r1 == r2 and w1 == f"{r1}-w1" and w2 == f"{r1}-w2"
+    assert "FRIDAY_BUILD_RUN_ID" not in os.environ and "FRIDAY_BUILD_WAVE_ID" not in os.environ
+
+
+# ----------------------------------------------------------------- program lock
+
+def _dead_pid():
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    return p.pid
+
+
+def test_a_held_lock_refuses_the_program_and_is_left_alone(env):
+    lock = env.state.parent / "build_program.lock"
+    lock.parent.mkdir(parents=True)
+    lock.write_text(json.dumps({"pid": os.getpid(), "started": "now"}), encoding="utf-8")
+    k = FakeKernel(ids=("A",))
+    res, _ = go(env, k)
+    assert res == {"stop_reason": "another program is running", "waves": []}
+    assert k.launches == [] and lock.exists()
+    assert json.loads(lock.read_text())["pid"] == os.getpid()
+
+
+def test_a_stale_lock_is_replaced_and_released_afterwards(env):
+    lock = env.state.parent / "build_program.lock"
+    lock.parent.mkdir(parents=True)
+    lock.write_text(json.dumps({"pid": _dead_pid(), "started": "then"}), encoding="utf-8")
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+    res, _ = go(env, k)
+    assert res["stop_reason"] != "another program is running" and k.launches
+    assert not lock.exists()
+
+
+def test_the_lock_is_held_during_the_run_and_released_when_it_raises(env):
+    lock = env.state.parent / "build_program.lock"
+    held = []
+
+    class Boom(FakeKernel):
+        def load_rows(self):
+            held.append(json.loads(lock.read_text())["pid"])
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        go(env, Boom(ids=("A",)))
+    assert held == [os.getpid()] and not lock.exists()
+
+
+def test_an_unreadable_lock_is_stale(tmp_path):
+    lock = tmp_path / "x.lock"
+    lock.write_text("{half", encoding="utf-8")
+    assert BP.acquire_lock(lock) is True
+    assert BP.acquire_lock(lock) is False  # now held by this live process
+    BP.release_lock(lock)
+    assert not lock.exists()
+
+
+def test_main_exits_3_when_another_program_is_running(monkeypatch, capsys):
+    monkeypatch.setattr(BP, "run_program", lambda **kw: {"stop_reason": BP.BUSY, "waves": []})
+    assert BP.main([]) == 3
+    assert "another program is running" in capsys.readouterr().out

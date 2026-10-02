@@ -6,6 +6,8 @@
     python scripts/build_kernel.py qualify
     python scripts/build_kernel.py resume REQ
     python scripts/build_kernel.py roi
+    python scripts/build_kernel.py repair REQ
+    python scripts/build_kernel.py escalate REQ [--model opus] [--packet FILE]
     python scripts/build_kernel.py launch REQ [--dry-run] [--model M] [--max-turns N] [--max-budget-usd X]
                                      [--mode SHIP|SCOUT] [--class MICRO|NORMAL|COMPLEX|P0]
     python scripts/build_kernel.py run-wave [--cap N] [--dry-run]
@@ -27,6 +29,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -53,6 +56,12 @@ DEFAULT_WORKER_GB = 1.5
 RSS_WINDOW = 10
 #: Append-only worker peak history; run records are overwritten per requirement.
 PEAKS_FILE = "peaks.jsonl"
+#: Append-only invocation ledger: one line per launch/resume/repair/escalate.
+#: Every cost and ROI figure is a projection of it, never of a run record.
+INVOCATIONS_FILE = "invocations.jsonl"
+KINDS = ("SHIP", "SCOUT", "RESUME", "REPAIR", "ESCALATE")
+#: A first repair may resume the session only for a failure this small.
+LOCALIZED_FAILING_TESTS = 3
 DEFAULT_WALL_S = 45 * 60
 DEFAULT_STALL_S = 10 * 60
 ALLOWED_TOOLS = ",".join(("Read", "Edit", "Write", "Glob", "Grep",
@@ -403,6 +412,10 @@ class Running:
     capsule: bool = False
     peak_rss_mb: float | None = None
     stream_offset: int = 0  # bytes of stream.jsonl that belong to earlier runs
+    kind: str = ""  # ledger kind; "" means SHIP (or SCOUT for a scout)
+    attempt_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    program_run_id: str = field(default_factory=lambda: os.environ.get("FRIDAY_BUILD_RUN_ID", ""))
+    wave_id: str = field(default_factory=lambda: os.environ.get("FRIDAY_BUILD_WAVE_ID", ""))
 
 
 # ------------------------------------------------------------ worktrees
@@ -606,7 +619,8 @@ def resume(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
     return Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
                    base_sha=meta["base_sha"], branch=meta["branch"],
                    model=model or meta.get("model") or "sonnet", wall_s=wall, repo=repo,
-                   continued=True, capsule=bool(meta.get("capsule")), stream_offset=offset)
+                   continued=True, capsule=bool(meta.get("capsule")), stream_offset=offset,
+                   kind="RESUME")
 
 
 def _read_json(path: Path) -> dict:
@@ -650,10 +664,90 @@ def repair_prompt(integration: dict) -> str:
     return "\n".join(lines)
 
 
+def _failing_tests(integration: dict) -> list[str]:
+    rg = integration.get("red_green") or {}
+    found = integration.get("failures") or rg.get("failing") or rg.get("tests") or []
+    return [str(t) for t in found]
+
+
+def localized(integration: dict) -> bool:
+    """A failure small enough for the worker's own session to fix with its
+    context: the integrator reset a change that ran (FAILED_INTEGRATION), or
+    the new tests ran red with at most LOCALIZED_FAILING_TESTS failing."""
+    result = integration.get("result", "FAILED_INTEGRATION")
+    if result == "FAILED_INTEGRATION":
+        return True
+    return result == "NOT_GREEN" and len(_failing_tests(integration)) <= LOCALIZED_FAILING_TESTS
+
+
+def _diff_stat(wt: Path, base_sha: str) -> str:
+    try:
+        return _git(["diff", "--stat", base_sha], wt, 60)
+    except (KernelError, subprocess.TimeoutExpired):
+        return ""
+
+
+def failure_capsule(req: str, integration: dict, run_rec: dict, wt: Path, base_sha: str,
+                    attempt: int) -> str:
+    """What a fresh session needs to fix a rejected change, built from the
+    integration record and the run record - never from the earlier transcript."""
+    result = integration.get("result") or "no integration record"
+    verifier = integration.get("verifier") or {}
+    rg = integration.get("red_green") or {}
+    failing = _failing_tests(integration)
+    tests = [str(t) for t in rg.get("tests") or []] or [
+        t.split(" - ")[0].removeprefix("FAILED ").strip() for t in failing]
+    evidence = run_rec.get("evidence") or {}
+    files = run_rec.get("files_changed") or []
+    lines = [f"# Failure capsule: {req} (attempt {attempt})",
+             "Read .build/packet.md for the requirement. This is a fresh session: the earlier "
+             "transcript is deliberately not carried over; the worktree holds the earlier work.",
+             "## What failed", f"Integration result: {result}."]
+    if integration.get("detail"):
+        lines.append(f"Detail: {integration['detail']}")
+    lines += ["## Expected",
+              "New or changed tests fail without the change and pass with it, nothing else "
+              "regresses, and every acceptance criterion is met."]
+    if verifier.get("failing_criteria"):
+        lines += ["Criteria the verifier found unmet:"] + [f"- {c}" for c in verifier["failing_criteria"]]
+    lines.append("## Observed")
+    if verifier:
+        lines.append(f"Verifier verdict: {verifier.get('verdict', '')}.")
+    lines += [f"- failing: {t}" for t in failing] or ["- no failing test was recorded"]
+    for ref in verifier.get("evidence_refs") or []:
+        lines.append(f"- evidence: {ref}")
+    if rg.get("tail"):
+        lines += ["Test output tail:", str(rg["tail"])]
+    lines.append("## Already ruled out")
+    lines.append(f"- the earlier attempt's own claim (verify it, do not trust it): "
+                 f"{evidence.get('summary') or 'none recorded'}")
+    lines += [f"- known gap: {g}" for g in evidence.get("gaps") or []]
+    lines.append("- repeating the earlier approach unchanged: it was rejected")
+    lines += ["## Reproduction",
+              f"{VENV_PY} scripts/pytest_brief.py -- " + (" ".join(tests) or "<the tests for this change>"),
+              "## Files"] + ([f"- {f}" for f in files] or ["- none recorded"])
+    stat = _diff_stat(wt, base_sha) if base_sha else ""
+    lines += ["## Current diff stat", stat or "(unavailable)", "## Tests to run",
+              " ".join(tests) or "the tests for this change",
+              "Fix every finding you can in code and tests. A finding that needs something outside "
+              "this worktree (a live run, hardware, an owner decision) is recorded in evidence gaps, "
+              "never faked. Then rewrite .build/evidence.json (status, summary, acceptance_met, "
+              "gaps, commit_subject)."]
+    return "\n".join(lines)
+
+
+def attempts_made(req: str, runs_dir: Path = RUNS_DIR) -> int:
+    """Worker invocations already recorded for `req` (scouts excluded)."""
+    return sum(e.get("req") == req and e.get("kind") != "SCOUT" for e in ledger_entries(runs_dir))
+
+
 def repair(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR,
            repo: Path = ROOT, model: str | None = None) -> Running:
-    """Resume the worker's own session in its worktree with the integrator's
-    findings, once, at half its class limits."""
+    """Repair a rejected change in its worktree at half its class limits. The
+    first repair (attempt 2) resumes the worker's own session when the failure
+    is localized; any other, and every repair from attempt 3, is a FRESH session
+    whose prompt is a Failure Capsule, because a resumed session re-reads its
+    whole transcript and costs more each time."""
     wt = (worktrees or _worktrees_root()) / req.lower()
     if not wt.is_dir():
         raise KernelError(f"{req} has no worktree at {wt}")
@@ -670,19 +764,64 @@ def repair(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
         raise KernelError(f"{req} has no base commit to repair against")
     klass = meta.get("klass") or run_rec.get("budget_class") or "NORMAL"
     turns, budget, wall = BUDGETS[klass]
+    attempt = max(attempts_made(req, runs_dir), 1) + 1
+    model = model or meta.get("model") or "sonnet"
+    if attempt == 2 and localized(integration):
+        cmd = worker_command(model, max(1, turns // 2), budget / 2, resume=str(sid),
+                             prompt=repair_prompt(integration))
+    else:
+        cmd = worker_command(model, max(1, turns // 2), budget / 2,
+                             prompt=failure_capsule(req, integration, run_rec, wt, base_sha, attempt))
+    return _relaunch(req, wt, cmd, meta, run_rec, kind="REPAIR", klass=klass, model=model,
+                     base_sha=base_sha, wall=wall, repo=repo, repairs=1)
+
+
+def _relaunch(req: str, wt: Path, cmd: list[str], meta: dict, run_rec: dict, *, kind: str,
+              klass: str, model: str, base_sha: str, wall: float, repo: Path,
+              repairs: int = 0) -> Running:
     started = time.time()
     offset = _stream_size(wt)
-    model = model or meta.get("model") or "sonnet"
     branch = meta.get("branch") or run_rec.get("branch", "")
     _write_run_meta(wt, {**meta, "req": req, "mode": "SHIP", "klass": klass,
                          "base_sha": base_sha, "branch": branch, "model": model,
                          "started": started, "stream_offset": offset})
-    cmd = worker_command(model, max(1, turns // 2), budget / 2, resume=str(sid),
-                         prompt=repair_prompt(integration))
     return Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
                    base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
-                   continued=True, repairs=1, capsule=bool(meta.get("capsule")),
-                   stream_offset=offset)
+                   continued=True, repairs=repairs, capsule=bool(meta.get("capsule")),
+                   stream_offset=offset, kind=kind)
+
+
+def escalate(req: str, *, model: str = "opus", capsule_extra: str = "",
+             worktrees: Path | None = None, runs_dir: Path = RUNS_DIR, repo: Path = ROOT,
+             row: dict | None = None) -> Running:
+    """A fresh session on a stronger model, with the P0 budget, in the
+    requirement's existing worktree (or a new one from HEAD when it has none).
+    Its prompt is the Failure Capsule plus any packet text the owner adds."""
+    name = req.lower()
+    wt = (worktrees or _worktrees_root()) / name
+    run_rec = _read_json(runs_dir / f"{req}.json")
+    integration = _read_json(runs_dir / f"{req}.integration.json")
+    meta = _run_meta(wt) if wt.is_dir() else {}
+    base_sha = meta.get("base_sha") or run_rec.get("base_sha") or ""
+    if not wt.is_dir():
+        row = row or next((r for r in load_rows() if r["id"] == req), None)
+        if row is None:
+            raise KernelError(f"unknown requirement {req!r}")
+        base_sha = create_worktree(wt, name, repo=repo)
+        (wt / ".build").mkdir(parents=True, exist_ok=True)
+        (wt / ".build" / "packet.md").write_text(
+            packet_text(row, load_findings(req, runs_dir), "P0"), encoding="utf-8", newline="\n")
+        meta = {"capsule": False}
+    if not base_sha:
+        raise KernelError(f"{req} has no base commit to escalate against")
+    attempt = attempts_made(req, runs_dir) + 1
+    prompt = failure_capsule(req, integration, run_rec, wt, base_sha, attempt)
+    if capsule_extra.strip():
+        prompt += "\n## Owner's packet\n" + capsule_extra.strip()
+    turns, budget, wall = BUDGETS["P0"]
+    cmd = worker_command(model, turns, budget, prompt=prompt)
+    return _relaunch(req, wt, cmd, meta, run_rec, kind="ESCALATE", klass="P0", model=model,
+                     base_sha=base_sha, wall=wall, repo=repo)
 
 
 # ---------------------------------------------------------------- watch
@@ -856,15 +995,91 @@ def _scout_outcome(run: Running, runs_dir: Path, final: str = "") -> dict:
     return found if ok else {}
 
 
+# ------------------------------------------------------ invocation ledger
+
+def ledger_entries(runs_dir: Path = RUNS_DIR) -> list[dict]:
+    """Every ledger line, oldest first; unreadable lines are skipped."""
+    out: list[dict] = []
+    try:
+        text = (runs_dir / INVOCATIONS_FILE).read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and entry.get("attempt_id"):
+            out.append(entry)
+    return out
+
+
+def ledger_append(entry: dict, runs_dir: Path = RUNS_DIR) -> bool:
+    """Append one invocation; a second line for the same attempt_id is a no-op
+    (a controller restart re-finalizes an attempt it already recorded)."""
+    if any(e["attempt_id"] == entry["attempt_id"] for e in ledger_entries(runs_dir)):
+        return False
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    with open(runs_dir / INVOCATIONS_FILE, "a", encoding="utf-8", newline="\n") as fh:
+        fh.write(json.dumps(entry) + "\n")
+    return True
+
+
+def _cost_where(runs_dir: Path, **match) -> float:
+    return round(sum(float(e.get("cost_usd") or 0.0) for e in ledger_entries(runs_dir)
+                     if all(e.get(k) == v for k, v in match.items())), 4)
+
+
+def invocation_cost(attempt_id: str, runs_dir: Path = RUNS_DIR) -> float:
+    return _cost_where(runs_dir, attempt_id=attempt_id)
+
+
+def wave_cost(wave_id: str, runs_dir: Path = RUNS_DIR) -> float:
+    return _cost_where(runs_dir, wave_id=wave_id) if wave_id else 0.0
+
+
+def run_cost(program_run_id: str, runs_dir: Path = RUNS_DIR) -> float:
+    return _cost_where(runs_dir, program_run_id=program_run_id) if program_run_id else 0.0
+
+
+def lifetime_cost(req: str, runs_dir: Path = RUNS_DIR) -> float:
+    return _cost_where(runs_dir, req=req)
+
+
+def _context_tokens(entry: dict) -> int:
+    return sum(int(entry.get(k) or 0) for k in
+               ("input_tokens", "cache_read_tokens", "cache_creation_tokens"))
+
+
+def _own_results(events: list[dict]) -> list[dict]:
+    """This attempt's result events, each counted once. A stream can carry a
+    foreign session's result (not one this attempt's init events announced) and a
+    result event written twice; neither may add cost."""
+    sessions = {e.get("session_id") for e in events if e.get("type") == "system"
+                and e.get("subtype") in (None, "init") and e.get("session_id")}
+    seen: set = set()
+    out: list[dict] = []
+    for r in _results(events):
+        if sessions and r.get("session_id") and r["session_id"] not in sessions:
+            continue
+        key = r.get("uuid") or ((r.get("session_id"), r.get("num_turns"))
+                                if r.get("session_id") else None)
+        if key is not None:
+            if key in seen:
+                continue
+            seen.add(key)
+        out.append(r)
+    return out
+
+
 def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dict:
     """Write data/build_runs/<req>.json from the result events and evidence;
     a DONE SHIP run is committed on its branch, a scout's findings are kept."""
     log = run.wt / ".build" / "stream.jsonl"
     events = _events(log, run.stream_offset)
-    results = _results(events)
+    results = _own_results(events)
     res = results[-1] if results else {}
     runs_dir.mkdir(parents=True, exist_ok=True)
-    previous = _read_json(runs_dir / f"{run.req}.json")
     scout = run.mode == "SCOUT"
     ev = _scout_outcome(run, runs_dir, str(res.get("result") or "")) if scout else _evidence(run.wt)
     if reason:
@@ -900,8 +1115,24 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
            "evidence": ev, "continued": run.continued,
            "session_id": res.get("session_id", ""), "reads": read_metrics(events),
            "capsule": run.capsule, "peak_rss_mb": run.peak_rss_mb}
-    rec["cumulative_cost_usd"] = round(float(previous.get("cumulative_cost_usd") or 0.0)
-                                       + rec["cost_usd"], 4)
+    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    prior = [e for e in ledger_entries(runs_dir) if e["req"] == run.req
+             and e["attempt_id"] != run.attempt_id and _context_tokens(e) > 0]
+    entry = {"attempt_id": run.attempt_id, "req": run.req,
+             "kind": run.kind or ("SCOUT" if scout else "SHIP"),
+             "program_run_id": run.program_run_id, "wave_id": run.wave_id, "model": run.model,
+             "session_id": rec["session_id"], "cost_usd": rec["cost_usd"],
+             "input_tokens": rec["input_tokens"], "output_tokens": rec["output_tokens"],
+             "cache_read_tokens": rec["cache_read_tokens"],
+             "cache_creation_tokens": rec["cache_creation_tokens"], "turns": rec["turns"],
+             "wall_seconds": rec["wall_seconds"], "peak_rss_mb": run.peak_rss_mb, "at": at,
+             "state": state, "budget_class": run.klass, "capsule": run.capsule,
+             "mode": run.mode, "reads": rec["reads"]}
+    if entry["kind"] in ("REPAIR", "RESUME") and prior and _context_tokens(prior[-1]):
+        entry["retry_context_growth"] = round(_context_tokens(entry) / _context_tokens(prior[-1]), 3)
+    ledger_append(entry, runs_dir)
+    rec["attempt_id"] = run.attempt_id
+    rec["cumulative_cost_usd"] = lifetime_cost(run.req, runs_dir)
     if commit_error:
         rec["commit_error"] = commit_error
     if run.peak_rss_mb is not None:
@@ -1019,18 +1250,27 @@ def _field(rec: dict, path: tuple[str, ...]):
     return rec if isinstance(rec, (int, float)) and not isinstance(rec, bool) else None
 
 
-def roi_groups(runs_dir: Path = RUNS_DIR) -> dict[str, dict[str, dict]]:
-    """Run records grouped by capsule arm (SHIP runs) and by budget class, each
-    with run count, DONE count, field means over the records that have the
-    field, a count of records missing it, and AgentROI = DONE runs per dollar."""
-    buckets: dict[str, dict[str, list[dict]]] = {"capsule": {}, "class": {}}
+def invocation_units(runs_dir: Path = RUNS_DIR) -> list[dict]:
+    """What ROI counts: every ledger invocation, plus the run record of a
+    requirement that predates the ledger (it has no invocation line)."""
+    units = list(ledger_entries(runs_dir))
+    covered = {u.get("req") for u in units}
     for p in run_records(runs_dir):
         try:
             rec = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if not isinstance(rec, dict):
-            continue
+        if isinstance(rec, dict) and rec.get("requirement") not in covered:
+            units.append(rec)
+    return units
+
+
+def roi_groups(runs_dir: Path = RUNS_DIR) -> dict[str, dict[str, dict]]:
+    """Run records grouped by capsule arm (SHIP runs) and by budget class, each
+    with run count, DONE count, field means over the records that have the
+    field, a count of records missing it, and AgentROI = DONE runs per dollar."""
+    buckets: dict[str, dict[str, list[dict]]] = {"capsule": {}, "class": {}}
+    for rec in invocation_units(runs_dir):
         if rec.get("mode") != "SCOUT":
             arm = {True: "on", False: "off"}.get(rec.get("capsule"), "unknown")
             buckets["capsule"].setdefault(arm, []).append(rec)
@@ -1092,6 +1332,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("roi")
     sub.add_parser("resume").add_argument("req")
     sub.add_parser("repair").add_argument("req")
+    es = sub.add_parser("escalate")
+    es.add_argument("req")
+    es.add_argument("--model", default="opus")
+    es.add_argument("--packet", default=None, help="file of extra packet text for the prompt")
     sub.add_parser("status")
     w = sub.add_parser("waves")
     rw = sub.add_parser("run-wave")
@@ -1131,6 +1375,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "repair":
             for rec in watch([repair(args.req)]):
+                print(f"{rec['requirement']}: {rec['state']}")
+            return 0
+        if args.cmd == "escalate":
+            extra = Path(args.packet).read_text(encoding="utf-8") if args.packet else ""
+            for rec in watch([escalate(args.req, model=args.model, capsule_extra=extra)]):
                 print(f"{rec['requirement']}: {rec['state']}")
             return 0
         rows, cfg = load_rows(), load_config()

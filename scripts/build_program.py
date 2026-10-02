@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,6 +31,9 @@ import build_kernel  # noqa: E402
 import prd_ledger as PL  # noqa: E402
 
 STATE_FILE = ROOT / "data" / "build_state.json"
+LOCK_FILE = ROOT / "data" / "build_program.lock"
+BUSY = "another program is running"
+BUSY_EXIT = 3
 STATE_DOC = ROOT / "docs" / "implementation" / "PRD_CURRENT_STATE.md"
 DOCS_DIR = "docs/implementation"
 BEGIN = b"<!-- build-program:begin -->"
@@ -77,6 +81,64 @@ def atomic_write(path: Path, data: bytes) -> None:
 def park(state: dict, req: str, reason: str, kind: str, detail: str) -> None:
     state["parked"][req] = reason
     state["escalations"].append({"req": req, "kind": kind, "detail": detail, "at": now()})
+
+
+# --------------------------------------------------------------------- lock
+
+def pid_alive(pid: int) -> bool:
+    """Whether a process with this pid exists. Never signals it: on Windows
+    os.kill terminates the target."""
+    if pid <= 0:
+        return False
+    psutil = build_kernel.psutil
+    if psutil is not None:
+        return psutil.pid_exists(pid)
+    if os.name == "nt":
+        import ctypes
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def acquire_lock(path: Path) -> bool:
+    """Take the exclusive program lock (O_CREAT|O_EXCL, holding our pid and start
+    time). A lock whose pid is not alive is stale and replaced; False when held."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                holder = int(json.loads(path.read_text(encoding="utf-8")).get("pid") or 0)
+            except (OSError, ValueError, AttributeError):
+                holder = 0  # unreadable or half-written: nobody holds it
+            if pid_alive(holder):
+                return False
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"pid": os.getpid(), "started": now()}, fh)
+        return True
+    return False
+
+
+def release_lock(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 # -------------------------------------------------------------------- state
@@ -288,12 +350,15 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
            repo: Path = ROOT, runner=sh) -> tuple[str, float, bool]:
     """Apply one watched run's outcome. Returns (result, spend, settled).
 
+    `spend` is the verifier's cost only: a worker's cost is read from the
+    kernel's invocation ledger (wave_cost / run_cost), never from `rec`.
+
     `settled` is False only when the worker itself failed (FAILED, TIMEOUT,
     STALLED) or the integrator refused to run: those are what a broken
     environment looks like. A rejected or blocked requirement is settled - its
     blocker is persisted and the program moves on to independent work."""
     req, st = rec["requirement"], rec["state"]
-    spend = float(rec.get("cost_usd") or 0.0)
+    spend = 0.0
     if st == "DONE" and rec.get("mode") == "SCOUT":
         return "SCOUT_DONE", spend, True
     if st == "DONE":
@@ -336,13 +401,36 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
                 priority: str | None = None, dry_run: bool = False, repo: Path = ROOT,
                 state_file: Path = STATE_FILE, state_doc: Path = STATE_DOC,
                 worktrees: Path | None = None, k=build_kernel, bi=build_integrate,
-                runner=sh, out=print) -> dict:
+                runner=sh, out=print, lock_file: Path | None = None) -> dict:
+    lock = lock_file or state_file.parent / LOCK_FILE.name
+    if not acquire_lock(lock):
+        return {"stop_reason": BUSY, "waves": []}
+    run_id = uuid.uuid4().hex[:12]
+    saved = {key: os.environ.get(key) for key in ("FRIDAY_BUILD_RUN_ID", "FRIDAY_BUILD_WAVE_ID")}
+    os.environ["FRIDAY_BUILD_RUN_ID"] = run_id
+    try:
+        return _run_locked(run_id, max_waves=max_waves, max_usd=max_usd, cap=cap,
+                           max_wave_usd=max_wave_usd, priority=priority, dry_run=dry_run,
+                           repo=repo, state_file=state_file, state_doc=state_doc,
+                           worktrees=worktrees, k=k, bi=bi, runner=runner, out=out)
+    finally:
+        for key, val in saved.items():
+            if val is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = val
+        release_lock(lock)
+
+
+def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority, dry_run, repo,
+                state_file, state_doc, worktrees, k, bi, runner, out) -> dict:
     if tree_dirty(repo, runner):
         return {"stop_reason": "dirty tree", "waves": []}
     worktrees = worktrees or k._worktrees_root()
     state = load_state(state_file)
     integrated: set[str] = set()
     resumed: set[str] = set()
+    verifier_spent = 0.0  # verifier invocations are not in the worker ledger
     spent, idle, waves_run, stop = 0.0, 0, 0, None
     wave_cap = max_usd / 2 if max_wave_usd is None else max_wave_usd
     while not stop:
@@ -382,18 +470,22 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
             for row, mode, klass in chosen:
                 out(f"{row['id']} {mode} {klass}")
             return {"stop_reason": "dry run", "waves": []}
-        results, wave_spend, progress = {}, 0.0, False
+        results, wave_verifier, progress = {}, 0.0, False
+        wave_id = f"{run_id}-w{len(state['waves']) + 1}"
+        os.environ["FRIDAY_BUILD_WAVE_ID"] = wave_id
         runs = launch_repairs(fixes, state, k, worktrees) + launch_all(chosen, state, k, worktrees, resumed)
         crashed = False
         for rec in k.watch(runs):
             res, cost, ok = settle(rec, state, integrated, k, bi, repo, runner)
             results[rec["requirement"]] = res
-            wave_spend += cost
+            wave_verifier += cost
             progress = progress or ok
             if res == "INTEGRATION_CRASH_UNRECOVERED":
                 crashed = True  # the branch is unverified: integrate nothing more
                 break
-        spent += wave_spend
+        verifier_spent += wave_verifier
+        wave_spend = k.wave_cost(wave_id) + wave_verifier
+        spent = k.run_cost(run_id) + verifier_spent
         waves_run += 1
         idle = 0 if progress else idle + 1
         state["spend_usd_total"] = round(state["spend_usd_total"] + wave_spend, 4)
@@ -470,6 +562,8 @@ def main(argv: list[str] | None = None) -> int:
                       max_wave_usd=a.max_wave_usd,
                       priority=a.priority, dry_run=a.dry_run)
     print(f"stopped: {res['stop_reason']}")
+    if res["stop_reason"] == BUSY:
+        return BUSY_EXIT
     return 1 if res["stop_reason"] == "dirty tree" else 0
 
 
