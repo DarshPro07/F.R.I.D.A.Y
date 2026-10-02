@@ -2912,6 +2912,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Contract governance holds a run to data invariants (checked on arguments before and results after each step), to state preconditions (governance 'requires', gating side-effecting actions only, or those named by an optional 'before'), and to declared recovery (resume_failed_items_only retries only the failed items, reading per-item outcomes from the result's output envelope and keeping merged outcomes on the task). Invariants and recovery are parsed from the request text, ignoring prose like 'the email must be short'. (build run, commit 92630f1bc)",
         "next_action": "GAPS: a state precondition said in words ('once the invoice is approved') is not parsed from text; it is governance-only; max_external_writes from the acceptance criteria is enforced under the key max_side_effects; of the ~110 files test_impact.py names, ~25 were run (contract, objective, planner, continuity, trajectory, executor suites); the rest were not run",
     }),
+    ('CTX-001', {
+        "status": PARTIAL,
+        "current_implementation": "model.infer now compiles its working set within the task class's max_input_tokens, so over-budget context sheds low-priority sections and an unfittable P0 fails before the gateway. (build run, commit ec43bf3cc)",
+        "next_action": 'GAPS: Hermes task bundle and voice turn still assemble context outside the compiler; live-marked test_live_hermes_gateway_answers_without_an_agent_loop fails on TEST-ISOLATION-001 (untouched)',
+    }),
 ]
 
 
