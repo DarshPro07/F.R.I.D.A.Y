@@ -2884,6 +2884,19 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Firewall now pins the handshake server name/version (change suspends), types a non-loopback server's tool output as untrusted via a result resolver, and builds the MCP client through mcp_firewall.server(). (build run, commit 15aff6531)",
         "next_action": 'GAPS: 3 failures in tests/test_voice_path.py are an invalid OpenAI API key (401) in this environment, unrelated; TLS identity is still not pinned; MCP servers used by Hermes/Claude Code workers are configured outside FRIDAY and not seen; wrapped output is a JSON envelope the model is told to treat as data; the runtime does not enforce it beyond that',
     }),
+    ('DOMAIN-001', {
+        "status": VERIFIED,
+        "current_implementation": 'Hermes sessions now count provider safety refusals against the admitted route (same ledger/key the gate reads), closing the Hermes refusal-hook gap. CLI executor and neighbouring executor suites run green. (build run, commit 520383799)',
+        "next_action": "Ruling 2026-10-02: the Cyber Lab executor and authorization-contract module are CYBER-002's scope; DOMAIN-001 routes restricted packets to their own program and never retries a refused route.",
+        "evidence": "Owner ruling 2026-10-02 implemented (cbrne with cbrn alias, cyber_sensitive with a separate intent/authority classification; phrases are signals, deterministic policy decides). The owner's six positive and negative controls plus a no-scope case pass on the integrated tree (17 passed, re-run by the controller with an isolated state root). Build runs f43a83c and 5203837: RED/GREEN at base, affected tests green, fresh verifier PASS both times.",
+        "tests": ['tests/test_domain_gate.py::test_sql_injection_code_review_is_defensive_not_malicious', 'tests/test_domain_gate.py::test_pentest_of_own_staging_with_scope_routes_to_cyber_lab', 'tests/test_domain_gate.py::test_breaking_into_a_third_party_server_is_restricted', 'tests/test_domain_gate.py::test_arms_control_treaty_history_is_informational', 'tests/test_domain_gate.py::test_semantic_classifier_catches_a_packet_without_the_keyword', 'tests/test_domain_gate.py::test_offensive_security_conference_notes_are_not_malicious'],
+        "files": ['friday/domain_gate.py'],
+    }),
+    ('CYBER-002', {
+        "status": PARTIAL,
+        "current_implementation": 'trust.SecurityAuthorization requires owner, scope, expiry and approval id and target_guard refuses out-of-scope hosts; contracts.NET_SECURITY_TARGETS represents the network scope; the fabric registers restricted providers with required permissions. Missing: a provider interface, a sandbox tier abstraction, a mock provider and an evidence contract for the lab.',
+        "next_action": "Add the provider interface, tier abstraction and a mock provider behind the existing authorization contract, with deterministic policy tests only (domain partition, section 95.2). | Carried from DOMAIN-001 (2026-10-02): domain_gate routes cyber_sensitive + authorized_testing packets to a 'cyber_lab' label, but no Cyber Lab executor or authorization-contract module exists yet - build them here.",
+    }),
 ]
 
 
