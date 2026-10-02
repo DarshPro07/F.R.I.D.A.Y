@@ -986,6 +986,25 @@ def _invariant(found: re.Match) -> dict | None:
     if sum(ch.isupper() for ch in value) >= 2 or any(ch.isdigit() for ch in value):
         return {"field": name, "equals": value}
     return None
+#: "once the invoice is approved", "after the order has been paid": a state
+#: that must hold first. Only a recognised state word counts, so "when it is
+#: ready" stays prose.
+_STATE_WORDS = ("approved", "paid", "signed", "confirmed", "verified",
+                "reviewed", "authorized", "authorised", "accepted", "released")
+_PRECONDITION = re.compile(
+    r"\b(?:once|after|when|as\s+soon\s+as|only\s+if|provided)\s+(?:the\s+)?(\w+)\s+"
+    r"(?:is|are|was|has\s+been|have\s+been|gets|get)\s+(?:been\s+)?("
+    + "|".join(_STATE_WORDS) + r")\b", re.IGNORECASE)
+
+
+def _requirement(found: re.Match) -> dict | None:
+    """A state precondition from one _PRECONDITION match: the noun's status."""
+    name = found.group(1).lower()
+    if name in _NOT_A_FIELD:
+        return None
+    return {"field": f"{name}_status", "equals": found.group(2).lower()}
+
+
 #: "retry only the failed ones", "resume the failed items only".
 _RESUME_FAILED = re.compile(
     r"\b(?:only\s+(?:retry|redo|resume)\s+(?:the\s+)?failed|"
@@ -1032,6 +1051,10 @@ def governance_for(plan: Plan, text: str) -> dict:
                   if rule]
     if invariants:
         governance["invariants"] = invariants
+    requires = [rule for rule in map(_requirement, _PRECONDITION.finditer(text or ""))
+                if rule]
+    if requires:
+        governance["requires"] = requires
     if _RESUME_FAILED.search(text or ""):
         governance["recovery"] = c.RESUME_FAILED_ITEMS_ONLY
     if forbidden:

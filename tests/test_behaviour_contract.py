@@ -253,6 +253,16 @@ def test_invariants_and_recovery_are_read_from_the_request_text():
     assert region.governance["invariants"] == [{"field": "region", "equals": "eu-west-1"}]
 
 
+def test_a_state_precondition_said_in_words_is_read_from_the_request_text():
+    text = "once the invoice is approved, send it to the client"
+    said = P.contract_for(P.plan_objective(text), text)
+    assert said.governance["requires"] == [
+        {"field": "invoice_status", "equals": "approved"}]
+    for prose in ("when it is ready, send the email", "send the invoice"):
+        plain = P.contract_for(P.plan_objective(prose), prose)
+        assert "requires" not in plain.governance, (prose, plain.governance)
+
+
 def test_resume_failed_items_only_retries_only_the_failed_items(tmp_path):
     store = Store(tmp_path / "ada.sqlite3")
     contract = c.ObjectiveContract(
