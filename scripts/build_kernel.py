@@ -1192,7 +1192,9 @@ def repair(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
     klass = meta.get("klass") or run_rec.get("budget_class") or "NORMAL"
     turns, budget, wall = BUDGETS[klass]
     attempt = max(attempts_made(req, runs_dir), 1) + 1
-    model = model or meta.get("model") or "sonnet"
+    # Repairs and advised implementers are normal coding work (owner v12 section 8):
+    # never inherit the strong model of the job before them (an Opus advisor).
+    model = model or "sonnet"
     decision, reasons = agent_utility(
         {"id": req}, {"attempt": attempt, "localized": localized(integration),
                       "retry_context_growth": _last_growth(req, runs_dir)})
@@ -1221,7 +1223,7 @@ def _relaunch(req: str, wt: Path, cmd: list[str], meta: dict, run_rec: dict, *, 
                          "started": started, "stream_offset": offset})
     run = Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
                   base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
-                  continued=True, repairs=repairs, capsule=bool(meta.get("capsule")),
+                  continued=False, repairs=repairs, capsule=bool(meta.get("capsule")),
                   stream_offset=offset, kind=kind, reason=reason)
     job_open(run, runs_dir)
     return run

@@ -1553,3 +1553,19 @@ def test_an_advisor_out_of_turns_gets_one_write_it_now_continuation(tmp_path, mo
     assert cmd[cmd.index("--allowedTools") + 1] == K.SCOUT_TOOLS
     assert K.WRITE_NOW_PROMPT in cmd
     assert K.continuation(run) is False  # once only
+
+
+
+def test_a_repair_never_inherits_the_strong_model_of_the_job_before_it(monkeypatch, repo, tmp_path):
+    # 2026-10-02: EVAL-001's and ACT-001's advised implementers ran on Opus because
+    # repair() took the model recorded by the Opus advisor before them (owner v12
+    # section 8: normal coding work runs on the normal model).
+    wt, runs = _repairable(repo, tmp_path)
+    meta = json.loads((wt / ".build" / "run.json").read_text())
+    K._write_run_meta(wt, {**meta, "model": "opus"})
+    cmds = []
+    monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
+    run = K.repair("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
+    assert cmds[0][cmds[0].index("--model") + 1] == "sonnet" and run.model == "sonnet"
+    # A fresh relaunch is a new invocation: its one continuation is still unused.
+    assert run.continued is False
