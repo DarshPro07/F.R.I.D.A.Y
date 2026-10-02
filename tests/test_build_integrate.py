@@ -25,8 +25,10 @@ PROGRESS_V7: list[tuple[str, dict]] = [
 
 
 def _load_v7():
-    return [{"id": "REQ-0", "status": "MISSING", "current_implementation": "", "next_action": "", "evidence": ""},
-            {"id": "REQ-1", "status": "MISSING", "current_implementation": "", "next_action": "", "evidence": ""}]
+    return [{"id": "REQ-0", "status": "MISSING", "current_implementation": "", "next_action": "", "evidence": "",
+             "tests": [], "files": []},
+            {"id": "REQ-1", "status": "MISSING", "current_implementation": "", "next_action": "", "evidence": "",
+             "tests": [], "files": []}]
 
 
 def apply_progress(rows, progress):
@@ -135,6 +137,9 @@ def test_integrated_with_ledger(tmp_path):
     row = {r["id"]: r for r in module.apply_progress(module._load_v7(), module.PROGRESS_V7)}["REQ-1"]
     assert "RED (collection)" in row["evidence"] and out["integrated_commit"][:9] in row["evidence"]
     assert "affected tests" in row["evidence"]
+    # 2026-10-02: --check refuses a VERIFIED v7 row that names no test; the entry
+    # cites the RED/GREEN tests and the changed files.
+    assert row["tests"] == ["tests/test_twice.py"] and "calc.py" in row["files"]
     saved = json.loads((runs / "REQ-1.integration.json").read_text())
     assert saved["result"] == "INTEGRATED" and saved["integrated_commit"]
     assert sh(repo, "branch", "--list", "build/req-1") == ""  # worker branch removed on success
@@ -146,6 +151,9 @@ def test_verified_without_evidence_is_refused_and_the_ledger_is_untouched(tmp_pa
     before = path.read_bytes()
     with pytest.raises(KernelError):
         bi.append_progress(path, "REQ-1", "VERIFIED", "impl", "", evidence=" ")
+    assert path.read_bytes() == before
+    with pytest.raises(KernelError):  # evidence but no named test
+        bi.append_progress(path, "REQ-1", "VERIFIED", "impl", "", evidence="RED/GREEN", extra={"tests": []})
     assert path.read_bytes() == before
 
 
@@ -557,7 +565,8 @@ def test_no_ledger_skips_the_entry(tmp_path):
 def test_append_progress_adds_one_entry_that_loads(tmp_path):
     path = tmp_path / "prd_ledger.py"
     path.write_text(LEDGER_SRC, encoding="utf-8")
-    bi.append_progress(path, "REQ-1", "VERIFIED", "done it's \"quoted\"", "", evidence="RED/GREEN 'x'")
+    bi.append_progress(path, "REQ-1", "VERIFIED", "done it's \"quoted\"", "", evidence="RED/GREEN 'x'",
+                       extra={"tests": ["tests/test_x.py"]})
     module = bi.load_ledger(path)
     assert [rid for rid, _ in module.PROGRESS_V7] == ["REQ-0", "REQ-1"]
     row = {r["id"]: r for r in module.apply_progress(module._load_v7(), module.PROGRESS_V7)}["REQ-1"]
@@ -581,7 +590,7 @@ def test_append_progress_restores_the_file_when_it_does_not_load(tmp_path):
         bi.append_progress(path, "REQ-1", "NOT_A_STATUS", "x", "")
     assert path.read_bytes() == before
     with pytest.raises(KernelError, match="restored"):
-        bi.append_progress(path, "REQ-UNKNOWN", "VERIFIED", "x", "", evidence="e")
+        bi.append_progress(path, "REQ-UNKNOWN", "VERIFIED", "x", "", evidence="e", extra={"tests": ["t.py"]})
     assert path.read_bytes() == before
 
 

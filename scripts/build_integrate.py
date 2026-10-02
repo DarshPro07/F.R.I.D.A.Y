@@ -428,13 +428,15 @@ def _end_of_list(text: str, name: str = "PROGRESS_V7") -> tuple[int, int]:
 
 
 def entry_text(req: str, status: str, impl: str, next_action: str, nl: str = "\n",
-               evidence: str = "") -> str:
+               evidence: str = "", extra: dict | None = None) -> str:
     lines = [f"    ({req!r}, {{",
              f'        "status": {status},',
              f'        "current_implementation": {impl!r},',
              f'        "next_action": {next_action!r},']
     if evidence:
         lines.append(f'        "evidence": {evidence!r},')
+    for key, value in (extra or {}).items():
+        lines.append(f'        "{key}": {value!r},')
     return nl.join((*lines, "    }),")) + nl
 
 
@@ -462,18 +464,21 @@ def load_ledger(path: Path):
 
 
 def append_progress(path: Path, req: str, status: str, impl: str, next_action: str,
-                    evidence: str = "") -> None:
+                    evidence: str = "", extra: dict | None = None) -> None:
     """Append one PROGRESS_V7 entry; restore the file byte-for-byte if it no longer loads.
-    A VERIFIED entry needs evidence: `prd_ledger.py --check` refuses one without."""
+    A VERIFIED entry needs evidence and a named test: `prd_ledger.py --check`
+    refuses a VERIFIED v7 row without either. `extra` sets further row fields."""
     if status == "VERIFIED" and not evidence.strip():
         raise KernelError(f"{req}: a VERIFIED entry needs evidence")
+    if status == "VERIFIED" and not (extra or {}).get("tests"):
+        raise KernelError(f"{req}: a VERIFIED entry needs at least one named test")
     original = Path(path).read_bytes()
     text = original.decode("utf-8")
     nl = "\r\n" if "\r\n" in text else "\n"
     idx, col = _end_of_list(text)
     lines_ = text.splitlines(keepends=True)
     head, tail = lines_[idx][:col], lines_[idx][col:]
-    entry = entry_text(req, status, impl, next_action, nl, evidence)
+    entry = entry_text(req, status, impl, next_action, nl, evidence, extra)
     if head.strip():
         entry = head.rstrip() + nl + entry
         head = ""
@@ -677,7 +682,11 @@ def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, pytho
         impl = f"{(run.get('evidence') or {}).get('summary', '')} (build run, commit {merged['integrated_commit'][:9]})"
         nxt = "" if status == "VERIFIED" else "GAPS: " + "; ".join(gaps)
         proof = evidence_text(run, rg, merged, verifier) if status == "VERIFIED" else ""
-        append_progress(Path(ledger_path), req, status, impl, nxt, proof)
+        cited = ({"tests": list(rg.get("tests") or []),
+                  "files": [f.replace("\\", "/") for f in run.get("files_changed", [])
+                            if not f.replace("\\", "/").startswith("tests/")]}
+                 if status == "VERIFIED" else None)
+        append_progress(Path(ledger_path), req, status, impl, nxt, proof, cited)
         commit_ledger(Path(ledger_path), req, status, repo)
         out["ledger_status"] = status
     remove_worker(run, repo)
