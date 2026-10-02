@@ -2957,6 +2957,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "The production objective port now honours idempotency_key: it records a successful call's result as a call.returned event under the key and replays it on re-run, so a death between call return and the executor's commit no longer repeats the side effect. (build run, commit 0c0f39049)",
         "next_action": "GAPS: A crash between the external effect and the port's call.returned write still re-runs the call; only a capability that dedupes by key itself closes that; Replay covers task statuses only and is not used to restore state; task rows remain the state",
     }),
+    ('JIT-001', {
+        "status": PARTIAL,
+        "current_implementation": "Registered real JIT target-state probes for files_edit/copy/move/recycle/delete: a file gone or outside the jail at execution is refused 'JIT: ...'. Hash-change acceptance already covered by existing tests. (build run, commit e691d993f)",
+        "next_action": 'GAPS: requires_auth capabilities other than files_* still have no probe; there is no live-session signal to probe for them; Envelopes from before fingerprints carry no hashes',
+    }),
 ]
 
 
