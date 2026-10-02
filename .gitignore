@@ -120,3 +120,6 @@ data/soak/
 
 # Build-kernel packets, logs and evidence (per worktree)
 .build/
+
+# STATE_ROOT/cache in a source checkout: re-downloadable local models (CTX-002) and other caches
+cache/

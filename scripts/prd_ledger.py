@@ -2982,6 +2982,46 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Trajectory check now reads the objective contract: forbidden action classes started, side-effect count over max_side_effects, and side-effecting steps started while contract questions are open flag the run DRIFTING. (build run, commit 361b426b8)',
         "next_action": 'GAPS: user-amendment and worker-conflict signals (no amendment event exists yet); non-pause actions (fresh worker, stronger model, lower concurrency); executor still only pauses and asks; no executor-level test of a contract-flagged pause; only assess/for_run inputs covered by unit tests',
     }),
+    # --- CTX-002: owner ruling on the learned retriever, 2026-10-02
+    ('CTX-002', {
+        "status": PARTIAL,
+        "next_action": (
+            "RULING 2026-10-02 (owner, docs/plans/build-harness/00-owner-directive-2026-10-02h.md): reach "
+            "the target with small local models, not a hosted API and not by relabelling the dev split. "
+            "START: `git checkout wip/ctx-002-retrievers -- friday/tool_retrieval.py "
+            "tests/test_tool_retrieval.py scripts/bench_tool_disclosure.py` (the BLOCKED run's BM25, "
+            "hashed-dense and hybrid retrievers and benchmark; none of these paths changed on main since). "
+            "STATICALLY_CONFIRMED by the controller: onnxruntime, tokenizers, huggingface_hub and numpy are "
+            "in .venv and .venv-build, so install nothing. Embedding BAAI/bge-small-en-v1.5 (MIT) revision "
+            "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a, onnx/model.onnx sha256 "
+            "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35; reranker "
+            "cross-encoder/ms-marco-MiniLM-L6-v2 (Apache-2.0) revision "
+            "233902d25c440f23af6f7d6e94d2946bac0bee0a, onnx/model.onnx sha256 "
+            "5d3e70fd0c9ff14b9b5169a51e957b7a9c74897afd0a35ce4bd318150c1d4d4a; both tokenizer.json sha256 "
+            "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66. Both are already downloaded "
+            "in huggingface_hub cache layout under F:/F.R.I.D.A.Y/cache/models: hf_hub_download(repo, file, "
+            "revision=<pin>, cache_dir=<that dir>) returns them with no network. Both take input_ids, "
+            "attention_mask and token_type_ids; the embedder outputs last_hidden_state (take the CLS row, "
+            "L2-normalise; bge's query prefix is 'Represent this sentence for searching relevant passages: '), "
+            "the reranker outputs logits [batch, 1] for (query, document) pairs. Together they load in 1.5 s "
+            "and add 240 MB RSS; three rerank pairs take 22 ms. "
+            "DESIGN: the models dir is FRIDAY_MODELS_DIR, else config.CACHE_DIR / 'models' (add cache/ to "
+            ".gitignore). Register each model in the capability fabric as its own provider (upstream = the "
+            "Hub repo id, commit = the revision pin, PERMISSIVE_IMPORT, ADAPTER) with a provision operation "
+            "that downloads by pin and verifies the sha256, and a runtime load with local_files_only, lazily, "
+            "once, on CPU: files absent or a hash mismatch -> UNAVAILABLE and retrieval falls back to "
+            "router+hybrid (never break boot, NON_NEGOTIABLE 15). If scripts/upstream_lock.py --check demands a "
+            "clone for every upstream, teach it a model pin (repo, revision, file sha256) rather than cloning "
+            "weights. Retrieval: dense = bge cosine over each tool's L1 text (cache the document vectors "
+            "keyed by the catalogue's hash), fused with router/BM25, then the cross-encoder reranks the top "
+            "k (k <= 20). Measure Recall@1/@3/@5, per-request latency and schema tokens on the dev split with "
+            "scripts/bench_tool_disclosure.py and FRIDAY_MODELS_DIR=F:/F.R.I.D.A.Y/cache/models; target "
+            "Recall@1 >= 0.90 and Recall@3 >= 0.97 with the 80% disclosure reduction kept; read the holdout "
+            "once, only after dev passes. Unit tests must not need the model files (a fake session); a "
+            "model-backed test skips with a stated reason when the files are absent. If the models still "
+            "miss the target, report the measured numbers and the ambiguous-label cases as a gap; do not "
+            "relabel the dev split."),
+    }),
 ]
 
 
