@@ -153,17 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 429ffb2 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T06:23:35+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 51, "PARTIAL": 58, "VERIFIED": 35}
+- HEAD: 64baa4c on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T12:50:05+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 70, "PARKED_BY_OWNER": 1, "PARTIAL": 60, "VERIFIED": 35}
 - Unresolved P0: 20
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (8): DOMAIN-001=FAILED
-- Parked: CORE-001 (FAILED_INTEGRATION), ACT-001 (VERIFIER_FAIL), DOMAIN-001 (failed x2)
-- Open escalations: 5
-  - CORE-001 integration: {"requirement": "CORE-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["test
+- Last wave (11): ACT-001=FAILED
+- Parked: CORE-001 (PARKED_BY_OWNER), ACT-001 (stale worktree)
+- Open escalations: 11
   - CORE-001 resolved: owner ruling: derive a check from acceptance; unparked with the ruling in its next action
   - CORE-001 integration: {"requirement": "CORE-001", "result": "FAILED_INTEGRATION", "red_green": {"result": "OK", "tests": [
   - ACT-001 integration: {"requirement": "ACT-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tests
   - DOMAIN-001 attempts: FAILED twice
-- Next ready: MCP-001
+  - DOMAIN-001 resolved: unparked: scout write denied by a harness permission bug (fixed in the scout commit)
+  - CORE-001 resolved: unparked: rejected for an @live test that fails without the change (fixed in d6242e9)
+  - CORE-001 integration: {"requirement": "CORE-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["test
+  - CORE-001 parked_by_owner: owner: stop waiting on CORE-001, build the rest of the product; resume only on the owner's word or w
+  - ACT-001 resolved: unparked so the escalation cascade (fresh strong model, then advisor) handles its five concrete veri
+  - ACT-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\act-001 already exists
+- Next ready: DOMAIN-001, MCP-001
 <!-- build-program:end -->

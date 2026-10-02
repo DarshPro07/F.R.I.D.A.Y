@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `c45176a9f87d519ccdf6fdf84bef665187612c5d1ede2afa74785989cfd38203`
 - PRD size: 8088 lines, 280524 bytes
-- Repository HEAD: `53912d51381b8c7376f15d31d37b8c24654b6c66`
-- Uncommitted paths at generation: 37
-- Generated: 2026-10-02T17:45:59+05:30
+- Repository HEAD: `64baa4ce58ccc68f9cfd3e20afce15c8df79d53d`
+- Uncommitted paths at generation: 38
+- Generated: 2026-10-02T18:20:08+05:30
 
 ## Status vocabulary
 
@@ -328,7 +328,7 @@ Unresolved P1: 104 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| PKG-001 | P1 | **PARTIAL** | Autonomous clean-machine bootstrap. | Clean Windows VM ready-state. | FR-PKG-001 | `tests/test_launcher.py:105-111`, `tests/test_state_root.py:59-63`, `tests/test_state_root.py:77-81` | Add a provisioning stage (Hermes, browser runtime, coding CLI) with PASS/DEGRADED/FAIL and a repair path per component, then run validate_exe_clean.py on a fresh Windows VM or Windows Sandbox and record the ready-state. |
+| PKG-001 | P1 | **PARTIAL** | Autonomous clean-machine bootstrap. | Clean Windows VM ready-state. | FR-PKG-001 | `tests/test_launcher.py:105-111`, `tests/test_state_root.py:59-63`, `tests/test_state_root.py:77-81` | DEFECT found running FRIDAY.exe 344d62a (2026-10-02): `--doctor` reports PASS for credentials that are template placeholders (LIVEKIT_URL wss://your-project-..., LIVEKIT_API_KEY/SECRET, OPENAI_API_KEY) and for a GOOGLE_API_KEY Google rejects with 401 - it only checks that values are non-empty, so 'configured' was reported as 'usable'. The launcher then starts the LiveKit voice worker, which retries the placeholder URL forever with 401. Fix: the doctor classifies each credential as MISSING / PLACEHOLDER / REJECTED (a bounded live auth probe, value never printed or logged) / VALID and reports DEGRADED naming which; the launcher skips the voice worker with one clear line when the LiveKit credentials are not VALID (the control room keeps its own browser voice); onboarding (ONB-001) asks for the missing keys. Tests: a placeholder and a rejected key each turn the doctor DEGRADED (fails without the fix); the launcher does not start the agent on placeholder LiveKit credentials. Previous next action: Add a provisioning stage (Hermes, browser runtime, coding CLI) with PASS/DEGRADED/FAIL and a repair path per component, then run validate_exe_clean.py on a fresh Windows VM or Windows Sandbox and record the ready-state. |
 | PKG-002 | P1 | **VERIFIED** | Durable state separate from application bundle. | Upgrade preserves brain/state. | FR-PKG-001 | `tests/test_state_root.py:206-214`, `tests/test_state_root.py:194-203` | Read the actual test: tests/test_state_root.py:206-214 seeds home/data/ada.sqlite3 with 'new database', runs migrate_legacy_state, and asserts the pre-existing newer file is NOT overwritten ('data/ada.sqlite3' not in moved; home file still reads 'new database'; the old internal copy is left in place for the owner) — this is a direct, load-bearing test of the exact failure mode an upgrade must avoid ('Upgrade preserves brain/state'). Re-run 2026-09-25 on 030795f with a dirty tree: every cited test passed (data/prd_v7_audit/rerun.xml). |
 
 ## PRD section 79
