@@ -1214,6 +1214,9 @@ class HermesSupervisor:
         self.hermes_version = ""
         #: session_id -> work_run_id, so events land on the right record.
         self._session_runs: dict[str, str] = {}
+        #: DOMAIN-001: the gate route each work run was admitted under, so a
+        #: provider safety refusal counts against the key the gate reads.
+        self._gate_routes: dict[str, str] = {}
         #: Sessions whose turn finished, oldest first; bounded by
         #: FINISHED_KEEP (see `_forget_session`).
         self._finished_sessions: list[str] = []
@@ -1579,6 +1582,8 @@ class HermesSupervisor:
                     updates["result"] = str(payload.get("text", ""))[:4000]
                     updates.update(self._capped_update(
                         work_run_id, str(payload.get("text", ""))))
+                    self._count_provider_refusal(
+                        work_run_id, str(payload.get("text", "")))
                 else:
                     updates["status"] = COMPLETE
                     updates["result"] = str(payload.get("text", ""))[:4000]
@@ -1589,6 +1594,7 @@ class HermesSupervisor:
                 updates["result"] = json.dumps(payload)[:2000]
                 updates.update(self._capped_update(
                     work_run_id, json.dumps(payload)))
+                self._count_provider_refusal(work_run_id, json.dumps(payload))
                 settle = self._turn_done.get(sid)
             elif kind == "clarify.request":
                 # Never brokered on this thread: answering calls request(),
@@ -1659,6 +1665,14 @@ class HermesSupervisor:
             self._finished_sessions.remove(sid)
         except ValueError:
             pass
+
+    def _count_provider_refusal(self, work_run_id: str, text: str) -> None:
+        """DOMAIN-001: a provider safety stop counts against the run's route."""
+        from friday import domain_gate
+        if not domain_gate.is_provider_refusal(text):
+            return
+        route = self._gate_routes.get(work_run_id) or "hermes"
+        domain_gate.record_provider_refusal(route, detail=text[:200])
 
     def _capped_update(self, work_run_id: str, text: str) -> dict:
         """
@@ -1761,8 +1775,8 @@ class HermesSupervisor:
         """
         # DOMAIN-001: classified before a lease is taken or a session made.
         from friday import domain_gate
-        gate = domain_gate.check(
-            bundle, domain_gate.route_name("hermes", provider, model))
+        gate_route = domain_gate.route_name("hermes", provider, model)
+        gate = domain_gate.check(bundle, gate_route)
         if not gate.allowed:
             return gate.as_result()
 
@@ -1789,6 +1803,7 @@ class HermesSupervisor:
             task=bundle.goal[:500], friday_run_id=friday_run_id,
             bundle_chars=measure["chars"], token_budget=bundle.token_budget)
         self._leases[work_run_id] = decision.lease
+        self._gate_routes[work_run_id] = gate_route
 
         create: dict = {"source": "friday", "title": f"Friday: {bundle.goal[:60]}"}
         if workspace:

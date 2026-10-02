@@ -128,3 +128,30 @@ def test_live_provider_refusal_in_cli_executor_counts_against_route(tmp_path, mo
                                "result": "Request violates our usage policy"})
     route = dg.route_name("claude_code", ex.model or "")
     assert led.count(route, "provider_refusal") == 1
+
+
+def _hermes_run(tmp_path, monkeypatch):
+    led = dg.SafeguardLedger(tmp_path / "l.sqlite3")
+    monkeypatch.setattr(dg, "_ledger", led)
+    log = hb.WorkRunLog(tmp_path / "b.sqlite3")
+    sup = hb.HermesSupervisor(log=log, profile="")
+    wid = log.create(task="fix the retry bug", friday_run_id="",
+                     bundle_chars=10, token_budget=1000)
+    sup._session_runs["s1"] = wid
+    return led, sup, wid
+
+
+def test_hermes_provider_refusal_counts_against_the_admitted_route(tmp_path, monkeypatch):
+    led, sup, wid = _hermes_run(tmp_path, monkeypatch)
+    sup._gate_routes[wid] = dg.route_name("hermes", "anthropic", "m1")
+    sup._handle_event({"type": "message.complete", "session_id": "s1",
+                       "payload": {"status": "error",
+                                   "text": "Request violates our usage policy"}})
+    assert led.count("hermes:anthropic:m1", "provider_refusal") == 1
+
+
+def test_hermes_ordinary_failure_is_not_counted_as_a_refusal(tmp_path, monkeypatch):
+    led, sup, wid = _hermes_run(tmp_path, monkeypatch)
+    sup._handle_event({"type": "message.complete", "session_id": "s1",
+                       "payload": {"status": "error", "text": "connection reset"}})
+    assert led.count("hermes", "provider_refusal") == 0
