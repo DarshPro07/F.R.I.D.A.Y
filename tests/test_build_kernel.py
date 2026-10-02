@@ -1497,3 +1497,14 @@ def test_adopt_rebuilds_a_running_from_a_job_and_the_run_meta(repo, tmp_path):
     got.proc._alive = lambda pid: False
     assert got.proc.poll() == 0
     assert K.has_result(wt) is True and K.has_result(tmp_path / "nowhere") is False
+
+
+def test_admit_itself_counts_a_live_lease(tmp_path):
+    # A mutation that dropped the lease from admit() survived: the two-kernel
+    # test passed through reserve()'s recheck. A wave must not be planned on
+    # headroom another job has already leased.
+    _heavy(tmp_path, "A")
+    _peaks(tmp_path, ("A", "COMPLEX", 1741), ("B", "COMPLEX", 1741))
+    assert K.reserve("att-1", "A", "COMPLEX", cap=3, gov=FakeGov(available=3.5), runs_dir=tmp_path)[0]
+    got, why = K.admit([({"id": "B"}, "SHIP", "COMPLEX")], cap=3, gov=FakeGov(available=3.5), runs_dir=tmp_path)
+    assert got == [] and "leased" in why
