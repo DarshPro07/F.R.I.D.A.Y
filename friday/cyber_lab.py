@@ -127,3 +127,27 @@ def execute(provider: LabProvider, auth: T.SecurityAuthorization | None,
 
 def verify_evidence(rec: LabEvidence) -> bool:
     return rec.digest == _digest(rec.to_dict())
+
+
+def run_routed(decision, provider_name: str, auth: T.SecurityAuthorization | None,
+               request: LabRequest, *, now: datetime | None = None) -> LabEvidence:
+    """Consume a `domain_gate.GateDecision`: only a `cyber_lab` route may reach a provider.
+
+    The gate label says the request is authorized testing; the contract still
+    decides, via `execute`. Any other route, or an unregistered provider, is a
+    refused evidence record rather than an exception, so callers keep one shape.
+    """
+    provider = get(provider_name)
+    step = getattr(decision, "next_step", "")
+    if step == "cyber_lab" and provider is not None:
+        return execute(provider, auth, request, now=now)
+    reason = (f"route {step or 'none'!r} is not the cyber_lab route"
+              if step != "cyber_lab" else f"no lab provider named {provider_name!r}")
+    rec = LabEvidence(
+        provider=provider_name, tier=getattr(provider, "tier", ""), host=request.host,
+        action=request.action, intensity=request.intensity, allowed=False,
+        reason=reason, approval_id=auth.approval_id if auth else "",
+        at=(now or datetime.now(timezone.utc)).isoformat(timespec="seconds"),
+    ).to_dict()
+    rec["digest"] = _digest(rec)
+    return LabEvidence(**rec)

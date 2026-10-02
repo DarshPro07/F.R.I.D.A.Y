@@ -57,6 +57,26 @@ def test_sandbox_tier_caps_intensity_even_when_contract_allows_it():
     assert p.calls == []
 
 
+def test_only_the_cyber_lab_route_reaches_a_provider():
+    from friday import domain_gate as G
+    p = L.MockProvider(name="routed-test")
+    L.register(p)
+    try:
+        req = L.LabRequest("staging.example.com", "port_scan")
+        lab = G.GateDecision(False, next_step="cyber_lab")
+        assert L.run_routed(lab, "routed-test", contract(), req).allowed
+        assert len(p.calls) == 1
+        for step in ("deny", "ask_scope", "program", ""):
+            ev = L.run_routed(G.GateDecision(False, next_step=step), "routed-test", contract(), req)
+            assert not ev.allowed and "cyber_lab route" in ev.reason and L.verify_evidence(ev)
+        assert "no lab provider" in L.run_routed(lab, "missing", contract(), req).reason
+        later = datetime.now(timezone.utc) + timedelta(days=30)
+        assert not L.run_routed(lab, "routed-test", contract(), req, now=later).allowed
+        assert len(p.calls) == 1
+    finally:
+        L.unregister("routed-test")
+
+
 def test_registry_rejects_unknown_tier_and_duplicates():
     with pytest.raises(ValueError):
         L.register(L.MockProvider(name="bad", tier="root"))
