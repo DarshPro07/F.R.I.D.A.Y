@@ -37,12 +37,12 @@ def _matrix() -> dict[str, str]:
 
 
 def test_the_v7_set_covers_exactly_the_prd_matrix():
-    """Every section-91 and 95.3 to 101.2 id has one row, in the PRD's
+    """Every section-91 and 95.3 to 103.2 id has one row, in the PRD's
     order, with the PRD's priority, and the ledger holds nothing the PRD
     does not name."""
     matrix = _matrix()
     rows = PL._load_v7()
-    assert len(matrix) == 69 + 37 + 14 + 4 + 6 + 2 + 9 + 14
+    assert len(matrix) == 69 + 37 + 14 + 4 + 6 + 2 + 9 + 14 + 12 + 10  # A8 Capability Forge, A9 Workflow Fabric
     assert [r["id"] for r in rows] == list(matrix)
     assert {r["id"]: r["priority"] for r in rows} == matrix
 
