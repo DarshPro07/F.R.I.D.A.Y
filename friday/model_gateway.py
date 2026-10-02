@@ -162,6 +162,9 @@ class ModelGatewayRequest:
     temperature: float | None = None
     worker: str = "friday"                   # attribution (FR-055/080)
     timeout_s: float = 60.0
+    #: What the compiled context holds, section by section (WorkingSet.telemetry()),
+    #: recorded with the call's row so a spike can be traced to its sections.
+    context_telemetry: dict | None = None
 
     def input_tokens(self) -> int:
         return sum(approx_tokens(str(m.get("content", "")))
@@ -323,6 +326,7 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
     retries           INTEGER NOT NULL DEFAULT 0,
     failover_count    INTEGER NOT NULL DEFAULT 0,
     context_fingerprint TEXT NOT NULL DEFAULT '',
+    context_sections  TEXT NOT NULL DEFAULT '',
     error             TEXT NOT NULL DEFAULT '',
     created_at        TEXT NOT NULL
 );
@@ -337,6 +341,7 @@ CREATE INDEX IF NOT EXISTS idx_gateway_calls_obj ON gateway_calls(objective_id, 
 #: dies with "no such column".
 _ADDED_COLUMNS = (
     ("credential", "TEXT NOT NULL DEFAULT ''"),
+    ("context_sections", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: Indexes over columns that may have just been added. Created after the
@@ -1323,7 +1328,10 @@ class ModelGateway:
                 input_tokens=input_tokens, output_tokens=output_tokens,
                 cached_tokens=cached_tokens, reasoning_tokens=reasoning_tokens,
                 latency_ms=latency_ms, retries=0, failover_count=failover_count,
-                context_fingerprint=fingerprint, error=error[:500])
+                context_fingerprint=fingerprint,
+                context_sections=(json.dumps(request.context_telemetry, sort_keys=True)
+                                  if request.context_telemetry else ""),
+                error=error[:500])
         except Exception:  # noqa: BLE001 - telemetry must never break inference
             logger.warning("gateway telemetry write failed", exc_info=True)
             return 0

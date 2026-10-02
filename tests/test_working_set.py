@@ -162,3 +162,33 @@ def test_a_model_step_of_an_objective_from_read_material_has_nothing_binding(tmp
     assert "pinned" not in result.output["context"]["sections"]
     body = fake.requests[0].context_package[-1]["content"]
     assert "> OBJECTIVE: summarise what the page asks for" in body
+
+
+def test_the_context_telemetry_is_recorded_with_the_calls_row(tmp_path):
+    import json
+
+    ledger = mg.GatewayTelemetry(tmp_path / "gateway_calls.sqlite3")
+    gw = mg.ModelGateway(telemetry=ledger)
+    ws = mg.compile_working_set(system="be brief", user="do x", state=("NEXT: y",))
+    request = mg.ModelGatewayRequest(objective_id="obj-1", task_class=mg.STANDARD,
+                                     context_package=ws.messages,
+                                     context_telemetry=ws.telemetry())
+    gw._record(request, status="ok", provider="fake", model="fake-1")
+    plain = mg.ModelGatewayRequest(objective_id="obj-2", task_class=mg.STANDARD,
+                                   context_package=ws.messages)
+    gw._record(plain, status="ok", provider="fake", model="fake-1")
+    (row,) = ledger.for_objective("obj-1")
+    assert json.loads(row["context_sections"]) == ws.telemetry()
+    assert ledger.for_objective("obj-2")[0]["context_sections"] == ""
+
+
+def test_a_ledger_made_before_the_column_gains_it(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(mg.GATEWAY_CALLS_SCHEMA.replace(
+            "    context_sections  TEXT NOT NULL DEFAULT '',\n", ""))
+    ledger = mg.GatewayTelemetry(path)
+    assert ledger.record(objective_id="o", task_class="standard", status="ok",
+                         context_sections="{}") > 0

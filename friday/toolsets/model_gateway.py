@@ -87,6 +87,7 @@ def model_infer(run: c.Run, prompt: str, *, task_class: str = mg.STANDARD,
             objective_id=objective_id or run.run_id,
             task_class=task_class or mg.STANDARD,
             context_package=working_set.messages,
+            context_telemetry=working_set.telemetry(),
             preferred_quality_tier=quality_tier or "", escalate=bool(escalate))
         result = mg.gateway().infer(request)
     except (mg.BudgetExceeded, mg.GrowthStopped) as exc:
