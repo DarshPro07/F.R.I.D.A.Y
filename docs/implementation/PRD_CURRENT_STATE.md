@@ -153,11 +153,11 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 64baa4c on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T12:50:05+00:00
+- HEAD: 1dbf7cc on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T13:04:50+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 70, "PARKED_BY_OWNER": 1, "PARTIAL": 60, "VERIFIED": 35}
 - Unresolved P0: 20
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (11): ACT-001=FAILED
+- Last wave (12): DOMAIN-001=INTEGRATED
 - Parked: CORE-001 (PARKED_BY_OWNER), ACT-001 (stale worktree)
 - Open escalations: 11
   - CORE-001 resolved: owner ruling: derive a check from acceptance; unparked with the ruling in its next action
@@ -170,5 +170,5 @@ That is the first implementation target of this program.
   - CORE-001 parked_by_owner: owner: stop waiting on CORE-001, build the rest of the product; resume only on the owner's word or w
   - ACT-001 resolved: unparked so the escalation cascade (fresh strong model, then advisor) handles its five concrete veri
   - ACT-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\act-001 already exists
-- Next ready: DOMAIN-001, MCP-001
+- Next ready: MCP-001, EVAL-001
 <!-- build-program:end -->
