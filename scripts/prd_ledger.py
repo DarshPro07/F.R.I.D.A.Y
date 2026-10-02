@@ -2927,6 +2927,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added friday/cyber_lab.py: LabProvider protocol, sandbox tiers capping intensity, registry, MockProvider, hash-bound evidence; all calls gated by trust.target_guard. (build run, commit 918b4af14)',
         "next_action": 'GAPS: Not wired into fabric descriptors or a live executor; cyber_lab domain_gate label has no caller yet',
     }),
+    ('BCON-001', {
+        "status": PARTIAL,
+        "current_implementation": "A state precondition said in words ('once the invoice is approved') is now parsed from the request into governance 'requires' as invoice_status=approved; prose like 'when it is ready' is ignored. (build run, commit c11511832)",
+        "next_action": "GAPS: Assumed the field for a spoken precondition is '<noun>_status' with a fixed list of state words; revisit if results use another field name; max_external_writes is still enforced under the key max_side_effects (same limit, different name); Only the 8 test files test_impact names for planner.py were run, not the ~110 from the earlier wave",
+    }),
 ]
 
 
