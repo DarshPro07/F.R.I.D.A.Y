@@ -945,3 +945,59 @@ def test_a_scouts_findings_can_be_its_final_message(repo, tmp_path):
 def test_the_scout_packet_asks_for_the_findings_as_the_final_message():
     text = K.scout_packet_text({"id": "R-1", "priority": "P0", "summary": "s"})
     assert "final message" in text and ".build/findings.json" not in text
+
+
+# ------------------------------------------------------------------ per-run accounting
+
+def _result(cost, turns=1):
+    return {"type": "result", "subtype": "success", "session_id": "S1", "num_turns": turns,
+            "total_cost_usd": cost, "usage": {"output_tokens": 10}}
+
+
+def test_finalize_counts_only_the_events_after_the_runs_stream_offset(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)  # the stream holds one earlier attempt: $0.2, 3 turns
+    run.stream_offset = K._stream_size(wt)
+    with open(wt / ".build" / "stream.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_result(0.5, 2)) + "\n")
+        fh.write(json.dumps(_result(0.25, 1)) + "\n")  # a continuation inside the same run counts
+    (wt / "a.py").write_text("a = 1\n")
+    _evidence_done(wt)
+    rec = K.finalize(run, None, tmp_path / "runs")
+    assert rec["cost_usd"] == 0.75 and rec["turns"] == 3 and rec["output_tokens"] == 20
+    assert rec["cumulative_cost_usd"] == 0.75
+    again = K.finalize(run, None, tmp_path / "runs")
+    assert again["cumulative_cost_usd"] == 1.5  # previous record's cumulative + this run
+
+
+def test_stream_size_marks_where_a_run_starts(tmp_path):
+    wt = tmp_path / "r-1"
+    _stream(wt, _result(1.0))
+    size = K._stream_size(wt)
+    assert size > 0 and K._stream_size(tmp_path / "missing") == 0
+    assert len(K._events(wt / ".build" / "stream.jsonl", size)) == 0
+    assert len(K._events(wt / ".build" / "stream.jsonl")) == 1
+
+
+def test_peak_history_survives_a_run_record_overwrite(repo, tmp_path):
+    runs = tmp_path / "runs"
+    run, wt = _done_run(repo, tmp_path)
+    run.peak_rss_mb = 1700.0
+    K.finalize(run, None, runs)
+    run.peak_rss_mb = 300.0  # a lighter run overwrites R-1.json
+    K.finalize(run, None, runs)
+    assert json.loads((runs / "R-1.json").read_text())["peak_rss_mb"] == 300.0
+    assert K.worker_gb(runs) == 1700.0 / 1024
+    entry = json.loads((runs / K.PEAKS_FILE).read_text().splitlines()[0])
+    assert entry["req"] == "R-1" and entry["peak_rss_mb"] == 1700.0
+    assert {"mode", "budget_class", "at"} <= set(entry)
+    assert runs / K.PEAKS_FILE not in K.run_records(runs)
+
+
+def test_peak_history_window_is_the_last_entries_and_records_are_the_fallback(tmp_path):
+    (tmp_path / K.PEAKS_FILE).write_text(
+        "".join(json.dumps({"peak_rss_mb": 9000.0 if i == 0 else 1024.0}) + "\n"
+                for i in range(K.RSS_WINDOW + 1)) + "not json\n", encoding="utf-8")
+    assert K.worker_gb(tmp_path) == 1.0  # the 9000 entry fell out of the window
+    other = tmp_path / "other"
+    _peak_record(other, "R", 2048, 1)
+    assert K.worker_gb(other) == 2.0

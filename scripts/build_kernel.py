@@ -29,6 +29,7 @@ import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -50,6 +51,8 @@ DEFAULT_CAP = 2
 HOST_PROFILE = RUNS_DIR / "host_profile.json"
 DEFAULT_WORKER_GB = 1.5
 RSS_WINDOW = 10
+#: Append-only worker peak history; run records are overwritten per requirement.
+PEAKS_FILE = "peaks.jsonl"
 DEFAULT_WALL_S = 45 * 60
 DEFAULT_STALL_S = 10 * 60
 ALLOWED_TOOLS = ",".join(("Read", "Edit", "Write", "Glob", "Grep",
@@ -210,7 +213,21 @@ def host_governor(path: Path = HOST_PROFILE):
 
 
 def worker_gb(runs_dir: Path = RUNS_DIR) -> float:
-    """Largest measured worker peak (GB) over the last RSS_WINDOW run records."""
+    """Largest measured worker peak (GB) over the last RSS_WINDOW entries of the
+    peak history; run records stand in until a history exists."""
+    history = []
+    try:
+        for line in (runs_dir / PEAKS_FILE).read_text(encoding="utf-8").splitlines():
+            try:
+                peak = json.loads(line).get("peak_rss_mb")
+            except (ValueError, AttributeError):
+                continue
+            if isinstance(peak, (int, float)) and not isinstance(peak, bool):
+                history.append(peak)
+    except OSError:
+        pass
+    if history:
+        return max(history[-RSS_WINDOW:]) / 1024
     recs = []
     for p in run_records(runs_dir):
         try:
@@ -385,6 +402,7 @@ class Running:
     repairs: int = 0
     capsule: bool = False
     peak_rss_mb: float | None = None
+    stream_offset: int = 0  # bytes of stream.jsonl that belong to earlier runs
 
 
 # ------------------------------------------------------------ worktrees
@@ -477,6 +495,13 @@ def create_worktree(wt: Path, name: str, *, repo: Path = ROOT, detach: bool = Fa
     return base_sha
 
 
+def _stream_size(wt: Path) -> int:
+    try:
+        return (wt / ".build" / "stream.jsonl").stat().st_size
+    except OSError:
+        return 0
+
+
 def _start(cmd: list[str], wt: Path) -> subprocess.Popen:
     """Start a worker appending to the stream log, so a continuation keeps it."""
     kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
@@ -515,13 +540,14 @@ def launch(row: dict, *, worktrees: Path | None = None, model: str = "sonnet",
     (wt / ".build" / "packet.md").write_text(text, encoding="utf-8", newline="\n")
     branch = "" if scout else f"build/{name}"
     started = time.time()
+    offset = _stream_size(wt)
     _write_run_meta(wt, {"req": row["id"], "mode": mode, "klass": klass, "base_sha": base_sha,
                          "branch": branch, "model": model, "started": started,
-                         "capsule": bool(capsule)})
+                         "capsule": bool(capsule), "stream_offset": offset})
     proc = _start(cmd, wt)
     return Running(row["id"], proc, wt, started=started, mode=mode, klass=klass,
                    base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
-                   capsule=bool(capsule))
+                   capsule=bool(capsule), stream_offset=offset)
 
 
 def _write_run_meta(wt: Path, meta: dict) -> None:
@@ -572,14 +598,15 @@ def resume(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
     klass = meta["klass"]
     turns, budget, wall = BUDGETS[klass]
     started = time.time()
-    meta = {**meta, "started": started}
+    offset = _stream_size(wt)
+    meta = {**meta, "started": started, "stream_offset": offset}
     _write_run_meta(wt, meta)
     cmd = worker_command(model or meta.get("model") or "sonnet", max(1, turns // 2), budget / 2,
                          resume=sid, prompt=CONTINUE_PROMPT)
     return Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
                    base_sha=meta["base_sha"], branch=meta["branch"],
                    model=model or meta.get("model") or "sonnet", wall_s=wall, repo=repo,
-                   continued=True, capsule=bool(meta.get("capsule")))
+                   continued=True, capsule=bool(meta.get("capsule")), stream_offset=offset)
 
 
 def _read_json(path: Path) -> dict:
@@ -644,16 +671,18 @@ def repair(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
     klass = meta.get("klass") or run_rec.get("budget_class") or "NORMAL"
     turns, budget, wall = BUDGETS[klass]
     started = time.time()
+    offset = _stream_size(wt)
     model = model or meta.get("model") or "sonnet"
     branch = meta.get("branch") or run_rec.get("branch", "")
     _write_run_meta(wt, {**meta, "req": req, "mode": "SHIP", "klass": klass,
                          "base_sha": base_sha, "branch": branch, "model": model,
-                         "started": started})
+                         "started": started, "stream_offset": offset})
     cmd = worker_command(model, max(1, turns // 2), budget / 2, resume=str(sid),
                          prompt=repair_prompt(integration))
     return Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
                    base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
-                   continued=True, repairs=1, capsule=bool(meta.get("capsule")))
+                   continued=True, repairs=1, capsule=bool(meta.get("capsule")),
+                   stream_offset=offset)
 
 
 # ---------------------------------------------------------------- watch
@@ -675,10 +704,12 @@ def kill_tree(proc: subprocess.Popen) -> None:
         proc.kill()
 
 
-def _events(path: Path) -> list[dict]:
+def _events(path: Path, offset: int = 0) -> list[dict]:
+    """The stream's events from byte `offset` on (earlier runs share the file)."""
     out: list[dict] = []
     if path.exists():
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        text = path.read_bytes()[offset:].decode("utf-8", errors="replace")
+        for line in text.splitlines():
             try:
                 ev = json.loads(line)
             except ValueError:
@@ -829,10 +860,11 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
     """Write data/build_runs/<req>.json from the result events and evidence;
     a DONE SHIP run is committed on its branch, a scout's findings are kept."""
     log = run.wt / ".build" / "stream.jsonl"
-    events = _events(log)
+    events = _events(log, run.stream_offset)
     results = _results(events)
     res = results[-1] if results else {}
     runs_dir.mkdir(parents=True, exist_ok=True)
+    previous = _read_json(runs_dir / f"{run.req}.json")
     scout = run.mode == "SCOUT"
     ev = _scout_outcome(run, runs_dir, str(res.get("result") or "")) if scout else _evidence(run.wt)
     if reason:
@@ -868,8 +900,15 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
            "evidence": ev, "continued": run.continued,
            "session_id": res.get("session_id", ""), "reads": read_metrics(events),
            "capsule": run.capsule, "peak_rss_mb": run.peak_rss_mb}
+    rec["cumulative_cost_usd"] = round(float(previous.get("cumulative_cost_usd") or 0.0)
+                                       + rec["cost_usd"], 4)
     if commit_error:
         rec["commit_error"] = commit_error
+    if run.peak_rss_mb is not None:
+        with open(runs_dir / PEAKS_FILE, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps({"req": run.req, "mode": run.mode, "budget_class": run.klass,
+                                 "peak_rss_mb": run.peak_rss_mb,
+                                 "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}) + "\n")
     (runs_dir / f"{run.req}.json").write_text(json.dumps(rec, indent=2) + "\n",
                                               encoding="utf-8", newline="\n")
     if log.exists():
@@ -966,7 +1005,7 @@ def run_records(runs_dir: Path = RUNS_DIR) -> list[Path]:
     if not runs_dir.exists():
         return []
     return [p for p in sorted(runs_dir.glob("*.json"))
-            if p.name.count(".") == 1 and p.name != HOST_PROFILE.name]
+            if p.name.count(".") == 1 and p.name not in (HOST_PROFILE.name, PEAKS_FILE)]
 
 
 _ROI_FIELDS = (("turns", ("turns",)), ("cost", ("cost_usd",)), ("wall", ("wall_seconds",)),

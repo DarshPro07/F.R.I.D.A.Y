@@ -463,3 +463,61 @@ def test_append_progress_restores_the_file_when_it_does_not_load(tmp_path):
     with pytest.raises(KernelError, match="restored"):
         bi.append_progress(path, "REQ-UNKNOWN", "VERIFIED", "x", "", evidence="e")
     assert path.read_bytes() == before
+
+
+# ---------------------------------------------------------------- chunked gate
+
+class _Done:
+    def __init__(self, rc):
+        self.returncode, self.stdout = rc, ""
+
+
+def test_gate_run_chunks_the_tests_and_aggregates(monkeypatch, tmp_path):
+    seen = []
+    codes = iter([0, 5, 1, 0])
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd[cmd.index("--") + 3:])
+        assert kw["timeout"] == bi.TEST_S
+        return _Done(next(codes))
+
+    monkeypatch.setattr(bi.subprocess, "run", fake_run)
+    tests = [f"tests/test_{i}.py" for i in range(bi.GATE_CHUNK * 3 + 1)]
+    rc, _ = bi.gate_run("py", tmp_path, tests)
+    assert [len(c) for c in seen] == [bi.GATE_CHUNK] * 3 + [1]
+    assert sum(seen, []) == tests
+    assert rc == 1  # one failing chunk fails the run
+    codes = iter([0, 5])
+    assert bi.gate_run("py", tmp_path, tests[:bi.GATE_CHUNK + 1])[0] == 0
+
+
+def test_a_chunk_timeout_is_a_return_value_naming_the_chunk(monkeypatch, tmp_path):
+    def fake_run(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+
+    monkeypatch.setattr(bi.subprocess, "run", fake_run)
+    rc, lines = bi.gate_run("py", tmp_path, [f"t{i}.py" for i in range(bi.GATE_CHUNK + 1)])
+    assert rc == bi.TIMEOUT and "chunk 1/2" in lines[-1]
+
+
+def test_merge_resets_the_pick_when_a_chunk_outlives_the_timeout(tmp_path, monkeypatch):
+    repo, runs, run, rows = setup(tmp_path)
+    slow = tmp_path / "slow_brief.py"
+    slow.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
+    monkeypatch.setattr(bi, "PYTEST_BRIEF", slow)
+    monkeypatch.setattr(bi, "TEST_S", 1)
+    before = head(repo)
+    merged = bi.merge(run, ["tests/test_twice.py"], repo, sys.executable)
+    assert merged["result"] == "TEST_TIMEOUT" and merged["reset"] == "reset to pre_head"
+    assert head(repo) == before and "chunk 1/1" in merged["detail"]
+    assert merged["affected"]
+
+
+def test_integrate_records_a_test_timeout_with_detail_and_affected(tmp_path, monkeypatch):
+    repo, runs, run, rows = setup(tmp_path)
+    monkeypatch.setattr(bi, "gate_run", lambda python, cwd, tests: (bi.TIMEOUT, ["TIMEOUT: chunk 2/3 (40 files)"]))
+    before = head(repo)
+    out = go(repo, runs, rows, runner=pass_runner())
+    assert out["result"] == "TEST_TIMEOUT" and head(repo) == before
+    assert "chunk 2/3" in out["detail"] and out["affected"]
+    assert json.loads((runs / "REQ-1.integration.json").read_text())["result"] == "TEST_TIMEOUT"

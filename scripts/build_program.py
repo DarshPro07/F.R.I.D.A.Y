@@ -262,7 +262,30 @@ def launch_repairs(repairs: list[tuple[str, str]], state: dict, k=build_kernel,
     return runs
 
 
-def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=build_integrate) -> tuple[str, float, bool]:
+def recover_crash(state: dict, req: str, head: str, exc: Exception, repo: Path, runner=sh) -> str:
+    """The integrator died. If it left a commit on the branch (a cherry-pick not yet
+    verified), put HEAD back; otherwise stop the run, because the branch holds
+    something nobody checked. Returns the settle result."""
+    detail = repr(exc)[:300]
+    try:
+        now_head = git_out(repo, "rev-parse", "HEAD", runner=runner)
+        if now_head == head:
+            park(state, req, "integration crashed", "integration_crash", detail)
+            return "INTEGRATION_CRASH"
+        if git_out(repo, "rev-parse", "HEAD^", runner=runner) == head:
+            reset = runner(["git", "reset", "--hard", head], repo, timeout=GIT_S)
+            if reset.returncode == 0:
+                park(state, req, "integration crashed", "integration_crash", detail)
+                return "INTEGRATION_CRASH"
+            detail += f"; reset failed: {(reset.stderr or '').strip()[-120:]}"
+    except Exception as inner:  # git itself is unusable: nothing is known about the branch
+        detail += f"; recovery failed: {inner!r}"[:200]
+    park(state, req, "integration crashed, branch not restored", "integration_crash_unrecovered", detail)
+    return "INTEGRATION_CRASH_UNRECOVERED"
+
+
+def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=build_integrate,
+           repo: Path = ROOT, runner=sh) -> tuple[str, float, bool]:
     """Apply one watched run's outcome. Returns (result, spend, settled).
 
     `settled` is False only when the worker itself failed (FAILED, TIMEOUT,
@@ -274,11 +297,14 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
     if st == "DONE" and rec.get("mode") == "SCOUT":
         return "SCOUT_DONE", spend, True
     if st == "DONE":
+        head = git_out(repo, "rev-parse", "HEAD", runner=runner)
         try:
             res = bi.integrate(req)
         except k.KernelError as exc:
             park(state, req, "integration refused", "integration", str(exc))
             return "REFUSED", spend, False
+        except Exception as exc:  # any crash may sit between the cherry-pick and its guarded reset
+            return recover_crash(state, req, head, exc, repo, runner), spend, False
         spend += float((res.get("verifier") or {}).get("cost_usd") or 0.0)
         if res["result"] == "INTEGRATED":
             integrated.add(req)
@@ -292,7 +318,8 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
         if res["result"] in REPAIRABLE and state["repairs"].get(req, 0) < MAX_REPAIRS:
             state["repair_queue"][req] = {"result": res["result"], "at": now()}
             return res["result"], spend, True
-        park(state, req, res["result"], "integration", json.dumps(res, default=str)[:300])
+        kind = "test_timeout" if res["result"] == "TEST_TIMEOUT" else "integration"
+        park(state, req, res["result"], kind, json.dumps(res, default=str)[:300])
         return res["result"], spend, True
     if st == "BLOCKED":
         blockers = (rec.get("evidence") or {}).get("blockers") or []
@@ -357,11 +384,15 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
             return {"stop_reason": "dry run", "waves": []}
         results, wave_spend, progress = {}, 0.0, False
         runs = launch_repairs(fixes, state, k, worktrees) + launch_all(chosen, state, k, worktrees, resumed)
+        crashed = False
         for rec in k.watch(runs):
-            res, cost, ok = settle(rec, state, integrated, k, bi)
+            res, cost, ok = settle(rec, state, integrated, k, bi, repo, runner)
             results[rec["requirement"]] = res
             wave_spend += cost
             progress = progress or ok
+            if res == "INTEGRATION_CRASH_UNRECOVERED":
+                crashed = True  # the branch is unverified: integrate nothing more
+                break
         spent += wave_spend
         waves_run += 1
         idle = 0 if progress else idle + 1
@@ -371,6 +402,8 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
         stop = "no progress" if idle >= NO_PROGRESS_WAVES else None
         if not progress and wave_spend >= COSTLY_SHARE * max_usd:
             stop = "costly wave without progress"
+        if crashed:
+            stop = "integration crash"
         rows = k.load_rows()
         snap = snapshot(state, rows, next_ready(rows, state, integrated, cap, k), stop, repo, runner)
         # Only the untracked state file between waves: the next wave's

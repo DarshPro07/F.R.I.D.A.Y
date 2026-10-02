@@ -48,6 +48,8 @@ VERIFIER_FLOOR_USD = 1.0
 VERIFIER_TURNS = 15
 GIT_S = 120
 TEST_S = 900
+GATE_CHUNK = 40
+TIMEOUT = -999  # gate_run's rc when a chunk outlived TEST_S
 VERIFIER_S = 900
 
 
@@ -295,10 +297,13 @@ def merge(run: dict, tests_extra: list[str], repo: Path = ROOT, python: str = VE
     ok["summary"] = lines[:12]
     if rc in (0, 5):  # 5: everything affected is live/slow, nothing to run
         return ok
-    failing = failed_ids(lines)
-    pre = still_failing(failing, pre_head, repo, python)
-    if failing and set(failing) <= pre:
-        return {**ok, "pre_existing": sorted(pre)}
+    timed_out = rc == TIMEOUT
+    pre: set[str] = set()
+    if not timed_out:
+        failing = failed_ids(lines)
+        pre = still_failing(failing, pre_head, repo, python)
+        if failing and set(failing) <= pre:
+            return {**ok, "pre_existing": sorted(pre)}
     failures = [ln for ln in lines if (m := _FAILED.match(ln)) and m.group(1) not in pre][:20]
     parent = git(repo, "rev-parse", "HEAD^").stdout.strip()
     if parent == pre_head:
@@ -306,22 +311,44 @@ def merge(run: dict, tests_extra: list[str], repo: Path = ROOT, python: str = VE
         reset = "reset to pre_head"
     else:
         reset = "NOT reset: HEAD^ is not pre_head; inspect by hand"
-    return {"result": "FAILED_INTEGRATION", "pre_head": pre_head, "integrated_commit": "",
-            "affected": tests, "summary": lines[:12], "reset": reset,
-            "failures": failures or lines[:12], "pre_existing": sorted(pre)}
+    return {"result": "TEST_TIMEOUT" if timed_out else "FAILED_INTEGRATION", "pre_head": pre_head,
+            "integrated_commit": "", "affected": tests, "summary": lines[:12], "reset": reset,
+            "failures": failures or (lines[-1:] if timed_out else lines[:12]),
+            "pre_existing": sorted(pre), **({"detail": f"{lines[-1]} ({len(tests)} affected); {reset}"}
+                                            if timed_out else {})}
 
 
-def gate_run(python: str, cwd: Path, tests: list[str]) -> tuple[int, list[str]]:
-    """Run tests under the gate markers via pytest_brief; return the exit code
-    and the full output's lines (the brief caps its failure list, the log does not)."""
-    res = subprocess.run([python, str(PYTEST_BRIEF), "--", *GATE, *tests], cwd=cwd, capture_output=True,
-                         text=True, encoding="utf-8", errors="replace", timeout=TEST_S)
+def gate_chunk(python: str, cwd: Path, tests: list[str]) -> tuple[int, list[str]]:
+    """One pytest_brief subprocess; the full output's lines (the brief caps its
+    failure list, the log does not). A timeout is TIMEOUT, never an exception."""
+    try:
+        res = subprocess.run([python, str(PYTEST_BRIEF), "--", *GATE, *tests], cwd=cwd, capture_output=True,
+                             text=True, encoding="utf-8", errors="replace", timeout=TEST_S)
+    except subprocess.TimeoutExpired:
+        return TIMEOUT, []
     out = res.stdout
     log = next((ln.split("full log: ", 1)[1].strip() for ln in out.splitlines()
                 if ln.startswith("full log: ")), "")
     if log and Path(log).is_file():
         out = Path(log).read_text(encoding="utf-8", errors="replace")
     return res.returncode, [ln.strip() for ln in out.splitlines()]
+
+
+def gate_run(python: str, cwd: Path, tests: list[str]) -> tuple[int, list[str]]:
+    """Run tests under the gate markers in chunks of GATE_CHUNK files so one huge
+    affected set cannot outlive TEST_S. rc is 0 only when every chunk is 0 or 5;
+    a chunk timeout stops the run with TIMEOUT and a line naming the chunk."""
+    chunks = [tests[i:i + GATE_CHUNK] for i in range(0, len(tests), GATE_CHUNK)]
+    worst, all_lines = 0, []
+    for n, chunk in enumerate(chunks, 1):
+        rc, got = gate_chunk(python, cwd, chunk)
+        all_lines += got
+        if rc == TIMEOUT:
+            all_lines.append(f"TIMEOUT: chunk {n}/{len(chunks)} ({len(chunk)} files) exceeded {TEST_S}s")
+            return TIMEOUT, all_lines
+        if rc not in (0, 5) and worst in (0, 5):
+            worst = rc
+    return worst, all_lines
 
 
 def failed_ids(lines: list[str]) -> list[str]:

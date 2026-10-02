@@ -757,3 +757,77 @@ def test_load_state_keeps_repairs_and_the_repair_queue(tmp_path):
     st = BP.load_state(f)
     assert st["repairs"] == {"A": 1} and st["repair_queue"]["B"]["result"] == "NO_TEST"
     assert BP.load_state(tmp_path / "none.json")["repair_queue"] == {}
+
+
+# ------------------------------------------------------------------ integrator crash
+
+class CrashGit(FakeGit):
+    """HEAD moves when the 'integrator' commits; `git reset --hard` puts it back."""
+
+    def __init__(self, parent_ok=True, reset_rc=0):
+        super().__init__()
+        self.head, self.parent, self.parent_ok, self.reset_rc = "base0", "base0", parent_ok, reset_rc
+
+    def __call__(self, cmd, cwd, timeout=60):
+        if cmd[:2] == ["git", "rev-parse"]:
+            self.cmds.append(cmd)
+            out = self.head if cmd[2] == "HEAD" else (self.parent if self.parent_ok else "other")
+            return subprocess.CompletedProcess(cmd, 0, out, "")
+        if cmd[:3] == ["git", "reset", "--hard"]:
+            self.cmds.append(cmd)
+            if self.reset_rc == 0:
+                self.head = cmd[3]
+            return subprocess.CompletedProcess(cmd, self.reset_rc, "", "locked" if self.reset_rc else "")
+        return super().__call__(cmd, cwd, timeout)
+
+
+class CommitThenCrash(FakeIntegrator):
+    def __init__(self, kernel, git, exc):
+        super().__init__(kernel)
+        self.git, self.exc = git, exc
+
+    def integrate(self, req):
+        self.calls.append(req)
+        self.git.head = "picked1"  # the cherry-pick landed, then the gate blew up
+        raise self.exc
+
+
+def test_an_integrator_crash_after_the_pick_resets_the_branch_and_parks(env):
+    env.git = CrashGit()
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+    bi = CommitThenCrash(k, env.git, subprocess.TimeoutExpired("pytest", 900))
+    res, _ = go(env, k, bi)
+    assert env.git.head == "base0" and ["git", "reset", "--hard", "base0"] in env.git.cmds
+    esc = state_of(env)["escalations"]
+    assert esc[0]["kind"] == "integration_crash" and "TimeoutExpired" in esc[0]["detail"]
+    assert "A" in state_of(env)["parked"] and res["stop_reason"] != "integration crash"
+
+
+def test_an_unrecoverable_integrator_crash_stops_the_run(env):
+    env.git = CrashGit(parent_ok=False)  # HEAD moved, and HEAD^ is not the recorded head
+    k = FakeKernel(ids=("A", "B"))
+    k.script = {"A": [rec("A")], "B": [rec("B")]}
+    bi = CommitThenCrash(k, env.git, RuntimeError("boom"))
+    res, _ = go(env, k, bi)
+    assert res["stop_reason"] == "integration crash"
+    assert state_of(env)["escalations"][0]["kind"] == "integration_crash_unrecovered"
+    assert not any(c[:3] == ["git", "reset", "--hard"] for c in env.git.cmds)
+    assert bi.calls == ["A"]  # nothing else is integrated on top of an unverified commit
+
+
+def test_a_failed_reset_after_a_crash_is_unrecovered(env):
+    env.git = CrashGit(reset_rc=1)
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+    res, _ = go(env, k, CommitThenCrash(k, env.git, RuntimeError("boom")))
+    assert res["stop_reason"] == "integration crash"
+    assert state_of(env)["escalations"][0]["kind"] == "integration_crash_unrecovered"
+
+
+def test_a_test_timeout_parks_as_test_timeout_and_is_not_repaired(env):
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+    go(env, k, FakeIntegrator(k, results={"A": "TEST_TIMEOUT"}))
+    st = state_of(env)
+    assert st["escalations"][0]["kind"] == "test_timeout" and not st["repair_queue"]
