@@ -2922,6 +2922,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "The Claude Code development packet carries and checks the objective's critical facts. Plan amendments are now recorded as decisions (read from the graph_edited events into CriticalFactSet.decisions, so they are binding and checked). A DevelopmentRun built with store and objective_id reads the facts itself in execute, so no caller has to remember to pass facts=. The checkpoint summary is stored whole instead of cut at 2,000 chars. (build run, commit 3042f8685)",
         "next_action": 'GAPS: No production code calls development.for_goal or DevelopmentRun.execute at all today (only the reachability entry-point list names them), so the wiring is proven by test, not by a live run; whoever adds the caller must pass store= and objective_id= to for_goal. Needs an owner decision on where the objective engine hands work to the development path.; Checkpoint summary is stored uncapped; if a size bound is wanted it is an owner decision, since a cut summary can lose facts silently.',
     }),
+    ('CYBER-002', {
+        "status": PARTIAL,
+        "current_implementation": 'Added friday/cyber_lab.py: LabProvider protocol, sandbox tiers capping intensity, registry, MockProvider, hash-bound evidence; all calls gated by trust.target_guard. (build run, commit 918b4af14)',
+        "next_action": 'GAPS: Not wired into fabric descriptors or a live executor; cyber_lab domain_gate label has no caller yet',
+    }),
 ]
 
 
