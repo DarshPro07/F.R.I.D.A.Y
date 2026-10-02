@@ -113,3 +113,54 @@ def test_a_call_that_did_not_commit_is_run_again(tmp_path):
     asyncio.run(_recover(store, run_id, port))
     assert effects == ["started", "done"]
     assert store.objective_run(run_id)["status"] == O.RUN_COMPLETED
+
+
+def test_a_side_effecting_call_gets_a_key_that_survives_the_rerun(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store)
+    keys: list[str] = []
+
+    async def died_before_commit(capability, arguments, idempotency_key=None):
+        keys.append(idempotency_key)
+        raise _Died()
+
+    first = ContinuousTaskExecutor(store, call_capability=died_before_commit,
+                                   executor_id="first")
+    first.stop()
+    with pytest.raises(_Died):
+        asyncio.run(first.start(run_id))
+
+    async def port(capability, arguments, idempotency_key=None):
+        keys.append(idempotency_key)
+        return {"status": "succeeded", "output": {}, "side_effects": ["wrote note.txt"]}
+
+    _expire_lease(store, run_id)
+    asyncio.run(_recover(store, run_id, port))
+    (task,) = store.objective_tasks(run_id)
+    assert keys == [f"{run_id}:{task['task_id']}"] * 2
+
+
+def test_the_event_log_alone_says_what_each_task_is(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store)
+
+    async def port(capability, arguments):
+        return {"status": "succeeded", "output": {}, "side_effects": ["wrote note.txt"]}
+
+    real_update = store.update_objective_task
+
+    def dies_while_recording_success(task_id, **fields):
+        if fields.get("status") == O.TaskStatus.SUCCEEDED:
+            raise _Died()
+        return real_update(task_id, **fields)
+
+    store.update_objective_task = dies_while_recording_success
+    first = ContinuousTaskExecutor(store, call_capability=port, executor_id="first")
+    first.stop()
+    with pytest.raises(_Died):
+        asyncio.run(first.start(run_id))
+    store.update_objective_task = real_update
+    (task,) = store.objective_tasks(run_id)
+    assert task["status"] != O.TaskStatus.SUCCEEDED  # the row lags the log
+    replayed = O.replay_task_statuses(store.objective_events(run_id))
+    assert replayed == {task["task_id"]: O.TaskStatus.SUCCEEDED}

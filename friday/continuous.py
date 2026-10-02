@@ -110,10 +110,14 @@ NO_ENVELOPE_BLOCKER = (
 
 def _takes_run(port) -> bool:
     """Whether a capability port accepts the task's Run as `run=`."""
+    return _takes(port, "run")
+
+
+def _takes(port, name: str) -> bool:
     import inspect
 
     try:
-        return "run" in inspect.signature(port).parameters
+        return name in inspect.signature(port).parameters
     except (TypeError, ValueError):
         return False
 
@@ -363,6 +367,7 @@ class ContinuousTaskExecutor:
         #: TRUST-002). Both production ports can; a port that cannot - a test
         #: fake - still sees the envelope enforced here before dispatch.
         self._port_takes_run = _takes_run(call_capability)
+        self._port_takes_key = _takes(call_capability, "idempotency_key")
         self.executor_id = executor_id or f"exec-{os.getpid()}"
         self.lease_timeout = DEFAULT_LEASE_TIMEOUT
         self.portion_budget = DEFAULT_PORTION_BUDGET
@@ -743,7 +748,8 @@ class ContinuousTaskExecutor:
                             "INVARIANT: " + "; ".join(broken))
             return
         try:
-            result = await self._dispatch(task["capability"], arguments, task_run)
+            result = await self._dispatch(task["capability"], arguments, task_run,
+                                          task_id)
         except Exception as exc:
             kind = FailureClassifier.classify(exc)
             max_attempts = self._max_attempts_for(task)
@@ -1094,7 +1100,7 @@ class ContinuousTaskExecutor:
                      attended=envelope.attended, envelope=envelope)
 
     async def _dispatch(self, capability_id: str, arguments: dict,
-                        run: c.Run) -> dict:
+                        run: c.Run, task_id: str = "") -> dict:
         """Call the port as this task's Run, after holding it to the envelope
         and to its lineage here. The capability runtime checks again; a port
         that carries the Run is not trusted to, and one that cannot carry it
@@ -1125,9 +1131,12 @@ class ContinuousTaskExecutor:
                     status=c.FAILED,
                     error=f"BLOCKED: the person allowed at most {ceiling} changes for "
                           f"this objective and {made} have been made or are in progress")).to_dict()
+        extra: dict = {}
         if self._port_takes_run:
-            return await self.call_capability(capability_id, arguments, run=run)
-        return await self.call_capability(capability_id, arguments)
+            extra["run"] = run
+        if self._port_takes_key and task_id and trajectory._side_effecting(capability_id):
+            extra["idempotency_key"] = O.idempotency_key(envelope.objective_id, task_id)
+        return await self.call_capability(capability_id, arguments, **extra)
 
     async def _reconcile_worker(self, run_id: str, task: dict,
                                 worker_id: str) -> None:

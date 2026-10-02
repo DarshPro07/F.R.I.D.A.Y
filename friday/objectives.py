@@ -160,6 +160,50 @@ EVENT_SIDE_EFFECT_COMMITTED = "side_effect.committed"
 #: A task completed from its commit record after its executor died.
 EVENT_TASK_RECOVERED = "task.recovered"
 
+#: What each task event does to a task's status when an objective is replayed.
+_EVENT_TASK_STATUS = {
+    EVENT_TASK_STARTED: TaskStatus.RUNNING,
+    EVENT_TASK_SUCCEEDED: TaskStatus.SUCCEEDED,
+    EVENT_TASK_RECOVERED: TaskStatus.SUCCEEDED,
+    EVENT_TASK_FAILED: TaskStatus.FAILED,
+    EVENT_TASK_BLOCKED: TaskStatus.BLOCKED,
+    EVENT_TASK_SKIPPED: TaskStatus.SKIPPED,
+    EVENT_TASK_INTERRUPTED: TaskStatus.INTERRUPTED,
+    EVENT_WORKER_WAITING: TaskStatus.WAITING,
+    EVENT_TASK_RETRY: TaskStatus.QUEUED,
+}
+
+
+def replay_task_statuses(events: list[dict]) -> dict[str, str]:
+    """Each task's status as the event log alone says it is (DUR-001).
+
+    Folds the events, oldest first, into {task_id: status}. A task whose
+    side effect committed but whose success was never recorded is
+    SUCCEEDED: the commit is the truth, not the missing row update. Tasks
+    that never appear in an event are absent."""
+    statuses: dict[str, str] = {}
+    for event in events:
+        task_id = event.get("task_id")
+        if not task_id:
+            continue
+        name = event.get("event")
+        if name == EVENT_SIDE_EFFECT_COMMITTED:
+            statuses[task_id] = TaskStatus.SUCCEEDED
+        elif name in _EVENT_TASK_STATUS:
+            if statuses.get(task_id) == TaskStatus.SUCCEEDED and name == EVENT_TASK_STARTED:
+                continue  # a committed task is never started again
+            statuses[task_id] = _EVENT_TASK_STATUS[name]
+    return statuses
+
+
+def idempotency_key(run_id: str, task_id: str) -> str:
+    """The key a side-effecting capability can use to do a call once.
+
+    Stable across the attempts of one task on purpose: the attempt that
+    died between the call returning and its commit record is re-run under
+    the same key, so a capability that honours it makes the change once."""
+    return f"{run_id}:{task_id}"
+
 UNMAPPED_CAPABILITY = 'objective.unmapped'
 
 #: A task id may only be referenced by dependencies after it is defined.
