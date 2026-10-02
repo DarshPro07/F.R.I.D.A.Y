@@ -81,8 +81,11 @@ def model_infer(run: c.Run, prompt: str, *, task_class: str = mg.STANDARD,
         # CTX-001: the call gets a compiled working set; a step of an
         # objective carries that objective's critical facts as data.
         binding, recorded = _objective_facts(objective_id)
-        working_set = mg.compile_working_set(system=system, user=prompt,
-                                             pinned=binding, state=recorded)
+        # The task class's input ceiling is the working set's budget, so an
+        # over-large context sheds its least needed sections here, not later.
+        working_set = mg.compile_working_set(
+            system=system, user=prompt, pinned=binding, state=recorded,
+            budget_tokens=mg.budget_for(task_class or mg.STANDARD).max_input_tokens)
         request = mg.ModelGatewayRequest(
             objective_id=objective_id or run.run_id,
             task_class=task_class or mg.STANDARD,

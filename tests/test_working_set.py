@@ -133,6 +133,24 @@ def test_a_model_call_outside_any_objective_is_unchanged(tmp_path, monkeypatch):
     assert request.context_package == mg.compile_context(system="be brief", user="hello there")
 
 
+def test_a_model_call_is_compiled_within_its_task_classes_input_budget(tmp_path, monkeypatch):
+    from friday.toolsets import model_gateway as MT
+    from friday.toolsets import objectives as OT
+
+    monkeypatch.setattr(OT, "store", lambda: Store(tmp_path / "ada.sqlite3"))
+    fake = _Gateway()
+    monkeypatch.setattr(mg, "gateway", lambda: fake)
+    for task_class in (mg.TRIVIAL, mg.STANDARD):
+        result = MT.model_infer(c.Run.create("hi"), "hello", task_class=task_class)
+        assert result.output["context"]["budget_tokens"] == mg.BUDGETS[task_class].max_input_tokens
+    # What may never be dropped not fitting the class's budget fails the call
+    # before it reaches the gateway.
+    fake.requests.clear()
+    refused = MT.model_infer(c.Run.create("big"), "x" * 8_000, task_class=mg.TRIVIAL)
+    assert refused.status == c.FAILED and "budget" in refused.error.lower()
+    assert fake.requests == []
+
+
 def test_a_recorded_line_cannot_close_its_frame():
     """Every line of a block is quoted, so a bracket or a line break inside a
     recorded fact cannot end the block and start an instruction."""
