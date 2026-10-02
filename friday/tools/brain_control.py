@@ -59,7 +59,7 @@ def register(mcp):
     @mcp.tool()
     def brain_remember(fact: str, provenance: str, entity: str = "",
                        kind: str = "fact", ttl: str = "",
-                       from_read_material: bool = False) -> dict:
+                       from_read_material: bool | None = None) -> dict:
         """
         Save ONE durable fact to the shared Friday/Hermes brain: verified
         project facts, architecture decisions, root-cause lessons,
@@ -73,8 +73,11 @@ def register(mcp):
         try:
             # The voice agent sets `from_read_material` from what the turn
             # consumed; such a turn is refused the ledger (MEM-002, V7-D28).
+            # An omitted flag fails closed: only an explicit False is the
+            # person's own turn.
             out = brain().remember(fact, provenance=provenance,
-                                   origin=(READ_ORIGIN if from_read_material
+                                   origin=(READ_ORIGIN
+                                           if from_read_material is not False
                                            else PERSON_ORIGIN),
                                    entity=entity, kind=kind, ttl=ttl)
         except AdmissionRefused as refusal:

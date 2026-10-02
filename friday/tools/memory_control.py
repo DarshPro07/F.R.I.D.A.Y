@@ -31,6 +31,13 @@ def _get_engine() -> PolicyEngine:
     return _engine
 
 
+def _read(flag: bool | None) -> bool:
+    # Fail closed: only the voice agent knows what the turn consumed, and it
+    # always sets the flag. A direct MCP client that omits it cannot claim
+    # the person's authority for what it writes (MEM-002).
+    return True if flag is None else flag
+
+
 def _execute(request: str, fn, *args, from_read_material: bool = False,
              **kwargs) -> dict:
     # The voice agent sets `from_read_material` from what the turn consumed
@@ -56,7 +63,7 @@ def register(mcp):
                         source: str = "user stated it",
                         confidence: float = 1.0, memory_type: str = "semantic",
                         project: str = "", source_ref: str = "",
-                        from_read_material: bool = False) -> dict:
+                        from_read_material: bool | None = None) -> dict:
         """
         Store something durably so it survives a restart.
 
@@ -75,7 +82,7 @@ def register(mcp):
                         kind=kind, source=source, confidence=confidence,
                         memory_type=memory_type, project=project,
                         source_ref=source_ref,
-                        from_read_material=from_read_material)
+                        from_read_material=_read(from_read_material))
 
     @mcp.tool()
     def memory_provenance(memory_id: int) -> dict:
@@ -128,11 +135,11 @@ def register(mcp):
     @mcp.tool()
     def memory_record_decision(project: str, decision: str,
                                rationale: str = "",
-                               from_read_material: bool = False) -> dict:
+                               from_read_material: bool | None = None) -> dict:
         """Record a project decision and why it was made."""
         return _execute(f"decision for {project}", M.project_record_decision,
                         project, decision, rationale=rationale or None,
-                        from_read_material=from_read_material)
+                        from_read_material=_read(from_read_material))
 
     @mcp.tool()
     def memory_project_context(project: str) -> dict:

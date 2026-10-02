@@ -109,6 +109,67 @@ def test_the_ledger_refuses_a_turn_that_read_something():
     assert out["status"] == "refused"
 
 
+class _Mcp:
+    def __init__(self):
+        self.tools = {}
+
+    def tool(self):
+        return lambda fn: self.tools.setdefault(fn.__name__, fn)
+
+
+def test_a_direct_client_that_omits_the_flag_is_read_material(db):
+    from friday.tools import memory_control as MC
+
+    mcp = _Mcp()
+    MC.register(mcp)
+    remember = mcp.tools["memory_remember"]
+
+    refused = remember("editor", "vim", kind=PREFERENCE)
+    assert refused["status"] == "failed"
+    assert db.recall("editor") == []
+
+    remember("arc.language", "Rust", kind=FACT)
+    assert db.recall("arc.language")[0]["trust_class"] == c.READ_MATERIAL
+
+    decision = mcp.tools["memory_record_decision"]("arc", "use Rust")
+    assert decision["status"] == "failed"
+    assert db.decisions("arc") == []
+
+
+def test_an_explicit_false_from_the_agent_stays_the_persons_voice(db):
+    from friday.tools import memory_control as MC
+
+    mcp = _Mcp()
+    MC.register(mcp)
+    mcp.tools["memory_remember"]("arc.language", "Rust", kind=FACT,
+                                 from_read_material=False)
+    assert db.recall("arc.language")[0]["trust_class"] == ""
+
+
+def test_the_ledger_refuses_a_direct_client_that_omits_the_flag():
+    from friday import brain as B
+    from friday.tools import brain_control as BC
+
+    mcp = _Mcp()
+    BC.register(mcp)
+
+    class Spy:
+        origins = []
+
+        def remember(self, fact, *, provenance, origin, **kw):
+            self.origins.append(origin)
+            return {"status": "ok", "id": 1}
+
+    spy = Spy()
+    BC.configure(spy)
+    try:
+        mcp.tools["brain_remember"]("a fact", "file.py:1")
+        mcp.tools["brain_remember"]("a fact", "file.py:1", from_read_material=False)
+    finally:
+        BC.configure(None)
+    assert spy.origins == [B.READ_ORIGIN, B.PERSON_ORIGIN]
+
+
 def test_the_agent_overwrites_the_models_lineage_claim():
     import agent_friday as A
 
