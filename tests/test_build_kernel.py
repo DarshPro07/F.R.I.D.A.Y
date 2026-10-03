@@ -635,6 +635,32 @@ def _done_run(repo, tmp_path, mode="SHIP"):
                      branch="" if mode == "SCOUT" else "build/r-1", repo=repo), wt
 
 
+def test_a_worker_capped_after_writing_done_evidence_is_done(repo, tmp_path):
+    # 2026-10-03: SEC-005's repair wrote DONE evidence (176 tests passing, acceptance met)
+    # and hit its turn cap on a last check; the cap made it FAILED and queued an Opus
+    # advisor on finished work. The integrator re-proves a DONE run in any case.
+    run, wt = _done_run(repo, tmp_path)
+    _stream(wt, {"type": "system", "session_id": "S1"},
+            {"type": "result", "subtype": "error_max_turns", "is_error": True, "session_id": "S1",
+             "num_turns": 21, "total_cost_usd": 1.18})
+    run.proc = _Proc(1)
+    (wt / "a.py").write_text("a = 1\n")
+    _evidence_done(wt)
+    rec = K.finalize(run, None, tmp_path / "runs")
+    assert rec["state"] == "DONE" and rec["commit"]
+
+
+def test_a_crashed_worker_with_done_evidence_is_still_failed(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    _stream(wt, {"type": "system", "session_id": "S1"},
+            {"type": "result", "subtype": "error_during_execution", "is_error": True, "session_id": "S1",
+             "num_turns": 3, "total_cost_usd": 0.2})
+    run.proc = _Proc(1)
+    (wt / "a.py").write_text("a = 1\n")
+    _evidence_done(wt)
+    assert K.finalize(run, None, tmp_path / "runs")["state"] == "FAILED"
+
+
 def test_finalize_commits_a_done_diff_on_the_build_branch(repo, tmp_path):
     run, wt = _done_run(repo, tmp_path)
     (wt / "new.py").write_text("x = 1\n")

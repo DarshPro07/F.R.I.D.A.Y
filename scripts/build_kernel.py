@@ -1775,9 +1775,15 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
     advisor = run.kind == "ADVISOR"
     ev = (_scout_outcome(run, runs_dir, str(res.get("result") or "")) if scout
           else {} if advisor else _evidence(run.wt))
+    # A worker that wrote its verdict and then hit the turn or budget cap on a last check
+    # did finish: the evidence is this invocation's (_start archives the one before it)
+    # and the integrator re-proves a DONE run (2026-10-03: SEC-005's finished repair was
+    # filed FAILED and queued for an Opus advisor).
+    finished_then_capped = (str(res.get("subtype", "")).startswith("error_max") and not scout
+                            and not advisor and ev.get("status") in ("DONE", "BLOCKED"))
     if reason:
         state = reason
-    elif run.proc.returncode != 0 or not res or res.get("is_error"):
+    elif (run.proc.returncode != 0 or not res or res.get("is_error")) and not finished_then_capped:
         state = "FAILED"
     elif advisor:
         state = "DONE" if str(res.get("result") or "").strip() else "FAILED"
