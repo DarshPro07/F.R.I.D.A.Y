@@ -1322,7 +1322,8 @@ class FridayAgent(Agent):
         # MCP-001: a tool server FRIDAY does not run itself is held to what
         # was pinned; a change nobody asked for withholds all of its tools.
         tools, self._tools_suspended = mcp_firewall.admitted_tools(
-            mcp_sse_url(), tools, identity=mcp_firewall.identity_of(self._toolset))
+            mcp_sse_url(), tools, identity=mcp_firewall.identity_of(self._toolset),
+            binding=mcp_firewall.remote_binding(mcp_sse_url()))
         if self._tools_suspended:
             self._tools_offline = True
             self._router.load([])
