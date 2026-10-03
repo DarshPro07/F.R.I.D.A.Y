@@ -3148,6 +3148,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "is not created); unscoped behaviour is unchanged; the existing 176 tests stay green. Commands come back "
             "only through EXEC-SBX-001 (AppContainer/LPAC or Windows Sandbox, after real escape tests)."),
     }),
+    ('MCP-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Firewall pins endpoint, protocol, relationship, permissions, auth scope, metadata, stdio exe hash/command/package; any drift suspends. External servers go DISCOVERED->UNVERIFIED->approve->ACTIVE; calls refused at the client until then. No TLS leaf pin; SPKI optional. (build run, commit b27e5c21d)',
+        "next_action": "GAPS: No live caller connects to an external server yet: external=True, discover_config (mcpServers JSON shape only; no Hermes config reader) and stdio_binding are exercised by tests and the approve CLI, not by a production path.; Approval is always required for an external server; no admin policy that waives it ('where required') exists.; protocol is pinned as a caller-registered revision, not the negotiated one (a client upgrade renegotiates); the voice agent pins the endpoint only.; tests/test_prd_ledger.py::test_the_real_ledgers_are_clean fails in this worktree on 7 cited data/ paths absent here (CORE-002, CTX-002, RES-001/2/3, SCOUT-001); none is MCP-001. scripts/prd_ledger.py MCP-001 line citations were not refreshed.",
+    }),
 ]
 
 
