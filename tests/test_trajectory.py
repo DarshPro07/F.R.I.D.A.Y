@@ -299,3 +299,255 @@ def test_a_resume_clears_the_contract_signals_for_the_new_window():
     trace.events.append({"event": O.EVENT_RUN_RESUMED, "task_id": None, "detail": {}})
     assert T.assess(trace.events, trace.tasks,
                     governance={"forbidden": ["delete"]}).verdict == T.ON_TRACK
+
+
+# -- long-horizon contract drift (synthetic) ---------------------------------------
+
+def _mixed_trace(tasks, write_every):
+    """A long trace of read steps with a write step now and then; the writes'
+    indexes are returned so a test knows which step is which."""
+    trace = _Trace(tasks)
+    writes = [i for i in range(tasks) if i % write_every == write_every - 1]
+    for i in writes:
+        trace.tasks[i]["capability"] = "files_write"
+    return trace, writes
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_a_long_run_inside_its_contract_is_never_flagged(seed):
+    """Writes within the allowed count, no forbidden class, no open questions:
+    the contract signals add no false positives to ordinary retries."""
+    rng = random.Random(seed)
+    trace, writes = _mixed_trace(60, rng.choice([5, 6, 7]))
+    governance = {"forbidden": ["delete", "send"], "max_side_effects": len(writes)}
+    for i in range(60):
+        if i not in writes and rng.random() < 0.3:
+            trace.failed(f"t{i}")
+        trace.succeeded(f"t{i}")
+        found = T.assess(trace.events, trace.tasks, governance=governance)
+        assert found.verdict == T.ON_TRACK, (seed, i, found)
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_one_write_past_the_contracts_limit_is_flagged_when_it_starts(seed):
+    rng = random.Random(seed)
+    trace, writes = _mixed_trace(60, 6)
+    allowed = rng.randint(2, len(writes) - 1)
+    governance = {"max_side_effects": allowed}
+    breach = writes[allowed]
+    for i in range(breach):
+        trace.succeeded(f"t{i}")
+        assert T.assess(trace.events, trace.tasks, governance=governance).verdict == T.ON_TRACK, (seed, i)
+    trace.started(f"t{breach}")
+    found = T.assess(trace.events, trace.tasks, governance=governance)
+    assert found.verdict == T.DRIFTING, (seed, found)
+    assert f"{allowed + 1} steps with side effects against a limit of {allowed}" in " ".join(found.reasons)
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_a_forbidden_step_in_a_long_run_is_flagged_when_it_starts(seed):
+    rng = random.Random(seed)
+    trace = _Trace(60)
+    onset = rng.randrange(5, 55)
+    trace.tasks[onset]["capability"] = "files_delete"
+    governance = {"forbidden": ["delete"]}
+    for i in range(onset):
+        trace.succeeded(f"t{i}")
+    assert T.assess(trace.events, trace.tasks, governance=governance).verdict == T.ON_TRACK
+    trace.started(f"t{onset}")
+    found = T.assess(trace.events, trace.tasks, governance=governance)
+    assert found.verdict == T.DRIFTING, (seed, found)
+    assert "files_delete (delete was forbidden)" in " ".join(found.reasons)
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_the_first_write_under_an_open_question_is_flagged_when_it_starts(seed):
+    rng = random.Random(seed)
+    trace, writes = _mixed_trace(60, rng.choice([8, 10, 12]))
+    first = writes[0]
+    open_questions = ("which folder?",)
+    for i in range(first):
+        trace.succeeded(f"t{i}")
+        assert T.assess(trace.events, trace.tasks,
+                        open_questions=open_questions).verdict == T.ON_TRACK, (seed, i)
+    trace.started(f"t{first}")
+    found = T.assess(trace.events, trace.tasks, open_questions=open_questions)
+    assert found.verdict == T.DRIFTING, (seed, found)
+    assert found.signals["unanswered_questions"] == 1
+
+
+# -- the executor acts on the contract ---------------------------------------------
+
+def _compile_under(store, contract, capability, n, *, chained=True):
+    """`n` steps under a contract: a chain (each its own batch) or, with
+    `chained=False`, independent steps that the executor runs as one batch."""
+    created = O.compile_objective(
+        store, request="tidy the folder", objective_summary="tidy the folder",
+        tasks=[{"capability": capability, "arguments": {},
+                "dependencies": [f"t{i}"] if chained and i else []} for i in range(n)],
+        manifest=[{"id": capability, "description": capability}],
+        provenance=c.PERSON, attended=True, contract=contract)
+    return created["run_id"]
+
+
+async def _every_call_works(capability, arguments, *, run=None):
+    return {"ok": True}
+
+
+def test_a_run_acting_under_an_open_question_is_paused_with_the_question(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    contract = c.ObjectiveContract(goal="tidy the folder",
+                                   open_questions=("which folder?",))
+    run_id = _compile_under(store, contract, "files_write", 3)
+
+    run = _drive(store, run_id, _every_call_works)
+    assert run["status"] == O.RUN_PAUSED, run
+    assert "trajectory" in (run.get("blocker") or "")
+    assert "question(s) in the contract are still open" in run["blocker"]
+    flagged = [e for e in store.objective_events(run_id) if e["event"] == T.EVENT_FLAGGED]
+    assert len(flagged) == 1
+    assert flagged[0]["detail"]["verdict"] == T.DRIFTING
+    assert flagged[0]["detail"]["signals"]["unanswered_questions"] == 1
+
+
+def test_read_only_steps_under_an_open_question_complete_unflagged(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    contract = c.ObjectiveContract(goal="check the system",
+                                   open_questions=("which report?",))
+    run_id = _compile_under(store, contract, "system_get_info", 3)
+
+    run = _drive(store, run_id, _every_call_works)
+    assert run["status"] == O.RUN_COMPLETED, run
+    assert not [e for e in store.objective_events(run_id) if e["event"] == T.EVENT_FLAGGED]
+
+
+# -- before a step starts: the check looks at what is about to run ---------------------
+
+OPEN = ("which folder?",)
+
+
+def _flagged(unanswered):
+    return {"event": T.EVENT_FLAGGED, "task_id": None,
+            "detail": {"verdict": T.DRIFTING, "signals": {"unanswered_questions": unanswered}}}
+
+
+def _resumed():
+    return {"event": O.EVENT_RUN_RESUMED, "task_id": None, "detail": {}}
+
+
+def test_a_side_effecting_step_about_to_start_under_an_open_question_is_flagged():
+    trace = _Trace(3, capability="files_write")
+    found = T.assess(trace.events, trace.tasks, open_questions=OPEN, upcoming=("t0",))
+    assert found.verdict == T.DRIFTING
+    assert "about to start while 1 question(s) in the contract are still open" in " ".join(found.reasons)
+    assert found.signals["unanswered_questions"] == 1
+    assert found.signals["pending_side_effects"] == ["files_write"]
+
+
+def test_a_read_only_step_about_to_start_under_an_open_question_is_not_flagged():
+    trace = _Trace(3)
+    found = T.assess(trace.events, trace.tasks, open_questions=OPEN, upcoming=("t0", "t1"))
+    assert found.verdict == T.ON_TRACK
+    assert found.signals["unanswered_questions"] == 0
+
+
+def test_a_step_about_to_start_with_no_open_question_is_not_flagged():
+    trace = _Trace(3, capability="files_write")
+    assert T.assess(trace.events, trace.tasks, upcoming=("t0", "t1", "t2")).verdict == T.ON_TRACK
+
+
+def test_a_step_that_has_already_started_is_reported_once_not_as_about_to_start():
+    trace = _Trace(3, capability="files_write")
+    trace.started("t0")
+    found = T.assess(trace.events, trace.tasks, open_questions=OPEN, upcoming=("t0",))
+    assert found.verdict == T.DRIFTING
+    assert found.signals["pending_side_effects"] == []
+    assert "about to start" not in " ".join(found.reasons)
+
+
+def test_carrying_on_past_the_question_is_not_asked_again_before_the_step():
+    trace = _Trace(3, capability="files_write")
+    trace.events += [_flagged(1), _resumed()]
+    assert T.assess(trace.events, trace.tasks, open_questions=OPEN,
+                    upcoming=("t0",)).verdict == T.ON_TRACK
+
+
+def test_carrying_on_past_the_question_is_not_asked_again_after_the_step():
+    trace = _Trace(3, capability="files_write")
+    trace.events += [_flagged(1), _resumed()]
+    trace.started("t0")
+    assert T.assess(trace.events, trace.tasks, open_questions=OPEN).verdict == T.ON_TRACK
+
+
+def test_carrying_on_past_some_other_flag_does_not_waive_the_open_question():
+    """The person was asked about failures, not about the unanswered question."""
+    trace = _Trace(3, capability="files_write")
+    trace.events += [_flagged(0), _resumed()]
+    found = T.assess(trace.events, trace.tasks, open_questions=OPEN, upcoming=("t0",))
+    assert found.verdict == T.DRIFTING
+
+
+def test_a_question_added_after_the_person_carried_on_is_asked_again():
+    trace = _Trace(3, capability="files_write")
+    trace.events += [_flagged(1), _resumed()]
+    found = T.assess(trace.events, trace.tasks, open_questions=OPEN + ("which day?",),
+                     upcoming=("t0",))
+    assert found.verdict == T.DRIFTING
+    assert found.signals["unanswered_questions"] == 2
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_the_first_write_under_an_open_question_is_flagged_before_it_starts(seed):
+    """The reads ahead of it are never flagged, and the write is flagged while
+    still pending: no side effect has happened when the person is asked."""
+    rng = random.Random(seed)
+    trace, writes = _mixed_trace(60, rng.choice([8, 10, 12]))
+    first = writes[0]
+    for i in range(first):
+        assert T.assess(trace.events, trace.tasks, open_questions=OPEN,
+                        upcoming=(f"t{i}",)).verdict == T.ON_TRACK, (seed, i)
+        trace.succeeded(f"t{i}")
+    found = T.assess(trace.events, trace.tasks, open_questions=OPEN, upcoming=(f"t{first}",))
+    assert found.verdict == T.DRIFTING, (seed, found)
+    assert found.signals["pending_side_effects"] == ["files_write"]
+    assert not any(e["task_id"] == f"t{first}" for e in trace.events)
+
+
+def _recording_dispatch(calls):
+    async def dispatch(capability, arguments, *, run=None):
+        calls.append(capability)
+        return {"ok": True}
+    return dispatch
+
+
+def test_a_first_batch_of_writes_under_an_open_question_is_stopped_before_any_starts(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    contract = c.ObjectiveContract(goal="tidy the folder", open_questions=OPEN)
+    run_id = _compile_under(store, contract, "files_write", 3, chained=False)
+    calls: list[str] = []
+
+    run = _drive(store, run_id, _recording_dispatch(calls))
+
+    assert run["status"] == O.RUN_PAUSED, run
+    assert calls == []
+    assert not [e for e in store.objective_events(run_id) if e["event"] == O.EVENT_TASK_STARTED]
+    assert "about to start" in run["blocker"]
+    flagged = [e for e in store.objective_events(run_id) if e["event"] == T.EVENT_FLAGGED]
+    assert len(flagged) == 1
+    assert flagged[0]["detail"]["signals"]["pending_side_effects"] == ["files_write"] * 3
+
+
+def test_carrying_on_runs_the_steps_without_asking_about_the_question_again(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    contract = c.ObjectiveContract(goal="tidy the folder", open_questions=OPEN)
+    run_id = _compile_under(store, contract, "files_write", 3, chained=False)
+    calls: list[str] = []
+    dispatch = _recording_dispatch(calls)
+    assert _drive(store, run_id, dispatch)["status"] == O.RUN_PAUSED
+
+    assert O.resume_run(store, run_id=run_id, reason="carry on", executor_id="test")
+    run = _drive(store, run_id, dispatch)
+
+    assert run["status"] == O.RUN_COMPLETED, run
+    assert calls == ["files_write"] * 3
+    assert len([e for e in store.objective_events(run_id) if e["event"] == T.EVENT_FLAGGED]) == 1

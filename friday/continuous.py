@@ -33,7 +33,7 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Sequence
 
 from friday import contracts as c
 from friday import objective_budget as budget_module
@@ -539,7 +539,8 @@ class ContinuousTaskExecutor:
                 if not ready:
                     self._settle_without_work(run_id)
                     return
-                if self._trajectory_pauses(run_id):
+                batch = ready[:max(self.portion_budget - executed, 0)]
+                if self._trajectory_pauses(run_id, [t["task_id"] for t in batch]):
                     return
 
                 done = await self._execute_tasks(
@@ -955,16 +956,18 @@ class ContinuousTaskExecutor:
                     run_id, task_id)
         self.release(run_id)
 
-    def _trajectory_pauses(self, run_id: str) -> bool:
+    def _trajectory_pauses(self, run_id: str, upcoming: Sequence[str] = ()) -> bool:
         """
         PRD v7 TRAJ-001: before more work, is the run still going somewhere?
         A run failing across tasks, failing everywhere for one cause, piling
-        up policy refusals, spending far ahead of its progress or re-running
-        a step with side effects is paused and the person asked: carry on,
-        change the plan, or cancel. Resuming starts a new window.
+        up policy refusals, spending far ahead of its progress, re-running
+        a step with side effects, or about to act with side effects while the
+        contract holds open questions (`upcoming`: the batch about to be
+        dispatched) is paused and the person asked: carry on, change the
+        plan, or cancel. Resuming starts a new window.
         """
         try:
-            assessment = trajectory.for_run(self.store, run_id)
+            assessment = trajectory.for_run(self.store, run_id, tuple(upcoming))
         except Exception:                                    # noqa: BLE001
             # The budget still holds every hard ceiling; a check that could
             # not read the run is reported, not a reason to stop it.
@@ -982,7 +985,7 @@ class ContinuousTaskExecutor:
                     "signals": assessment.signals})
         self.store.create_objective_delivery(
             run_id,
-            f"Boss, this objective has stopped going anywhere useful: {reasons}. "
+            f"Boss, I've paused this objective: {reasons}. "
             "Say carry on, change the plan, or cancel it.")
         logger.warning("objective.trajectory_paused run_id=%s verdict=%s reasons=%s",
                        run_id, assessment.verdict, reasons)

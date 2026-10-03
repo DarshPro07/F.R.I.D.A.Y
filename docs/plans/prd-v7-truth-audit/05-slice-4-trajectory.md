@@ -25,6 +25,12 @@ refusals piling up, spend running far ahead of progress, a side-effecting step b
 - The executor asks before dispatching ready tasks. A flagged run is PAUSED with the reasons as its blocker, a
   `trajectory.flagged` event, and one message to the person (continue, change the plan, or cancel). Resuming
   starts a new window, so the same history does not flag it again at once.
+- Contract drift: a forbidden action class started, more side-effecting steps than `max_side_effects`, or a
+  side-effecting step under an open contract question. The open-question signal is also checked before
+  dispatch: `assess(..., upcoming=<ids of the batch about to run>)` flags a side-effecting step that is *about
+  to start*, so the person is asked before the first side effect, not after it. Assumption (no owner ruling
+  found): a resume after a flag that named the open questions is the person's "carry on", so the same
+  questions are not asked again in later windows; a question added afterwards is asked.
 - Actions beyond pause (fresh worker, stronger model, lower concurrency) are later; this closes detection and
   the safe default action.
 
@@ -34,3 +40,6 @@ refusals piling up, spend running far ahead of progress, a side-effecting step b
   recover) never flag; each drift shape is flagged within a stated number of events of its onset.
 - The executor parks a real run whose every call fails transiently across tasks, and a healthy run completes
   unflagged (negative control).
+- Contract drift: seeded long traces for each contract signal, and the executor with an open question: a first
+  batch of independent writes is paused with no step started and nothing dispatched; after a resume the
+  steps run and the person is not asked again.

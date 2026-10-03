@@ -16,7 +16,9 @@ it, and says whether it is still going somewhere:
 
 `assess` is pure, so the thresholds can be benchmarked on synthetic traces;
 `for_run` gathers the inputs from the store. The executor pauses a flagged
-run and asks the person (continuous.py); resuming starts a new window.
+run and asks the person (continuous.py); resuming starts a new window. Acting
+on an open question is caught before the step starts (`upcoming`), and a person
+who has said carry on is not asked about the same questions again.
 """
 from __future__ import annotations
 
@@ -100,23 +102,39 @@ def _outside_contract(governance: dict, started: list[str],
     return found
 
 
-def _acting_on_questions(open_questions: tuple, started: list[str],
+def _acting_on_questions(open_questions: tuple, steps: list[str],
                          capability_of: dict) -> list[str]:
-    """The side-effecting steps started while the contract still holds
-    unanswered questions: an assumption nobody verified."""
+    """The side-effecting steps, started or about to start, while the contract
+    still holds unanswered questions: an assumption nobody verified."""
     if not open_questions:
         return []
-    return [str(capability_of.get(task)) for task in started
+    return [str(capability_of.get(task)) for task in steps
             if _side_effecting(str(capability_of.get(task) or ""))]
 
 
+def _questions_waved_through(earlier: list[dict], open_questions: tuple) -> bool:
+    """Whether the person was already asked about these open questions and
+    said carry on: a flag that named them, before the resume that began this
+    window. Asking again after every step would make "carry on" mean one step."""
+    asked = 0
+    for e in earlier:
+        signals = _detail(e).get("signals")
+        count = signals.get("unanswered_questions") if isinstance(signals, dict) else 0
+        if e.get("event") == EVENT_FLAGGED and isinstance(count, int):
+            asked = max(asked, count)
+    return bool(open_questions) and asked >= len(open_questions)
+
+
 def assess(events: list[dict], tasks: list[dict], *, spend: float = 0.0,
-           governance: dict | None = None, open_questions: tuple = ()) -> Assessment:
+           governance: dict | None = None, open_questions: tuple = (),
+           upcoming: tuple = ()) -> Assessment:
     """
     Where the run is going, from its events since the person last resumed it
     (all of them if never), its task rows, and the largest fraction of any
     budget it has spent. With the objective contract's governance and open
-    questions it also says whether the run has left what was asked.
+    questions it also says whether the run has left what was asked. `upcoming`
+    is the ids of the tasks the executor is about to dispatch: a side-effecting
+    one under an open question is flagged before it starts, not after.
     """
     governance = governance or {}
     start = max((i for i, e in enumerate(events) if e.get("event") == _RESUMED), default=-1)
@@ -155,12 +173,17 @@ def assess(events: list[dict], tasks: list[dict], *, spend: float = 0.0,
     progress = done / len(tasks) if tasks else 1.0
     started = sorted(task for task in starts if task)
     out_of_scope = _outside_contract(governance, started, capability_of)
-    unanswered = _acting_on_questions(open_questions, started, capability_of)
+    waved_through = start >= 0 and _questions_waved_through(events[:start], open_questions)
+    unanswered = [] if waved_through else _acting_on_questions(open_questions, started,
+                                                               capability_of)
+    pending = [] if waved_through else _acting_on_questions(
+        open_questions, [task for task in upcoming if task not in starts], capability_of)
 
     signals = {"attempts_since_success": len(since), "failing_tasks": len(failing),
                "refusals": refusals, "spend": round(spend, 3), "progress": round(progress, 3),
                "repeated_side_effects": repeated_effects, "out_of_scope": out_of_scope,
-               "unanswered_questions": len(open_questions) if unanswered else 0}
+               "unanswered_questions": len(open_questions) if unanswered or pending else 0,
+               "pending_side_effects": pending}
     stuck: list[str] = []
     drifting: list[str] = []
     if len(since) >= NO_PROGRESS_ATTEMPTS and len(failing) >= NO_PROGRESS_TASKS:
@@ -184,6 +207,9 @@ def assess(events: list[dict], tasks: list[dict], *, spend: float = 0.0,
     if unanswered:
         drifting.append(f"a step with side effects has started while {len(open_questions)} "
                         "question(s) in the contract are still open: " + "; ".join(unanswered))
+    if pending:
+        drifting.append(f"a step with side effects is about to start while {len(open_questions)} "
+                        "question(s) in the contract are still open: " + "; ".join(pending))
     if stuck:
         return Assessment(NO_PROGRESS, tuple(stuck + drifting), signals)
     if drifting:
@@ -206,8 +232,9 @@ def spend_fraction(store, run_id: str) -> float:
     return max(fractions, default=0.0)
 
 
-def for_run(store, run_id: str) -> Assessment:
-    """`assess` over what the store holds for this run."""
+def for_run(store, run_id: str, upcoming: tuple = ()) -> Assessment:
+    """`assess` over what the store holds for this run, and the ids of the
+    tasks about to be dispatched."""
     raw = (store.objective_run(run_id) or {}).get("contract")
     try:
         contract = json.loads(raw) if raw else {}
@@ -218,4 +245,5 @@ def for_run(store, run_id: str) -> Assessment:
     return assess(store.recent_objective_events(run_id), store.objective_tasks(run_id),
                   spend=spend_fraction(store, run_id),
                   governance=dict(contract.get("governance") or {}),
-                  open_questions=tuple(contract.get("open_questions") or ()))
+                  open_questions=tuple(contract.get("open_questions") or ()),
+                  upcoming=tuple(upcoming))
