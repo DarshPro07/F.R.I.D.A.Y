@@ -3128,6 +3128,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "acceptance_met=false and the gaps listed, so the work integrates as PARTIAL; BLOCKED is only for a "
             "decision only the owner can make. CTX-002 stays PARTIAL until the held-out metrics pass."),
     }),
+    ('CTX-003', {
+        "status": PARTIAL,
+        "current_implementation": 'Objective engine reaches workers only through the context compiler (compile_request / development.for_request); critical facts, literals, blockers and now acceptance criteria survive tight budgets or the package fails loudly. (build run, commit d2ae3bd28)',
+        "next_action": "GAPS: No production capability calls development.for_request yet. for_goal had no production caller before this change either; registering one needs an owner decision on its policy category (what authority starting a development run in a repo carries) and a capability_router group. The seam is enforced by tests/test_context_compiler.py (for_goal is called only from for_request, which compiles first), and the live objective path that does reach a worker today (hermes_delegate) goes through mg.compile_request.; tests/test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop is @pytest.mark.live; it trips the TEST-ISOLATION-001 guard on data/gateway_calls_live_test.sqlite3 when run without the gate's -m 'not live' filter. It needs a live Hermes install, is excluded from the gate, and is outside this change.; Full 4-chunk baseline suite not run in this worktree (host is memory-constrained); only the targeted files above plus the other for_objective users were run.",
+    }),
 ]
 
 
