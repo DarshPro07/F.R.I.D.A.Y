@@ -1245,7 +1245,11 @@ def _failing_tests(integration: dict) -> list[str]:
 def localized(integration: dict) -> bool:
     """A failure small enough for the worker's own session to fix with its
     context: the integrator reset a change that ran (FAILED_INTEGRATION), or
-    the new tests ran red with at most LOCALIZED_FAILING_TESTS failing."""
+    the new tests ran red with at most LOCALIZED_FAILING_TESTS failing. A worker
+    that failed before integration never is: its own session is the one that ran
+    out (2026-10-03, SEC-005: resuming it cost 1.5x the first run for half the turns)."""
+    if not integration:
+        return False
     result = integration.get("result", "FAILED_INTEGRATION")
     if result == "FAILED_INTEGRATION":
         return True
@@ -1274,7 +1278,13 @@ def failure_capsule(req: str, integration: dict, run_rec: dict, wt: Path, base_s
     lines = [f"# Failure capsule: {req} (attempt {attempt})",
              "Read .build/packet.md for the requirement. This is a fresh session: the earlier "
              "transcript is deliberately not carried over; the worktree holds the earlier work.",
-             "## What failed", f"Integration result: {result}."]
+             "## What failed"]
+    if integration:
+        lines.append(f"Integration result: {result}.")
+    else:
+        lines.append(f"The earlier worker ended {run_rec.get('state') or 'FAILED'} before integration: it "
+                     "stopped (its turn or time limit) before finishing and wrote no evidence. The "
+                     "worktree holds its unfinished work - read the diff, finish it, do not start over.")
     if integration.get("detail"):
         lines.append(f"Detail: {integration['detail']}")
     lines += ["## Expected",
@@ -1306,6 +1316,21 @@ def failure_capsule(req: str, integration: dict, run_rec: dict, wt: Path, base_s
               "never faked. Then rewrite .build/evidence.json (status, summary, acceptance_met, "
               "gaps, commit_subject)."]
     return "\n".join(lines)
+
+
+#: A worker's own failure before integration: it ran out of turns or time.
+WORKER_FAILURES = ("FAILED", "TIMEOUT")
+
+
+def has_work(rec: dict) -> bool:
+    """Whether a run left changes in its worktree (the kernel's .build/ aside). A
+    worktree git cannot read counts as holding nothing: the run is then an ordinary
+    failed attempt, which is what it was before this check existed."""
+    wt = Path(rec.get("worktree") or "")
+    try:
+        return wt.is_dir() and bool(_changes(wt).strip())
+    except KernelError:
+        return False
 
 
 def attempts_made(req: str, runs_dir: Path = RUNS_DIR) -> int:
@@ -1347,7 +1372,9 @@ def repair(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
     if not sid:
         raise KernelError(f"{req} has no recorded session to repair")
     integration = _read_json(runs_dir / f"{req}.integration.json")
-    if not integration:
+    # A worker that failed before integration (its turn cap, a timeout) has no integration
+    # record; its unfinished work on disk is repaired from a fresh capsule all the same.
+    if not integration and run_rec.get("state") not in WORKER_FAILURES:
         raise KernelError(f"{req} has no integration record to repair from")
     meta = _run_meta(wt)
     base_sha = meta.get("base_sha") or run_rec.get("base_sha")

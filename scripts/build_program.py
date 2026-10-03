@@ -492,6 +492,12 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
         # rather than dropping out of the cascade with the work it left on disk.
         state["repair_queue"][req] = {"result": f"WORKER_{st}", "at": now()}
         return st, spend, False
+    if st in k.WORKER_FAILURES and k.has_work(rec):
+        # A worker that ran out with its work on disk enters the repair cascade: a fresh
+        # capsule session finishes it in the same worktree. As a plain attempt the next run
+        # could only park the worktree as stale (2026-10-03, SEC-005).
+        state["repair_queue"][req] = {"result": f"WORKER_{st}", "at": now()}
+        return st, spend, False
     state["attempts"][req] = state["attempts"].get(req, 0) + 1
     if state["attempts"][req] >= MAX_ATTEMPTS:
         park(state, req, f"{st.lower()} x{state['attempts'][req]}", "attempts", f"{st} twice")

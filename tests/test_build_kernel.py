@@ -1062,6 +1062,32 @@ def _repairable(repo, tmp_path, integration=True, session="S1", result="FAILED_I
     return wt, runs
 
 
+def _worker_failed(repo, tmp_path):
+    """A worker that hit its turn cap with work on disk and no evidence: never integrated."""
+    wt, runs = _repairable(repo, tmp_path, integration=False)
+    rec = json.loads((runs / "R-1.json").read_text())
+    (runs / "R-1.json").write_text(json.dumps({**rec, "state": "FAILED", "evidence": {}}))
+    return wt, runs
+
+
+def test_a_worker_that_failed_before_integration_is_repaired_in_a_fresh_session(monkeypatch, repo, tmp_path):
+    # 2026-10-03: SEC-005 hit its turn cap twice with work on disk. With no integration
+    # record repair() refused, and the next run could only park the worktree as stale.
+    wt, runs = _worker_failed(repo, tmp_path)
+    cmds = []
+    monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
+    run = K.repair("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
+    prompt = cmds[0][cmds[0].index("-p") + 1]
+    assert "--resume" not in cmds[0]  # never the worker's own, already huge, session
+    assert "ended FAILED before integration" in prompt and run.kind == "REPAIR"
+
+
+def test_a_finished_run_still_needs_its_integration_record_to_be_repaired(repo, tmp_path):
+    wt, runs = _repairable(repo, tmp_path, integration=False)  # DONE, never integrated
+    with pytest.raises(K.KernelError):
+        K.repair("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
+
+
 def test_repair_resumes_the_recorded_session_at_half_budget(monkeypatch, repo, tmp_path):
     wt, runs = _repairable(repo, tmp_path)
     cmds = []

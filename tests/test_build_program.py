@@ -26,6 +26,7 @@ class KErr(Exception):
 
 class FakeKernel:
     KernelError = KErr
+    WORKER_FAILURES = BK.WORKER_FAILURES
     BUDGETS = {"SCOUT": (8, 0.75, 1), "MICRO": (12, 1.0, 1), "NORMAL": (25, 3.0, 1),
                "COMPLEX": (40, 6.0, 1), "P0": (40, 6.0, 1)}
     VENV_PY = "py"
@@ -55,6 +56,7 @@ class FakeKernel:
         self.refused: set[str] = set()  # requirements whose admission or lease recheck fails
         self.over_budget: set[str] = set()  # requirements the day's spend lease refuses
         self.too_big: set[str] = set()  # requirements whose predicted memory does not fit now
+        self.with_work: set[str] = set()  # requirements whose failed worker left changes on disk
         self.spend: list[tuple[str, str, float]] = []  # (req, kind, usd) of each spend lease taken
         self.released: list[str] = []  # memory leases given back
         self.events: list[tuple] = []  # job-state writes and lease attempts, in order
@@ -73,6 +75,9 @@ class FakeKernel:
 
     def concurrency(self, cap=2):
         return min(self.level, cap), "fake"
+
+    def has_work(self, rec):
+        return rec["requirement"] in self.with_work
 
     def admissible(self, candidates, cap=2):
         ids = [row["id"] for row, _, _ in candidates if row["id"] not in self.too_big]
@@ -314,6 +319,25 @@ def test_a_job_the_day_budget_refuses_gives_its_memory_back_and_stops_the_run(en
     assert res["stop_reason"] == "day budget" and not k.launches
     assert k.released == ["att-A"] and "A" not in state_of(env)["parked"]
     assert state_of(env)["budget"].startswith("SPEND_SOFT_STOP")
+
+
+def test_a_worker_that_fails_with_work_on_disk_enters_the_repair_cascade(env):
+    # 2026-10-03: SEC-005 ran out of turns with its work on disk. Counted as a plain
+    # attempt, the next run could only park its worktree as stale.
+    k = FakeKernel(ids=("A",), priority="P0")
+    k.with_work = {"A"}
+    k.script = {"A": [rec("A", state="FAILED")]}
+    go(env, k, max_waves=1)
+    st = state_of(env)
+    assert "A" in st["repair_queue"] and "A" not in st["parked"] and not st["attempts"].get("A")
+
+
+def test_a_worker_that_fails_with_nothing_on_disk_is_an_attempt(env):
+    k = FakeKernel(ids=("A",), priority="P0")
+    k.script = {"A": [rec("A", state="FAILED")]}
+    go(env, k, max_waves=1)
+    st = state_of(env)
+    assert st["attempts"]["A"] == 1 and "A" not in st["repair_queue"]
 
 
 def test_a_job_too_big_for_the_memory_waits_while_the_next_one_runs(env):

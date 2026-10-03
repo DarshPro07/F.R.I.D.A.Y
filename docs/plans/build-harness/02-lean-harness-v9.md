@@ -316,6 +316,20 @@ behind CTX-002 with 2-3 GB free. Owner v12: a branch that needs RAM waits; indep
 - The chain's probe is the program's own dry run; only "nothing to plan: pressure (...)" waits.
 - `concurrency()` (the generic worker) stays for the CLI and the integrator's gate parallelism.
 
+## BH-M - a failed worker's unfinished work enters the repair cascade (2026-10-03)
+
+Measured: SEC-005's Sonnet worker hit its 40-turn cap, its resumed continuation hit 20 more ($1.82 then $2.83:
+the resume re-read a 7.2M-token transcript at about three times the cost per turn), and it wrote no evidence.
+FAILED counted as a plain attempt, so the next run would only have parked the worktree as stale; `repair()`
+refused without an integration record; `localized({})` would have resumed the same huge session.
+
+- `build_program.settle`: a worker FAILED or TIMEOUT whose worktree holds changes goes to the repair queue
+  (cascade REPAIR -> ADVISOR -> IMPLEMENTER), not to the attempt count.
+- `build_kernel.repair`: a run that failed before integration is repaired without an integration record, always
+  in a fresh session from a capsule that says the worker stopped unfinished; `localized({})` is False.
+- Not changed yet (BACKLOG): the one session-resume continuation at the turn cap. On SEC-005 it cost 1.55x the
+  first run for half the turns; with this path a fresh capsule session may be the cheaper continuation.
+
 ## Resume (fresh session)
 
 `git status`; read `data/build_state.json` (parked, escalations, stop_reason); `build_kernel.py concurrency`;
