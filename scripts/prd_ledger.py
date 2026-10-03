@@ -3163,6 +3163,24 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Acceptance already held: an unexpected MCP schema change suspends the server (47 firewall tests green). This run refreshed the stale MCP-001 file:line citations and added a test that fails when they drift. Remaining gaps need owner rulings. (build run, commit 3ee481d36)',
         "next_action": "GAPS: No live caller connects to an external server: external=True, discover_config (mcpServers JSON only, no Hermes config reader) and stdio_binding run only in tests and the approve CLI. Needs the Hermes config location/format.; Approval is always required for an external server; no admin policy waives it ('where required' is undefined). Needs an owner ruling on who may waive and when.; protocol is pinned as the caller-registered revision, not the negotiated one; pinning the negotiated one would suspend the server on every client library upgrade. The voice agent pins the endpoint only. Needs an owner ruling.; tests/test_prd_ledger.py::test_the_real_ledgers_are_clean still fails here on 7 cited data/ paths absent from this worktree (CORE-002, CTX-002, RES-001/2/3, SCOUT-001); none is MCP-001. The 1 failure in the run above is this test.",
     }),
+    # --- CTX-003: owner ruling on the authority to start a development run, 2026-10-03 (d)
+    ('CTX-003', {
+        "status": PARTIAL,
+        "next_action": (
+            "RULING 2026-10-03d (owner, docs/plans/build-harness/00-owner-directive-2026-10-03d.md): register the "
+            "production capability that starts a development run (it calls development.for_request, so the context "
+            "compiler stays the only way to a worker). It is a selfdev/FILE_WRITE-class action in the 'selfdev' "
+            "router group (beside selfdev_run): it asks by default, and proceeds without another prompt only when "
+            "APPROVAL-001's lease (objectives / capability_runtime) is valid and explicitly covers development work "
+            "for that workspace/repo and blast radius. The run stays confined to its own sandbox worktree. Merging "
+            "or promoting into a live branch is a separate capability at a higher authority (COMMAND_EXECUTION) that "
+            "needs fresh approval unless the lease explicitly names promotion to that exact branch. Until "
+            "EXEC-SBX-001 exists, a development run that needs command execution is refused with that reason - "
+            "never a fallback to unrestricted host commands. Tests: a covering lease starts the run with no prompt; "
+            "no lease, another repo or a different blast radius asks; promotion without an exact-branch lease asks; "
+            "a run that needs commands is refused citing EXEC-SBX-001; the seam test still proves the objective path "
+            "reaches the worker only through the compiler."),
+    }),
 ]
 
 
