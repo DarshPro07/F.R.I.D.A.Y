@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: a5cddab on prd-v7/slice-7-adaptive-hardware, updated 2026-10-02T16:33:51+00:00
+- HEAD: d45f209 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-03T08:00:51+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 70, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
 - Unresolved P0: 19
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (54): TRAJ-001=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), MCP-001 (integration refused), EVAL-001 (failed x2), ACT-001 (failed x2), APPROVAL-001 (stale worktree), CTX-001 (partial x2), CTX-002 (blocked), BCON-001 (partial x2), CTX-003 (integration refused), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), SEC-005 (blocked)
-- Open escalations: 38
-  - CTX-002 blocked: Owner target needs a learned embedding/reranker model (or relabelled dev split); decide whether to a
-  - BCON-001 partial: integrated twice without closing its gaps
-  - CTX-003 integration: refusing CTX-003: run has no commit
-  - CYBER-002 partial: integrated twice without closing its gaps
-  - DUR-001 partial: integrated twice without closing its gaps
-  - INTENT-001 integration: refusing INTENT-001: run has no commit
+- Last wave (56): APPROVAL-001=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), CTX-002 (blocked)
+- Open escalations: 44
   - JIT-001 partial: integrated twice without closing its gaps
   - MEM-003 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\mem-003 already exists
   - MEM-002 partial: integrated twice without closing its gaps
   - SEC-005 blocked: Per-session jail needs a seam: Hermes spawns the stdio bridge once per profile with a fixed env (exe
-- Next ready: BROW-004, ASSUME-001
+  - CTX-002 resolved: owner ruling 2026-10-02h: small local models; prior work on wip/ctx-002-retrievers; fresh launch fro
+  - APPROVAL-001 resolved: stale clean worktree removed; the 2026-10-02 blast-radius ruling is in its next_action
+  - SEC-005 resolved: owner ruling 2026-10-03 (00-owner-directive-2026-10-03.md) in its next_action; stale worktree remove
+  - CTX-003 resolved: owner ruling 2026-10-03 (00-owner-directive-2026-10-03.md) in its next_action; stale worktree remove
+  - MCP-001 resolved: owner ruling 2026-10-03 (00-owner-directive-2026-10-03.md) in its next_action; stale worktree remove
+  - CTX-002 blocked: Recall target cannot be met by these models on this dev split; needs an owner decision on ambiguous 
+- Next ready: SEC-005, CTX-003
 <!-- build-program:end -->
