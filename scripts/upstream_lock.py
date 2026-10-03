@@ -421,7 +421,35 @@ def derive() -> dict:
                 + ", ".join(n["path"] for n in copyleft_nested))
         locked[name] = row
 
+    locked.update(model_entries())
     return locked
+
+
+def model_entries() -> dict:
+    """
+    Weights are pinned, not cloned: a Hub repo, the revision, and the sha256 of
+    each file Friday loads (friday/tool_models.py is the one place the pin is
+    written). `provision()` verifies those hashes; there is no clone to read a
+    licence from, so the licence is the one the pin declares.
+    """
+    try:
+        sys.path.insert(0, str(ROOT))
+        from friday import tool_models
+    except Exception:                                        # noqa: BLE001
+        return {}
+    return {pin.repo: {
+        "url": f"https://huggingface.co/{pin.repo}",
+        "commit": pin.revision,
+        "version": pin.revision[:12],
+        "license": pin.license,
+        "license_verified": pin.license,
+        "integration_mode": "ADAPTER",
+        "integration_mode_source": "descriptor",
+        "provider_id": pin.id,
+        "role": "local model weights for tool retrieval (CTX-002)",
+        "files": [{"path": path, "sha256": digest} for path, digest in pin.files],
+        "status": "MODEL_PINNED",
+    } for pin in tool_models.PINS.values()}
 
 
 def main() -> int:

@@ -1,0 +1,53 @@
+{
+ "intents": {
+  "tools": 190,
+  "baseline_chars": 105530,
+  "starting_chars": 17090,
+  "starting_reduction": 0.8381,
+  "cases": 123,
+  "found": 123,
+  "worst_reduction": 0.8159
+ },
+ "development": {
+  "tools": 190,
+  "baseline_chars": 105530,
+  "starting_chars": 17090,
+  "starting_reduction": 0.8381,
+  "cases": 965,
+  "found": 739,
+  "worst_reduction": 0.8145,
+  "recall_at_6": 0.7658,
+  "requests": 965,
+  "retrievers": {
+   "embedder": "tool_embedder_base",
+   "router": {
+    "success_at_1": 0.3813,
+    "success_at_3": 0.629,
+    "success_at_5": 0.714,
+    "success_at_10": 0.8249,
+    "success_at_20": 0.885,
+    "mrr": 0.5312,
+    "ms_per_request": 9.15
+   },
+   "hybrid": {
+    "success_at_1": 0.4207,
+    "success_at_3": 0.6881,
+    "success_at_5": 0.7679,
+    "success_at_10": 0.857,
+    "success_at_20": 0.9285,
+    "mrr": 0.5734,
+    "ms_per_request": 38.24
+   },
+   "hybrid+cards": {
+    "success_at_1": 0.4435,
+    "success_at_3": 0.6964,
+    "success_at_5": 0.7782,
+    "success_at_10": 0.8694,
+    "success_at_20": 0.9326,
+    "mrr": 0.59,
+    "ms_per_request": 38.56
+   },
+   "peak_ram_mb": 584.4
+  }
+ }
+}

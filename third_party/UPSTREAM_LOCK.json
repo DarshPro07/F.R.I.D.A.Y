@@ -1,4 +1,48 @@
 {
+  "BAAI/bge-base-en-v1.5": {
+    "commit": "a5beb1e3e68b9ab74eb54cfd186867f64f240e1a",
+    "files": [
+      {
+        "path": "onnx/model.onnx",
+        "sha256": "9bc579acdba21c253c62a9bf866891355a63ffa3442b52c8a37d75b2ccb91848"
+      },
+      {
+        "path": "tokenizer.json",
+        "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+      }
+    ],
+    "integration_mode": "ADAPTER",
+    "integration_mode_source": "descriptor",
+    "license": "MIT",
+    "license_verified": "MIT",
+    "provider_id": "tool_embedder_base",
+    "role": "local model weights for tool retrieval (CTX-002)",
+    "status": "MODEL_PINNED",
+    "url": "https://huggingface.co/BAAI/bge-base-en-v1.5",
+    "version": "a5beb1e3e68b"
+  },
+  "BAAI/bge-small-en-v1.5": {
+    "commit": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+    "files": [
+      {
+        "path": "onnx/model.onnx",
+        "sha256": "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35"
+      },
+      {
+        "path": "tokenizer.json",
+        "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+      }
+    ],
+    "integration_mode": "ADAPTER",
+    "integration_mode_source": "descriptor",
+    "license": "MIT",
+    "license_verified": "MIT",
+    "provider_id": "tool_embedder",
+    "role": "local model weights for tool retrieval (CTX-002)",
+    "status": "MODEL_PINNED",
+    "url": "https://huggingface.co/BAAI/bge-small-en-v1.5",
+    "version": "5c38ec7c405e"
+  },
   "agency-agents": {
     "commit": "3c9588880b7cafaec325a104899fd8bbe27e7d72",
     "integration_mode": "SKILL",
@@ -489,6 +533,28 @@
     "upstream_tests": "NOT_RUN",
     "url": "https://github.com/crewAIInc/crewAI",
     "version": "fcdeb3d"
+  },
+  "cross-encoder/ms-marco-MiniLM-L6-v2": {
+    "commit": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
+    "files": [
+      {
+        "path": "onnx/model.onnx",
+        "sha256": "5d3e70fd0c9ff14b9b5169a51e957b7a9c74897afd0a35ce4bd318150c1d4d4a"
+      },
+      {
+        "path": "tokenizer.json",
+        "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+      }
+    ],
+    "integration_mode": "ADAPTER",
+    "integration_mode_source": "descriptor",
+    "license": "Apache-2.0",
+    "license_verified": "Apache-2.0",
+    "provider_id": "tool_reranker",
+    "role": "local model weights for tool retrieval (CTX-002)",
+    "status": "MODEL_PINNED",
+    "url": "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2",
+    "version": "233902d25c44"
   },
   "diagram-design": {
     "added_by": "new_upstream_set.py",

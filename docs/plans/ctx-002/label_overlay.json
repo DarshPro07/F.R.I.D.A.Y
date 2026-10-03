@@ -1,0 +1,971 @@
+{
+ "rule": "docs/plans/ctx-002/PLAN.md#adjudication-rule",
+ "counts": {
+  "development": {
+   "bring-to-front": 38,
+   "write-a-file": 26,
+   "forget-fact": 3,
+   "close-program": 19,
+   "delete-file": 18,
+   "master-volume": 9
+  },
+  "holdout": {
+   "write-a-file": 11,
+   "master-volume": 5,
+   "bring-to-front": 9,
+   "forget-fact": 5,
+   "close-program": 8,
+   "delete-file": 7
+  }
+ },
+ "rows": {
+  "025ad0ad0556": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "0a94fd1c5be3": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "0d4be421aba6": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "0d7084762a38": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "0dddef562e17": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "16753f097970": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "18dd0bc32300": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "196796cc353c": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "19e2bd5d253d": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "1a940c12c791": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "1aae0731e10b": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "20429ac53478": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "20abccbf4e0f": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "23ecf3f8cb96": {
+   "also_correct": [
+    "volume_set"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "2449b6e3697b": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "24ac5c7c5c49": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "24e33a98a856": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "253cd29869eb": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "25bff62c5d35": {
+   "also_correct": [
+    "audio_master_volume"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "266d94d2606b": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "2dc47f04e375": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "2e755da377b4": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "2f2dd031e7d3": {
+   "also_correct": [
+    "brain_forget"
+   ],
+   "reason": "A:forget-fact: both stop treating a remembered fact as current and keep the history"
+  },
+  "2f536cff8366": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "30105e50f212": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "302f262a8c50": {
+   "also_correct": [
+    "brain_forget"
+   ],
+   "reason": "A:forget-fact: both stop treating a remembered fact as current and keep the history"
+  },
+  "3400b9750d3e": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "375495a118b1": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "37bf38a7ac0a": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "386840225dd2": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "38b75e21a711": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "3d58fad9e078": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "3f1729562217": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "41dd18961e64": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "4268ef7342cf": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "43835ba8e335": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "4963a961397d": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "4adf56a01fcf": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "4de68e613ef2": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "4e45bd1c6c84": {
+   "also_correct": [
+    "volume_set"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "4e54368ae174": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "4e7f127a6f01": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "4fcccef78a1b": {
+   "also_correct": [
+    "audio_master_volume"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "51f09694048f": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "528d60dacde9": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "539f7aa9c624": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "58f2ef301cc7": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "590dce249351": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "5e2a7c40a5ff": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "5e4045152976": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "6095e72d2bb8": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "60a903922186": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "61f524fbab21": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "673011d7a4fd": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "691cc938ce7a": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "6cc5a4ae926b": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "6cca1158d8c7": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "70615bcc581f": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "7069319ed9b2": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "72de031a28a6": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "74f74a6a15c0": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "753ff6fc0f10": {
+   "also_correct": [
+    "audio_master_volume"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "75c5951fd2ee": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "79960c32be35": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "7baf76eea493": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "7ed1e51326e5": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "7ef065973d7f": {
+   "also_correct": [
+    "volume_set"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "7f744b5ff525": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "7fbdb814421e": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "806237856f18": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "81c2154b2be0": {
+   "also_correct": [
+    "brain_forget"
+   ],
+   "reason": "A:forget-fact: both stop treating a remembered fact as current and keep the history"
+  },
+  "84023c407c1c": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "85c2bf422b36": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "878aa2d03a08": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "899934e71fad": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "8a291459b1a3": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "8bb1de6f4ec7": {
+   "also_correct": [
+    "audio_master_volume"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "8bbd46372b48": {
+   "also_correct": [
+    "volume_set"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "8befc2709cda": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "8c3a0a9a6bdb": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "8e9a6add3115": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "917b77f7a8fd": {
+   "also_correct": [
+    "volume_set"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "956690c07acb": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "959035c6163e": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "972ab1dbad2d": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "9977d8103b2c": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "9b764502c2b3": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "9bc081696db3": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "9d1af0c2b592": {
+   "also_correct": [
+    "apps_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "9daa78281bdc": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "9e37027bdefb": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "9e85f4bd9172": {
+   "also_correct": [
+    "brain_forget"
+   ],
+   "reason": "A:forget-fact: both stop treating a remembered fact as current and keep the history"
+  },
+  "9f38d69c5f6f": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "a1a45c067e24": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "a3369b82b458": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "a40d975ecaa2": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "a412899eeb26": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "a5b7a8ca95cc": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "a90f52392e80": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "aaf0f2d014d7": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "ac17c5c868d7": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "aec10fcf7044": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "af2f5f989e87": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "af87544ed182": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "b06dedefab7a": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "b20b1c0003f0": {
+   "also_correct": [
+    "volume_set"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "b2e617e33314": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "b301c5084b09": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "b30668cef4c7": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "b3bd9a77795f": {
+   "also_correct": [
+    "volume_set"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "b3c53a288daa": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "b51f5013fa09": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "b6343dd111f7": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "b64dbe4265d5": {
+   "also_correct": [
+    "apps_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "b660b374f720": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "b9297a23e24d": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "be35cb49992e": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "be6ef32452c0": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "becc6f3d785b": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "c10841ed8e1c": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "c5244f259cc0": {
+   "also_correct": [
+    "volume_set"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "c5632a5f546a": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "c845d4e4ce0a": {
+   "also_correct": [
+    "volume_set"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "c92e16938789": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "ca77dc054c02": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "cb00b45c59ba": {
+   "also_correct": [
+    "brain_forget"
+   ],
+   "reason": "A:forget-fact: both stop treating a remembered fact as current and keep the history"
+  },
+  "cba33204a877": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "ce170e7b9154": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "ce35bf97ff00": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "ceabb46a3fa0": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "cfdb5541aa06": {
+   "also_correct": [
+    "brain_forget"
+   ],
+   "reason": "A:forget-fact: both stop treating a remembered fact as current and keep the history"
+  },
+  "d242be48ab1c": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "d2b019a41471": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "d35c57db0e9e": {
+   "also_correct": [
+    "brain_forget"
+   ],
+   "reason": "A:forget-fact: both stop treating a remembered fact as current and keep the history"
+  },
+  "d58ef7500f0c": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "d70332e89fc1": {
+   "also_correct": [
+    "files_delete"
+   ],
+   "reason": "A:delete-file: files_recycle is documented as what 'delete that file' means, and files_delete recycles by default"
+  },
+  "dafb68b5cd20": {
+   "also_correct": [
+    "brain_forget"
+   ],
+   "reason": "A:forget-fact: both stop treating a remembered fact as current and keep the history"
+  },
+  "db6e17dd0188": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "dd605bdc16ee": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "de3728785da8": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "de43178b7bf2": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "de9e3060732b": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "debc537853ac": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "e0c60e74030d": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "e14bdb0651c3": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "e3ae86ac1298": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "e5bee4b1d4ea": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "e7a7fde9bab6": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "e8ff58fdcc70": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "ea46bb0c2d07": {
+   "also_correct": [
+    "files_create"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "ec50da268c03": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "f24e79a7ab9a": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "f3796f12a618": {
+   "also_correct": [
+    "windows_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "f71f81660df2": {
+   "also_correct": [
+    "volume_set"
+   ],
+   "reason": "A:master-volume: both set the machine's master volume from 0 to 100"
+  },
+  "f7f5af3ea99d": {
+   "also_correct": [
+    "files_write"
+   ],
+   "reason": "A:write-a-file: the request does not say whether the file exists; each succeeds when it does not"
+  },
+  "fbede1179a7b": {
+   "also_correct": [
+    "process_close"
+   ],
+   "reason": "A:close-program: both ask a running program to close the polite way"
+  },
+  "fc0aefed65d4": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  },
+  "fcba7ae83aa1": {
+   "also_correct": [
+    "apps_focus"
+   ],
+   "reason": "A:bring-to-front: both bring an already open window to the foreground"
+  }
+ }
+}

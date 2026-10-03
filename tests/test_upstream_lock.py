@@ -73,7 +73,10 @@ def test_no_upstream_was_staged_without_being_requested(lock):
 
     _, _, unrequested = difference()
     assert not unrequested, f"staged but never requested: {sorted(unrequested)}"
-    assert set(lock) <= {slug(url) for url in REQUESTED}
+    # Model weights are pinned by Hub revision and file hash, not requested as
+    # clones; test_tool_models pins them to their descriptors.
+    cloned = {name for name, row in lock.items() if row.get("status") != "MODEL_PINNED"}
+    assert cloned <= {slug(url) for url in REQUESTED}
 
 
 # --- pins ------------------------------------------------------------------
