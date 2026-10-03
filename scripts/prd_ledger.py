@@ -3181,6 +3181,36 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "a run that needs commands is refused citing EXEC-SBX-001; the seam test still proves the objective path "
             "reaches the worker only through the compiler."),
     }),
+    # --- MCP-001: owner rulings on discovery, approval waivers and protocol pinning, 2026-10-03 (e)
+    ('MCP-001', {
+        "status": PARTIAL,
+        "next_action": (
+            "RULINGS 2026-10-03e (owner, docs/plans/build-harness/00-owner-directive-2026-10-03e.md). "
+            "(1) Discovery: Hermes' canonical live MCP config is $HERMES_HOME/config.yaml under the YAML key "
+            "mcp_servers; HERMES_HOME defaults to ~/.hermes (C:/Users/<user>/.hermes on Windows) and a named "
+            "profile lives at ~/.hermes/profiles/<name>/config.yaml. Read that, beside FRIDAY's managed registry; keep "
+            "the JSON mcpServers parser (Claude Code) and Codex's config only as optional external/import discovery, "
+            "and do not treat a profile distribution's mcp.json as the live source. Everything found outside FRIDAY "
+            "enters as EXTERNAL_DISCOVERED. (2) Approval: lifecycle EXTERNAL_DISCOVERED -> EXTERNAL_UNVERIFIED -> "
+            "VERIFIED_PENDING_APPROVAL -> ACTIVE. First activation of an external server needs explicit owner/admin "
+            "approval unless a standing approval lease explicitly covers that exact server or trust class; a waiver "
+            "can come only from the owner, a workspace administrator policy, or such a lease - a model can never "
+            "waive. An approved, verified server (or a FRIDAY-managed one) reconnects and restarts with no new prompt "
+            "while its server identity, transport class, origin/executable identity, permission/risk class, "
+            "credential scope, tool authority ceiling, approved workspace and trust-policy version are unchanged; "
+            "ordinary non-authority metadata changes do not prompt. Any authority or identity change: SUSPENDED -> "
+            "REVALIDATE -> approval if needed. (3) Protocol: never pin the last negotiated version as identity. "
+            "Persist the policy (allowed eras legacy/modern, allowed versions, e.g. 2025-11-25 and 2026-07-28), the "
+            "registered preference (e.g. auto) and the last observed version and era. A compatible change of "
+            "negotiated version is recorded and re-runs the semantic health/schema checks, no suspension; suspend only "
+            "on a version outside the policy, an unapproved legacy<->modern lifecycle change, an identity, endpoint or "
+            "executable/hash change, a tool gaining higher authority, a material schema change, an expanded "
+            "credential/auth scope, or a change in security-sensitive capabilities. friday/mcp_firewall.py currently "
+            "suspends on a handshake name/version change: keep the identity half, replace the version half with the "
+            "policy. Tests per lifecycle transition, per waiver source (and a model-issued waiver refused), the silent "
+            "reconnect and each listed suspension trigger, a compatible SDK version bump that does not suspend, and "
+            "discovery from a fixture config.yaml for the default and a named profile."),
+    }),
 ]
 
 
