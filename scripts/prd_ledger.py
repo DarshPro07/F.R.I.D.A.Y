@@ -2540,7 +2540,7 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "URL only (no server name, version or TLS identity from the handshake); tool output from a pinned "
             "server is not yet typed as untrusted by the runtime; MCP servers used by Hermes or Claude Code "
             "workers are configured outside FRIDAY and not seen here."),
-        "files": ["friday/mcp_firewall.py:63,70,97,118,150,161,172", "agent_friday.py:1270,1311"],
+        "files": ["friday/mcp_firewall.py:95,149,162,176,201,242,363,384,435,486", "agent_friday.py:739,1324"],
         "tests": ["tests/test_mcp_firewall.py::test_a_new_server_is_pinned_and_admitted",
                   "tests/test_mcp_firewall.py::test_an_unexpected_change_suspends_the_server",
                   "tests/test_mcp_firewall.py::test_a_description_that_instructs_the_model_is_refused_before_pinning",

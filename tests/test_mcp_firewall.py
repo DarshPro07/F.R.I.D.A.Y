@@ -494,3 +494,25 @@ def test_the_voice_agent_pins_the_servers_registered_endpoint(tmp_path, monkeypa
     asyncio.run(agent._narrow_tools())
     assert firewall.status(REMOTE)["binding"] == {"endpoint": REMOTE}
     assert agent._tools_suspended == ""
+
+
+def test_the_ledgers_mcp_citations_land_on_the_code_they_name():
+    """MCP-001's file:line citations are how a reader finds the firewall; a
+    line that has drifted off its definition points at nothing."""
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(root / "scripts"))
+    import prd_ledger as PL
+
+    row = {r["id"]: r for r in PL.apply_progress(PL._load_v7(), PL.PROGRESS_V7)}["MCP-001"]
+    stale = []
+    for cite in row["files"]:
+        path, _, lines = cite.partition(":")
+        source = (root / path).read_text(encoding="utf-8").splitlines()
+        for number in (int(n) for n in lines.split(",")):
+            text = source[number - 1].strip()
+            if not text.startswith(("def ", "class ", "async def ")) and "mcp_firewall." not in text:
+                stale.append(f"{path}:{number}: {text!r}")
+    assert not stale, "MCP-001 cites lines that are not a definition or a firewall call: " + "; ".join(stale)
