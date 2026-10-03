@@ -280,16 +280,22 @@ def capsule_arm(req: str, state: dict) -> bool:
 
 
 def gate(k, req: str, klass: str, mode: str, state: dict, runs_dir: Path | None = None,
-         cap: int = build_kernel.DEFAULT_CAP) -> str | None:
-    """QUEUED -> admission -> memory lease for one chosen job. Returns its attempt
-    id when it may spawn; None (job WAITING_RESOURCES, reason in state) when not."""
+         cap: int = build_kernel.DEFAULT_CAP, kind: str = "SHIP") -> str | None:
+    """QUEUED -> admission -> memory lease -> spend lease for one chosen job. Returns
+    its attempt id when it may spawn; None (job WAITING_RESOURCES, reason in state)
+    when not. A spend refusal gives the memory lease back and sets state['budget']."""
     runs_dir = runs_dir or k.RUNS_DIR
     attempt_id = k.job_queue(req, klass, mode, runs_dir)
     ok, why = k.reserve(attempt_id, req, klass, mode, cap=cap, runs_dir=runs_dir)
     if ok:
-        return attempt_id
+        ok, why = k.spend_reserve(attempt_id, "launch", req, kind, k.launch_usd(klass, kind), runs_dir)
+        if ok:
+            return attempt_id
+        k.lease_release(attempt_id, runs_dir)
+        state["budget"] = why
+    else:
+        state["resources"] = why
     k.job_wait(attempt_id, why, runs_dir)
-    state["resources"] = why
     state.setdefault("waiting", {})[req] = why
     return None
 
@@ -300,7 +306,9 @@ def launch_all(chosen, state: dict, k=build_kernel, worktrees: Path | None = Non
     runs = []
     for row, mode, klass in chosen:
         rid = row["id"]
-        attempt_id = gate(k, rid, klass, mode, state, runs_dir, cap)
+        kind = ("SCOUT" if mode == "SCOUT" else
+                "RESUME" if worktrees is not None and (worktrees / rid.lower()).exists() else "SHIP")
+        attempt_id = gate(k, rid, klass, mode, state, runs_dir, cap, kind)
         if attempt_id is None:
             continue
         state.get("waiting", {}).pop(rid, None)
@@ -348,7 +356,7 @@ def launch_repairs(repairs: list[tuple[str, str]], state: dict, k=build_kernel,
         step = k.agent_utility({"id": rid}, {"failures": spent})[0]["step"]
         attempt_id = None
         if step in ("ESCALATE", "ADVISOR", "IMPLEMENTER", "REPAIR"):
-            attempt_id = gate(k, rid, klass, "SHIP", state, runs_dir, cap)
+            attempt_id = gate(k, rid, klass, "SHIP", state, runs_dir, cap, step)
             if attempt_id is None:  # stays queued: no repair has been consumed
                 continue
         state.get("waiting", {}).pop(rid, None)
@@ -564,11 +572,14 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
         results, wave_verifier, progress = {}, 0.0, False
         wave_id = f"{run_id}-w{len(state['waves']) + 1}"
         os.environ["FRIDAY_BUILD_WAVE_ID"] = wave_id
+        state.pop("budget", None)
         runs = (launch_repairs(fixes, state, k, worktrees, runs_dir, cap)
                 + launch_all(chosen, state, k, worktrees, resumed, runs_dir, cap))
         if not runs and any(rid in state.get("waiting", {})
                             for rid in [r for r, _ in fixes] + [r["id"] for r, _, _ in chosen]):
-            stop = "pressure"  # admission or the lease recheck refused every job: wait, spawn nothing
+            # Admission, the lease recheck or the day's spend lease refused every job: spawn
+            # nothing. Memory frees up within the run's day; the spend budget does not.
+            stop = "day budget" if state.get("budget") else "pressure"
             break
         crashed = False
         for rec in k.watch(runs):

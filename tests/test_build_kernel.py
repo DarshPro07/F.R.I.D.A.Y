@@ -154,6 +154,13 @@ def test_worker_size_is_the_largest_peak_of_the_last_ten_measured_records(tmp_pa
 def _no_pending_attempts():
     K._PENDING_ATTEMPTS.clear()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _spend_ledger_in_tmp(monkeypatch, tmp_path):
+    # A Running built without runs_dir resolves its spend leases and the day's ledger
+    # through RUNS_DIR at call time: never the live data/build_runs from a test.
+    monkeypatch.setattr(K, "RUNS_DIR", tmp_path / "default-runs")
     K._PENDING_ATTEMPTS.clear()
 
 
@@ -1584,3 +1591,97 @@ def test_day_cost_sums_the_invocations_of_one_local_day(tmp_path):
         K.ledger_append({"attempt_id": f"a{i}", "req": "R", "kind": "SHIP", "cost_usd": cost,
                          "at": at(*when)}, tmp_path)
     assert K.day_cost(date(2026, 10, 2), tmp_path) == 3.5
+
+
+# --- spend lease (owner, 2026-10-03: $40 soft stop, $45 hard ceiling, every paid call)
+
+def _spent(runs, usd):
+    K.ledger_append({"attempt_id": f"paid-{usd}", "req": "X", "kind": "SHIP", "cost_usd": usd,
+                     "at": K._iso()}, runs)
+
+
+def test_parallel_reservations_at_the_edge_admit_only_what_fits(tmp_path):
+    # Two parallel agents must never both see "$6 left" and each start a $5 job.
+    from concurrent.futures import ThreadPoolExecutor
+    _spent(tmp_path, 39.0)
+    with ThreadPoolExecutor(2) as pool:
+        got = list(pool.map(lambda i: K.spend_reserve(f"a{i}", "continue", "R", "SHIP", 5.0, tmp_path)[0],
+                            range(2)))
+    assert sorted(got) == [False, True]
+    assert K.spend_committed(tmp_path) == (39.0, 5.0)
+
+
+def test_the_soft_stop_refuses_new_work_but_lets_paid_work_finish(tmp_path):
+    _spent(tmp_path, K.DAY_SOFT_USD)
+    ok, why = K.spend_reserve("a1", "launch", "R", "SHIP", 1.0, tmp_path)
+    assert not ok and why.startswith("SPEND_SOFT_STOP")
+    assert K.spend_reserve("a0:verify", "verify", "R", "VERIFIER", 1.0, tmp_path)[0]
+    ok, why = K.spend_reserve("a2", "continue", "R", "SHIP", 4.5, tmp_path)
+    assert not ok and why.startswith("SPEND_CAP")  # 40 spent + 1 held + 4.5 passes 45
+
+
+def test_a_held_lease_is_not_reserved_twice(tmp_path):
+    # The program's gate takes the launch lease; the kernel function it calls finds it held.
+    assert K.spend_reserve("a1", "launch", "R", "SHIP", 7.5, tmp_path)[0]
+    assert K.spend_reserve("a1", "launch", "R", "SHIP", 7.5, tmp_path) == (True, "already reserved")
+    assert K.spend_committed(tmp_path) == (0.0, 7.5)
+
+
+def test_settle_gives_the_reservation_back_for_the_actual_cost(tmp_path):
+    K.spend_reserve("a1", "launch", "R", "SHIP", 7.5, tmp_path)
+    K.spend_reserve("a1", "continue", "R", "SHIP", 3.0, tmp_path)
+    K.ledger_append({"attempt_id": "a1", "req": "R", "kind": "SHIP", "cost_usd": 2.0, "at": K._iso()},
+                    tmp_path)
+    K.spend_settle("a1", "R", K.verifier_budget(2.0), tmp_path)
+    assert K.spend_committed(tmp_path) == (2.0, 1.0)  # the verifier's floor stays held
+    K.spend_release("a1:verify", tmp_path)
+    assert K.spend_committed(tmp_path) == (2.0, 0.0)
+
+
+def test_launch_usd_covers_the_worker_and_its_verifier():
+    assert K.launch_usd("P0") == 6.0 + 1.5
+    assert K.launch_usd("NORMAL", "REPAIR") == 1.5 + 1.0
+    assert K.launch_usd("NORMAL", "ESCALATE") == K.launch_usd("P0")
+    assert K.launch_usd("NORMAL", "ADVISOR") == K.ADVISOR_BUDGET[1]
+    assert K.launch_usd("NORMAL", "SCOUT") == K.BUDGETS["SCOUT"][1]
+
+
+def test_a_launch_refused_by_the_day_budget_leaves_no_worktree(monkeypatch, repo, tmp_path):
+    runs = tmp_path / "runs"
+    _spent(runs, K.DAY_SOFT_USD)
+    monkeypatch.setattr(K, "_start", lambda cmd, wt: pytest.fail("a refused launch must not spawn"))
+    with pytest.raises(K.SpendCapReached):
+        K.launch(row("R-1", "P1"), worktrees=tmp_path / "wts", repo=repo, runs_dir=runs)
+    assert not (tmp_path / "wts" / "r-1").exists()
+    assert K.spend_committed(runs) == (K.DAY_SOFT_USD, 0.0)
+
+
+def test_a_launch_holds_its_worker_and_verifier_budget_until_finalize(monkeypatch, repo, tmp_path):
+    _, run = _launched(monkeypatch, repo, tmp_path)
+    runs = tmp_path / "runs"
+    assert K.spend_committed(runs) == (0.0, K.launch_usd(run.klass))
+    K.finalize(run, "TIMEOUT", runs)  # not a finished change: nothing left to verify
+    assert K.spend_committed(runs)[1] == 0.0
+
+
+def test_a_finished_change_keeps_only_its_verifier_budget(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    runs = tmp_path / "runs"
+    K.spend_reserve(run.attempt_id, "launch", "R-1", "SHIP", 7.5, runs)
+    (wt / "a.py").write_text("a = 1\n")
+    _evidence_done(wt)
+    assert K.finalize(run, None, runs)["state"] == "DONE"
+    assert K.spend_committed(runs) == (0.2, K.VERIFIER_FLOOR_USD)
+
+
+def test_no_continuation_past_the_day_ceiling(tmp_path, monkeypatch):
+    wt = tmp_path / "wt"
+    _stream(wt, {"type": "system", "subtype": "init", "session_id": "ADV1"},
+            {"type": "result", "subtype": "error_max_turns", "is_error": True, "session_id": "ADV1",
+             "num_turns": 16, "total_cost_usd": 0.68, "result": ""})
+    runs = tmp_path / "runs"
+    _spent(runs, K.DAY_HARD_USD - 0.2)
+    monkeypatch.setattr(K, "_start", lambda cmd, w: pytest.fail("no paid resume past the ceiling"))
+    run = K.Running("EVAL-001", _Proc(1), wt, mode="SHIP", base_sha="abc", branch="build/eval-001",
+                    model="opus", kind="ADVISOR", runs_dir=runs)
+    assert K.continuation(run) is False

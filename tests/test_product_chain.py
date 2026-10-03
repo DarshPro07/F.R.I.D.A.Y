@@ -32,7 +32,7 @@ def _chain(monkeypatch, tmp_path, day_spent: float) -> list:
     state.write_text('{"spend_usd_total": 0, "waves": []}', encoding="utf-8")
     monkeypatch.setattr(PC, "STATE", state)
     monkeypatch.setattr(PC, "wait_for_admission", lambda hours: True)
-    monkeypatch.setattr(PC.K, "day_cost", lambda day, runs_dir: day_spent)
+    monkeypatch.setattr(PC.K, "spend_committed", lambda runs_dir: (day_spent, 0.0))
     cmds = []
     monkeypatch.setattr(PC.subprocess, "run", lambda cmd, **kw: cmds.append(cmd)
                         or subprocess.CompletedProcess(cmd, 0, "stopped: no ready work\n", ""))
@@ -42,9 +42,16 @@ def _chain(monkeypatch, tmp_path, day_spent: float) -> list:
 def test_a_run_never_spends_past_the_day_cap(monkeypatch, tmp_path):
     # 2026-10-02: a chain given $30 started after the day had already spent
     # about $28; its own cap never saw that, and the day closed at $49.66 of $45.
-    cmds = _chain(monkeypatch, tmp_path, day_spent=44.0)
+    cmds = _chain(monkeypatch, tmp_path, day_spent=38.0)
     assert PC.main(["--day-usd", "45", "--total-usd", "30"]) == 0
-    assert cmds[0][cmds[0].index("--max-usd") + 1] == "1.00"
+    assert cmds[0][cmds[0].index("--max-usd") + 1] == "7.00"
+
+
+def test_no_run_starts_at_the_soft_stop(monkeypatch, tmp_path):
+    # 2026-10-03 owner: $40 soft stop, $45 hard ceiling, open leases counted.
+    cmds = _chain(monkeypatch, tmp_path, day_spent=PC.K.DAY_SOFT_USD)
+    assert PC.main([]) == 0
+    assert cmds == []
 
 
 def test_a_spent_day_starts_no_run(monkeypatch, tmp_path):

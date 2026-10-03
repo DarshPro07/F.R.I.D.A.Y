@@ -95,6 +95,7 @@ WORKER_PROMPT = "Read .build/packet.md and carry out the requirement it describe
 #: A read-only job (advisor, scout) that ran out of turns has read what it needed; it gets one
 #: short resume to write its result (2026-10-02: EVAL-001's advisor hit its cap with nothing written).
 WRITE_NOW_TURNS = 3
+WRITE_NOW_USD = 0.5
 WRITE_NOW_PROMPT = ("Stop reading. From what you have already read, write your final message now: the "
                     "complete packet your instructions asked for. Do not open more files.")
 CONTINUE_PROMPT = ("Continue the requirement in .build/packet.md; "
@@ -551,6 +552,143 @@ def reserve(attempt_id: str, req: str, klass: str, mode: str = "SHIP", *, cap: i
     return True, why
 
 
+# ---------------------------------------------------------------- spend
+#: The owner's day budget (2026-10-03, 00-owner-directive-2026-10-03.md): no new paid work starts at or
+#: above the soft stop, and nothing may reserve past the hard ceiling. Per local day, every paid call -
+#: worker, verifier, advisor, rescue, manual - inside a program or not.
+DAY_SOFT_USD = 40.0
+DAY_HARD_USD = 45.0
+SPEND_LEASES_FILE = "spend_leases.json"
+VERIFIER_FLOOR_USD = 1.0
+VERIFIER_SHARE = 0.25
+#: Purposes that finish work already paid for: only the hard ceiling refuses them.
+FINISHING = ("continue", "verify")
+
+
+class SpendCapReached(KernelError):
+    """A paid call would pass the owner's day budget; nothing was started."""
+
+
+def verifier_budget(cost_usd: float) -> float:
+    """A quarter of the implementer's cost, never below the floor: the verifier
+    pays for its own system prompt before it reads a line of the change."""
+    return max(VERIFIER_FLOOR_USD, VERIFIER_SHARE * float(cost_usd or 0))
+
+
+def launch_usd(klass: str, kind: str = "SHIP") -> float:
+    """The most one launch may spend: its worker budget and, for a change that is
+    then verified, its verifier's - so a finished worker can always be checked."""
+    if kind == "ADVISOR":
+        return ADVISOR_BUDGET[1]
+    if kind == "SCOUT":
+        return BUDGETS["SCOUT"][1]
+    budget = BUDGETS["P0" if kind == "ESCALATE" else klass][1]
+    if kind in ("REPAIR", "IMPLEMENTER", "RESUME"):
+        budget /= 2
+    return round(budget + verifier_budget(budget), 4)
+
+
+def _runs(runs_dir: Path | None) -> Path:
+    return Path(runs_dir) if runs_dir is not None else RUNS_DIR
+
+
+def _today() -> str:
+    return datetime.now().astimezone().date().isoformat()
+
+
+def _spend_load(runs_dir: Path) -> list[dict]:
+    try:
+        data = json.loads((runs_dir / SPEND_LEASES_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [x for x in data if isinstance(x, dict) and x.get("key")] if isinstance(data, list) else []
+
+
+def _spend_store(leases: list[dict], runs_dir: Path) -> None:
+    """Only today's leases are kept: an earlier day's never counts again."""
+    today = _today()
+    path = runs_dir / SPEND_LEASES_FILE
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps([x for x in leases if x.get("day") == today], indent=2) + "\n",
+                   encoding="utf-8", newline="\n")
+    os.replace(tmp, path)
+
+
+def spend_committed(runs_dir: Path | None = None) -> tuple[float, float]:
+    """(spent, reserved) today: the ledger's recorded cost and the open spend leases."""
+    runs_dir, today = _runs(runs_dir), _today()
+    reserved = sum(float(x.get("usd") or 0) for x in _spend_load(runs_dir) if x.get("day") == today)
+    return day_cost(datetime.now().astimezone().date(), runs_dir), round(reserved, 4)
+
+
+def spend_reserve(key: str, purpose: str, req: str, kind: str, usd: float,
+                  runs_dir: Path | None = None) -> tuple[bool, str]:
+    """Reserve one paid call's maximum cost against today's budget. The ledger and
+    the leases are re-read and the lease written under one lock, so the recheck is
+    the check: two parallel launches can never both see the same dollars left. A
+    (key, purpose) already held is not reserved twice (the program's gate takes the
+    lease, the kernel function it then calls finds it)."""
+    runs_dir = _runs(runs_dir)
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    today = _today()
+    with creation_lock(runs_dir, LEASE_LOCK_WAIT_S, LEASE_LOCK_STALE_S):
+        leases = [x for x in _spend_load(runs_dir) if x.get("day") == today]
+        if any(x["key"] == key and x.get("purpose") == purpose for x in leases):
+            return True, "already reserved"
+        spent = day_cost(datetime.now().astimezone().date(), runs_dir)
+        reserved = sum(float(x.get("usd") or 0) for x in leases)
+        committed = spent + reserved
+        if purpose not in FINISHING and committed >= DAY_SOFT_USD:
+            return False, (f"SPEND_SOFT_STOP: ${committed:.2f} committed today (${spent:.2f} spent, "
+                           f"${reserved:.2f} reserved), soft stop ${DAY_SOFT_USD:.2f}")
+        if committed + usd > DAY_HARD_USD:
+            return False, (f"SPEND_CAP: ${committed:.2f} committed today + ${usd:.2f} for {req} {kind} "
+                           f"would pass the ${DAY_HARD_USD:.2f} day ceiling")
+        leases.append({"key": key, "purpose": purpose, "req": req, "kind": kind,
+                       "usd": round(float(usd), 4), "day": today, "at": _iso()})
+        _spend_store(leases, runs_dir)
+    return True, f"${usd:.2f} reserved for {req} {kind}; ${committed + usd:.2f} committed today"
+
+
+def spend_guard(key: str, purpose: str, req: str, kind: str, usd: float,
+                runs_dir: Path | None = None) -> None:
+    ok, why = spend_reserve(key, purpose, req, kind, usd, runs_dir)
+    if not ok:
+        raise SpendCapReached(why)
+
+
+def spend_release(key: str, runs_dir: Path | None = None) -> None:
+    runs_dir = _runs(runs_dir)
+    if not (runs_dir / SPEND_LEASES_FILE).exists():
+        return
+    with creation_lock(runs_dir, LEASE_LOCK_WAIT_S, LEASE_LOCK_STALE_S):
+        leases = _spend_load(runs_dir)
+        kept = [x for x in leases if x["key"] != key]
+        if len(kept) != len(leases):
+            _spend_store(kept, runs_dir)
+
+
+def spend_settle(attempt_id: str, req: str, verify_usd: float, runs_dir: Path | None = None) -> None:
+    """After an attempt's actual cost is in the ledger: drop its launch and continue
+    leases and, for a finished change, hold its verifier's budget until the
+    integrator has run (or skipped) the verifier."""
+    runs_dir = _runs(runs_dir)
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    verify_key = f"{attempt_id}:verify"
+    with creation_lock(runs_dir, LEASE_LOCK_WAIT_S, LEASE_LOCK_STALE_S):
+        leases = [x for x in _spend_load(runs_dir) if x["key"] not in (attempt_id, verify_key)]
+        if verify_usd > 0:
+            leases.append({"key": verify_key, "purpose": "verify", "req": req, "kind": "VERIFIER",
+                           "usd": round(float(verify_usd), 4), "day": _today(), "at": _iso()})
+        _spend_store(leases, runs_dir)
+
+
+def _attempt_for(req: str) -> str:
+    """The attempt id a launch runs under: the one its memory lease was taken
+    under, or a fresh one for a launch made outside the program."""
+    return _PENDING_ATTEMPTS.get(req) or str(uuid.uuid4())
+
+
 # --------------------------------------------------------------- launch
 
 def _worktrees_root() -> Path:
@@ -697,6 +835,7 @@ class Running:
     attempt_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     program_run_id: str = field(default_factory=lambda: os.environ.get("FRIDAY_BUILD_RUN_ID", ""))
     wave_id: str = field(default_factory=lambda: os.environ.get("FRIDAY_BUILD_WAVE_ID", ""))
+    runs_dir: Path | None = None  # where its spend leases live; None is RUNS_DIR
 
     def __post_init__(self):
         leased = _PENDING_ATTEMPTS.pop(self.req, None)  # the id the job's memory lease was taken under
@@ -762,8 +901,11 @@ def job_wait(attempt_id: str, reason: str, runs_dir: Path = RUNS_DIR) -> dict | 
 
 
 def job_close(attempt_id: str, state: str, reason: str = "", runs_dir: Path = RUNS_DIR) -> dict | None:
-    """Move a job to COMPLETE or FAILED and release its memory lease; None when it has no record."""
+    """Move a job to COMPLETE or FAILED and release its memory lease and its launch and
+    continue spend leases (a finished change's verify lease is the integrator's to
+    release); None when it has no record."""
     lease_release(attempt_id, runs_dir)
+    spend_release(attempt_id, runs_dir)
     job = _read_json(job_path(attempt_id, runs_dir))
     if not job.get("attempt_id"):
         return None
@@ -807,7 +949,8 @@ def adopt(job: dict, *, alive, runs_dir: Path = RUNS_DIR, repo: Path = ROOT) -> 
                    capsule=bool(meta.get("capsule")), stream_offset=int(meta.get("stream_offset") or 0),
                    kind="" if job.get("role") in ("IMPLEMENTER", "SCOUT") else str(job.get("role")),
                    reason=str(job.get("reason") or ""), attempt_id=job["attempt_id"],
-                   program_run_id=job.get("program_run_id", ""), wave_id=job.get("wave_id", ""))
+                   program_run_id=job.get("program_run_id", ""), wave_id=job.get("wave_id", ""),
+                   runs_dir=runs_dir)
 
 
 def has_result(wt: Path, offset: int = 0) -> bool:
@@ -949,7 +1092,15 @@ def launch(row: dict, *, worktrees: Path | None = None, model: str = "sonnet",
                 "packet": str(wt / ".build" / "packet.md"), "command": cmd}
     if wt.exists():
         raise KernelError(f"worktree {wt} already exists; refusing to reuse it")
-    base_sha = create_worktree(wt, name, repo=repo, detach=scout)
+    # The spend lease before any side effect: a refused launch leaves no worktree behind.
+    attempt_id = _attempt_for(row["id"])
+    spend_guard(attempt_id, "launch", row["id"], mode,
+                budget if scout else budget + verifier_budget(budget), runs_dir)
+    try:
+        base_sha = create_worktree(wt, name, repo=repo, detach=scout)
+    except BaseException:
+        spend_release(attempt_id, runs_dir)
+        raise
     (wt / ".build").mkdir(parents=True, exist_ok=True)
     text = scout_packet_text(row) if scout else packet_text(row, findings, klass, capsule)
     (wt / ".build" / "packet.md").write_text(text, encoding="utf-8", newline="\n")
@@ -963,7 +1114,7 @@ def launch(row: dict, *, worktrees: Path | None = None, model: str = "sonnet",
     decision, reasons = agent_utility(row, {"has_findings": findings is not None})
     run = Running(row["id"], proc, wt, started=started, mode=mode, klass=klass,
                   base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
-                  capsule=bool(capsule), stream_offset=offset,
+                  capsule=bool(capsule), stream_offset=offset, attempt_id=attempt_id, runs_dir=runs_dir,
                   reason=f"{decision['orient']}: {'; '.join(reasons)}")
     job_open(run, runs_dir)
     return run
@@ -1016,6 +1167,8 @@ def resume(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
                 "model": model or "sonnet", "capsule": False}
     klass = meta["klass"]
     turns, budget, wall = BUDGETS[klass]
+    attempt_id = _attempt_for(req)
+    spend_guard(attempt_id, "launch", req, "RESUME", budget / 2 + verifier_budget(budget / 2), runs_dir)
     started = time.time()
     offset = _stream_size(wt)
     meta = {**meta, "started": started, "stream_offset": offset}
@@ -1026,6 +1179,7 @@ def resume(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
                   base_sha=meta["base_sha"], branch=meta["branch"],
                   model=model or meta.get("model") or "sonnet", wall_s=wall, repo=repo,
                   continued=True, capsule=bool(meta.get("capsule")), stream_offset=offset,
+                  attempt_id=attempt_id, runs_dir=runs_dir,
                   kind="RESUME", reason="RESUME: a killed worker continues its own session")
     job_open(run, runs_dir)
     return run
@@ -1209,12 +1363,16 @@ def repair(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
     cmd = worker_command(model, max(1, turns // 2), budget / 2, resume=resume, prompt=prompt)
     return _relaunch(req, wt, cmd, meta, run_rec, kind="REPAIR", klass=klass, model=model,
                      base_sha=base_sha, wall=wall, repo=repo, repairs=1, runs_dir=runs_dir,
+                     usd=budget / 2 + verifier_budget(budget / 2),
                      reason=f"{decision['session']}: {'; '.join(reasons)}")
 
 
 def _relaunch(req: str, wt: Path, cmd: list[str], meta: dict, run_rec: dict, *, kind: str,
-              klass: str, model: str, base_sha: str, wall: float, repo: Path,
-              repairs: int = 0, runs_dir: Path = RUNS_DIR, reason: str = "") -> Running:
+              klass: str, model: str, base_sha: str, wall: float, repo: Path, usd: float,
+              repairs: int = 0, runs_dir: Path = RUNS_DIR, reason: str = "",
+              attempt_id: str | None = None) -> Running:
+    attempt_id = attempt_id or _attempt_for(req)
+    spend_guard(attempt_id, "launch", req, kind, usd, runs_dir)
     started = time.time()
     offset = _stream_size(wt)
     branch = meta.get("branch") or run_rec.get("branch", "")
@@ -1224,7 +1382,8 @@ def _relaunch(req: str, wt: Path, cmd: list[str], meta: dict, run_rec: dict, *, 
     run = Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
                   base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
                   continued=False, repairs=repairs, capsule=bool(meta.get("capsule")),
-                  stream_offset=offset, kind=kind, reason=reason)
+                  stream_offset=offset, kind=kind, reason=reason, attempt_id=attempt_id,
+                  runs_dir=runs_dir)
     job_open(run, runs_dir)
     return run
 
@@ -1241,11 +1400,19 @@ def escalate(req: str, *, model: str = "opus", capsule_extra: str = "",
     integration = _read_json(runs_dir / f"{req}.integration.json")
     meta = _run_meta(wt) if wt.is_dir() else {}
     base_sha = meta.get("base_sha") or run_rec.get("base_sha") or ""
+    turns, budget, wall = BUDGETS["P0"]
+    attempt_id = _attempt_for(req)
+    usd = budget + verifier_budget(budget)
     if not wt.is_dir():
         row = row or next((r for r in load_rows() if r["id"] == req), None)
         if row is None:
             raise KernelError(f"unknown requirement {req!r}")
-        base_sha = create_worktree(wt, name, repo=repo)
+        spend_guard(attempt_id, "launch", req, "ESCALATE", usd, runs_dir)  # before the worktree exists
+        try:
+            base_sha = create_worktree(wt, name, repo=repo)
+        except BaseException:
+            spend_release(attempt_id, runs_dir)
+            raise
         (wt / ".build").mkdir(parents=True, exist_ok=True)
         (wt / ".build" / "packet.md").write_text(
             packet_text(row, load_findings(req, runs_dir), "P0"), encoding="utf-8", newline="\n")
@@ -1256,10 +1423,10 @@ def escalate(req: str, *, model: str = "opus", capsule_extra: str = "",
     prompt = failure_capsule(req, integration, run_rec, wt, base_sha, attempt)
     if capsule_extra.strip():
         prompt += "\n## Owner's packet\n" + capsule_extra.strip()
-    turns, budget, wall = BUDGETS["P0"]
     cmd = worker_command(model, turns, budget, prompt=prompt)
     return _relaunch(req, wt, cmd, meta, run_rec, kind="ESCALATE", klass="P0", model=model,
-                     base_sha=base_sha, wall=wall, repo=repo, runs_dir=runs_dir,
+                     base_sha=base_sha, wall=wall, repo=repo, runs_dir=runs_dir, usd=usd,
+                     attempt_id=attempt_id,
                      reason=f"ESCALATE: attempt {attempt} is a fresh {model} session")
 
 
@@ -1289,7 +1456,7 @@ def advise(req: str, *, model: str = "opus", worktrees: Path | None = None,
     turns, budget, wall = ADVISOR_BUDGET
     cmd = worker_command(model, turns, budget, tools=SCOUT_TOOLS, prompt=prompt)
     return _relaunch(req, wt, cmd, meta, run_rec, kind="ADVISOR", klass=meta.get("klass") or "NORMAL",
-                     model=model, base_sha=base_sha, wall=wall, repo=repo, runs_dir=runs_dir,
+                     model=model, base_sha=base_sha, wall=wall, repo=repo, runs_dir=runs_dir, usd=budget,
                      reason=f"ADVISOR: attempt {attempt}, read-only {model} diagnosis, no edits")
 
 
@@ -1626,6 +1793,11 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
     if entry["kind"] in ("REPAIR", "RESUME") and prior and _context_tokens(prior[-1]):
         entry["retry_context_growth"] = round(_context_tokens(entry) / _context_tokens(prior[-1]), 3)
     ledger_append(entry, runs_dir)
+    # The actual cost is in the ledger now: the attempt's reservations give way to it, and
+    # a finished change keeps its verifier's budget until the integrator is done with it.
+    spend_settle(run.attempt_id, run.req,
+                 verifier_budget(rec["cost_usd"]) if state == "DONE" and not scout and not advisor else 0.0,
+                 runs_dir)
     rec["attempt_id"] = run.attempt_id
     rec["kind"] = entry["kind"]
     job_close(run.attempt_id, "COMPLETE" if state in ("DONE", "BLOCKED") else "FAILED",
@@ -1658,7 +1830,10 @@ def _write_now(run: Running) -> bool:
         return False
     if str(res.get("result") or "").strip():
         return False
-    cmd = worker_command(run.model or "sonnet", WRITE_NOW_TURNS, 0.5, tools=SCOUT_TOOLS,
+    if not spend_reserve(run.attempt_id, "continue", run.req, run.kind or "SCOUT", WRITE_NOW_USD,
+                         run.runs_dir)[0]:
+        return False  # the day's ceiling: the job ends with what it has
+    cmd = worker_command(run.model or "sonnet", WRITE_NOW_TURNS, WRITE_NOW_USD, tools=SCOUT_TOOLS,
                          resume=sid, prompt=WRITE_NOW_PROMPT)
     run.proc = _start(cmd, run.wt)
     run.continued = True
@@ -1681,6 +1856,8 @@ def continuation(run: Running) -> bool:
     if _evidence(run.wt).get("status") in ("DONE", "BLOCKED") or not _changes(run.wt):
         return False
     turns, budget, _ = BUDGETS[run.klass]
+    if not spend_reserve(run.attempt_id, "continue", run.req, run.kind or "SHIP", budget / 2, run.runs_dir)[0]:
+        return False  # the day's ceiling: the run is finalized with what is on disk
     cmd = worker_command(run.model, max(1, turns // 2), budget / 2, resume=sid,
                          prompt=CONTINUE_PROMPT)
     run.proc = _start(cmd, run.wt)
@@ -1751,11 +1928,13 @@ def watch(runs: list[Running], *, wall_s: float | None = None, stall_s: float = 
 
 def run_records(runs_dir: Path = RUNS_DIR) -> list[Path]:
     """<REQ>.json run records only: not <REQ>.integration/.scout.json, not the
-    stream copies, not host_profile.json."""
+    stream copies, not the kernel's own state files (host profile, memory and
+    spend leases)."""
     if not runs_dir.exists():
         return []
     return [p for p in sorted(runs_dir.glob("*.json"))
-            if p.name.count(".") == 1 and p.name not in (HOST_PROFILE.name, PEAKS_FILE)]
+            if p.name.count(".") == 1
+            and p.name not in (HOST_PROFILE.name, PEAKS_FILE, LEASES_FILE, SPEND_LEASES_FILE)]
 
 
 _ROI_FIELDS = (("turns", ("turns",)), ("cost", ("cost_usd",)), ("wall", ("wall_seconds",)),

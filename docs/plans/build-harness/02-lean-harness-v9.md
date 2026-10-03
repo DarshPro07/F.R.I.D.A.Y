@@ -275,6 +275,33 @@ parked with the new evidence and the program continues other P0 work.
 - Harness gap, handled by hand today: an owner ruling that unblocks a BLOCKED run has no kernel path (`repair`
   needs an integration record; `launch` refuses an existing worktree). See BACKLOG_CANDIDATES.
 
+## BH-K - spend lease (owner, 2026-10-03, `00-owner-directive-2026-10-03.md`)
+
+Rule: no chain, rescue, verifier, advisor, scout or subagent spends outside the daily ledger. $40 soft stop
+(no new work starts), $45 hard ceiling (nothing may reserve past it), per local day.
+
+- Kernel (`build_kernel.py`, beside the memory lease): `spend_leases.json` under the runs dir; a lease is
+  (key, purpose, req, kind, usd, day). `spend_reserve` reads the day's actual cost (`day_cost`) and the day's
+  open leases and writes the new lease under one lock - check and lease are atomic, so two parallel launches
+  cannot both see the same "$6 left". New work (`launch`) is refused at or above the soft stop and whenever
+  committed + max would pass the hard ceiling; finishing work (`continue`, `verify`) only by the hard ceiling.
+- Max cost per invocation: its `--max-budget-usd`; a build launch also reserves its verifier
+  (max($1 floor, 25% of the worker budget)), so a finished worker can always be verified.
+- Every paid entry point takes its lease before any side effect: `launch`, `resume`, `repair`, `escalate`,
+  `advise` (purpose `launch`, keyed by the attempt id; the program's gate takes it first, the function then finds
+  it held), `continuation` and `_write_now` (`continue`; refused -> no continuation), the integrator's verifier
+  (`verify`, keyed `<attempt>:verify`). Refusal raises `SpendCapReached` (a KernelError).
+- Settle: `finalize` writes the actual cost to the invocation ledger, then releases the attempt's launch and
+  continue leases and, for a DONE build, keeps a verify lease of the verifier's real budget; the integrator
+  releases it after recording the verifier's cost, or when no verifier runs. `job_close` on a job that never ran
+  releases its leases. An attempt whose controller died keeps its lease, counted at its maximum, until the day ends.
+- Program: `gate` takes the spend lease after the memory lease (refusal releases the memory lease, the job waits);
+  a wave that launches nothing because of spend stops the run as `day budget` (not parked, not retried by the
+  chain the same day). `product_chain` stops at the soft stop, counting open leases.
+- Tests: two parallel reservations at the edge (one admitted), soft stop, hard ceiling, verify fits after the
+  worker, settle replaces a lease by the actual cost, a refused manual launch leaves no worktree, gate refusal
+  releases memory, the program stops on `day budget`.
+
 ## Resume (fresh session)
 
 `git status`; read `data/build_state.json` (parked, escalations, stop_reason); `build_kernel.py concurrency`;

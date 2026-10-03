@@ -668,3 +668,36 @@ def test_a_paid_verifier_is_a_line_in_the_invocation_ledger(tmp_path):
     assert lines[0]["model"] in ("sonnet", "opus") and lines[0]["at"]
     # The program adds verifier cost to its wave and run totals itself: never twice.
     assert not lines[0].get("wave_id") and not lines[0].get("program_run_id")
+
+
+def _attempted(runs, run, attempt_id="att-1"):
+    (runs / "REQ-1.json").write_text(json.dumps({**run, "attempt_id": attempt_id}), encoding="utf-8")
+
+
+def test_the_verifier_runs_on_the_budget_its_launch_held_then_gives_it_back(tmp_path):
+    # 2026-10-03 owner: the spend lease covers verifiers too. A build launch holds its
+    # verifier's budget; the verifier uses it, records the actual cost, releases the rest.
+    import build_kernel
+    repo, runs, run, rows = setup(tmp_path, priority="P0")
+    _attempted(runs, run)
+    build_kernel.spend_settle("att-1", "REQ-1", build_kernel.verifier_budget(1.0), runs)
+    # Past the soft stop: new work could not start, but this verifier was already paid for.
+    build_kernel.ledger_append({"attempt_id": "w", "req": "X", "kind": "SHIP", "cost_usd": 41.0,
+                                "at": build_kernel._iso()}, runs)
+
+    def paid(cmd, prompt, cwd):
+        return json.dumps({"result": '{"verdict": "PASS", "requirement_ids": ["REQ-1"]}', "total_cost_usd": 0.4})
+    assert go(repo, runs, rows, runner=paid)["result"] == "INTEGRATED"
+    assert build_kernel.spend_committed(runs) == (41.4, 0.0)
+
+
+def test_a_verifier_with_no_budget_left_does_not_run(tmp_path):
+    import build_kernel
+    repo, runs, run, rows = setup(tmp_path, priority="P0")
+    _attempted(runs, run)
+    build_kernel.ledger_append({"attempt_id": "w", "req": "X", "kind": "SHIP", "cost_usd": 44.5,
+                                "at": build_kernel._iso()}, runs)
+    before = head(repo)
+    with pytest.raises(build_kernel.SpendCapReached):
+        go(repo, runs, rows, runner=boom_runner)
+    assert head(repo) == before and build_kernel.spend_committed(runs) == (44.5, 0.0)

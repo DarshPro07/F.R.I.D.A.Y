@@ -53,6 +53,9 @@ class FakeKernel:
         self.closed_jobs: list[tuple[str, str]] = []
         self.finished = False  # whether an adopted dead job's stream holds a result
         self.refused: set[str] = set()  # requirements whose admission or lease recheck fails
+        self.over_budget: set[str] = set()  # requirements the day's spend lease refuses
+        self.spend: list[tuple[str, str, float]] = []  # (req, kind, usd) of each spend lease taken
+        self.released: list[str] = []  # memory leases given back
         self.events: list[tuple] = []  # job-state writes and lease attempts, in order
 
     def load_rows(self):
@@ -82,6 +85,17 @@ class FakeKernel:
 
     def job_wait(self, attempt_id, reason, runs_dir=None):
         self.events.append(("WAITING_RESOURCES", attempt_id, reason))
+
+    def spend_reserve(self, key, purpose, req, kind, usd, runs_dir=None):
+        if req in self.over_budget:
+            return False, f"SPEND_SOFT_STOP: fake day spent before {req}"
+        self.spend.append((req, kind, usd))
+        return True, "fake"
+
+    launch_usd = staticmethod(BK.launch_usd)
+
+    def lease_release(self, attempt_id, runs_dir=None):
+        self.released.append(attempt_id)
 
     def resumable(self, wt):
         return "S1" if wt.name in self.resumable_ids else None
@@ -284,6 +298,32 @@ def test_a_refused_job_does_not_stop_the_admitted_one_beside_it(env):
     k.script = {"B": [rec("B")]}
     go(env, k, max_waves=1)
     assert [x[0] for x in k.launches] == ["B"]
+
+
+def test_a_job_the_day_budget_refuses_gives_its_memory_back_and_stops_the_run(env):
+    # 2026-10-03 owner: the spend lease is part of the scheduler. Memory frees up
+    # within a day; the day's budget does not, so the run stops as "day budget".
+    k = FakeKernel(ids=("A",), priority="P0")
+    k.over_budget = {"A"}
+    res, _ = go(env, k)
+    assert res["stop_reason"] == "day budget" and not k.launches
+    assert k.released == ["att-A"] and "A" not in state_of(env)["parked"]
+    assert state_of(env)["budget"].startswith("SPEND_SOFT_STOP")
+
+
+def test_each_launch_reserves_its_worker_and_verifier_budget(env):
+    k = FakeKernel(ids=("A",), priority="P0")
+    k.script = {"A": [rec("A")]}
+    go(env, k, max_waves=1)
+    assert k.spend == [("A", "SHIP", BK.launch_usd("P0", "SHIP"))]
+
+
+def test_a_repair_refused_by_the_day_budget_stays_queued(env):
+    k = FakeKernel(ids=())
+    k.over_budget = {"A"}
+    state = {"repair_queue": {"A": {"at": "1"}}, "repairs": {}, "cascade": {}, "parked": {}}
+    assert BP.launch_repairs([("A", "NORMAL")], state, k, env.wt) == []
+    assert "A" in state["repair_queue"] and state["repairs"] == {} and not k.repairs
 
 
 def test_a_refused_repair_stays_queued_and_consumes_no_attempt(env):

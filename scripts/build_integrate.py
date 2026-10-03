@@ -52,7 +52,7 @@ PATCH_CAP = 40 * 1024
 #: a running service, slow ones wall-clock time - neither proves a change.
 GATE = ("-m", "not live and not slow")
 _FAILED = re.compile(r"^(?:FAILED|ERROR) (\S+)")
-VERIFIER_FLOOR_USD = 1.0
+VERIFIER_FLOOR_USD = build_kernel.VERIFIER_FLOOR_USD
 VERIFIER_TURNS = 15
 GIT_S = 120
 TEST_S = 900
@@ -218,9 +218,9 @@ def verifier_model(files: list[str]) -> str:
 
 
 def verifier_command(cost_usd: float, files: list[str] = (), exe: str | None = None) -> list[str]:
-    """A quarter of the implementer's cost, never below the floor: the verifier
-    pays for its own system prompt before it reads a line of the change."""
-    budget = max(VERIFIER_FLOOR_USD, 0.25 * float(cost_usd or 0))
+    """The verifier's budget is build_kernel.verifier_budget: the amount a build
+    launch reserved for it under the day's spend lease."""
+    budget = build_kernel.verifier_budget(cost_usd)
     return [exe or shutil.which("claude") or "claude", "-p", "--model", verifier_model(list(files)),
             "--allowedTools", VERIFIER_TOOLS,
             "--strict-mcp-config", "--settings", '{"disableAllHooks": true}',
@@ -272,17 +272,34 @@ def _first_verdict(text: str) -> dict:
             "failing_criteria": ["no parseable verdict in the verifier output"], "evidence_refs": []}
 
 
-def run_verifier(row: dict, run: dict, rg: dict, *, repo: Path = ROOT, runner=None) -> dict:
+def verify_key(run: dict) -> str:
+    """The spend-lease key of a run's verifier: the one its build launch reserved under."""
+    return f"{run.get('attempt_id') or 'unattempted-' + str(run.get('requirement'))}:verify"
+
+
+def run_verifier(row: dict, run: dict, rg: dict, *, repo: Path = ROOT, runner=None,
+                 runs_dir: Path = RUNS_DIR) -> dict:
+    """Run the fresh verifier inside the day's budget: it uses the lease its build
+    launch reserved (or takes one under the hard ceiling; SpendCapReached when none
+    fits, and nothing runs), records its actual cost, then gives the lease back."""
     cwd = Path(run.get("worktree") or repo)
     if not cwd.is_dir():
         cwd = repo
+    cmd = verifier_command(run.get("cost_usd", 0), run.get("files_changed", []))
+    key = verify_key(run)
+    build_kernel.spend_guard(key, "verify", str(run.get("requirement")), "VERIFIER",
+                             float(cmd[cmd.index("--max-budget-usd") + 1]), runs_dir)
     try:
-        out = (runner or default_runner)(verifier_command(run.get("cost_usd", 0), run.get("files_changed", [])),
-                                         verifier_prompt(row, run, rg, repo), cwd)
+        out = (runner or default_runner)(cmd, verifier_prompt(row, run, rg, repo), cwd)
     except (subprocess.SubprocessError, OSError) as exc:
         return {"verdict": "INSUFFICIENT_EVIDENCE", "requirement_ids": [],
                 "failing_criteria": [f"verifier did not run: {type(exc).__name__}"], "evidence_refs": []}
-    return parse_receipt(out)
+    else:
+        receipt = parse_receipt(out)
+        record_verifier(run, receipt, runs_dir)
+        return receipt
+    finally:
+        build_kernel.spend_release(key, runs_dir)
 
 
 def record_verifier(run: dict, verifier: dict, runs_dir: Path = RUNS_DIR) -> None:
@@ -644,6 +661,10 @@ def integrate(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR, ledger_
             return out
     finally:
         queue.finish(req, result)
+        # Whatever happened, the verifier reservation this run's launch held is done with:
+        # used and recorded, not needed, or the run went back for a rebase or repair.
+        build_kernel.spend_release(verify_key(build_kernel._read_json(Path(runs_dir) / f"{req}.json")),
+                                   runs_dir)
 
 
 def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, python: str,
@@ -679,8 +700,7 @@ def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, pytho
     if dry_run:
         return done("DRY_RUN", verifier_required=required)
     if required:
-        out["verifier"] = verifier = run_verifier(row, run, rg, repo=repo, runner=runner)
-        record_verifier(run, verifier, runs_dir)
+        out["verifier"] = verifier = run_verifier(row, run, rg, repo=repo, runner=runner, runs_dir=runs_dir)
         if verifier["verdict"] != "PASS":
             return done("VERIFIER_FAIL")
     else:
