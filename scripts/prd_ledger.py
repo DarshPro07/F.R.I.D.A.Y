@@ -3080,6 +3080,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "on a handshake name/version change; extend it to these). Tests per transition and per drifted "
             "field, a refused call for an unverified external server, and no TLS leaf pin required."),
     }),
+    ('APPROVAL-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Approval lease now binds blast_radius (capability side_effect+risk x target count x whose data). Recorded on grant; runtime refuses a yes whose current blast radius differs or is absent. 4 new tests. (build run, commit b021e636b)',
+        "next_action": "GAPS: CAP-004's six effect flags are not declared yet; blast radius uses the existing side_effect and risk fields. Swap in the flags when CAP-004 lands.; Full 105-file impact set not run; 9 related files were.",
+    }),
 ]
 
 
