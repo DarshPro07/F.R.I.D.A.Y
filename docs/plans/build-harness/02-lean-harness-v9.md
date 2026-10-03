@@ -330,6 +330,28 @@ refused without an integration record; `localized({})` would have resumed the sa
 - Not changed yet (BACKLOG): the one session-resume continuation at the turn cap. On SEC-005 it cost 1.55x the
   first run for half the turns; with this path a fresh capsule session may be the cheaper continuation.
 
+### Status 2026-10-03 22:15 - end of day
+
+- Spend: $37.26 of the owner's $40 soft stop, every paid call in the ledger (spend lease since 9fc0b29). The chain
+  is stopped for the day; the next run needs a new local day.
+- Integrated today: APPROVAL-001 (blast-radius-bound approval leases), CTX-003 (objective -> compiler -> worker),
+  MCP-001 (twice), TRAJ-001 (via the full repair cascade), CTX-002 (staged router, cards, adjudication, pinned
+  embedders; 0632b4c), SEC-005 (file access enforced below Hermes, commands disabled in scoped delegations;
+  33e52c1). All PARTIAL with named gaps.
+- Owner rulings recorded today: 2026-10-03 (spend lease; SEC-005/CTX-003/MCP-001), b (CTX-002 staged router),
+  c (SEC-005 commands + EXEC-SBX-001), d (CTX-003 lease-gated development start), e (MCP-001 discovery, waivers,
+  protocol), f (unified identity CAP-FORGE-013, relevance gate CAP-FORGE-014, OpenDots), g (OpenShell K2,
+  Coucou, Capability Marketplace A11). New rows: EXEC-SBX-001 (P0), CAP-FORGE-013/014, CAP-MKT-001..006 (P1).
+- Harness fixes today: BH-K spend lease; BH-L admission over the real queue; BH-M a failed worker's unfinished work
+  enters the repair cascade; DONE evidence survives a turn cap (45001f5); pick_wave on an empty queue (a1d12ec);
+  verifier sized to the change and worker command forms in the packet (4a852d4); a chain that can afford nothing
+  stops (9adecb3).
+- Next, in the build order: CTX-002 (its gaps: wire the router into live tool search; stage 2 is unmeasurable until
+  a working provider key exists), CTX-003 (lease-gated development start), MCP-001 (rulings e), EXEC-SBX-001
+  (OpenShell K2 first), then the next dependency-ready P0.
+- Lesson: never tell a worker to run a command its allowlist denies (the CTX-002 brief said `git checkout`);
+  prior work is seeded by the controller or carried in the brief, not fetched by the worker.
+
 ## Resume (fresh session)
 
 `git status`; read `data/build_state.json` (parked, escalations, stop_reason); `build_kernel.py concurrency`;
