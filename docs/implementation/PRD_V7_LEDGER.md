@@ -8,11 +8,11 @@ no next action, or (v7) a VERIFIED row naming no test or a citation that
 does not resolve on the tree.
 
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
-- PRD sha256: `403c93e311433178da1dc60ec7c7ec4b0600018d6904a68e2298e31a8d2fb5ac`
-- PRD size: 8126 lines, 283943 bytes
-- Repository HEAD: `3d452509da3688dea4aa3b121d711d556f39c8c8`
-- Uncommitted paths at generation: 49
-- Generated: 2026-10-03T21:32:03+05:30
+- PRD sha256: `c7e409f87324472650d8a2e65fd63b8b0590330e85cb38b3020d554184cf2680`
+- PRD size: 8155 lines, 288403 bytes
+- Repository HEAD: `5848277d155a2be8e917cb9e6e5a913da094f2e6`
+- Uncommitted paths at generation: 47
+- Generated: 2026-10-03T22:05:13+05:30
 
 ## Status vocabulary
 
@@ -27,17 +27,17 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 73 |
+| MISSING | 79 |
 | PARTIAL | 59 |
 | VERIFIED | 36 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
 | PARKED_BY_OWNER | 1 |
-| **total** | **180** |
+| **total** | **186** |
 
 Unresolved P0: 20 (CORE-001, INTENT-001, TRAJ-001, CTX-001, CTX-002, CTX-003, MEM-002, MEM-003, SEC-005, RES-001, EVAL-001, ACT-001, MCP-001, CYBER-002, DUR-001, BCON-001, APPROVAL-001, JIT-001, RES-002, EXEC-SBX-001)
 
-Unresolved P1: 106 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008, ORCH-001, ORCH-002, ORCH-003, ORCH-004, ORCH-005, ORCH-006, ORCH-007, ORCH-008, ORCH-009, ORCH-010, ORCH-011, ORCH-012, ORCH-013, ORCH-014, CAP-FORGE-001, CAP-FORGE-002, CAP-FORGE-003, CAP-FORGE-004, CAP-FORGE-005, CAP-FORGE-006, CAP-FORGE-007, CAP-FORGE-008, CAP-FORGE-009, CAP-FORGE-010, CAP-FORGE-011, CAP-FORGE-012, CAP-FORGE-013, CAP-FORGE-014, WF-001, WF-002, WF-003, WF-004, WF-005, WF-006, WF-007, WF-008, WF-009, WF-010)
+Unresolved P1: 112 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008, ORCH-001, ORCH-002, ORCH-003, ORCH-004, ORCH-005, ORCH-006, ORCH-007, ORCH-008, ORCH-009, ORCH-010, ORCH-011, ORCH-012, ORCH-013, ORCH-014, CAP-FORGE-001, CAP-FORGE-002, CAP-FORGE-003, CAP-FORGE-004, CAP-FORGE-005, CAP-FORGE-006, CAP-FORGE-007, CAP-FORGE-008, CAP-FORGE-009, CAP-FORGE-010, CAP-FORGE-011, CAP-FORGE-012, CAP-FORGE-013, CAP-FORGE-014, WF-001, WF-002, WF-003, WF-004, WF-005, WF-006, WF-007, WF-008, WF-009, WF-010, CAP-MKT-001, CAP-MKT-002, CAP-MKT-003, CAP-MKT-004, CAP-MKT-005, CAP-MKT-006)
 
 ## PRD section 0
 
@@ -502,7 +502,18 @@ Unresolved P1: 106 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| EXEC-SBX-001 | P0 | **MISSING** | A scoped delegation runs commands and interpreters only inside an OS-enforced sandbox bounded by its ExecutionEnvelope. | Escape tests run real Python, Node and PowerShell processes and their child processes inside the sandbox and show that reads and writes outside the envelope roots (by traversal, absolute and UNC paths, case variations, symlinks and junctions, and network paths) all fail, while work inside the roots succeeds; only then is bridge_run_command restored to scoped delegations. | - | `friday/tools/execution_bridge.py`, `friday/execution.py`, `friday/contracts.py` | Owner ruling 2026-10-03c (docs/plans/build-harness/00-owner-directive-2026-10-03c.md): build an OS-enforced scoped command runner - AppContainer/LPAC as the preferred normal Windows backend, Windows Sandbox as the stronger isolated backend; Job Objects for process-tree and resource control only, never as the filesystem sandbox. Restore bridge_run_command and interpreters to scoped delegations only after the escape tests pass. Depends on SEC-005. |
+| EXEC-SBX-001 | P0 | **MISSING** | A scoped delegation runs commands and interpreters only inside an OS-enforced sandbox bounded by its ExecutionEnvelope. | Escape tests run real Python, Node and PowerShell processes and their child processes inside the sandbox and show that reads and writes outside the envelope roots (by traversal, absolute and UNC paths, case variations, symlinks and junctions, and network paths) all fail, while work inside the roots succeeds; only then is bridge_run_command restored to scoped delegations. | - | `friday/tools/execution_bridge.py`, `friday/execution.py`, `friday/contracts.py` | RULINGS 2026-10-03c and 2026-10-03g (owner; docs/plans/build-harness/00-owner-directive-2026-10-03c.md and -03g.md). Three tiers behind one scoped command runner: K1 native AppContainer/LPAC for lightweight Windows jobs; K2 NVIDIA OpenShell through WSL2 for coding, build and test workers (a policy-enforced agent runtime: gateway plus sandbox supervisors enforcing filesystem, process, network, credential and inference boundaries, Landlock/seccomp and a policy proxy on Linux, endpoint-bound credential injection so a sandbox never holds raw secrets; Windows support is through WSL2 and experimental); K3 Windows Sandbox or a VM for highly untrusted work. Job Objects only for process-tree and resource control. Start with K2: evaluate OpenShell through the capability fabric (read its LICENCE, pin the commit, adapter module under friday/fabric_adapters/, an absent install reports UNAVAILABLE), since it may spare FRIDAY building most of the K2 infrastructure; OpenShell wraps execution only and never replaces FRIDAY's objective engine, policy engine, model router or UI. WSL is present on this host (C:/Windows/System32/wsl.exe). bridge_run_command and interpreters return to scoped delegations only after real escape tests pass: Python, Node, PowerShell and child processes cannot read or write outside the ExecutionEnvelope by traversal, absolute, UNC or network paths, case variations, symlinks or junctions. The same sandbox is the preferred runtime for the Capability Marketplace's dynamic evaluation (CAP-MKT-003). |
+
+## PRD section 105
+
+| id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
+|---|---|---|---|---|---|---|---|
+| CAP-MKT-001 | P1 | **MISSING** | Capability sources (skills.rest, GitHub, NVIDIA skills, MCP registries, plugins, local skills, URLs from the person) feed one marketplace pipeline that indexes all their metadata and activates nothing in bulk. | The marketplace holds the full catalogue metadata of each source (name, category, source, popularity) while the active registry holds only verified capabilities; a relevance filter and deduplication pick the candidates that are downloaded (into quarantine, pinned by source and hash); downloading or activating every catalogue entry is refused. | - | `friday/forge.py`, `friday/fabric.py` | Ranked P1 behind the P0 burn-down (A11, owner 2026-10-03g: docs/plans/build-harness/00-owner-directive-2026-10-03g.md). |
+| CAP-MKT-002 | P1 | **MISSING** | NVIDIA SkillSpector is a mandatory pre-activation security gate for every skill, repository, MCP server or package. | Every candidate is scanned (static scan of SKILL.md, code, MCP definitions and dependencies, via the SkillSpector CLI) before activation; findings are stored with the candidate; a candidate with a high-severity finding (prompt injection, exfiltration, privilege escalation, tool or memory poisoning, dangerous code, a vulnerable dependency) is never activated; a planted malicious skill is rejected. | - | `friday/forge.py` | Ranked P1 behind the P0 burn-down (A11, owner 2026-10-03g: docs/plans/build-harness/00-owner-directive-2026-10-03g.md). |
+| CAP-MKT-003 | P1 | **MISSING** | A candidate's dynamic evaluation runs inside an approved sandbox with restricted files, network and processes and no real credentials. | The behaviour test of an imported capability runs in the EXEC-SBX-001 sandbox (NVIDIA OpenShell preferred) with no host credentials, an allowlisted network and an audit log; an attempt to read a host secret or reach an unapproved host is blocked and recorded. | - | `friday/forge.py`, `friday/tools/execution_bridge.py` | Ranked P1 behind the P0 burn-down (A11, owner 2026-10-03g: docs/plans/build-harness/00-owner-directive-2026-10-03g.md). |
+| CAP-MKT-004 | P1 | **MISSING** | Competing candidates for the same capability are chosen by a Skill Arena on the same tasks, never by their descriptions. | For a capability with several candidates, each runs the same task set and is scored on accuracy, completion, tokens, latency, tool calls, retries, security and maintenance; the winner becomes ACTIVE and the rest ARCHIVED with their scores; a later better candidate can replace the winner. | - | `friday/forge.py` | Ranked P1 behind the P0 burn-down (A11, owner 2026-10-03g: docs/plans/build-harness/00-owner-directive-2026-10-03g.md). |
+| CAP-MKT-005 | P1 | **MISSING** | Activated capabilities have a lifecycle with automatic revalidation and garbage collection. | States QUARANTINED, TESTING, ACTIVE, DEGRADED, REVALIDATE, DEPRECATED, ARCHIVED, REMOVED; a worse security scan, an unexpected source change, a vulnerable dependency, a better duplicate, disuse, a token cost without better results, repeated failures or an obsolete app/API version moves a capability out of ACTIVE, and each trigger has a test. | - | `friday/fabric.py`, `friday/forge.py` | Ranked P1 behind the P0 burn-down (A11, owner 2026-10-03g: docs/plans/build-harness/00-owner-directive-2026-10-03g.md). |
+| CAP-MKT-006 | P1 | **MISSING** | When FRIDAY lacks a capability for a task it searches its catalogue and then the marketplace, and finishes the original task with what passes the gates. | A request needing a missing capability goes local catalogue -> marketplace -> candidate -> SkillSpector -> sandbox -> test -> activate -> the original task, with the person's approval wherever policy requires it; with no passing candidate FRIDAY says so instead of improvising. | - | `friday/capability_router.py`, `friday/forge.py` | Ranked P1 behind the P0 burn-down (A11, owner 2026-10-03g: docs/plans/build-harness/00-owner-directive-2026-10-03g.md). |
 
 ## Owner direction recorded against a requirement
 

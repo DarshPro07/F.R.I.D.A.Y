@@ -3221,6 +3221,26 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Owner ruling 2026-10-03c applied: while any delegation holds the exec bridge under an envelope, bridge_run_command is refused outright (delegation_scope.refuse_commands, called before the command is parsed, no executable allowlist, refusal names no program), and bounded_by reports commands as DISABLED (new contracts.DISABLED), not ADVISORY. A python/node/git/powershell command from a scoped delegation is refused and an outside file is not created; file access stays FRIDAY's jail-backed read/write/list/search held to the envelope roots. Unscoped calls are unchanged. Checked in-process and through a real stdio bridge process. (build run, commit 33e52c189)",
         "next_action": "GAPS: Not run against a live Hermes gateway under D:/hermes (needs the owner's host): the bridge was driven as its own stdio MCP process (python, node, git and powershell commands refused under a registered scope, outside file never created, in-envelope read/write allowed, outside write refused, commands back after release), but no Hermes model turn was run through it.; The bridge cannot tell callers apart (no session id), so while a delegation holds it no command runs for any caller on that Hermes profile, and a command already running when a delegation registers (up to the 600 s cap) is not stopped. Commands return for delegations only through EXEC-SBX-001 (AppContainer/LPAC or Windows Sandbox, after real escape tests).; tests/test_prd_ledger.py::test_the_real_ledgers_are_clean fails in this worktree on 7 missing untracked data/ evidence paths of other rows; not caused by this change, not run in a tree that has data/. scripts/prd_ledger.py was not edited: its SEC-005 next_action ('EXTEND: Hermes file roots and network are ADVISORY ...') is now stale and is the kernel's to update.; docs/plans/build-harness/00-owner-directive-2026-10-03c.md is not present in this worktree; the ruling was taken from the text quoted in .build/packet.md.; Network scope and tool-call limits stay ADVISORY for a Hermes delegation (unchanged; the ruling concerns file access and commands).; A delegation workspace outside FRIDAY's own jail roots (repo, data workspace/artifacts, Documents, Desktop, Downloads) gets no file access: the jail is the outer limit and the envelope only narrows it. Fails closed; the owner may want those roots widened for D:/ project workspaces.; The bridge serves one workspace at a time: a second concurrent delegation under a different workspace is refused at registration.; Hermes' native file/terminal toolsets are detected from the profile config.yaml only; an envelope-bound delegation is refused when they are on or the config is unreadable. A runtime change to the profile after the check is not seen.",
     }),
+    # --- EXEC-SBX-001: three sandbox tiers with NVIDIA OpenShell as K2, owner 2026-10-03 (g)
+    ('EXEC-SBX-001', {
+        "status": MISSING,
+        "next_action": (
+            "RULINGS 2026-10-03c and 2026-10-03g (owner; docs/plans/build-harness/00-owner-directive-2026-10-03c.md "
+            "and -03g.md). Three tiers behind one scoped command runner: K1 native AppContainer/LPAC for lightweight "
+            "Windows jobs; K2 NVIDIA OpenShell through WSL2 for coding, build and test workers (a policy-enforced agent "
+            "runtime: gateway plus sandbox supervisors enforcing filesystem, process, network, credential and inference "
+            "boundaries, Landlock/seccomp and a policy proxy on Linux, endpoint-bound credential injection so a "
+            "sandbox never holds raw secrets; Windows support is through WSL2 and experimental); K3 Windows Sandbox or "
+            "a VM for highly untrusted work. Job Objects only for process-tree and resource control. Start with K2: "
+            "evaluate OpenShell through the capability fabric (read its LICENCE, pin the commit, adapter module under "
+            "friday/fabric_adapters/, an absent install reports UNAVAILABLE), since it may spare FRIDAY building most of "
+            "the K2 infrastructure; OpenShell wraps execution only and never replaces FRIDAY's objective engine, "
+            "policy engine, model router or UI. WSL is present on this host (C:/Windows/System32/wsl.exe). "
+            "bridge_run_command and interpreters return to scoped delegations only after real escape tests pass: "
+            "Python, Node, PowerShell and child processes cannot read or write outside the ExecutionEnvelope by "
+            "traversal, absolute, UNC or network paths, case variations, symlinks or junctions. The same sandbox is "
+            "the preferred runtime for the Capability Marketplace's dynamic evaluation (CAP-MKT-003)."),
+    }),
 ]
 
 

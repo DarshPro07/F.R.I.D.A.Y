@@ -136,6 +136,28 @@
     "CAP-FORGE-014": [
       "CAP-FORGE-002",
       "CAP-FORGE-011"
+    ],
+    "CAP-MKT-001": [
+      "CAP-FORGE-002",
+      "CAP-FORGE-014"
+    ],
+    "CAP-MKT-002": [
+      "CAP-FORGE-003"
+    ],
+    "CAP-MKT-003": [
+      "EXEC-SBX-001",
+      "CAP-FORGE-003"
+    ],
+    "CAP-MKT-004": [
+      "CAP-FORGE-007"
+    ],
+    "CAP-MKT-005": [
+      "CAP-FORGE-009",
+      "CAP-FORGE-010"
+    ],
+    "CAP-MKT-006": [
+      "CAP-MKT-001",
+      "CAP-FORGE-001"
     ]
   }
 }

@@ -1848,6 +1848,35 @@ working set, progressive disclosure and context health (CTX-001, CTX-002, CTX-00
 |---|---|---|---|
 | EXEC-SBX-001 | P0 | A scoped delegation runs commands and interpreters only inside an OS-enforced sandbox bounded by its ExecutionEnvelope. | Real Python, Node and PowerShell processes and their children cannot read or write outside the envelope roots by traversal, absolute or UNC paths, case variations, symlinks, junctions or network paths; work inside the roots succeeds; only then is bridge_run_command restored to scoped delegations. |
 
+## 105. Amendment A11 (2026-10-03): the Capability Marketplace
+
+> **Transcription note (added 2026-10-03; not part of the owner's text).** The owner's directive is kept verbatim in
+> `docs/plans/build-harness/00-owner-directive-2026-10-03g.md`; the six requirements below are worded by the implementing agent. P1 with the rest of the Capability
+> Forge (assumed; the owner may re-rank). Its OpenShell decision also changes EXEC-SBX-001 (P0): see that row's next action.
+
+### 105.1 Decisions carried by this amendment
+
+- Ingest everything, activate almost nothing automatically: all catalogue metadata is indexed; only relevant candidates are
+  downloaded (into quarantine), and only safe, useful, winning ones are activated.
+- One pipeline for every source and kind (skill, MCP, plugin, CLI, SDK, service, repository, model, reference): classify,
+  deduplicate, SkillSpector scan, semantic review where needed, licences and dependencies, sandboxed evaluation, value, register.
+- The simplest reliable interface wins: not everything becomes an MCP server (CAP-FORGE-004).
+- NVIDIA OpenShell is the preferred sandbox for untrusted imported capabilities and scoped development workers (EXEC-SBX-001
+  tier K2 through WSL2); Coucou is a source of UI patterns only; all accepted functionality stays behind FRIDAY's identity
+  with provenance in Developer Mode (CAP-FORGE-013).
+- Adoption decisions are recorded in `docs/plans/capability-forge/ADOPTION_LEDGER.md`.
+
+### 105.2 Requirement matrix addendum
+
+| ID | Pri | Requirement | Acceptance evidence |
+|---|---|---|---|
+| CAP-MKT-001 | P1 | Capability sources (skills.rest, GitHub, NVIDIA skills, MCP registries, plugins, local skills, URLs from the person) feed one marketplace pipeline that indexes all their metadata and activates nothing in bulk. | The marketplace holds the full catalogue metadata of each source (name, category, source, popularity) while the active registry holds only verified capabilities; a relevance filter and deduplication pick the candidates that are downloaded (into quarantine, pinned by source and hash); downloading or activating every catalogue entry is refused. |
+| CAP-MKT-002 | P1 | NVIDIA SkillSpector is a mandatory pre-activation security gate for every skill, repository, MCP server or package. | Every candidate is scanned (static scan of SKILL.md, code, MCP definitions and dependencies, via the SkillSpector CLI) before activation; findings are stored with the candidate; a candidate with a high-severity finding (prompt injection, exfiltration, privilege escalation, tool or memory poisoning, dangerous code, a vulnerable dependency) is never activated; a planted malicious skill is rejected. |
+| CAP-MKT-003 | P1 | A candidate's dynamic evaluation runs inside an approved sandbox with restricted files, network and processes and no real credentials. | The behaviour test of an imported capability runs in the EXEC-SBX-001 sandbox (NVIDIA OpenShell preferred) with no host credentials, an allowlisted network and an audit log; an attempt to read a host secret or reach an unapproved host is blocked and recorded. |
+| CAP-MKT-004 | P1 | Competing candidates for the same capability are chosen by a Skill Arena on the same tasks, never by their descriptions. | For a capability with several candidates, each runs the same task set and is scored on accuracy, completion, tokens, latency, tool calls, retries, security and maintenance; the winner becomes ACTIVE and the rest ARCHIVED with their scores; a later better candidate can replace the winner. |
+| CAP-MKT-005 | P1 | Activated capabilities have a lifecycle with automatic revalidation and garbage collection. | States QUARANTINED, TESTING, ACTIVE, DEGRADED, REVALIDATE, DEPRECATED, ARCHIVED, REMOVED; a worse security scan, an unexpected source change, a vulnerable dependency, a better duplicate, disuse, a token cost without better results, repeated failures or an obsolete app/API version moves a capability out of ACTIVE, and each trigger has a test. |
+| CAP-MKT-006 | P1 | When FRIDAY lacks a capability for a task it searches its catalogue and then the marketplace, and finishes the original task with what passes the gates. | A request needing a missing capability goes local catalogue -> marketplace -> candidate -> SkillSpector -> sandbox -> test -> activate -> the original task, with the person's approval wherever policy requires it; with no passing candidate FRIDAY says so instead of improvising. |
+
 ## Appendix C. Implementation controller, updated 2026-09-26 (owner's text, verbatim)
 
 ```text

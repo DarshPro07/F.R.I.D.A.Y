@@ -37,3 +37,38 @@ and records audit before acting - close to FRIDAY's ExecutionEnvelope -> PolicyE
 ComputerUseFabric) and AG-UI (the event protocol between frontend, runtime and agents). Output: one adoption entry
 per part with its CAP-FORGE-014 decision and value score. Ranked P1 behind the P0 burn-down; no clone or install
 before then.
+
+## NVIDIA/OpenShell - HIGH PRIORITY: WRAP AND EVALUATE (owner verdict 2026-10-03g)
+
+Source: `docs/plans/build-harness/00-owner-directive-2026-10-03g.md`. A policy-enforced runtime for autonomous
+agents: a gateway (control plane) and sandbox supervisors that enforce filesystem, process, network, credential and
+inference boundaries; endpoint-bound credential injection; Windows support through WSL2 (experimental).
+
+- Use: EXEC-SBX-001 tier K2 (coding, build and test workers through WSL2), the Capability Marketplace's quarantine and
+  dynamic-evaluation runtime (CAP-MKT-003), network, filesystem and process isolation, credential injection,
+  sandboxed model routing.
+- Does not replace: FRIDAY's objective engine, policy engine, model router or UI.
+- Status: P0 through EXEC-SBX-001 - evaluated by its next run through the capability fabric (licence read, commit
+  pinned, adapter, UNAVAILABLE when absent).
+
+## Louis-CFM/coucou - EXTRACT (UI patterns only, owner verdict 2026-10-03g)
+
+A small UI that watches agent sessions (Claude Code, Cursor, Gemini CLI and others), surfaces permission requests,
+accepts dropped files and shows notifications. Extract for FRIDAY's activity indicator: agent status, compact
+approvals, provider/model switching, drag-and-drop context, notifications. Not used as: FRIDAY's brain, model
+gateway, a second chat system, or a separately branded product. P1 (UI fabric).
+
+## skills.rest and NVIDIA SkillSpector - the Capability Marketplace (owner directive 2026-10-03g, amendment A11)
+
+- skills.rest: index all catalogue metadata; download only relevant, deduplicated candidates into quarantine; activate
+  only winners (CAP-MKT-001, CAP-MKT-004). Never install the catalogue.
+- NVIDIA SkillSpector: mandatory pre-activation gate, CLI first (the owner notes a known stdio MCP initialisation
+  issue), later behind a FRIDAY capability wrapper (CAP-MKT-002). The owner cites its finding that 26.1% of 31,132
+  analysed skills contained vulnerabilities and 5.2% showed likely malicious intent.
+- First candidates the owner named for scanning and evaluation, each with its likely outcome: playwright-web-testing
+  (REFERENCE/EXTRACT - FRIDAY has Playwright), mcp-integration (several forks: deduplicate, keep one), git-worktree-
+  everyinc (REFERENCE/EXTRACT - the harness has worktrees), research and research-agent (benchmark against FRIDAY's
+  research), security-pvpha and skill-security (SkillSpector stays the gate), claude-code-testing-workflows and
+  test-plugin-skill (useful to the Forge for generated MCP servers), the Docker skills (deduplicate, pick one),
+  context-memory and memory-context-management (likely REFERENCE_ONLY against FRIDAY's memory).
+- P1 behind the P0 burn-down; nothing downloaded before then.
