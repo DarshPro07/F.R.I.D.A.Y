@@ -1,5 +1,10 @@
 {
   "order": [
+    "CTX-002",
+    "APPROVAL-001",
+    "SEC-005",
+    "CTX-003",
+    "MCP-001",
     "BROW-001",
     "BROW-004",
     "RES-002",
@@ -7,7 +12,6 @@
     "CORE-001",
     "ACT-001",
     "DOMAIN-001",
-    "MCP-001",
     "EVAL-001"
   ],
   "depends": {

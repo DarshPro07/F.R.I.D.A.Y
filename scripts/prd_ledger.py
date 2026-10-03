@@ -3022,6 +3022,64 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "miss the target, report the measured numbers and the ambiguous-label cases as a gap; do not "
             "relabel the dev split."),
     }),
+    # --- owner rulings on the three blocked P0 rows, 2026-10-03 (00-owner-directive-2026-10-03.md)
+    ('SEC-005', {
+        "status": PARTIAL,
+        "next_action": (
+            "RULING 2026-10-03 (owner): enforce the filesystem boundary; advisory-only file roots are NOT "
+            "accepted under HOST. Enforce it below Hermes rather than inside it: every worker session gets a "
+            "runtime-scoped filesystem envelope, and the only file access a Hermes delegation has is FRIDAY's "
+            "jail-backed file capability - where Hermes cannot enforce the envelope itself, remove or bypass "
+            "its unrestricted file tools for that delegation (do not edit Hermes' internals under D:/hermes). "
+            "Path: worker session -> execution envelope (the delegation's write and read roots) -> FRIDAY file "
+            "capability (friday/toolsets/files.py, friday/fsjail.py) -> canonicalize the path -> resolve "
+            "symlink, junction and reparse-point targets -> allowed-root check -> read or write; refused "
+            "otherwise, and the refusal is logged. The blocker the last run found stands as the seam to "
+            "design around: the exec bridge is spawned once per Hermes profile with a fixed env and no session "
+            "id (execution_bridge.py:57-74), so the per-session root must reach the bridge another way (per "
+            "session bridge, or a session-scoped root passed with each call and checked by FRIDAY). Windows "
+            "tests, each a refusal or an allowed access that fails without the change: ordinary paths, '..', "
+            "symlinks and junctions out of a root, UNC paths, case variations, forward and back slash separators, "
+            "and redirected known folders. A prompt telling the worker to stay in a directory is not "
+            "isolation and does not count."),
+    }),
+    ('CTX-003', {
+        "status": PARTIAL,
+        "next_action": (
+            "RULING 2026-10-03 (owner): the objective engine hands work to the context compiler, never "
+            "straight to a model or a worker. Boundary: Objective Engine -> Objective Contract -> WorkPacket "
+            "/ ContextRequest -> Context Compiler (model_gateway.compile_working_set, CTX-001: CriticalFactSet, "
+            "literals, authority and policy, L0/L1/L2 retrieval, compaction, provenance) -> Model Gateway / "
+            "worker (DevelopmentRun, Hermes task bundle). CriticalFactSet belongs to the Objective Contract "
+            "side and is an input constraint on compaction: the compiler may shorten representation but may "
+            "never silently alter or omit critical facts, exact literals, authority state, acceptance "
+            "criteria, active blockers or required provenance - an over-budget package that cannot keep them "
+            "fails loudly rather than dropping them. So: add the production caller (the objective engine "
+            "emits a WorkPacket/ContextRequest; development.for_goal is reached through the compiler with "
+            "store= and objective_id=), and give the checkpoint summary no size cut that can lose a fact - "
+            "any bound goes through the compiler's fact-preserving compaction and reports what it reduced. "
+            "The objective engine must not become a prompt builder itself. Tests: a critical fact, a literal "
+            "and an active blocker survive compaction under a tight budget; a package that cannot fit them "
+            "fails; the objective path reaches the worker only through the compiler."),
+    }),
+    ('MCP-001', {
+        "status": PARTIAL,
+        "next_action": (
+            "RULING 2026-10-03 (owner): pin identity, but no mandatory leaf-certificate pinning for HTTPS MCP "
+            "servers (routine certificate rotation would become an outage). FRIDAY-managed local stdio "
+            "servers: pin the executable / package / source version, the command, its hash, the server's "
+            "metadata and a tool-schema fingerprint. Remote servers: pin the registered origin / endpoint, "
+            "the authenticated server relationship, the advertised server identity, protocol compatibility "
+            "and tool and description fingerprints; SPKI (public-key) pinning is optional, only for endpoints "
+            "FRIDAY controls or that need the stronger binding. Servers configured outside FRIDAY (Claude "
+            "Code, Hermes, other apps' configs) enter as EXTERNAL_DISCOVERED -> EXTERNAL_UNVERIFIED -> "
+            "fingerprint + scan + schema capture -> user/admin approval where required -> ACTIVE, and are "
+            "never callable merely because another tool's config knows them. Any unexpected change of "
+            "endpoint/origin, server identity, executable/hash, tool schema, tool description, permissions "
+            "or auth scope moves ACTIVE -> SUSPENDED -> REVALIDATE (friday/mcp_firewall.py already suspends "
+            "on a handshake name/version change; extend it to these). Tests per transition and per drifted "
+            "field, a refused call for an unverified external server, and no TLS leaf pin required."),
+    }),
 ]
 
 
