@@ -8,11 +8,11 @@ no next action, or (v7) a VERIFIED row naming no test or a citation that
 does not resolve on the tree.
 
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
-- PRD sha256: `de53b0674078a1143b0f73fcee4a743a443f7deee612aadd6b6c60eae91ec60b`
-- PRD size: 8110 lines, 282064 bytes
-- Repository HEAD: `686f5baffc81ae260577c7c8a143beb3bbe75c52`
-- Uncommitted paths at generation: 49
-- Generated: 2026-10-03T21:08:45+05:30
+- PRD sha256: `403c93e311433178da1dc60ec7c7ec4b0600018d6904a68e2298e31a8d2fb5ac`
+- PRD size: 8126 lines, 283943 bytes
+- Repository HEAD: `ee49e81254b7e9eb2460871f083dc010ef03d6a6`
+- Uncommitted paths at generation: 48
+- Generated: 2026-10-03T21:24:23+05:30
 
 ## Status vocabulary
 
@@ -27,17 +27,17 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 71 |
+| MISSING | 73 |
 | PARTIAL | 59 |
 | VERIFIED | 36 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
 | PARKED_BY_OWNER | 1 |
-| **total** | **178** |
+| **total** | **180** |
 
 Unresolved P0: 20 (CORE-001, INTENT-001, TRAJ-001, CTX-001, CTX-002, CTX-003, MEM-002, MEM-003, SEC-005, RES-001, EVAL-001, ACT-001, MCP-001, CYBER-002, DUR-001, BCON-001, APPROVAL-001, JIT-001, RES-002, EXEC-SBX-001)
 
-Unresolved P1: 104 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008, ORCH-001, ORCH-002, ORCH-003, ORCH-004, ORCH-005, ORCH-006, ORCH-007, ORCH-008, ORCH-009, ORCH-010, ORCH-011, ORCH-012, ORCH-013, ORCH-014, CAP-FORGE-001, CAP-FORGE-002, CAP-FORGE-003, CAP-FORGE-004, CAP-FORGE-005, CAP-FORGE-006, CAP-FORGE-007, CAP-FORGE-008, CAP-FORGE-009, CAP-FORGE-010, CAP-FORGE-011, CAP-FORGE-012, WF-001, WF-002, WF-003, WF-004, WF-005, WF-006, WF-007, WF-008, WF-009, WF-010)
+Unresolved P1: 106 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008, ORCH-001, ORCH-002, ORCH-003, ORCH-004, ORCH-005, ORCH-006, ORCH-007, ORCH-008, ORCH-009, ORCH-010, ORCH-011, ORCH-012, ORCH-013, ORCH-014, CAP-FORGE-001, CAP-FORGE-002, CAP-FORGE-003, CAP-FORGE-004, CAP-FORGE-005, CAP-FORGE-006, CAP-FORGE-007, CAP-FORGE-008, CAP-FORGE-009, CAP-FORGE-010, CAP-FORGE-011, CAP-FORGE-012, CAP-FORGE-013, CAP-FORGE-014, WF-001, WF-002, WF-003, WF-004, WF-005, WF-006, WF-007, WF-008, WF-009, WF-010)
 
 ## PRD section 0
 
@@ -480,6 +480,8 @@ Unresolved P1: 104 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 | CAP-FORGE-010 | P1 | **MISSING** | Updates keep a last-known-good integration and roll back automatically. | A failed or regressing update rolls back to the last known-good version without the person acting, and the bad version is marked so it is not retried. | - | `friday/fabric.py` | Ranked P1 behind the P0 burn-down (A8). Versioned integration directories with a known-good pointer; rollback on failed tests or a rising failure rate. |
 | CAP-FORGE-011 | P1 | **MISSING** | FRIDAY does not import a repository whose useful capabilities are already covered unless a measurement shows an improvement. | A repository whose capabilities an existing registered capability covers is recorded REFERENCE_ONLY, with the overlap evidence, unless a benchmark shows an improvement. | - | `friday/fabric.py` | Ranked P1 behind the P0 burn-down (A8). Compare the dossier's capabilities with the registry (CAP-003) before planning. |
 | CAP-FORGE-012 | P1 | **MISSING** | FRIDAY may adopt a repository's pattern without installing the repository when that is simpler or safer. | FRIDAY records an EXTRACT_PATTERN decision with the pattern described, and can implement it natively without the repository installed. | - | `friday/forge.py:145` | Ranked P1 behind the P0 burn-down (A8). An EXTRACT_PATTERN outcome in the decision set, handed to the build program as an ordinary requirement. |
+| CAP-FORGE-013 | P1 | **MISSING** | Externally sourced capabilities run behind FRIDAY's capability abstractions and user-facing identity, with their provenance kept internally. | A person using an integrated third-party capability sees and addresses only FRIDAY (no vendor product, agent or framework name in normal replies or UI); the capability's source repository, commit, licence and its required notices, version, integrity hash and security review stay recorded and are shown in Developer Mode; removing a required licence notice fails a check. | - | `friday/fabric.py`, `friday/forge.py` | Ranked P1 behind the P0 burn-down (A8 addendum, owner 2026-10-03f). Good invisibility only: one FRIDAY brand and command surface; never strip licence notices or attribution, never lose source, version or security provenance (internal SBOM: capability id, source, commit, licence, ui_exposure.vendor_branding=false, provenance retained). |
+| CAP-FORGE-014 | P1 | **MISSING** | An external repository is rejected when it adds no material new capability, measurable improvement or required dependency over what FRIDAY already has. | Every repository gets one decision of ADOPT, EXTEND, WRAP, EXTRACT, REFERENCE or REJECT with a recorded capability-value score (new capability, quality, cost, latency, reliability and user value against duplicate overlap, maintenance, security, runtime, context cost and integration complexity); given three duplicate browser-agent repositories and one genuinely new capability, the three are REJECTED with their overlap evidence and nothing installed, and the new one goes to quarantine and evaluation. | - | `friday/forge.py`, `friday/fabric.py` | Ranked P1 behind the P0 burn-down (A8 addendum, owner 2026-10-03f). Sharpens CAP-FORGE-011 into a scored gate with an explicit REJECT; keeps FRIDAY from becoming a junk drawer of repositories, MCP servers, skills and agents. |
 
 ## PRD section 103
 

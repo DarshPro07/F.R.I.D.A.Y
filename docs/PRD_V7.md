@@ -1771,6 +1771,22 @@ working set, progressive disclosure and context health (CTX-001, CTX-002, CTX-00
 | CAP-FORGE-010 | P1 | Updates keep a last-known-good integration and roll back automatically. | A failed or regressing update rolls back to the last known-good version without the person acting, and the bad version is marked so it is not retried. |
 | CAP-FORGE-011 | P1 | FRIDAY does not import a repository whose useful capabilities are already covered unless a measurement shows an improvement. | A repository whose capabilities an existing registered capability covers is recorded REFERENCE_ONLY, with the overlap evidence, unless a benchmark shows an improvement. |
 | CAP-FORGE-012 | P1 | FRIDAY may adopt a repository's pattern without installing the repository when that is simpler or safer. | FRIDAY records an EXTRACT_PATTERN decision with the pattern described, and can implement it natively without the repository installed. |
+| CAP-FORGE-013 | P1 | Externally sourced capabilities run behind FRIDAY's capability abstractions and user-facing identity, with their provenance kept internally. | A person sees and addresses only FRIDAY; source, commit, licence and required notices, version, integrity and security review stay recorded and are shown in Developer Mode; removing a required licence notice fails a check. |
+| CAP-FORGE-014 | P1 | An external repository is rejected when it adds no material new capability, measurable improvement or required dependency. | One decision per repository (ADOPT, EXTEND, WRAP, EXTRACT, REFERENCE, REJECT) with a recorded value score; three duplicate browser-agent repositories are REJECTED with overlap evidence and nothing installed, one genuinely new capability goes to quarantine and evaluation. |
+
+### 102.3 Addendum (2026-10-03): unified identity and the relevance gate
+
+> Transcription note: the owner's text is kept verbatim in `docs/plans/build-harness/00-owner-directive-2026-10-03f.md`;
+> CAP-FORGE-013 and CAP-FORGE-014 above are its two formalised requirements (P1, with the rest of A8).
+
+- Third-party projects never become separate products inside FRIDAY: they enter through the Capability Forge and only
+  their useful parts survive, as FRIDAY capabilities. The person sees FRIDAY; Developer Mode shows the backend.
+- Provenance is never erased: licence notices and required attribution, source, commit, version, integrity and
+  security review are kept (an internal SBOM).
+- Every repository gets one of ADOPT, EXTEND, WRAP, EXTRACT, REFERENCE, REJECT; REJECT is a normal, expected outcome.
+- The owner's first verdict under this rule, CopilotKit/OpenDots (SELECTIVE ADOPTION - HIGH VALUE), and the request to
+  evaluate OpenMuse, OpenDots, OpenBot and AG-UI together as one family, are recorded in
+  `docs/plans/capability-forge/ADOPTION_LEDGER.md`.
 
 ## 103. Amendment A9 (2026-10-02): Workflow Fabric - intelligence for novel work, automation for repeated work
 

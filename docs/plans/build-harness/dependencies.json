@@ -129,6 +129,13 @@
     ],
     "EXEC-SBX-001": [
       "SEC-005"
+    ],
+    "CAP-FORGE-013": [
+      "CAP-FORGE-008"
+    ],
+    "CAP-FORGE-014": [
+      "CAP-FORGE-002",
+      "CAP-FORGE-011"
     ]
   }
 }
