@@ -153,14 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 2bc6e29 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-03T09:25:24+00:00
+- HEAD: fadd540 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-03T10:22:52+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 70, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
 - Unresolved P0: 19
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (57): APPROVAL-001=FAILED
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), CTX-002 (blocked), APPROVAL-001 (stale worktree)
-- Open escalations: 45
-  - MEM-003 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\mem-003 already exists
+- Last wave (58): SEC-005=FAILED
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree)
+- Open escalations: 46
   - MEM-002 partial: integrated twice without closing its gaps
   - SEC-005 blocked: Per-session jail needs a seam: Hermes spawns the stdio bridge once per profile with a fixed env (exe
   - CTX-002 resolved: owner ruling 2026-10-02h: small local models; prior work on wip/ctx-002-retrievers; fresh launch fro
@@ -170,5 +169,6 @@ That is the first implementation target of this program.
   - MCP-001 resolved: owner ruling 2026-10-03 (00-owner-directive-2026-10-03.md) in its next_action; stale worktree remove
   - CTX-002 blocked: Recall target cannot be met by these models on this dev split; needs an owner decision on ambiguous 
   - APPROVAL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\approval-001 already exists
-- Next ready: SEC-005, CTX-003
+  - CTX-002 resolved: owner ruling 2026-10-03b (staged router) in its next_action; run 2's work on wip/ctx-002-models
+- Next ready: CTX-002, SEC-005
 <!-- build-program:end -->
