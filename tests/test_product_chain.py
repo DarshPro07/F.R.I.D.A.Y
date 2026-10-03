@@ -71,6 +71,21 @@ def test_the_admission_probe_is_the_programs_own_dry_run(monkeypatch, dry_run, a
         assert "CTX-002 needs 2.8 GB" in why
 
 
+def test_a_spend_stop_that_ran_no_wave_ends_the_chain(monkeypatch, tmp_path):
+    # 2026-10-03 (chain 10): with $3.28 left in its budget and only $7.50 jobs queued,
+    # every run stopped on "spend" at once and the chain started another a minute later.
+    cmds = _chain(monkeypatch, tmp_path, day_spent=10.0)
+
+    def run(cmd, **kw):
+        cmds.append(cmd)
+        assert len(cmds) <= 3, "the chain kept starting runs that could afford nothing"
+        return subprocess.CompletedProcess(cmd, 0, "stopped: spend\n", "")
+    monkeypatch.setattr(PC.subprocess, "run", run)
+    assert PC.main(["--total-usd", "30"]) == 0
+    assert len(cmds) == 1
+    assert "nothing affordable" in PC.json.loads(PC.STATE.read_text(encoding="utf-8"))["product_chain"]["detail"]
+
+
 def test_a_spent_day_starts_no_run(monkeypatch, tmp_path):
     cmds = _chain(monkeypatch, tmp_path, day_spent=49.66)
     assert PC.main(["--day-usd", "45"]) == 0

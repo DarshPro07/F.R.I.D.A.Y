@@ -133,6 +133,12 @@ def main(argv: list[str] | None = None) -> int:
         if reason not in AGAIN:
             mark("STOPPED", f"program stopped: {reason}")
             return 0
+        if reason == "spend" and waves() == waves_before:
+            # Nothing queued fits what is left of this chain's budget; the next run would
+            # stop the same way a minute later (2026-10-03, chain 10).
+            mark("STOPPED", f"spend stop with no wave: nothing affordable in ${run_usd:.2f}")
+            log(f"STOP nothing affordable in ${run_usd:.2f}")
+            return 0
         if reason == "pressure" and waves() == waves_before:
             mark("WAITING_RESOURCES", f"pressure stop with no wave; backing off {PRESSURE_BACKOFF_S}s")
             time.sleep(PRESSURE_BACKOFF_S)
