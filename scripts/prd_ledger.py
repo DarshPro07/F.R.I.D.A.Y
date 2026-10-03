@@ -3211,6 +3211,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "reconnect and each listed suspension trigger, a compatible SDK version bump that does not suspend, and "
             "discovery from a fixture config.yaml for the default and a named profile."),
     }),
+    ('CTX-002', {
+        "status": PARTIAL,
+        "current_implementation": 'Staged router built and measured on dev: hybrid+cards+bge-small S@1/5/10 .450/.764/.858 vs router .381/.714/.825. bge-base not material, large skipped. No confidence signal routes directly at 95%, so all requests go to stage 2 (fake chooser only). (build run, commit 0632b4c18)',
+        "next_action": 'GAPS: Live stage-2 accuracy is unmeasured: the benchmark makes no paid call (OpenAI key invalid 2026-10-02, Gemini key rejected); GatewayChooser is tested with a fake chooser only.; Direct routing is off: at the 95% precision target no (agree, margin) cell routes anything, and score-based signals (cosine top-1, gap, agreement) reach only 66% precision at 13% routed. Top-1 is right on 45% of dev rows, so every request currently needs stage 2. A better confidence signal or a measured chooser is needed before loosening Thresholds.; Stage-2 candidate coverage is 85.8% at top 10 and 93.2% at top 20; a larger k should be measured with the live chooser.; Held-out metrics were not measured (holdout deliberately not read); CTX-002 stays PARTIAL until they pass.; Label adjudication covers the stated substitution sets and bare-pronoun rows only; no row-by-row human review.; scripts/upstream_lock.py --check reports drift in this worktree because the third_party clone dirs are empty here (46 clone rows differ; the 3 model rows match derive()); re-run it in the main checkout.; bge-large not fetched: bge-base was not a material win over bge-small (S@5 +1.5, S@10 +1.1, S@1 -0.6 points for 1.6x latency, 2.2x RAM).; implementer did not claim acceptance met',
+    }),
 ]
 
 
