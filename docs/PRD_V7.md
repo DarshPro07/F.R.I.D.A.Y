@@ -1810,6 +1810,28 @@ working set, progressive disclosure and context health (CTX-001, CTX-002, CTX-00
 | WF-009 | P1 | A workflow engine receives only the credential scopes its workflow needs, through the secret broker. | A workflow's connections are issued per workflow through the secret broker; a planted workflow asking for an unrelated credential (e.g. a marketing flow asking for banking) is refused and the refusal logged; workflow changes pass the policy and JIT authority checks. |
 | WF-010 | P1 | FRIDAY promotes a task to a workflow only when recurrence, reliability and expected savings justify it. | Promotion records frequency, current model tokens and time, expected error reduction against build and maintenance cost; a task below the threshold is not converted and the reason is recorded. |
 
+## 104. Amendment A10 (2026-10-03): scoped command execution
+
+> **Transcription note (added 2026-10-03; not part of the owner's text).** The owner's ruling is kept verbatim in
+> `docs/plans/build-harness/00-owner-directive-2026-10-03c.md`; the requirement and its acceptance evidence below are
+> worded by the implementing agent. P0 because the owner called it the immediate restoration path (assumed; the
+> owner may re-rank).
+
+### 104.1 Decisions carried by this amendment
+
+- SEC-005 merges with command execution disabled for scoped delegations: their only file access is FRIDAY's
+  jail-backed file capability.
+- Commands come back only through an OS-enforced scoped command runner: AppContainer/LPAC is the preferred normal
+  Windows backend, Windows Sandbox the stronger isolated backend.
+- Job Objects control the process tree and resources; they are not the filesystem sandbox.
+- bridge_run_command and interpreters return to scoped delegations only after real escape tests pass.
+
+### 104.2 Requirement matrix addendum
+
+| ID | Pri | Requirement | Acceptance evidence |
+|---|---|---|---|
+| EXEC-SBX-001 | P0 | A scoped delegation runs commands and interpreters only inside an OS-enforced sandbox bounded by its ExecutionEnvelope. | Real Python, Node and PowerShell processes and their children cannot read or write outside the envelope roots by traversal, absolute or UNC paths, case variations, symlinks, junctions or network paths; work inside the roots succeeds; only then is bridge_run_command restored to scoped delegations. |
+
 ## Appendix C. Implementation controller, updated 2026-09-26 (owner's text, verbatim)
 
 ```text

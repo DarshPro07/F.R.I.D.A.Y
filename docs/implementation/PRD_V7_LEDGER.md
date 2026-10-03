@@ -8,11 +8,11 @@ no next action, or (v7) a VERIFIED row naming no test or a citation that
 does not resolve on the tree.
 
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
-- PRD sha256: `c45176a9f87d519ccdf6fdf84bef665187612c5d1ede2afa74785989cfd38203`
-- PRD size: 8088 lines, 280524 bytes
-- Repository HEAD: `e4300652752330ee03a250e37e20a45f75b49df6`
-- Uncommitted paths at generation: 49
-- Generated: 2026-10-03T17:03:35+05:30
+- PRD sha256: `de53b0674078a1143b0f73fcee4a743a443f7deee612aadd6b6c60eae91ec60b`
+- PRD size: 8110 lines, 282064 bytes
+- Repository HEAD: `aee8c40faae81b4d2e41d081d944a64b80c292f9`
+- Uncommitted paths at generation: 47
+- Generated: 2026-10-03T18:26:09+05:30
 
 ## Status vocabulary
 
@@ -27,15 +27,15 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 70 |
+| MISSING | 71 |
 | PARTIAL | 59 |
 | VERIFIED | 36 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
 | PARKED_BY_OWNER | 1 |
-| **total** | **177** |
+| **total** | **178** |
 
-Unresolved P0: 19 (CORE-001, INTENT-001, TRAJ-001, CTX-001, CTX-002, CTX-003, MEM-002, MEM-003, SEC-005, RES-001, EVAL-001, ACT-001, MCP-001, CYBER-002, DUR-001, BCON-001, APPROVAL-001, JIT-001, RES-002)
+Unresolved P0: 20 (CORE-001, INTENT-001, TRAJ-001, CTX-001, CTX-002, CTX-003, MEM-002, MEM-003, SEC-005, RES-001, EVAL-001, ACT-001, MCP-001, CYBER-002, DUR-001, BCON-001, APPROVAL-001, JIT-001, RES-002, EXEC-SBX-001)
 
 Unresolved P1: 104 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, MODEL-004, MODEL-005, LEARN-001, SKILL-002, CLI-001, CODE-001, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, EVAL-002, EVAL-003, MODEL-006, CTX-007, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, CAP-004, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008, ORCH-001, ORCH-002, ORCH-003, ORCH-004, ORCH-005, ORCH-006, ORCH-007, ORCH-008, ORCH-009, ORCH-010, ORCH-011, ORCH-012, ORCH-013, ORCH-014, CAP-FORGE-001, CAP-FORGE-002, CAP-FORGE-003, CAP-FORGE-004, CAP-FORGE-005, CAP-FORGE-006, CAP-FORGE-007, CAP-FORGE-008, CAP-FORGE-009, CAP-FORGE-010, CAP-FORGE-011, CAP-FORGE-012, WF-001, WF-002, WF-003, WF-004, WF-005, WF-006, WF-007, WF-008, WF-009, WF-010)
 
@@ -495,6 +495,12 @@ Unresolved P1: 104 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 | WF-008 | P1 | **MISSING** | While a workflow is broken FRIDAY can complete eligible urgent runs through its normal capabilities. | With a workflow broken, an eligible pending run is completed through ordinary capabilities with the same verification, and the person is told which path ran. | - | `friday/fabric.py` | Ranked P1 behind the P0 burn-down (A9). Provider order from the owner: Activepieces first (MIT core, MCP-native), n8n as an optional adapter (Sustainable Use License), Windmill for code/data jobs (AGPL: isolated mode only) - each licence-checked through the fabric at adoption. |
 | WF-009 | P1 | **MISSING** | A workflow engine receives only the credential scopes its workflow needs, through the secret broker. | A workflow's connections are issued per workflow through the secret broker; a planted workflow asking for an unrelated credential (e.g. a marketing flow asking for banking) is refused and the refusal logged; workflow changes pass the policy and JIT authority checks. | - | `friday/secret_broker.py` | Ranked P1 behind the P0 burn-down (A9). Provider order from the owner: Activepieces first (MIT core, MCP-native), n8n as an optional adapter (Sustainable Use License), Windmill for code/data jobs (AGPL: isolated mode only) - each licence-checked through the fabric at adoption. |
 | WF-010 | P1 | **MISSING** | FRIDAY promotes a task to a workflow only when recurrence, reliability and expected savings justify it. | Promotion records frequency, current model tokens and time, expected error reduction against build and maintenance cost; a task below the threshold is not converted and the reason is recorded. | - | `friday/trajectory.py` | Ranked P1 behind the P0 burn-down (A9). Provider order from the owner: Activepieces first (MIT core, MCP-native), n8n as an optional adapter (Sustainable Use License), Windmill for code/data jobs (AGPL: isolated mode only) - each licence-checked through the fabric at adoption. |
+
+## PRD section 104
+
+| id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
+|---|---|---|---|---|---|---|---|
+| EXEC-SBX-001 | P0 | **MISSING** | A scoped delegation runs commands and interpreters only inside an OS-enforced sandbox bounded by its ExecutionEnvelope. | Escape tests run real Python, Node and PowerShell processes and their child processes inside the sandbox and show that reads and writes outside the envelope roots (by traversal, absolute and UNC paths, case variations, symlinks and junctions, and network paths) all fail, while work inside the roots succeeds; only then is bridge_run_command restored to scoped delegations. | - | `friday/tools/execution_bridge.py`, `friday/execution.py`, `friday/contracts.py` | Owner ruling 2026-10-03c (docs/plans/build-harness/00-owner-directive-2026-10-03c.md): build an OS-enforced scoped command runner - AppContainer/LPAC as the preferred normal Windows backend, Windows Sandbox as the stronger isolated backend; Job Objects for process-tree and resource control only, never as the filesystem sandbox. Restore bridge_run_command and interpreters to scoped delegations only after the escape tests pass. Depends on SEC-005. |
 
 ## Owner direction recorded against a requirement
 

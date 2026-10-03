@@ -1259,4 +1259,11 @@ def table(R7):
            impl='No workflow ROI exists.',
            files=['friday/trajectory.py'],
            next_action='Ranked P1 behind the P0 burn-down (A9). Provider order from the owner: Activepieces first (MIT core, MCP-native), n8n as an optional adapter (Sustainable Use License), Windmill for code/data jobs (AGPL: isolated mode only) - each licence-checked through the fabric at adoption.'),
+        # --- Amendment A10 (2026-10-03): scoped command execution (docs/PRD_V7.md section 104)
+        R7('EXEC-SBX-001', "104", "A scoped delegation runs commands and interpreters only inside an OS-enforced sandbox bounded by its ExecutionEnvelope.", "P0",
+           acceptance='Escape tests run real Python, Node and PowerShell processes and their child processes inside the sandbox and show that reads and writes outside the envelope roots (by traversal, absolute and UNC paths, case variations, symlinks and junctions, and network paths) all fail, while work inside the roots succeeds; only then is bridge_run_command restored to scoped delegations.',
+           status='MISSING',
+           impl='No OS sandbox for delegated commands exists. Since SEC-005 (2026-10-03) a scoped delegation has no command execution at all; its file access goes only through FRIDAY\'s jail-backed file capability.',
+           files=['friday/tools/execution_bridge.py', 'friday/execution.py', 'friday/contracts.py', 'friday/fsjail.py'],
+           next_action="Owner ruling 2026-10-03c (docs/plans/build-harness/00-owner-directive-2026-10-03c.md): build an OS-enforced scoped command runner - AppContainer/LPAC as the preferred normal Windows backend, Windows Sandbox as the stronger isolated backend; Job Objects for process-tree and resource control only, never as the filesystem sandbox. Restore bridge_run_command and interpreters to scoped delegations only after the escape tests pass. Depends on SEC-005."),
     ]
