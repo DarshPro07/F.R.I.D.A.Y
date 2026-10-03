@@ -511,6 +511,10 @@ class CapabilityRuntime:
                 current = O.plan_hash(db, objective_id)
             if record.get("plan_hash") != current:
                 continue
+            # The action reaches as far as it did when the yes was given; a
+            # wider reach (a changed effect declaration) is a material change.
+            if record.get("blast_radius") != O.blast_radius(capability_id, arguments):
+                continue
             return objective_id
         return ""
 

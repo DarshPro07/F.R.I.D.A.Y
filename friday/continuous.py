@@ -1701,7 +1701,8 @@ def resume_after_approval(store: Store, run_id: str, *, decided_by: str,
         parameters=arguments, decision="APPROVED", decided_by=decided_by,
         expires_at=(datetime.now(timezone.utc) + O.APPROVAL_TTL).isoformat(),
         plan_hash=O.plan_hash(store, run_id),
-        graph_version=modification.graph_version(store, run_id))
+        graph_version=modification.graph_version(store, run_id),
+        blast_radius=O.blast_radius(str(task.get("capability") or ""), arguments))
     # The approval travels with the call as `approved_by`, and the capability
     # runtime honours it only when the APPROVED record written above matches
     # this capability and these exact arguments (`_approval_on_record`). It

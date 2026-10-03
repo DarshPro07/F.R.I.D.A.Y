@@ -2950,15 +2950,18 @@ class Store:
                                   target: str, parameters: dict | None,
                                   decision: str, decided_by: str,
                                   nonce: str = "", expires_at: str = "",
-                                  plan_hash: str = "", graph_version: int = 0) -> int:
+                                  plan_hash: str = "", graph_version: int = 0,
+                                  blast_radius: str = "") -> int:
         """FR-060 exact-action approval record bound to operation, target,
         parameters, objective and expiry - and, since APPROVAL-001, to the
-        plan it was given for (`plan_hash`, `graph_version`)."""
+        plan it was given for (`plan_hash`, `graph_version`) and the blast
+        radius of the action (`blast_radius`)."""
         return self._append_objective_json(run_id, "approvals", {
             "operation": operation, "target": target,
             "parameters": dict(parameters or {}), "decision": decision,
             "decided_by": decided_by, "nonce": nonce, "expires_at": expires_at,
-            "plan_hash": plan_hash, "graph_version": graph_version})
+            "plan_hash": plan_hash, "graph_version": graph_version,
+            "blast_radius": blast_radius})
 
     def objective_ledger(self, run_id: str) -> dict | None:
         """The PRD 9.2 Objective shape, assembled from the durable rows:

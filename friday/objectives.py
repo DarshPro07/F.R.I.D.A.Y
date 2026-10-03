@@ -537,6 +537,41 @@ ENVELOPE_LIFETIME = timedelta(days=7)
 APPROVAL_TTL = timedelta(hours=24)
 
 
+#: Argument names that carry the targets of an action, and the ones that name
+#: somebody else whose data or inbox it reaches.
+_TARGET_KEYS = ("path", "paths", "url", "urls", "target", "targets", "name",
+                "names", "id", "ids", "recipient", "recipients", "to")
+_OTHER_PEOPLE_KEYS = ("recipient", "recipients", "to", "cc", "bcc", "email",
+                      "user", "users", "contact", "contacts")
+
+
+def blast_radius(capability_id: str, arguments: dict | None = None) -> str:
+    """
+    How far one action reaches, as a comparable value (APPROVAL-001): the
+    capability's declared effect (`side_effect`, `risk`) combined with the
+    action's target scope - how many targets, and whether they are somebody
+    else's. An approval is bound to it, so an action that reaches further than
+    the one the person said yes to is not covered by that yes. A capability
+    the registry has never heard of is "unknown:unknown", which never equals a
+    declared one.
+    """
+    from friday import capabilities
+
+    capability = capabilities.by_id(capability_id)
+    if capability is None:
+        return "unknown:unknown"
+    arguments = dict(arguments or {})
+    targets = 0
+    for key in _TARGET_KEYS:
+        value = arguments.get(key)
+        if value in (None, "", [], (), {}):
+            continue
+        targets += len(value) if isinstance(value, (list, tuple, set)) else 1
+    scope = "many" if targets > 1 else "one"
+    whose = "others" if any(arguments.get(k) for k in _OTHER_PEOPLE_KEYS) else "own"
+    return f"{capability.side_effect}:{capability.risk}:{scope}:{whose}"
+
+
 def plan_hash(store: Store, run_id: str) -> str:
     """
     What the objective will do, as one comparable value: each task's

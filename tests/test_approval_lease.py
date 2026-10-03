@@ -155,3 +155,47 @@ def test_a_call_outside_any_objective_cannot_use_an_objective_approval(bench):
                                               "approved_by": "boss"})
     assert result.status == c.CANCELLED and "APPROVAL_REQUIRED" in result.error, result
     assert not (root / "note.txt").exists()
+
+
+def test_blast_radius_combines_the_declared_effect_with_the_target_scope():
+    one = O.blast_radius("files_create", {"path": "a.txt"})
+    many = O.blast_radius("files_create", {"paths": ["a.txt", "b.txt"]})
+    others = O.blast_radius("files_create", {"path": "a.txt", "to": "x@example.com"})
+    assert len({one, many, others}) == 3
+    assert O.blast_radius("no_such_capability") == "unknown:unknown"
+
+
+def test_the_approval_records_the_blast_radius_it_was_given_for(bench):
+    store, run_id, _ = bench
+    _parked_then_approved(store, run_id)
+    (record,) = [a for a in json.loads(store.objective_run(run_id)["approvals"])
+                 if a["decision"] == "APPROVED"]
+    assert record["blast_radius"] == O.blast_radius("files_create", record["parameters"])
+
+
+def test_a_change_of_blast_radius_makes_the_approval_stale(bench, monkeypatch):
+    import dataclasses
+
+    from friday import capabilities as CAPS
+
+    store, run_id, root = bench
+    _parked_then_approved(store, run_id)
+    declared = CAPS.CAPABILITIES["files_create"]
+    wider = "IRREVERSIBLE" if declared.risk != "IRREVERSIBLE" else "LOW"
+    monkeypatch.setitem(CAPS.CAPABILITIES, "files_create",
+                        dataclasses.replace(declared, risk=wider))
+    run = _drive(store, run_id)
+    assert run["status"] == O.RUN_WAITING_PERMISSION, run
+    assert not (root / "note.txt").exists(), "a yes to a narrower action was acted on"
+
+
+def test_an_approval_with_no_blast_radius_is_not_honoured(bench):
+    store, run_id, root = bench
+    _parked_then_approved(store, run_id)
+    approvals = json.loads(store.objective_run(run_id)["approvals"])
+    for record in approvals:
+        record.pop("blast_radius", None)
+    store._conn.execute("UPDATE objective_runs SET approvals=? WHERE run_id=?",
+                        (json.dumps(approvals), run_id))
+    assert _drive(store, run_id)["status"] == O.RUN_WAITING_PERMISSION
+    assert not (root / "note.txt").exists()
