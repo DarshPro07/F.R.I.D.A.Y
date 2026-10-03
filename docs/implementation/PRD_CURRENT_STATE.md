@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 3f02bad on prd-v7/slice-7-adaptive-hardware, updated 2026-10-03T13:27:08+00:00
+- HEAD: 686f5ba on prd-v7/slice-7-adaptive-hardware, updated 2026-10-03T15:38:37+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 71, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
 - Unresolved P0: 20
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (65): TRAJ-001=FAILED
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree), CTX-003 (blocked)
-- Open escalations: 51
-  - CTX-003 resolved: owner ruling 2026-10-03 (00-owner-directive-2026-10-03.md) in its next_action; stale worktree remove
-  - MCP-001 resolved: owner ruling 2026-10-03 (00-owner-directive-2026-10-03.md) in its next_action; stale worktree remove
-  - CTX-002 blocked: Recall target cannot be met by these models on this dev split; needs an owner decision on ambiguous 
-  - APPROVAL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\approval-001 already exists
+- Last wave (72): none
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree), TRAJ-001 (partial x2), MCP-001 (partial x2), CTX-002 (cascade exhausted)
+- Open escalations: 55
   - CTX-002 resolved: owner ruling 2026-10-03b (staged router) in its next_action; run 2's work on wip/ctx-002-models
   - SEC-005 resolved: turn-cap failure with work on disk queued for the repair cascade (BH-M)
   - SEC-005 resolved: repair finished (DONE evidence, 176 tests) but was filed FAILED at the turn cap; re-finalized DONE a
   - SEC-005 owner: verifier FAIL 2026-10-03: bridge_run_command and interpreters stay available in a scoped delegation;
   - SEC-005 resolved: owner ruling 2026-10-03c: commands disabled for scoped delegations; packet refreshed; repair queued 
   - CTX-003 blocked: Owner decision needed: the policy category (what authority starting a development run in a repo carr
-- Next ready: CTX-002, SEC-005
+  - TRAJ-001 partial: integrated twice without closing its gaps
+  - MCP-001 partial: integrated twice without closing its gaps
+  - CTX-003 resolved: owner ruling 2026-10-03d (lease-gated development start) in its next_action
+  - CTX-002 cascade: 3 repairs spent
+- Next ready: SEC-005, CTX-003
 <!-- build-program:end -->
