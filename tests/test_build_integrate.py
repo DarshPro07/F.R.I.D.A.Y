@@ -470,6 +470,27 @@ def test_verifier_that_cannot_run_is_insufficient(tmp_path):
     assert out["result"] == "VERIFIER_FAIL" and out["verifier"]["verdict"] == "INSUFFICIENT_EVIDENCE"
 
 
+def test_a_large_change_gets_a_verifier_sized_to_read_it():
+    # 2026-10-03: CTX-002's 19-file, 3,774-line change got the fixed 15-turn verifier,
+    # which "ran out of turns before it reached any code" (INSUFFICIENT_EVIDENCE).
+    files = ([f"friday/m{i}.py" for i in range(8)] + [f"scripts/s{i}.py" for i in range(3)]
+             + ["third_party/UPSTREAM_LOCK.json"] + [f"tests/test_{i}.py" for i in range(4)]
+             + ["docs/plans/x/PLAN.md", "docs/plans/x/bench.json", "docs/plans/x/labels.json"])
+    cmd = bi.verifier_command(1.8, files, exe="claude")
+    assert int(cmd[cmd.index("--max-turns") + 1]) == 15 + 2 * (12 - 3)
+    assert cmd[cmd.index("--max-budget-usd") + 1] == "1.80"  # 12 code files at $0.15
+    small = bi.verifier_command(1.0, ["friday/a.py", "tests/test_a.py"], exe="claude")
+    assert small[small.index("--max-turns") + 1] == "15" and small[small.index("--max-budget-usd") + 1] == "1.00"
+    huge = bi.verifier_command(9.0, [f"friday/m{i}.py" for i in range(60)], exe="claude")
+    assert int(huge[huge.index("--max-turns") + 1]) == build_kernel_mod().VERIFIER_MAX_TURNS
+    assert float(huge[huge.index("--max-budget-usd") + 1]) == build_kernel_mod().VERIFIER_MAX_USD
+
+
+def build_kernel_mod():
+    import build_kernel
+    return build_kernel
+
+
 def test_verifier_prompt_and_command(tmp_path):
     repo, runs, run, rows = setup(tmp_path)
     prompt = bi.verifier_prompt(rows[0], run, {"result": "OK"}, repo)

@@ -366,6 +366,15 @@ def test_packet_carries_rules_and_evidence_contract():
     assert "Never commit" in text and "evidence.json" in text and "acc" in text
 
 
+def test_packet_states_the_only_command_forms_the_worker_may_run():
+    # 2026-10-03: 13 of CTX-002's 102 Bash calls were denied - pipes, `cd &&`, `timeout`,
+    # bare `python`, `git checkout` - which the allowlist never permits; turns burned on them.
+    text = K.packet_text(row("REQ-1"))
+    assert f"`{K.VENV_PY} ...`" in text and "one command per call" in text
+    for banned in ("pipes", "`cd`", "`timeout`", "bare `python`", "`git checkout`"):
+        assert banned in text
+
+
 def _fake_run(tmp_path, code, name="R-1"):
     wt = tmp_path / name
     (wt / ".build").mkdir(parents=True)

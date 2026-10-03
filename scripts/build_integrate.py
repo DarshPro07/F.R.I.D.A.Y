@@ -53,7 +53,7 @@ PATCH_CAP = 40 * 1024
 GATE = ("-m", "not live and not slow")
 _FAILED = re.compile(r"^(?:FAILED|ERROR) (\S+)")
 VERIFIER_FLOOR_USD = build_kernel.VERIFIER_FLOOR_USD
-VERIFIER_TURNS = 15
+VERIFIER_TURNS = build_kernel.VERIFIER_TURNS
 GIT_S = 120
 TEST_S = 900
 GATE_CHUNK = 40
@@ -218,13 +218,13 @@ def verifier_model(files: list[str]) -> str:
 
 
 def verifier_command(cost_usd: float, files: list[str] = (), exe: str | None = None) -> list[str]:
-    """The verifier's budget is build_kernel.verifier_budget: the amount a build
-    launch reserved for it under the day's spend lease."""
-    budget = build_kernel.verifier_budget(cost_usd)
+    """Turns and budget sized to the change (build_kernel.verifier_turns and
+    verifier_budget - the amount finalize held for it under the day's spend lease)."""
+    budget = build_kernel.verifier_budget(cost_usd, files)
     return [exe or shutil.which("claude") or "claude", "-p", "--model", verifier_model(list(files)),
             "--allowedTools", VERIFIER_TOOLS,
             "--strict-mcp-config", "--settings", '{"disableAllHooks": true}',
-            "--max-turns", str(VERIFIER_TURNS), "--max-budget-usd", f"{budget:.2f}",
+            "--max-turns", str(build_kernel.verifier_turns(files)), "--max-budget-usd", f"{budget:.2f}",
             "--output-format", "json"]
 
 

@@ -579,10 +579,32 @@ class SpendCapReached(KernelError):
     """A paid call would pass the owner's day budget; nothing was started."""
 
 
-def verifier_budget(cost_usd: float) -> float:
-    """A quarter of the implementer's cost, never below the floor: the verifier
-    pays for its own system prompt before it reads a line of the change."""
-    return max(VERIFIER_FLOOR_USD, VERIFIER_SHARE * float(cost_usd or 0))
+#: The verifier reads the change it judges, so a large change needs more turns and
+#: money (2026-10-03: CTX-002's 19-file change exhausted 15 turns before any code).
+VERIFIER_TURNS = 15
+VERIFIER_FREE_FILES = 3       # code files the base turns cover
+VERIFIER_FILE_TURNS = 2       # extra turns per code file beyond those
+VERIFIER_FILE_USD = 0.15      # budget per code file
+VERIFIER_MAX_TURNS = 40
+VERIFIER_MAX_USD = 4.0
+
+
+def _code_files(files) -> int:
+    """Changed files the verifier must read as code: not tests, not docs."""
+    return sum(1 for f in files or () if not str(f).replace("\\", "/").startswith(("tests/", "docs/")))
+
+
+def verifier_budget(cost_usd: float, files=()) -> float:
+    """A quarter of the implementer's cost, never below the floor (the verifier
+    pays for its own system prompt before it reads a line of the change), and
+    enough to read every changed code file - capped."""
+    return min(VERIFIER_MAX_USD, max(VERIFIER_FLOOR_USD, VERIFIER_SHARE * float(cost_usd or 0),
+                                     VERIFIER_FILE_USD * _code_files(files)))
+
+
+def verifier_turns(files=()) -> int:
+    return min(VERIFIER_MAX_TURNS,
+               VERIFIER_TURNS + VERIFIER_FILE_TURNS * max(0, _code_files(files) - VERIFIER_FREE_FILES))
 
 
 def launch_usd(klass: str, kind: str = "SHIP") -> float:
@@ -755,6 +777,9 @@ Summary: {row['summary']}
 - Read budget: at most {READ_FILES.get(klass, 8)} files and <= 400 lines before your first edit.
 - Run targeted tests only: `{VENV_PY} scripts/test_impact.py --direct --files <changed files>` then
   `{VENV_PY} scripts/pytest_brief.py -- <test files>`.
+- Bash accepts exactly these forms, one command per call: `git status ...`, `git diff ...`, `git log ...`
+  and `{VENV_PY} ...` (a script, `-m pytest`, or `-c`). Anything else is denied and wastes a turn: pipes,
+  `cd`, `&&` or `;`, `timeout`, redirections, bare `python`, `git checkout`. Use Read, Grep and Glob to look.
 - Add a test that fails without your change. No debug prints, no secrets.
 - Finish by writing `.build/evidence.json`:
   {{"requirement": "{row['id']}", "status": "DONE|BLOCKED", "summary": "<=300 chars",
@@ -1839,7 +1864,7 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
     # The actual cost is in the ledger now: the attempt's reservations give way to it, and
     # a finished change keeps its verifier's budget until the integrator is done with it.
     spend_settle(run.attempt_id, run.req,
-                 verifier_budget(rec["cost_usd"]) if state == "DONE" and not scout and not advisor else 0.0,
+                 verifier_budget(rec["cost_usd"], files) if state == "DONE" and not scout and not advisor else 0.0,
                  runs_dir)
     rec["attempt_id"] = run.attempt_id
     rec["kind"] = entry["kind"]
