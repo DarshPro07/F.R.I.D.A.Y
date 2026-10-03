@@ -67,13 +67,17 @@ def mark(status: str, detail: str) -> None:
 
 
 def admits() -> tuple[bool, str]:
-    r = subprocess.run([PY, "scripts/build_kernel.py", "concurrency"], cwd=ROOT, capture_output=True,
-                       text=True, encoding="utf-8", errors="replace", timeout=120)
-    out = r.stdout.strip()
-    try:
-        return int(out.split(" ", 1)[0]) >= 1, out
-    except ValueError:
-        return False, out or r.stderr.strip()[-200:]
+    """Would the program start a job now? Its own dry run answers, pricing each
+    queued job by its own memory history (2026-10-03: a probe priced at a generic
+    worker - the heaviest recent peak - held every light job back). Only a pressure
+    stop waits; any other answer is the program's to give when it runs."""
+    r = subprocess.run([PY, "scripts/build_program.py", "--priority", "P0", "--dry-run"], cwd=ROOT,
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+    lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
+    why = next((ln for ln in lines if ln.startswith("nothing to plan: ")), "")
+    if why.startswith("nothing to plan: pressure"):
+        return False, why
+    return True, why or "; ".join(lines)[-300:] or r.stderr.strip()[-200:] or f"exit {r.returncode}"
 
 
 def wait_for_admission(hours: float) -> bool:

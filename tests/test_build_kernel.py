@@ -65,7 +65,9 @@ def test_owner_rows_excluded_unless_asked():
 
 def test_config_has_order_and_depends():
     cfg = K.load_config()
-    assert cfg["order"][0] == "BROW-001" and cfg["depends"]["MODEL-010"] == ["MODEL-009"]
+    # The owner's 2026-10-03 sequence leads the order (00-owner-directive-2026-10-03.md).
+    assert cfg["order"][:5] == ["CTX-002", "APPROVAL-001", "SEC-005", "CTX-003", "MCP-001"]
+    assert "BROW-001" in cfg["order"] and cfg["depends"]["MODEL-010"] == ["MODEL-009"]
 
 
 def test_waves_disjoint_unknown_alone_and_cap():
@@ -198,6 +200,17 @@ def test_admit_charges_each_candidate_against_what_was_admitted_before_it(tmp_pa
     cands = [({"id": r}, "SHIP", "NORMAL") for r in "ABC"]
     got, why = K.admit(cands, 3, gov, tmp_path)
     assert [r["id"] for r, _ in got] == ["A", "B"] and "C needs 1.7 GB" in why
+
+
+def test_a_job_too_big_for_the_memory_waits_and_the_lighter_one_behind_it_runs(tmp_path):
+    # Owner v12 (2026-10-02): a branch that needs RAM waits; independent work continues.
+    # 2026-10-03: CTX-002 (2.9 GB, it loads models) held SEC-005 (0.3 GB) back all afternoon.
+    gov = FakeGov(available=3.0, thresholds=Thresholds(max_workers=2))  # 1.5 GB above the reserve
+    _peaks(tmp_path, ("CTX-002", "P0", 2910), ("SEC-005", "P0", 321))
+    cands = [({"id": "CTX-002"}, "SHIP", "P0"), ({"id": "SEC-005"}, "SHIP", "P0")]
+    got, why = K.admit(cands, 2, gov, tmp_path)
+    assert [r["id"] for r, _ in got] == ["SEC-005"] and "CTX-002 needs 2.8 GB" in why
+    assert K.admissible(cands, 2, gov, tmp_path)[0] == ["SEC-005"]
 
 
 @pytest.mark.parametrize("available,n", [(2.9, 0), (4.5, 1)])

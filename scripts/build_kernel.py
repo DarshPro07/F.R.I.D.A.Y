@@ -451,8 +451,10 @@ def admit(candidates: list, cap: int = DEFAULT_CAP, gov=None,
           runs_dir: Path = RUNS_DIR) -> tuple[list[tuple[dict, float]], str]:
     """Walk the candidates in order and admit each whose predicted memory fits
     the headroom left by the reserve, every live lease and everything admitted so
-    far - on physical RAM and on commit alike. A candidate is a row or a
-    (row, mode, class) tuple. CRITICAL admits none; HIGH at most one."""
+    far - on physical RAM and on commit alike. A candidate that does not fit waits
+    and the ones behind it are still tried (owner v12: a branch that needs RAM
+    waits, independent work continues). A candidate is a row or a (row, mode,
+    class) tuple. CRITICAL admits none; HIGH at most one."""
     gov = gov or host_governor()
     pressure = gov.pressure()
     if pressure.level == "CRITICAL":
@@ -473,15 +475,23 @@ def admit(candidates: list, cap: int = DEFAULT_CAP, gov=None,
             why = why or f"{len(admitted)} admitted, the ceiling for pressure {pressure.level}"
             break
         if min(_headroom(sample, reserve)) - leased - taken < gb:
-            why = (f"{row.get('id') or 'a worker'} needs {gb:.1f} GB ({source}); "
-                   f"{min(_headroom(sample, reserve)) - leased - taken:.1f} GB free above the reserve")
-            break
+            why = why or (f"{row.get('id') or 'a worker'} needs {gb:.1f} GB ({source}); "
+                          f"{min(_headroom(sample, reserve)) - leased - taken:.1f} GB free above the reserve")
+            continue
         admitted.append((row, gb))
         taken += gb
     return admitted, (f"pressure {pressure.level}: {sample.ram_available_gb:.1f} GB available, "
                       f"{reserve:.1f} GB reserve, {leased:.1f} GB leased, {taken:.1f} GB admitted "
                       f"-> {len(admitted)} slots (cap {cap}, max_workers {limits.max_workers})"
                       + (f"; {why}" if why else ""))
+
+
+def admissible(candidates: list, cap: int = DEFAULT_CAP, gov=None,
+               runs_dir: Path = RUNS_DIR) -> tuple[list[str], str]:
+    """The ids admission would start now from the program's own candidates, in
+    order: each job priced by its own prediction, never by a generic worker's."""
+    got, why = admit(candidates, cap, gov, runs_dir)
+    return [row.get("id", "") for row, _ in got], why
 
 
 def concurrency(cap: int = DEFAULT_CAP, *, gov=None, runs_dir: Path = RUNS_DIR) -> tuple[int, str]:

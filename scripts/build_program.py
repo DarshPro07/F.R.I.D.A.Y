@@ -252,6 +252,16 @@ def class_of(row: dict, mode: str, k=build_kernel) -> str:
     return "SCOUT" if mode == "SCOUT" else k.budget_class(row)
 
 
+def admission_candidates(queue: list[dict], repairs: list[tuple[str, str]], k=build_kernel) -> list[tuple]:
+    """Queued repairs first (they run first), then the ready rows in order, each as
+    (row, mode, class) so admission prices every job by its own memory history."""
+    out = [({"id": rid}, "SHIP", klass) for rid, klass in repairs]
+    for row in queue:
+        mode = k.mode_for(row)
+        out.append((row, mode, class_of(row, mode, k)))
+    return out
+
+
 def pick_wave(queue: list[dict], cap: int, n: int, remaining: float,
               k=build_kernel, first_within: float | None = None) -> list[tuple[dict, str, str]]:
     """First wave of the queue, limited to `n` rows and trimmed to the spend left.
@@ -543,11 +553,16 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
         elif not (queue := queue_for(rows, state, integrated, worktrees, priority, k, not dry_run, resumed)) \
                 and not repairs:
             stop = "no ready work"
-        elif (slots := k.concurrency(cap=cap))[0] <= 0:
+        elif not (fit := k.admissible(admission_candidates(queue, repairs, k), cap))[0]:
             stop = "pressure"
-            state["resources"] = slots[1]
+            state["resources"] = fit[1]
         else:
-            n = slots[0]
+            # Only what admission would start now: a job too big for the memory left
+            # waits this wave, and the lighter work behind it goes (owner v12).
+            fits = set(fit[0])
+            n = len(fit[0])
+            repairs = [(rid, klass) for rid, klass in repairs if rid in fits]
+            queue = [row for row in queue if row["id"] in fits]
             left_run = max_usd - spent
             left = min(left_run, wave_cap)
             for rid, klass in repairs[:n]:
@@ -610,7 +625,8 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
         # current-state doc is tracked. It is written once, below.
         write_state(state_file, snap)
     if dry_run:
-        out(f"nothing to plan: {stop}")
+        out(f"nothing to plan: {stop}"
+            + (f" ({state['resources']})" if stop == "pressure" and state.get("resources") else ""))
         return {"stop_reason": stop, "waves": []}
     # Waiting for memory is not a failed run: say what it waits for.
     state["status"] = "WAITING_RESOURCES" if stop == "pressure" else "STOPPED"

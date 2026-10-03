@@ -302,6 +302,20 @@ Rule: no chain, rescue, verifier, advisor, scout or subagent spends outside the 
   worker, settle replaces a lease by the actual cost, a refused manual launch leaves no worktree, gate refusal
   releases memory, the program stops on `day budget`.
 
+## BH-L - admission over the real queue (2026-10-03)
+
+Measured: after CTX-002's run peaked at 2.9 GB (it loads the ONNX models), every program run and every chain
+probe stopped on "pressure". `concurrency()` priced a generic worker at the p95 of the last ten peaks (that one
+outlier), and `admit()` stopped at the first job that did not fit, so SEC-005 (0.3 GB), CTX-003 and MCP-001 waited
+behind CTX-002 with 2-3 GB free. Owner v12: a branch that needs RAM waits; independent work continues.
+
+- `admit()` skips a candidate that does not fit and tries the ones behind it (order otherwise kept; the first
+  refusal's reason is reported). No anti-starvation yet: a heavy job waits until memory frees.
+- `admissible(candidates)` returns the ids admission would start; the program builds its candidates from the
+  queued repairs and the ready rows, each priced by its own history, and plans its wave only from those.
+- The chain's probe is the program's own dry run; only "nothing to plan: pressure (...)" waits.
+- `concurrency()` (the generic worker) stays for the CLI and the integrator's gate parallelism.
+
 ## Resume (fresh session)
 
 `git status`; read `data/build_state.json` (parked, escalations, stop_reason); `build_kernel.py concurrency`;

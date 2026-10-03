@@ -54,6 +54,7 @@ class FakeKernel:
         self.finished = False  # whether an adopted dead job's stream holds a result
         self.refused: set[str] = set()  # requirements whose admission or lease recheck fails
         self.over_budget: set[str] = set()  # requirements the day's spend lease refuses
+        self.too_big: set[str] = set()  # requirements whose predicted memory does not fit now
         self.spend: list[tuple[str, str, float]] = []  # (req, kind, usd) of each spend lease taken
         self.released: list[str] = []  # memory leases given back
         self.events: list[tuple] = []  # job-state writes and lease attempts, in order
@@ -72,6 +73,10 @@ class FakeKernel:
 
     def concurrency(self, cap=2):
         return min(self.level, cap), "fake"
+
+    def admissible(self, candidates, cap=2):
+        ids = [row["id"] for row, _, _ in candidates if row["id"] not in self.too_big]
+        return ids[:min(self.level, cap)], "fake"
 
     def job_queue(self, req, klass, mode="SHIP", runs_dir=None, reason=""):
         self.events.append(("QUEUED", req))
@@ -309,6 +314,25 @@ def test_a_job_the_day_budget_refuses_gives_its_memory_back_and_stops_the_run(en
     assert res["stop_reason"] == "day budget" and not k.launches
     assert k.released == ["att-A"] and "A" not in state_of(env)["parked"]
     assert state_of(env)["budget"].startswith("SPEND_SOFT_STOP")
+
+
+def test_a_job_too_big_for_the_memory_waits_while_the_next_one_runs(env):
+    # Owner v12: park only the branch that needs RAM; continue the independent work.
+    k = FakeKernel(ids=("A", "B"), priority="P0", level=1)
+    k.too_big = {"A"}
+    k.script = {"B": [rec("B")]}
+    go(env, k, max_waves=1)
+    assert [x[0] for x in k.launches] == ["B"] and "A" not in state_of(env)["parked"]
+
+
+def test_nothing_admissible_is_a_pressure_stop_with_its_reason(env):
+    k = FakeKernel(ids=("A",), priority="P0")
+    k.too_big = {"A"}
+    lines = []
+    BP.run_program(repo=Path("."), state_file=env.state, state_doc=env.doc, worktrees=env.wt, k=k,
+                   bi=FakeIntegrator(k), runner=env.git, out=lines.append, dry_run=True,
+                   checkout_turn=lambda label: contextlib.nullcontext())
+    assert lines[-1] == "nothing to plan: pressure (fake)"
 
 
 def test_each_launch_reserves_its_worker_and_verifier_budget(env):

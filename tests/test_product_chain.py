@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -52,6 +54,21 @@ def test_no_run_starts_at_the_soft_stop(monkeypatch, tmp_path):
     cmds = _chain(monkeypatch, tmp_path, day_spent=PC.K.DAY_SOFT_USD)
     assert PC.main([]) == 0
     assert cmds == []
+
+
+@pytest.mark.parametrize("dry_run,admitted", [("CTX-002 SHIP P0\n", True),
+                                              ("nothing to plan: no ready work\n", True),
+                                              ("nothing to plan: pressure (CTX-002 needs 2.8 GB)\n", False)])
+def test_the_admission_probe_is_the_programs_own_dry_run(monkeypatch, dry_run, admitted):
+    # 2026-10-03: the probe asked about a generic worker, priced at the heaviest recent
+    # peak (CTX-002's models), so no run started while lighter jobs would have fitted.
+    seen = []
+    monkeypatch.setattr(PC.subprocess, "run", lambda cmd, **kw: seen.append(cmd)
+                        or subprocess.CompletedProcess(cmd, 0, dry_run, ""))
+    ok, why = PC.admits()
+    assert ok is admitted and "--dry-run" in seen[0] and why
+    if not admitted:
+        assert "CTX-002 needs 2.8 GB" in why
 
 
 def test_a_spent_day_starts_no_run(monkeypatch, tmp_path):
