@@ -195,6 +195,56 @@ def native_tools_healthy(timeout: float = 20.0) -> bool:
     return healthy
 
 
+#: Config keys whose lists name the toolsets a Hermes profile turns on, and the
+#: toolsets that read and change files or run commands outside FRIDAY's bridge.
+_TOOLSET_KEYS = ("toolsets", "platform_toolsets", "enabled_toolsets")
+_NATIVE_FILE_TOOLSETS = ("file", "terminal")
+
+
+def native_file_toolsets_enabled(profile: str = "") -> tuple[str, ...]:
+    """
+    Which of Hermes' own unrestricted `file`/`terminal` toolsets the profile
+    config turns on - none in the friday profile, where only FRIDAY's exec
+    bridge is registered (see `native_tools_healthy`).
+
+    A delegation held to an execution envelope gets FRIDAY's jail-backed file
+    capability and nothing else, and Hermes cannot enforce the envelope on its
+    own tools, so `delegate` refuses when this is not empty. No profile at all
+    (no Hermes install here) names none; a config that is there and cannot be
+    read raises ValueError, because then nothing is known.
+    """
+    home = os.environ.get(ENV_PROFILE_HOME) or profile_home(
+        profile or os.environ.get(ENV_PROFILE, DEFAULT_PROFILE))
+    config_path = Path(home) / "config.yaml" if home else None
+    if config_path is None or not config_path.is_file():
+        return ()
+    import yaml
+    try:
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise ValueError(f"the profile config {config_path} cannot be read: {exc}") from exc
+
+    found: list[str] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in _TOOLSET_KEYS:
+                    # a list of names, or a mapping of platform -> list of names
+                    lists = (list(value.values()) if isinstance(value, dict)
+                             else [value])
+                    for names in lists:
+                        if isinstance(names, list):
+                            found.extend(str(name).lower() for name in names)
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(config)
+    return tuple(name for name in _NATIVE_FILE_TOOLSETS if name in found)
+
+
 #: Hermes gateway event type → Friday event name. Anything absent is
 #: forwarded under its own name rather than dropped, so a new Hermes event
 #: is visible before it is understood.
@@ -638,6 +688,9 @@ class Bounded:
     workspace: str
     expires_in: float | None
     strength: dict
+    #: The envelope the delegation is held to; `delegate` registers it so the
+    #: exec bridge judges every file call by it (friday.delegation_scope).
+    envelope: object = None
 
 
 def bounded_by(bundle: TaskBundle, envelope) -> Bounded:
@@ -647,10 +700,13 @@ def bounded_by(bundle: TaskBundle, envelope) -> Bounded:
     Refuses (`contracts.OutsideEnvelope`) when the envelope has expired or
     does not allow delegation. The session starts inside the envelope, and
     the supervisor interrupts the task when the envelope expires; those two
-    and the refusal are FRIDAY's to hold. The roots and the network scope
-    reach Hermes as the task's scope and constraints: the exec bridge jails
-    it to its profile's workspace, not to this envelope, so they are
-    ADVISORY here and reported as such.
+    and the refusal are FRIDAY's to hold. The roots are held too: `delegate`
+    registers the envelope (`delegation_scope`) and the exec bridge, the only
+    file access the delegation has, judges every path against it. A program
+    the worker ran would not be confined by file roots, so the bridge runs no
+    command for a delegation under an envelope (DISABLED, owner ruling
+    2026-10-03c). The network scope reaches Hermes as the task's constraints
+    only: ADVISORY here and reported as such.
     """
     from friday import contracts as c
 
@@ -684,9 +740,10 @@ def bounded_by(bundle: TaskBundle, envelope) -> Bounded:
                        allowed_paths=tuple(envelope.write_roots)),
         workspace=workspace,
         expires_in=envelope.seconds_left(),
+        envelope=envelope,
         strength={"capability": c.ENFORCED, "expiry": c.ENFORCED,
-                  "file_roots": c.ADVISORY, "network": c.ADVISORY,
-                  "tool_calls": c.ADVISORY})
+                  "file_roots": c.ENFORCED, "commands": c.DISABLED,
+                  "network": c.ADVISORY, "tool_calls": c.ADVISORY})
 
 
 def render_completion(record: dict) -> str:
@@ -1241,6 +1298,9 @@ class HermesSupervisor:
         #: transition (FR-013: the worker count is the count of workers
         #: actually running, not of runs ever started).
         self._leases: dict[str, str] = {}
+        #: Leases whose delegation was registered with its envelope for the
+        #: exec bridge to hold it to; released with the lease.
+        self._scoped: set[str] = set()
         self.log.on_terminal_hook = self._release_lease
 
     def _release_lease(self, work_run_id: str) -> None:
@@ -1248,6 +1308,10 @@ class HermesSupervisor:
         if lease:
             from friday import governor as G
             G.governor().release(lease)
+            if lease in self._scoped:
+                from friday import delegation_scope
+                self._scoped.discard(lease)
+                delegation_scope.release(lease)
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -1757,7 +1821,7 @@ class HermesSupervisor:
                  route_reason: str = "", wait: bool = False,
                  turn_timeout: float = 900.0, reasoning_effort: str = "",
                  share_memory: bool = True,
-                 expires_in: float | None = None) -> dict:
+                 expires_in: float | None = None, scope=None) -> dict:
         """
         Send one bounded task to a fresh Hermes session.
 
@@ -1776,7 +1840,23 @@ class HermesSupervisor:
         the bundle, so the sub-agent knows what Friday knows.
         `expires_in`, from the objective's envelope (`bounded_by`), is when
         the task is interrupted if it is still running then.
+        `scope`, that envelope, is registered for the life of the run
+        (`delegation_scope`): the exec bridge then holds every file call the
+        task makes to its roots. A delegation under a scope is refused when
+        Hermes' own `file`/`terminal` toolsets are on in the profile, since
+        those cannot be held to it (`native_file_toolsets_enabled`).
         """
+        from friday import contracts as c
+        if scope is not None:
+            try:
+                native = native_file_toolsets_enabled()
+            except ValueError as exc:
+                raise c.OutsideEnvelope(f"the profile's tools cannot be verified: {exc}") from exc
+            if native:
+                raise c.OutsideEnvelope(
+                    f"Hermes' own {', '.join(native)} toolset is on in this profile and "
+                    f"cannot be held to an envelope; a delegation under one gets only "
+                    f"FRIDAY's file capability")
         # DOMAIN-001: classified before a lease is taken or a session made.
         from friday import domain_gate
         gate_route = domain_gate.route_name("hermes", provider, model)
@@ -1796,6 +1876,14 @@ class HermesSupervisor:
                                       objective_id=friday_run_id, owner="hermes_bridge")
         if not decision.admitted:
             raise G.Refused(decision)
+        if scope is not None:
+            from friday import delegation_scope
+            try:
+                delegation_scope.register(decision.lease, scope, workspace)
+            except c.OutsideEnvelope:
+                G.governor().release(decision.lease)
+                raise
+            self._scoped.add(decision.lease)
 
         if share_memory:
             bundle = bundle.with_memory()
@@ -1818,7 +1906,13 @@ class HermesSupervisor:
             create["provider"] = provider
         if reasoning_effort:
             create["reasoning_effort"] = reasoning_effort
-        session = self.request("session.create", create, timeout=60)
+        try:
+            session = self.request("session.create", create, timeout=60)
+        except BaseException:
+            # No session, so nothing will ever end this run: free its slot
+            # and its scope now rather than refuse every later file call.
+            self._release_lease(work_run_id)
+            raise
         sid = session["session_id"]
         stored = session.get("stored_session_id", "")
         info = session.get("info") or {}

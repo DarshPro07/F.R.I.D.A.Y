@@ -177,6 +177,13 @@ def _safeguard_ledger_in_tmp(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _delegation_scopes_in_tmp(tmp_path, monkeypatch):
+    """SEC-005: a test neither reads nor writes the live registry of the
+    delegations holding the exec bridge."""
+    monkeypatch.setenv("FRIDAY_DELEGATION_SCOPE_DIR", str(tmp_path / "delegation_scopes"))
+
+
+@pytest.fixture(autouse=True)
 def _never_the_real_database(tmp_path, monkeypatch):
     """
     A test may not write to the boss's actual store.

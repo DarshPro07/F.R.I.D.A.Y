@@ -37,7 +37,8 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from friday import execution
+from friday import delegation_scope, execution
+from friday.fsjail import JailError
 
 #: Interpreters and destructive verbs the bridge refuses to launch at all.
 #: The environment jail would contain most of this anyway; refusing early
@@ -74,6 +75,34 @@ def _environment():
     return _env
 
 
+# File access. With a delegation holding the bridge every path is judged by
+# `delegation_scope` - FRIDAY's jail, then that delegation's envelope roots -
+# and nothing else; with none, the profile's workspace jail, as ever.
+
+
+def _read(path: str, *, limit: int = 1_000_000) -> str:
+    held = delegation_scope.resolve(path)
+    if held is None:
+        return _environment().read(path, limit=limit)
+    return held.read_text(encoding="utf-8", errors="replace")[:limit]
+
+
+def _write(path: str, content: str) -> Path:
+    held = delegation_scope.resolve(path, write=True)
+    if held is None:
+        return _environment().write(path, content)
+    held.parent.mkdir(parents=True, exist_ok=True)
+    held.write_text(content, encoding="utf-8")
+    return held
+
+
+def _listing(path: str) -> list[str]:
+    held = delegation_scope.resolve(path)
+    if held is None:
+        return _environment().listing(path)
+    return delegation_scope.listing(held)
+
+
 mcp = FastMCP("friday-execution-bridge")
 
 
@@ -87,8 +116,8 @@ def bridge_read_file(path: str, offset: int = 1, limit: int = 2000) -> str:
         limit: Maximum number of lines to return.
     """
     try:
-        text = _environment().read(path)
-    except execution.ExecutionError as exc:
+        text = _read(path)
+    except (execution.ExecutionError, JailError) as exc:
         return f"{REFUSED}: {exc}"
     except OSError as exc:
         return f"ERROR: {exc}"
@@ -108,8 +137,8 @@ def bridge_write_file(path: str, content: str) -> str:
         content: Full file content.
     """
     try:
-        target = _environment().write(path, content)
-    except execution.ExecutionError as exc:
+        target = _write(path, content)
+    except (execution.ExecutionError, JailError) as exc:
         return f"{REFUSED}: {exc}"
     except OSError as exc:
         return f"ERROR: {exc}"
@@ -124,8 +153,8 @@ def bridge_list_files(path: str = ".") -> str:
         path: Directory relative to the workspace root.
     """
     try:
-        names = _environment().listing(path)
-    except execution.ExecutionError as exc:
+        names = _listing(path)
+    except (execution.ExecutionError, JailError) as exc:
         return f"{REFUSED}: {exc}"
     except OSError as exc:
         return f"ERROR: {exc}"
@@ -154,10 +183,9 @@ def bridge_search_files(pattern: str, path: str = ".",
         path: Directory relative to the workspace root.
         limit: Maximum matching lines to return.
     """
-    env = _environment()
     try:
-        names = env.listing(path)
-    except execution.ExecutionError as exc:
+        names = _listing(path)
+    except (execution.ExecutionError, JailError) as exc:
         return f"{REFUSED}: {exc}"
     hits: list[str] = []
     scanned = 0
@@ -172,7 +200,7 @@ def bridge_search_files(pattern: str, path: str = ".",
                         f"narrow `path` to search further")
             break
         try:
-            text = env.read(name, limit=2_000_000)
+            text = _read(name, limit=2_000_000)
         except (execution.ExecutionError, OSError):
             continue
         for number, line in enumerate(text.splitlines(), start=1):
@@ -255,10 +283,19 @@ def bridge_run_command(command: str, timeout: int = 300) -> str:
     system-mutating executables are refused. Output is captured, truncated
     and credential-redacted by Friday's execution layer.
 
+    Refused outright while a delegation is held to an execution envelope: a
+    program is not confined by the envelope's file roots.
+
     Args:
         command: The program and its arguments, e.g. "git status --short".
         timeout: Seconds before the process is killed.
     """
+    # First, before the command is parsed: under an envelope no program runs,
+    # whatever it is, because only FRIDAY's file tools are held to the roots.
+    try:
+        delegation_scope.refuse_commands()
+    except JailError as exc:
+        return f"{REFUSED}: {exc}"
     try:
         vector = shlex.split(command, posix=False)
     except ValueError as exc:

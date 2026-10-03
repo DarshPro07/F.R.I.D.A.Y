@@ -7,7 +7,9 @@ agent's router as an MCP call, which carries no Run. So the call names its
 objective, and the server loads that objective's stored envelope itself: an
 envelope only narrows, so a caller naming another objective gains nothing.
 What the bridge can hold on its own side is reported as ENFORCED (expiry,
-membership); what only the task text carries (roots, network) as ADVISORY.
+membership, and the file roots, which the exec bridge holds below Hermes -
+tests/test_delegation_scope.py); what only the task text carries (network, what
+a program the worker runs does) as ADVISORY.
 """
 from __future__ import annotations
 
@@ -56,7 +58,8 @@ def test_a_delegation_is_compiled_from_its_envelope(tmp_path):
     assert 0 < bounded.expires_in <= 120
     assert bounded.strength["expiry"] == c.ENFORCED
     assert bounded.strength["capability"] == c.ENFORCED
-    assert bounded.strength["file_roots"] == c.ADVISORY
+    assert bounded.strength["file_roots"] == c.ENFORCED
+    assert bounded.strength["commands"] == c.DISABLED
     assert bounded.strength["network"] == c.ADVISORY
 
 
@@ -147,7 +150,8 @@ def test_an_objectives_delegation_is_held_to_its_stored_envelope(delegate_tool):
     assert kwargs["workspace"] in stored.read_roots + stored.write_roots
     assert bundle.allowed_paths == stored.write_roots
     assert 0 < kwargs["expires_in"] <= stored.seconds_left() + 1
-    assert out["envelope"]["strength"]["file_roots"] == c.ADVISORY
+    assert out["envelope"]["strength"]["file_roots"] == c.ENFORCED
+    assert kwargs["scope"] == stored
 
 
 def _objective_with_contract(store) -> str:

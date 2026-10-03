@@ -208,7 +208,9 @@ class FileJail:
         tail = raw[2:] if re.match(r"^[a-zA-Z]:[/\\]", raw) else raw
         if os.name == "nt" and ":" in tail:
             raise JailError("path contains ':' (alternate data stream)")
-        if raw.startswith("\\\\"):
+        # Either slash: Windows reads "//host/share" as a UNC path too, and
+        # resolving it would reach out to that host before any root is checked.
+        if raw.startswith("\\\\") or (os.name == "nt" and raw.startswith("//")):
             raise JailError("UNC and device paths are not permitted")
 
     @staticmethod

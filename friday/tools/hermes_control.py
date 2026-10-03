@@ -223,7 +223,8 @@ def register(mcp):
                 if bounded is not None else {})
         within = ({"workspace": bounded.workspace,
                    "friday_run_id": objective_run_id,
-                   "expires_in": bounded.expires_in}
+                   "expires_in": bounded.expires_in,
+                   "scope": bounded.envelope}
                   if bounded is not None else {})
         # H1/H2: when the caller did not pin a model, one deterministic
         # pass picks the minimum capable route AND its reasoning depth -
@@ -243,6 +244,8 @@ def register(mcp):
                                         wait=False, **within)
         except hb.HermesUnavailable as exc:
             return {"status": "failed", "error": str(exc)}
+        except c.OutsideEnvelope as exc:
+            return {"status": "failed", "error": f"ENVELOPE: {exc}"}
         except G.Refused as exc:
             # FR-056: the machine cannot carry another worker right now.
             # Say so, with the measured reason, instead of starting one.

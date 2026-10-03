@@ -500,8 +500,12 @@ ANY_CAPABILITY = "*"
 #: 43: reported, not assumed). ENFORCED: the worker, its launcher or FRIDAY
 #: refuses what is outside it. ADVISORY: the worker is told, and something it
 #: may legitimately do (a test suite, a gateway's own tools) is not held to it.
+#: DISABLED: the worker is not given the capability at all, so there is nothing
+#: left to hold it to (a delegation's shell: a program is not confined by file
+#: roots, so under an envelope there is none).
 ENFORCED = "ENFORCED"
 ADVISORY = "ADVISORY"
+DISABLED = "DISABLED"
 
 
 class OutsideEnvelope(Exception):
