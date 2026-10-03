@@ -3085,6 +3085,49 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Approval lease now binds blast_radius (capability side_effect+risk x target count x whose data). Recorded on grant; runtime refuses a yes whose current blast radius differs or is absent. 4 new tests. (build run, commit b021e636b)',
         "next_action": "GAPS: CAP-004's six effect flags are not declared yet; blast radius uses the existing side_effect and risk fields. Swap in the flags when CAP-004 lands.; Full 105-file impact set not run; 9 related files were.",
     }),
+    # --- CTX-002: owner ruling for a staged router, 2026-10-03 (supersedes 2026-10-02 h's "do not relabel")
+    ('CTX-002', {
+        "status": PARTIAL,
+        "next_action": (
+            "RULING 2026-10-03b (owner, docs/plans/build-harness/00-owner-directive-2026-10-03b.md): build a "
+            "staged router - better candidate recall (a larger embedder) AND a reasoning model that chooses "
+            "among the top k only when retrieval is uncertain - not either alone, and not a large model on "
+            "every request. START: `git checkout wip/ctx-002-models -- friday/tool_retrieval.py "
+            "friday/tool_models.py friday/fabric_adapters/tool_embedder.py friday/fabric_adapters/tool_reranker.py "
+            "scripts/bench_tool_disclosure.py scripts/upstream_lock.py third_party/UPSTREAM_LOCK.json "
+            "tests/test_tool_retrieval.py tests/test_tool_models.py tests/test_upstream_lock.py` (run 2: pinned "
+            "bge-small embedder and MiniLM reranker as fabric providers, hash-verified offline loading with "
+            "fallback, model rows in the upstream lock, the benchmark). Run 2 measured on dev (R@1/@3/@5): "
+            "router 0.369/0.621/0.704, bge-small 0.401/0.656/0.748, router+BM25+bge 0.414/0.677/0.749 at 25 ms, "
+            "+reranker 0.368/0.548/0.639 at 1.5 s. STEPS: (1) Adjudicate ambiguous labels first: write the "
+            "adjudication rule before measuring; keep every original label and add also_correct tools or an "
+            "expect=CLARIFY marker with a one-line reason; never take a label from a model's output; apply the "
+            "same written rule to the holdout without looking at any model result on it. (2) Baseline = the "
+            "router+BM25+embedding hybrid. Drop the MiniLM reranker from routing (it lowered recall and cost "
+            "1.5 s). (3) Benchmark bge-small against BAAI/bge-base-en-v1.5 (MIT, revision "
+            "a5beb1e3e68b9ab74eb54cfd186867f64f240e1a, onnx/model.onnx sha256 "
+            "9bc579acdba21c253c62a9bf866891355a63ffa3442b52c8a37d75b2ccb91848, tokenizer.json sha256 "
+            "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66; already downloaded under "
+            "F:/F.R.I.D.A.Y/cache/models) on the same data, hybrid weights and tool text. Only if base wins "
+            "materially, fetch BAAI/bge-large-en-v1.5 by pin (MIT, revision "
+            "d4aa6901d3a41ba39fb536a557fa166f842b0e09, onnx/model.onnx 1.34 GB sha256 "
+            "69ed3f810d3b6d13f70dff9ca89966f39c0a0e877fb88211be7bcc070df2a2ce) and measure it too, after "
+            "checking free memory. Report Success@1/3/5/10/20, MRR, latency and peak RAM per model; promote a "
+            "larger model only for a material win on FRIDAY's benchmark, never for being larger. (4) Enrich the "
+            "tool cards the retriever indexes: does, does_not, aliases, examples, confusable_with, domain - "
+            "written from the tools' behaviour, never copied from dev or holdout requests (that leaks the test "
+            "set); re-measure. (5) Stage 2: when retrieval is confident (top-1 score and margin to top-2 over "
+            "thresholds chosen on dev) route directly, about 25 ms and no model call; otherwise send the request "
+            "with compact cards for the top 10 (try 20 if coverage@10 is short) to a reasoning model through "
+            "FRIDAY's model gateway, which may return only {decision: TOOL | CLARIFY | ABSTAIN, tool_id, "
+            "confidence}. Measure end to end: correct tool, correct clarification, correct abstention, and the "
+            "share of requests that need stage 2. No paid API call from the benchmark (the owner's day budget "
+            "counts every paid call): on 2026-10-02 the OpenAI key here was invalid (401 in "
+            "tests/test_voice_path.py) and the exe's Gemini key was rejected, so build stage 2 with a fake "
+            "chooser in tests and list the live stage-2 measurement as a gap. FINISH as DONE with "
+            "acceptance_met=false and the gaps listed, so the work integrates as PARTIAL; BLOCKED is only for a "
+            "decision only the owner can make. CTX-002 stays PARTIAL until the held-out metrics pass."),
+    }),
 ]
 
 
