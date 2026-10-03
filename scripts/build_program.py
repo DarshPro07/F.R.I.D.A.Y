@@ -268,7 +268,10 @@ def pick_wave(queue: list[dict], cap: int, n: int, remaining: float,
     `first_within` lets the wave's first row use that larger budget: a wave cap
     limits how many workers run together, never whether one can run at all."""
     chosen, total = [], 0.0
-    for row in k.waves(queue, cap)[0][:n]:
+    waves = k.waves(queue, cap)
+    if not waves:  # admission may leave nothing but repairs the run cannot afford
+        return chosen
+    for row in waves[0][:n]:
         mode = k.mode_for(row)
         klass = class_of(row, mode, k)
         cost = k.BUDGETS[klass][1]

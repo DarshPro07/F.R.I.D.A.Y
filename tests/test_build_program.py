@@ -71,7 +71,7 @@ class FakeKernel:
         return [r for r in rows if r["id"] not in self.closed]
 
     def waves(self, queue, cap):
-        return [list(queue)]
+        return [list(queue)] if queue else []  # as the kernel: no rows, no waves
 
     def concurrency(self, cap=2):
         return min(self.level, cap), "fake"
@@ -338,6 +338,22 @@ def test_a_worker_that_fails_with_nothing_on_disk_is_an_attempt(env):
     go(env, k, max_waves=1)
     st = state_of(env)
     assert st["attempts"]["A"] == 1 and "A" not in st["repair_queue"]
+
+
+def test_a_run_whose_only_admissible_job_is_an_unaffordable_repair_stops_on_spend(env):
+    # 2026-10-03 (chain 8, 19:37): admission let only CTX-002's repair through, the run's
+    # budget could not pay for it, and pick_wave crashed on the empty filtered queue.
+    k = FakeKernel(ids=("B",), priority="P0", level=1)
+    k.too_big = {"B"}
+    state = {"repair_queue": {"A": {"at": "1"}}, "repairs": {}, "cascade": {}, "parked": {}}
+    env.state.parent.mkdir(parents=True, exist_ok=True)
+    env.state.write_text(json.dumps(state), encoding="utf-8")
+    res, _ = go(env, k, max_usd=0.5)
+    assert res["stop_reason"] == "spend" and not k.repairs and not k.launches
+
+
+def test_pick_wave_on_an_empty_queue_is_empty():
+    assert BP.pick_wave([], 2, 1, 5.0, BK) == []
 
 
 def test_a_job_too_big_for_the_memory_waits_while_the_next_one_runs(env):
