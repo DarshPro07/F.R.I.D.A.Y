@@ -24,6 +24,7 @@ def objective(tmp_path):
     contract = c.ObjectiveContract(
         goal="write the Q3 summary to 'Q3 report.md' and tidy the old drafts",
         purpose=("the board meets on Friday",),
+        success_criteria=("Q3 report.md exists and every old draft is gone",),
         hard_constraints=("keep the numbers exactly as the finance sheet has them",),
         exact_literals=("Q3 report.md",),
         open_questions=("which drafts count as old?",),
@@ -56,6 +57,7 @@ def test_every_kind_of_critical_fact_is_read_from_the_record(objective):
     text = facts.render()
     assert "OBJECTIVE: write the Q3 summary to 'Q3 report.md' and tidy the old drafts" in text
     assert "OBJECTIVE (why): the board meets on Friday" in text
+    assert "OBJECTIVE (done when): Q3 report.md exists and every old draft is gone" in text
     assert "EXACT: Q3 report.md" in text
     assert "MUST: keep the numbers exactly as the finance sheet has them" in text
     assert "MUST: never power" in text
@@ -138,8 +140,9 @@ def test_what_tools_recorded_is_kept_apart_from_what_the_person_gave(objective):
     binding, recorded = facts.binding(), facts.recorded()
     assert set(binding) | set(recorded) == set(facts.lines())
     assert not set(binding) & set(recorded)
-    assert all(line.split(":")[0] in {"OBJECTIVE", "OBJECTIVE (why)", "EXACT", "MUST", "DECIDED",
-                                      "OPEN QUESTION", "AUTHORITY"} for line in binding)
+    assert all(line.split(":")[0] in {"OBJECTIVE", "OBJECTIVE (why)", "OBJECTIVE (done when)",
+                                      "EXACT", "MUST", "DECIDED", "OPEN QUESTION",
+                                      "AUTHORITY"} for line in binding)
     assert any("open in Word" in line for line in recorded)
     assert not any("open in Word" in line for line in binding)
 

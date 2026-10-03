@@ -190,25 +190,32 @@ def register(mcp):
             except c.OutsideEnvelope as exc:
                 return {"status": "failed", "error": f"ENVELOPE: {exc}"}
             bundle = bounded.bundle
-            # CTX-003: the fresh worker starts from a packet, not the history,
-            # so the objective's critical facts go in as recorded and a packet
-            # that would not carry every one of them is not sent.
+            # CTX-003: the fresh worker starts from a packet, not the history.
+            # The objective engine asks the context compiler for it and does
+            # not read the record or build the packet itself; the compiler
+            # keeps every critical fact, and a packet that would not carry
+            # every one of them is not sent.
             from friday import compaction
+            from friday import model_gateway as mg
             from friday.toolsets.objectives import store as objective_store
 
             try:
-                facts = compaction.for_objective(objective_store(), objective_run_id)
+                compiled = mg.compile_request(
+                    objective_store(),
+                    compaction.ContextRequest(objective_id=objective_run_id, work=goal),
+                    bound=envelope.provenance == c.PERSON)
+            except compaction.LossyCompaction as exc:
+                return {"status": "failed", "error": f"LOSSY_COMPACTION: {exc}"}
+            except mg.ContextOverBudget as exc:
+                return {"status": "failed",
+                        "error": f"CONTEXT: the objective's facts do not fit: {exc}"}
             except (c.ContractError, ValueError, LookupError) as exc:
                 return {"status": "failed",
                         "error": f"CONTEXT: the objective's record cannot be read: {exc}"}
-            # What the person gave binds the worker; what tools recorded is
-            # quoted data. An objective that came from read material has
-            # nothing the person gave, so all of it is data.
-            binding = facts.binding() if envelope.provenance == c.PERSON else ()
-            recorded = tuple(line for line in facts.lines() if line not in binding)
-            bundle = replace(bundle, critical_facts=binding, recorded_state=recorded)
+            bundle = replace(bundle, critical_facts=compiled.binding,
+                             recorded_state=compiled.recorded)
             try:
-                compaction.validate(bundle.render(), facts)
+                compaction.validate(bundle.render(), compiled.facts)
             except compaction.LossyCompaction as exc:
                 return {"status": "failed", "error": f"LOSSY_COMPACTION: {exc}"}
         held = ({"envelope": {"objective_run_id": objective_run_id,

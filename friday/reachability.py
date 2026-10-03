@@ -133,7 +133,8 @@ ENTRY_POINTS: dict[str, tuple[str, ...]] = {
     OBJECTIVE_EXECUTOR: ("ContinuousTaskExecutor", "start_objective_engine",
                          "run_objective", "execute"),
     AUTOMATION: ("automations_run", "automation_tick"),
-    DEVELOPMENT_RUN: ("DevelopmentRun", "for_goal"),
+    # for_request is the one door (CTX-003): it compiles, then reaches for_goal.
+    DEVELOPMENT_RUN: ("DevelopmentRun", "for_request"),
     # Things with their own lifecycle: the learner, the world monitor, the
     # shadow writer. A background service with no lifecycle owner is one of
     # the shapes this audit looks for.

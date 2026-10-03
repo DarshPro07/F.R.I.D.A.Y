@@ -92,6 +92,34 @@ class CriticalFactSet:
         return "\n".join(self.lines())
 
 
+@dataclass(frozen=True)
+class ContextRequest:
+    """What the objective engine emits when work must reach a worker (CTX-003).
+
+    The engine states which objective the work serves and what is asked of the
+    worker; it never builds a prompt and never reaches a model or a worker
+    itself. The context compiler (`model_gateway.compile_request`) turns this
+    into a package that carries the objective's critical facts, within
+    `budget_tokens` when one is set (0 is no bound).
+    """
+
+    objective_id: str
+    work: str
+    root: str = ""
+    project: str = ""
+    task_id: str = ""
+    strategy_hint: str = ""
+    budget_tokens: int = 0
+
+    def __post_init__(self) -> None:
+        if not (self.objective_id or "").strip():
+            raise contracts.ContractError("a context request names its objective")
+        if not (self.work or "").strip():
+            raise contracts.ContractError("a context request states the work asked")
+        if self.budget_tokens < 0:
+            raise contracts.ContractError("a token budget is not negative")
+
+
 def _squash(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
@@ -118,6 +146,8 @@ def for_objective(store, run_id: str) -> CriticalFactSet:
     objective = [f"{OBJECTIVE}: {_squash(goal)}"]
     if contract is not None:
         objective += [f"{OBJECTIVE} (why): {_squash(p)}" for p in contract.purpose]
+        objective += [f"{OBJECTIVE} (done when): {_squash(s)}"
+                      for s in contract.success_criteria]
     literals = [f"{LITERAL}: {literal}" for literal in
                 (contract.exact_literals if contract is not None else ())]
     constraints = []

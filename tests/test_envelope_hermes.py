@@ -197,6 +197,38 @@ def test_a_delegation_that_would_drop_a_critical_fact_is_not_sent(delegate_tool,
     assert supervisor.calls == []
 
 
+def test_an_objectives_delegation_is_compiled_before_it_is_sent(delegate_tool, monkeypatch):
+    """CTX-003 ruling: the objective path hands work to the context compiler,
+    never straight to the worker, so a request the compiler cannot keep whole
+    sends nothing."""
+    from friday import compaction
+    from friday import model_gateway as mg
+
+    store, delegate, supervisor = delegate_tool
+    run_id = _objective_with_contract(store)
+    _running(store, run_id)
+    real, seen = mg.compile_request, []
+
+    def spy(db, request, **kwargs):
+        seen.append(request)
+        return real(db, request, **kwargs)
+
+    monkeypatch.setattr(mg, "compile_request", spy)
+    out = delegate(goal="fix the parser", objective_run_id=run_id, wait_seconds=0)
+    assert out["status"] == "working", out
+    assert seen == [compaction.ContextRequest(objective_id=run_id, work="fix the parser")]
+
+    def too_big(db, request, **kwargs):
+        raise mg.ContextOverBudget("the facts need 900 tokens and the budget is 10")
+
+    monkeypatch.setattr(mg, "compile_request", too_big)
+    supervisor.calls.clear()
+    refused = delegate(goal="fix the parser", objective_run_id=run_id, wait_seconds=0)
+    assert refused["status"] == "failed" and refused["error"].startswith("CONTEXT"), refused
+    assert "900 tokens" in refused["error"]
+    assert supervisor.calls == []
+
+
 def test_tool_output_reaches_the_worker_only_as_quoted_data(delegate_tool):
     """A failed step's evidence is whatever a tool or page said. It reaches a
     fresh worker only as a quoted line of recorded state, never among the

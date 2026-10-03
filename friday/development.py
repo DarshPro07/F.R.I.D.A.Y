@@ -276,12 +276,11 @@ class DevelopmentRun:
             from dataclasses import replace
 
             from friday import compaction
+            from friday import model_gateway as mg
 
-            binding = (facts.binding() if envelope is None
-                       or envelope.provenance == c.PERSON else ())
-            bundle = replace(bundle, critical_facts=binding,
-                             recorded_state=tuple(line for line in facts.lines()
-                                                  if line not in binding))
+            binding, recorded = mg.split_facts(
+                facts, bound=envelope is None or envelope.provenance == c.PERSON)
+            bundle = replace(bundle, critical_facts=binding, recorded_state=recorded)
             try:
                 compaction.validate(bundle.prompt(), facts)
             except compaction.LossyCompaction as exc:
@@ -576,3 +575,21 @@ def for_goal(goal: str, root: str | Path, *, project: str = "",
                          strategy_hint=strategy_hint or "",
                          store=store, objective_id=objective_id)
     return run.understand().staff()
+
+
+def for_request(store, request) -> DevelopmentRun:
+    """The objective engine's one way to development work (CTX-003): it emits
+    a `compaction.ContextRequest`; the context compiler reads the objective's
+    critical facts and checks they fit before any worker is staffed, and only
+    then is `for_goal` reached, with the store and the objective so the
+    worker's packet carries those facts again. A request whose facts cannot be
+    kept (ContextOverBudget, LossyCompaction) or whose objective is unknown
+    (LookupError) raises here and no worker is chosen."""
+    from friday import model_gateway as mg
+
+    if not request.root:
+        raise c.ContractError("a development request names its repository root")
+    mg.compile_request(store, request)
+    return for_goal(request.work, request.root, project=request.project,
+                    strategy_hint=request.strategy_hint, store=store,
+                    objective_id=request.objective_id)

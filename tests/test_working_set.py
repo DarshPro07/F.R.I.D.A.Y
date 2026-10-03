@@ -112,7 +112,10 @@ def test_an_objectives_model_step_carries_its_facts_and_reports_its_context(tmp_
     assert K.missing(packet, K.for_objective(store, run_id)) == []
     context = result.output["context"]
     assert context["sections"]["pinned"] > 0 and context["sections"]["task"] > 0
-    assert context["sections"]["state"] > 0
+    # the recorded facts are critical, so they travel in a section that is
+    # never dropped, and the telemetry says how many facts the package holds
+    assert context["sections"]["recorded"] > 0
+    assert context["facts_kept"] == len(K.for_objective(store, run_id).lines())
     assert context["dropped"] == []
     # The person's constraint binds; the recorded next step is quoted state.
     body = request.context_package[-1]["content"]

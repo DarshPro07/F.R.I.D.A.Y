@@ -47,16 +47,15 @@ def model_providers(run: c.Run, *, engine: PolicyEngine = default_engine) -> c.A
                       f"{len(unavailable)} unavailable: {', '.join(unavailable[:6]) or 'none'}"))))
 
 
-def _objective_facts(objective_id: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """(binding, recorded): the critical facts of the objective a call works
-    for (CTX-003's set) - what the person gave, and what tools and the plan
-    recorded, which is data - or neither when it names no objective the store
-    holds. An objective that came from read material has nothing the person
-    gave, so all of it is recorded. An objective whose record cannot be read
-    raises (a ContractError is a ValueError), so the call fails rather than
-    running without its constraints."""
+def _objective_facts(objective_id: str):
+    """(facts, bound): the critical facts of the objective a call works for
+    (CTX-003's set), and whether they bind the call, or (None, False) when it
+    names no objective the store holds. An objective that came from read
+    material has nothing the person gave, so none of it binds. An objective
+    whose record cannot be read raises (a ContractError is a ValueError), so
+    the call fails rather than running without its constraints."""
     if not objective_id:
-        return (), ()
+        return None, False
     from friday import compaction
     from friday.toolsets.objectives import store as objective_store
 
@@ -64,10 +63,8 @@ def _objective_facts(objective_id: str) -> tuple[tuple[str, ...], tuple[str, ...
     try:
         facts = compaction.for_objective(db, objective_id)
     except LookupError:
-        return (), ()
-    person = (db.objective_run(objective_id) or {}).get("provenance") == c.PERSON
-    binding = facts.binding() if person else ()
-    return binding, tuple(line for line in facts.lines() if line not in binding)
+        return None, False
+    return facts, (db.objective_run(objective_id) or {}).get("provenance") == c.PERSON
 
 
 def model_infer(run: c.Run, prompt: str, *, task_class: str = mg.STANDARD,
@@ -79,12 +76,14 @@ def model_infer(run: c.Run, prompt: str, *, task_class: str = mg.STANDARD,
     started = c.started(run.run_id, "model.infer")
     try:
         # CTX-001: the call gets a compiled working set; a step of an
-        # objective carries that objective's critical facts as data.
-        binding, recorded = _objective_facts(objective_id)
+        # objective carries that objective's critical facts, which the
+        # compiler keeps whole (CTX-003).
+        facts, bound = _objective_facts(objective_id)
         # The task class's input ceiling is the working set's budget, so an
-        # over-large context sheds its least needed sections here, not later.
+        # over-large context sheds its least needed sections here, not later;
+        # a context whose facts alone do not fit is refused, not shortened.
         working_set = mg.compile_working_set(
-            system=system, user=prompt, pinned=binding, state=recorded,
+            system=system, user=prompt, facts=facts, facts_bind=bound,
             budget_tokens=mg.budget_for(task_class or mg.STANDARD).max_input_tokens)
         request = mg.ModelGatewayRequest(
             objective_id=objective_id or run.run_id,
