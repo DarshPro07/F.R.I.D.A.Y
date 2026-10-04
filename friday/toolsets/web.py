@@ -441,8 +441,14 @@ class BrowserSession:
     def __init__(self) -> None:
         self._pw = None
         self._browser = None
+        self._persistent = None        # the on-disk context, when a profile directory is used
         self._page = None
         self._loop = None
+        self._temp_owner = ""          # workspace that owns a running TEMPORARY profile
+        #: The ProfileChoice the running session was launched with (BROW-003).
+        #: The loop reads this rather than choosing again, so what it reports
+        #: is what actually started.
+        self.profile = None
 
     @property
     def running(self) -> bool:
@@ -457,47 +463,92 @@ class BrowserSession:
         are already gone with it, so the references are simply released. The
         MCP server uses one loop and never hits this, but a stale handle
         otherwise surfaces as a confusing PARTIAL instead of a clean restart.
-        """
-        self._pw = self._browser = self._page = self._loop = None
 
-    async def page(self, *, headless: bool | None = None):
+        A TEMPORARY profile is deleted here too, after the handles are
+        released: it was approved for one session, so it never outlives it.
+        A failed delete raises - the profile holds cookies, so it must not
+        be left behind unnoticed.
+        """
+        from friday import browser as B
+        profile, owner = self.profile, self._temp_owner
+        self._pw = self._browser = self._persistent = None
+        self._page = self._loop = self.profile = None
+        self._temp_owner = ""
+        if profile is not None and profile.kind == B.TEMPORARY and profile.directory:
+            B.discard_temporary_profile(profile.directory, owner)
+
+    async def page(self, *, headless: bool | None = None, profile=None):
+        """The shared page. `profile` is a `friday.browser.ProfileChoice`
+        from trusted code (never from a tool argument): a directory-backed
+        one (AUTHORIZED, TEMPORARY) is launched as a persistent context on
+        that directory, ISOLATED stays the in-memory context. A session that
+        is already running keeps its profile, and a request for a different
+        one is refused rather than quietly served from the wrong cookies."""
+        from friday import browser as B
         loop = asyncio.get_running_loop()
         if self._page is not None:
             if self._loop is loop:
+                if profile is not None and not _same_profile(profile, self.profile):
+                    raise RuntimeError(
+                        f"the browser is already running with its {self.profile.kind} "
+                        f"profile; close it before starting with a {profile.kind} one")
                 return self._page
             self._abandon()
 
+        profile = profile or B.choose_profile(worker="friday", authorized_by_approval=False)
+        self.profile = profile
+        if profile.kind == B.TEMPORARY:
+            from friday.workspace import resolve
+            self._temp_owner = resolve(None)
+        hl = _headless() if headless is None else headless
+        viewport = {"width": 1440, "height": 900}
         try:
             from playwright.async_api import async_playwright
 
             self._pw = await async_playwright().start()
-            self._browser = await self._pw.chromium.launch(
-                headless=_headless() if headless is None else headless
-            )
+            if profile.directory:
+                self._persistent = await self._pw.chromium.launch_persistent_context(
+                    profile.directory, headless=hl, viewport=viewport,
+                    user_agent=USER_AGENT)
+            else:
+                self._browser = await self._pw.chromium.launch(headless=hl)
         except Exception as exc:  # noqa: BLE001 - typed by browser_readiness
             # A driver started before the launch failed would otherwise be
             # orphaned, and the next call would start a second one.
             await self.close()
             raise browser_readiness.BrowserUnavailable(
                 browser_readiness.classify_failure(exc)) from exc
-        context = await self._browser.new_context(
-            viewport={"width": 1440, "height": 900}, user_agent=USER_AGENT
-        )
+        if self._persistent is not None:
+            context = self._persistent
+        else:
+            context = await self._browser.new_context(
+                viewport=viewport, user_agent=USER_AGENT
+            )
         self._page = await context.new_page()
         self._loop = loop
         return self._page
 
     async def close(self) -> bool:
         was_running = self.running
-        for closer in (self._browser, self._pw):
+        for closer in (self._persistent, self._browser, self._pw):
             if closer is None:
                 continue
             try:
-                await (closer.close() if closer is self._browser else closer.stop())
+                await (closer.stop() if closer is self._pw else closer.close())
             except Exception:
                 pass
         self._abandon()
         return was_running
+
+
+def _same_profile(wanted, running) -> bool:
+    """Whether a requested ProfileChoice is the one a session already runs.
+    A TEMPORARY choice names a fresh directory every time, so for it the kind
+    is the identity: any throwaway profile stands in for another."""
+    from friday import browser as B
+    if running is None or wanted.kind != running.kind:
+        return False
+    return wanted.kind == B.TEMPORARY or wanted.directory == running.directory
 
 session = BrowserSession()
 
@@ -519,16 +570,17 @@ def _unavailable(run: c.Run, started: c.ActionResult,
 _LOOP = None
 
 
-async def _loop_browser(*, headless: bool | None = None):
+async def _loop_browser(*, headless: bool | None = None, profile=None):
     """The FR-036 observe/plan/policy/act/observe/verify loop over the
-    shared session's context, created once per session lifetime."""
+    shared session's context, created once per session lifetime. The loop's
+    profile is the one the session actually launched with (BROW-003)."""
     global _LOOP
     from friday import browser as B
-    page = await session.page(headless=headless)
+    page = await session.page(headless=headless, profile=profile)
     if _LOOP is None or _LOOP.driver.page is not page and _LOOP.driver.context is not page.context:
         _LOOP = B.Browser(
             B.PlaywrightDriver(page.context, page),
-            profile=B.choose_profile(worker="friday", authorized_by_approval=False),
+            profile=session.profile,
             shots_dir=str(Path(os.getenv("FRIDAY_BROWSER_SHOTS",
                                          str(Path(__file__).resolve().parents[2] / "data" / "browser_shots")))),
             approvals={})
@@ -537,7 +589,7 @@ async def _loop_browser(*, headless: bool | None = None):
 
 async def browser_act(
     run: c.Run, primitive: str, target: str = "", args: dict | None = None, *,
-    engine: PolicyEngine = default_engine, timeout_ms: int = 30000,
+    engine: PolicyEngine = default_engine, timeout_ms: int = 30000, profile=None,
 ) -> c.ActionResult:
     """
     One PRD browser primitive (open, inspect, navigate, click, type, scroll,
@@ -559,6 +611,11 @@ async def browser_act(
     are dropped, and a nonce is only a handle naming which question was
     answered - `Book.consume` refuses one the person's answer did not
     approve (PRD v7 TRUST-001, SEC-004; FR-034).
+
+    `profile` is a `friday.browser.ProfileChoice` and is a keyword for
+    trusted code only, like `confirmed`: the tool wrapper never passes one,
+    so a session started from a model's call runs ISOLATED. It takes effect
+    when this call starts the session (BROW-003).
     """
     from friday import browser as B
     from friday import confirmation
@@ -582,7 +639,7 @@ async def browser_act(
         args.pop(key, None)
 
     try:
-        loop = await _loop_browser()
+        loop = await _loop_browser(profile=profile)
     except browser_readiness.BrowserUnavailable as exc:
         return _unavailable(run, started, exc)
     except Exception as exc:  # noqa: BLE001

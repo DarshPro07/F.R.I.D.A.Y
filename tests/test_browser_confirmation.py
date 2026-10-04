@@ -153,7 +153,7 @@ def shop(monkeypatch):
     loop = B.Browser(driver, profile=B.ProfileChoice(B.AUTHORIZED, "signed in", "C:/p"),
                      approvals={})
 
-    async def _loop_browser(*, headless=None):
+    async def _loop_browser(*, headless=None, profile=None):
         return loop
 
     monkeypatch.setattr(W, "_loop_browser", _loop_browser)
