@@ -3316,6 +3316,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "observability.reconstruct() replays a run's outcome and task statuses from the event log and verifies the audit chain, then names every disagreement with the ledger rows. Reachable via objective_trace(blackbox=True). 4 new tests + 1 extended. (build run, commit 91e5f53b6)",
         "next_action": 'GAPS: No new capability/tool id: the replay is a flag on objective_trace, so the capability description, tool card and intent examples still describe only the timeline trace.; reconstruct reads at most 5000 events; a longer log is reported as a partial replay, not paged.',
     }),
+    ('CAP-003', {
+        "status": PARTIAL,
+        "current_implementation": 'Capability record gains version, backend, provenance, permissions, data_classes, os_support, latency/cost class, tests, last_verified (validated). capabilities.health() is probe-backed: no probe = REGISTERED, failing probe = UNAVAILABLE, never READY by default. (build run, commit 52e9c0bb3)',
+        "next_action": 'GAPS: No native capability has a probe registered yet; all report REGISTERED until one calls capabilities.register_probe.; Registry fields default to undeclared; the 160+ existing entries are not back-filled with version/os/latency/tests.; Assumed vocabularies for provenance, data_classes, os_support and latency_class (no documented source); revisit if wrong.; fabric.health still reports READY for an adapter with no probe; out of scope for this packet.',
+    }),
 ]
 
 
