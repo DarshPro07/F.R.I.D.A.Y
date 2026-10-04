@@ -176,6 +176,10 @@ DECLARED = {
                       "observes every turn from watch_from_the_side"),
     "friday/forge": (FUTURE, "skill authoring, frozen by the product rescue"),
     "friday/forge_runtime": (FUTURE, "same"),
+    "friday/repo_classifier": (FUTURE,
+                               "CAP-FORGE-002 classification only; the sandboxed "
+                               "analysis (CAP-FORGE-003) and the integration "
+                               "decision (CAP-FORGE-004/014) are its callers"),
     "friday/onboarding": (PRODUCTION,
                           "the owner's interview console: friday.onboarding "
                           "subcommands are dispatched by argparse "
