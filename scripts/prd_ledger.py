@@ -3277,6 +3277,20 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Closed the legacy-pin hole in _offer: a handshake whose sensitive capability set is empty (e.g. only logging) dropped the capabilities key, which _reconnect reads as a pin made before capabilities were recorded, so a later prompts/resources/sampling/experimental declaration was silently adopted. An empty list is now stored as a pinned value, so the same change suspends with 'capabilities: [] -> [...]'. 8 regression cases (4 capabilities x binding/no-binding) failed first with KeyError, pass now. MCP-001 next_action text refreshed. The friday/mcp_firewall.py line count is unchanged, so the ledger citations still land. (build run, commit 9eeae9784)",
         "next_action": 'GAPS: tests/test_prd_ledger.py::test_the_real_ledgers_are_clean fails in this worktree (103 passed, 1 failed across the two files): 7 problems on CORE-002, CTX-002, RES-001 (x2), SCOUT-001, RES-002, RES-003 cite data/ files that are not present here. None is MCP-001 (PL.check(v1) is clean); data/ is off limits; needs the main checkout\'s data/ to confirm green.; A pin made from a handshake but with no binding now stores {"capabilities": []}. If a binding with an endpoint arrives later it suspends with \'transport class: None -> remote\' (observed with a throwaway script, not pinned by a test). Pins of [\'tools\'] already behave this way.; No live path calls Firewall.inspect for a server that Hermes or Claude Code workers configure, so the external lifecycle (discover, verify, approve, waive) runs only from the CLI and tests. It has not been exercised against a live Hermes; that needs a live run outside this worktree.; Assumption, revisit if wrong: server metadata (the title and instructions a server hands the model) is treated as authority-bearing, so a change suspends. The owner ruling that ordinary non-authority metadata does not prompt could be read to exclude it; tests/test_mcp_firewall.py:204 pins the current reading.; The voice-agent wiring (agent_friday.py:739, 1324) was not changed and was not re-run against a live LiveKit session.',
     }),
+    # --- CTX-002: slice the 2026-10-04 rulings so each run (and its verifier) has one scope
+    ('CTX-002', {
+        "status": PARTIAL,
+        "next_action": (
+            "SLICED 2026-10-04 (controller; owner rulings in docs/plans/build-harness/00-owner-directive-2026-10-04.md). "
+            "CURRENT SLICE 1 - wiring only: tool_router_mode legacy|shadow|staged (default legacy), shadow logs and never "
+            "changes the executed tool, staged falls back to legacy on error or timeout, and staged acts on ABSTAIN (falls "
+            "back to legacy) and CLARIFY (asks) with agent-level tests. Benchmark code that spends money or opens the sealed "
+            "holdout (LedgeredChooser, chooser_benchmark, frozen_run) is either tested with fakes or left out of slice 1. "
+            "Slice 1 integrates as PARTIAL; measured gates are NOT its acceptance. LATER SLICES (not in slice 1): 2 - "
+            "measure the stage-2 chooser through a coding-agent CLI on a bounded dev sample, each call in the day ledger; "
+            "3 - the one-time holdout measurement after dev is fixed; 4 - promotion to staged when Success@1 >= 0.90, "
+            "Success@3 >= 0.97, ambiguity handling, p95 latency, chooser invocation rate and golden journeys pass."),
+    }),
 ]
 
 
