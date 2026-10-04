@@ -91,3 +91,53 @@ def test_a_spent_day_starts_no_run(monkeypatch, tmp_path):
     assert PC.main(["--day-usd", "45"]) == 0
     assert cmds == []
     assert "day spend cap" in PC.json.loads(PC.STATE.read_text(encoding="utf-8"))["product_chain"]["detail"]
+
+
+def _until_done(monkeypatch, tmp_path, outcomes, day_spent=(0.0,)):
+    """Run main(--until-done) with scripted program outcomes; returns (commands, sleeps)."""
+    state = tmp_path / "build_state.json"
+    state.write_text('{"spend_usd_total": 0, "waves": []}', encoding="utf-8")
+    monkeypatch.setattr(PC, "STATE", state)
+    monkeypatch.setattr(PC, "wait_for_admission", lambda hours: True)
+    days = iter(day_spent)
+    last = [0.0]
+
+    def committed(runs_dir):
+        last[0] = next(days, last[0])
+        return last[0], 0.0
+    monkeypatch.setattr(PC.K, "spend_committed", committed)
+    outs, cmds, sleeps = iter(outcomes), [], []
+
+    def run(cmd, **kw):
+        cmds.append(cmd)
+        assert len(cmds) <= 12, "the loop did not end"
+        return subprocess.CompletedProcess(cmd, 0, f"stopped: {next(outs)}\n", "")
+    monkeypatch.setattr(PC.subprocess, "run", run)
+    monkeypatch.setattr(PC.time, "sleep", sleeps.append)
+    monkeypatch.setattr(PC, "seconds_to_next_day", lambda: 123.0)
+    assert PC.main(["--until-done"]) == 0
+    return cmds, sleeps
+
+
+def test_until_done_works_through_every_priority_then_stops(monkeypatch, tmp_path):
+    # Owner, 2026-10-04: keep building until the whole PRD is done, not just P0.
+    cmds, _ = _until_done(monkeypatch, tmp_path, ["no ready work"] * 4)
+    assert [c[c.index("--priority") + 1] for c in cmds] == ["P0", "P1", "P2", "P3"]
+    assert "every priority" in PC.json.loads(PC.STATE.read_text(encoding="utf-8"))["product_chain"]["detail"]
+
+
+def test_until_done_waits_for_the_next_day_at_the_day_budget(monkeypatch, tmp_path):
+    cmds, sleeps = _until_done(monkeypatch, tmp_path, ["no ready work"] * 4,
+                               day_spent=(PC.K.DAY_SOFT_USD, 0.0))
+    assert sleeps[0] == 123.0 and len(cmds) == 4  # slept to the next day, then ran
+
+
+def test_until_done_backs_off_and_retries_a_no_progress_or_busy_stop(monkeypatch, tmp_path):
+    cmds, sleeps = _until_done(monkeypatch, tmp_path,
+                               ["no progress", "another program is running"] + ["no ready work"] * 4)
+    assert sleeps[:2] == [PC.RETRY_AFTER_S, PC.BUSY_RETRY_S] and len(cmds) == 6
+
+
+def test_until_done_stops_for_good_on_a_crash(monkeypatch, tmp_path):
+    cmds, _ = _until_done(monkeypatch, tmp_path, ["integration crash"])
+    assert len(cmds) == 1
