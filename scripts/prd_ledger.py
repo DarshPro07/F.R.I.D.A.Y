@@ -3341,6 +3341,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Browser loop now resumes after an auth/OTP/passkey hand-off (Browser.resume, pending_handoff) instead of planning on the stale page; added approved TEMPORARY profile kind with workspace ownership and guarded discard; passkey/hardware-key pages hand off. (build run, commit a41c205ac)',
         "next_action": 'GAPS: No launcher consumes ProfileChoice.directory yet: web.py still starts an in-memory Playwright context, so a TEMPORARY profile is chosen, owned and discardable but not launched on disk (needs live Chromium to verify).; Resume is pulled by the next state-changing primitive or an explicit Browser.resume(); no caller outside Browser invokes resume() or discard_temporary_profile() yet.; Did not run the new tests against the pre-change tree (git checkout is denied here); they depend on the new Browser.resume/pending_handoff and choose_profile(temporary_by_approval), so they cannot pass without the change.',
     }),
+    ('CAP-004', {
+        "status": PARTIAL,
+        "current_implementation": 'Capability now carries read_only, consequential, reversible, idempotent, external_side_effect, requires_confirmation. All 192 are classified from side_effect/risk/policy plus two small override sets. registry_problems() refuses undeclared hints and a consequential capability with no confirmation path; it runs at import. (build run, commit 8142d753e)',
+        "next_action": 'GAPS: Classification is derived (consequential = mutation above LOW risk; requires_confirmation read from policy) plus _IDEMPOTENT_MUTATIONS and _NOT_REVERSIBLE sets: my assumption, not confirmed with the owner.; tests/test_prd_ledger.py::test_the_real_ledgers_are_clean fails in this worktree only because data/prd_v7_requirements.json is untracked and absent here; unrelated to this change.; scripts/prd_v7_table.py CAP-004 row not flipped; the kernel flips the ledger from the run evidence.',
+    }),
 ]
 
 
