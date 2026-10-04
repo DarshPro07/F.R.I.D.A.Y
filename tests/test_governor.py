@@ -582,6 +582,119 @@ def test_high_pressure_evicts_a_resident_model_and_a_failed_cleanup_keeps_the_le
     assert len(gov2.reductions) == n                # reported once, not every reading
 
 
+# -- BG-001: background work waits for the person, the power and the priority --
+
+
+class Ctx:
+    """A context reading the test turns: the person's idle seconds and the power."""
+
+    def __init__(self, idle_s: float | None = 600.0, on_battery: bool | None = False) -> None:
+        self.idle_s, self.on_battery = idle_s, on_battery
+
+    def __call__(self) -> G.Context:
+        return G.Context(user_idle_s=self.idle_s, on_battery=self.on_battery)
+
+
+def make_ctx(ctx: Ctx | None, s: G.Sample | None = None) -> tuple[G.Governor, Dial]:
+    dial = Dial(s or sample())
+    gov = G.Governor(thresholds=G.Thresholds(), sampler=dial, sample_ttl_s=0.0,
+                     baseline=IDLE, context=ctx)
+    return gov, dial
+
+
+def test_background_work_runs_when_the_person_is_away_on_mains_with_headroom():
+    gov, _ = make_ctx(Ctx(idle_s=600.0, on_battery=False))
+    assert gov.pressure().level == G.NORMAL
+    assert gov.admit(G.OPTIONAL, label="digest").admitted
+
+
+def test_background_work_is_deferred_while_the_person_is_active():
+    ctx = Ctx(idle_s=5.0)
+    gov, _ = make_ctx(ctx)
+    assert gov.pressure().level == G.NORMAL           # headroom alone would admit it
+    d = gov.admit(G.OPTIONAL, label="digest")
+    assert d.decision == G.SHED and "person is active" in d.reason, d.reason
+    away = gov.thresholds.user_idle_s
+    ctx.idle_s = away - 0.1
+    assert gov.admit(G.OPTIONAL).decision == G.SHED
+    ctx.idle_s = away                                 # away once idle for the whole window
+    assert gov.admit(G.OPTIONAL).admitted
+
+
+def test_background_work_is_deferred_on_battery_and_runs_once_plugged_in():
+    ctx = Ctx(on_battery=True)
+    gov, _ = make_ctx(ctx)
+    d = gov.admit(G.OPTIONAL, label="digest")
+    assert d.decision == G.SHED and "battery" in d.reason, d.reason
+    ctx.on_battery = False
+    assert gov.admit(G.OPTIONAL, label="digest").admitted
+
+
+def test_pressure_still_sheds_background_work_when_idle_and_plugged_in():
+    gov, _ = make_ctx(Ctx(idle_s=600.0, on_battery=False), sample(cpu=90))
+    d = gov.admit(G.OPTIONAL)
+    assert d.decision == G.SHED and "pressure" in d.reason, d.reason
+
+
+def test_urgent_work_skips_the_activity_and_power_gates_but_not_pressure():
+    gov, dial = make_ctx(Ctx(idle_s=1.0, on_battery=True))
+    assert gov.admit(G.OPTIONAL).decision == G.SHED
+    assert gov.admit(G.OPTIONAL, priority=G.URGENT).admitted
+    dial.s = sample(cpu=90)
+    d = gov.admit(G.OPTIONAL, priority=G.URGENT)
+    assert d.decision == G.SHED and "pressure" in d.reason, d.reason
+
+
+def test_an_unreadable_context_never_defers_work():
+    assert G.Context(user_idle_s=None, on_battery=None).deferral(G.Thresholds()) == ""
+    unknown, _ = make_ctx(Ctx(idle_s=None, on_battery=None))
+    assert unknown.admit(G.OPTIONAL).admitted
+    unwired, _ = make_ctx(None)
+    assert unwired.context() == G.Context() and unwired.admit(G.OPTIONAL).admitted
+
+
+def test_only_optional_work_waits_for_the_person():
+    gov, _ = make_ctx(Ctx(idle_s=1.0, on_battery=True))
+    for kind in (G.WORKER, G.BROWSER, G.MODEL):
+        assert gov.admit(kind).admitted, kind
+
+
+def test_an_unknown_priority_is_refused():
+    gov, _ = make_ctx(Ctx())
+    with pytest.raises(ValueError, match="priority"):
+        gov.admit(G.OPTIONAL, priority="whenever")
+
+
+def test_status_reports_the_context():
+    gov, _ = make_ctx(Ctx(idle_s=42.0, on_battery=True))
+    assert gov.status()["context"] == {"user_idle_s": 42.0, "on_battery": True}
+
+
+def test_on_battery_reads_the_power_state(monkeypatch):
+    import psutil
+
+    class Battery:
+        def __init__(self, plugged):
+            self.percent, self.power_plugged = 80.0, plugged
+
+    for plugged, expected in ((True, False), (False, True), (None, None)):
+        monkeypatch.setattr(psutil, "sensors_battery", lambda p=plugged: Battery(p))
+        assert G._on_battery() is expected
+    monkeypatch.setattr(psutil, "sensors_battery", lambda: None)   # a desktop
+    assert G._on_battery() is None
+
+
+def test_idle_seconds_survive_the_32_bit_tick_wrap():
+    assert G._idle_seconds_since(now=5, last=0xFFFFFFFF - 994) == pytest.approx(1.0)
+    assert G._idle_seconds_since(now=90_000, last=30_000) == pytest.approx(60.0)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="only Windows reports last input")
+def test_the_real_idle_probe_reads_a_plausible_value():
+    idle = G._user_idle_s()
+    assert idle is None or 0.0 <= idle < 366 * 86400
+
+
 def test_work_past_its_deadline_or_silent_is_reaped_at_any_pressure():
     gov, _ = make(heartbeat_stale_s=30.0, max_workers=5)
     gone = []

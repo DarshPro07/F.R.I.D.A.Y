@@ -45,6 +45,7 @@ tests, but the sample is always the live machine unless a test injects one.
 """
 from __future__ import annotations
 
+import ctypes
 import logging
 import statistics
 import sys
@@ -79,6 +80,12 @@ BROWSER = "browser"          # a browser automation session
 OPTIONAL = "optional"        # autolearn, benchmarks, background digests
 MODEL = "model"              # a local model held resident in RAM/VRAM (MODEL-005)
 KINDS = (WORKER, BROWSER, OPTIONAL, MODEL)
+
+# -- priority of the objective the work serves (BG-001) ----------------------
+
+BACKGROUND = "background"    # proactive work: waits for the person to be away and the power to be on
+URGENT = "urgent"            # an objective that cannot wait for either; pressure still sheds it
+PRIORITIES = (BACKGROUND, URGENT)
 
 
 @dataclass(frozen=True)
@@ -133,6 +140,9 @@ class Thresholds:
     network_busy_share: float = 0.90
     # a lease with no heartbeat for this long is presumed orphaned (section 55)
     heartbeat_stale_s: float = 120.0
+    # the person is away once they have not touched the keyboard or mouse for
+    # this long; background work waits for that (BG-001)
+    user_idle_s: float = 120.0
 
     def ram_floor(self, total_gb: float | None) -> float:
         """The least available RAM that is not an emergency on this machine."""
@@ -344,6 +354,73 @@ at=time.time(), cpu_percent=cpu,
                   disk_free_gb=disk_free, browser_processes=browsers,
                   friday_rss_mb=rss, ram_total_gb=mem.total / 1024**3,
                   commit_available_gb=commit_available, commit_limit_gb=commit_limit)
+
+
+# -- the person and the power (BG-001) ---------------------------------------
+
+
+@dataclass(frozen=True)
+class Context:
+    """What the load cannot say: whether the person is at the machine and
+    whether it runs on battery. None means the platform cannot tell, and an
+    unknown never defers work - the pressure levels still apply."""
+
+    user_idle_s: float | None = None      # seconds since the last keyboard/mouse input
+    on_battery: bool | None = None        # False on mains, None with no battery to report
+
+    def deferral(self, t: Thresholds) -> str:
+        """Why background work should wait now; empty when nothing says so."""
+        if self.user_idle_s is not None and self.user_idle_s < t.user_idle_s:
+            return (f"the person is active (last input {self.user_idle_s:.0f}s ago, "
+                    f"away after {t.user_idle_s:.0f}s)")
+        if self.on_battery:
+            return "the machine is on battery"
+        return ""
+
+    def to_dict(self) -> dict:
+        return {"user_idle_s": self.user_idle_s, "on_battery": self.on_battery}
+
+
+class _LastInputInfo(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+
+
+def _idle_seconds_since(*, now: int, last: int) -> float:
+    """Windows tick counts are 32-bit milliseconds that wrap every 49.7
+    days; the masked difference is right across the wrap."""
+    return ((now - last) & 0xFFFFFFFF) / 1000.0
+
+
+def _user_idle_s() -> float | None:
+    """Seconds since the person last touched the keyboard or mouse; None
+    where the platform cannot say (only Windows reports it)."""
+    if sys.platform != "win32":
+        return None
+    info = _LastInputInfo(cbSize=ctypes.sizeof(_LastInputInfo))
+    try:
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+            return None
+        ctypes.windll.kernel32.GetTickCount.restype = ctypes.c_uint
+        now = ctypes.windll.kernel32.GetTickCount()
+    except (OSError, AttributeError) as exc:
+        logger.warning("last input time unreadable: %s", exc)
+        return None
+    return _idle_seconds_since(now=now, last=info.dwTime)
+
+
+def _on_battery() -> bool | None:
+    """True on battery, False on mains, None with no battery to report."""
+    import psutil
+
+    read = getattr(psutil, "sensors_battery", None)
+    battery = read() if read else None
+    if battery is None or battery.power_plugged is None:
+        return None
+    return not battery.power_plugged
+
+
+def sample_context() -> Context:
+    return Context(user_idle_s=_user_idle_s(), on_battery=_on_battery())
 
 
 @dataclass(frozen=True)
@@ -637,14 +714,16 @@ class Governor:
     default samples the real machine, cached for `sample_ttl_s` so a burst
     of admissions does not spend a CPU probe each. `baseline` is the
     machine's measured idle state; without one the governor profiles the
-    machine from its own readings (provisional).
+    machine from its own readings (provisional). `context` reads the person's
+    activity and the power state (BG-001); without one neither can defer work.
     """
 
     def __init__(self, *, thresholds: Thresholds | None = None,
                  sampler=None, sample_ttl_s: float = 2.0,
-                 baseline: Baseline | None = None) -> None:
+                 baseline: Baseline | None = None, context=None) -> None:
         self.thresholds = thresholds or Thresholds()
         self._sampler = sampler or sample_machine
+        self._context = context
         self.sample_ttl_s = sample_ttl_s
         self._lock = threading.Lock()
         self._leases: dict[str, tuple[str, float, str]] = {}   # lease -> (kind, at, label)
@@ -674,6 +753,11 @@ class Governor:
             if thresholds is not None:
                 self.thresholds = self._tracker.thresholds = thresholds
             self._last = None
+
+    def context(self) -> Context:
+        """The person's activity and the power state now; unknown (nothing
+        deferred) when the governor has no way to read them."""
+        return self._context() if self._context else Context()
 
     def pressure(self, *, fresh: bool = False) -> Pressure:
         now = time.time()
@@ -815,14 +899,23 @@ class Governor:
 
     def admit(self, kind: str, *, label: str = "", objective_id: str = "",
               owner: str = "", pid: int | None = None,
-              deadline_s: float | None = None, cleanup=None) -> Decision:
+              deadline_s: float | None = None, cleanup=None,
+              priority: str = BACKGROUND) -> Decision:
         """`owner`, `pid`, `deadline_s` (seconds from now) and `cleanup` fill
         section 55's owned-process record for an admitted lease; a caller
-        that omits `owner` is recorded under its label."""
+        that omits `owner` is recorded under its label. `priority` is that of
+        the objective the work serves: optional work at BACKGROUND (the
+        default) is also deferred while the person is active or the machine
+        is on battery; URGENT skips those two, never the pressure gate."""
         if kind not in KINDS:
             raise ValueError(f"unknown work kind {kind!r}; known: {KINDS}")
+        if priority not in PRIORITIES:
+            raise ValueError(f"unknown priority {priority!r}; known: {PRIORITIES}")
         p = self.pressure()
         t = self.thresholds
+        wait = ""
+        if kind == OPTIONAL and priority == BACKGROUND:
+            wait = self.context().deferral(t)
         with self._lock:
             workers = sum(1 for k, _, _ in self._leases.values() if k == WORKER)
             browsers = sum(1 for k, _, _ in self._leases.values() if k == BROWSER)
@@ -857,6 +950,8 @@ class Governor:
             if kind == OPTIONAL:
                 if p.level != NORMAL or workers >= cap:
                     return out(SHED, f"optional work shed under {p.level} pressure ({why})")
+                if wait:
+                    return out(SHED, f"optional work deferred: {wait}")
                 return out(ADMIT, "optional work admitted")
             if p.level == CRITICAL:
                 return out(SHED, f"CRITICAL pressure: {why}; no new {kind} started")
@@ -905,6 +1000,7 @@ class Governor:
         p = self.pressure()
         return {
             "pressure": p.to_dict(),
+            "context": self.context().to_dict(),
             "active": self.active_leases(),
             "workers": self.active(WORKER),
             "browsers": self.active(BROWSER),
@@ -947,7 +1043,8 @@ def governor() -> Governor:
         if _GOVERNOR is None:
             from friday import hardware_profile
             baseline, thresholds = hardware_profile.for_governor()
-            _GOVERNOR = Governor(thresholds=thresholds, baseline=baseline)
+            _GOVERNOR = Governor(thresholds=thresholds, baseline=baseline,
+                                 context=sample_context)
         return _GOVERNOR
 
 
