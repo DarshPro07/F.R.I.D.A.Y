@@ -153,16 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 48eece5 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-04T05:29:37+00:00
+- HEAD: d74b22d on prd-v7/slice-7-adaptive-hardware, updated 2026-10-04T06:33:16+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 79, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
 - Unresolved P0: 20
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (85): none
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree), TRAJ-001 (partial x2), MCP-001 (NOT_RED), CTX-002 (cascade exhausted)
-- Open escalations: 63
-  - CTX-003 resolved: owner ruling 2026-10-03d (lease-gated development start) in its next_action
-  - CTX-002 cascade: 3 repairs spent
-  - MCP-001 resolved: owner rulings 2026-10-03e (Hermes config.yaml discovery, approval waivers, protocol policy) in its n
+- Last wave (87): SEC-005=REFUSED
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree), TRAJ-001 (partial x2), MCP-001 (NOT_RED), CTX-002 (VERIFIER_FAIL), SEC-005 (integration refused)
+- Open escalations: 66
   - CTX-002 resolved: the 19:32 repair's DONE commit 6be3cc4 failed only on a 15-turn verifier; re-integrating with the si
   - SEC-005 rebase: {"requirement": "SEC-005", "result": "REBASE_REQUIRED", "red_green": {}, "verifier": null, "integrat
   - SEC-005 resolved: REBASE_REQUIRED: clean controller rebase onto main; re-integrating
@@ -170,5 +167,8 @@ That is the first implementation target of this program.
   - CTX-002 resolved: owner rulings 2026-10-04 (CLI chooser, holdout once, flag + shadow) in its next_action
   - MCP-001 integration: {"requirement": "MCP-001", "result": "NOT_RED", "red_green": {"result": "NOT_RED", "tests": ["tests/
   - CTX-002 cascade: 3 repairs spent
-- Next ready: SEC-005, CTX-003
+  - CTX-002 resolved: implementer out of turns on a three-part brief; re-queued for one slice (flag + shadow) from the wor
+  - CTX-002 integration: {"requirement": "CTX-002", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tests
+  - SEC-005 integration: refusing SEC-005: run has no commit
+- Next ready: CTX-003, RES-001
 <!-- build-program:end -->
