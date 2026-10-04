@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `e1b8540fdc17e53da06d507ea9faf563fd2a7ffdabfbd4016b04395a327e7142`
 - PRD size: 8182 lines, 291497 bytes
-- Repository HEAD: `c99cbb373894f40630ae3a70fef1c97be506812a`
-- Uncommitted paths at generation: 43
-- Generated: 2026-10-04T22:40:54+05:30
+- Repository HEAD: `bebf83c33b73e3f96d48941347d1d0a881df622f`
+- Uncommitted paths at generation: 44
+- Generated: 2026-10-04T23:38:07+05:30
 
 ## Status vocabulary
 
@@ -526,7 +526,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| MODEL-012 | P0 | **MISSING** | FRIDAY can think through a signed-in coding-agent CLI (Claude Code, Codex, Antigravity) as a model-gateway provider when no API key works. | With no working API key, model.infer routes to the CLI provider: it is registered in the model registry, passes MODEL-002's semantic probe, and FRIDAY answers a text and a voice turn end to end through FRIDAY.exe; each call's cost is recorded; the CLI runs as pure completion with no tools, its output treated as model text, never as commands; an absent or signed-out CLI reports UNAVAILABLE and the route fails over or says so. | - | `friday/model_gateway.py`, `friday/model_capabilities.py` | Owner 2026-10-04 (CTX-002 answer): 'we will try to use claude code or codex and antigravity instead of api key'. Build the Claude Code provider first: `claude -p` with --output-format json, --max-turns 1, no tools (--allowedTools '' / --strict-mcp-config), the prompt on stdin, a timeout, cost from total_cost_usd; register it so routes can select it; semantic probe; failover order API key -> CLI; then Codex and Antigravity behind the same interface. |
+| MODEL-012 | P0 | **MISSING** | FRIDAY can think through a signed-in coding-agent CLI (Claude Code, Codex, Antigravity) as a model-gateway provider when no API key works. | With no working API key, model.infer routes to the CLI provider: it is registered in the model registry, passes MODEL-002's semantic probe, and FRIDAY answers a text and a voice turn end to end through FRIDAY.exe; each call's cost is recorded; the CLI runs as pure completion with no tools, its output treated as model text, never as commands; an absent or signed-out CLI reports UNAVAILABLE and the route fails over or says so. | - | `friday/model_gateway.py`, `friday/model_capabilities.py` | SLICED 2026-10-04 (controller; advisor design in data/build_runs/MODEL-012.advice.md). Root cause: FRIDAY's live turns never reach the model gateway - spoken and typed turns use the AgentSession LLM from providers.build_resilient_llm (Gemini or LiveKit inference only), so the gateway's Claude Code provider (friday/cli_model_provider.py) is unreachable. CURRENT SLICE 1: friday/gateway_llm.py - GatewayLLM, a livekit.agents.llm.LLM over model_gateway.gateway().infer (one assistant chunk, never tool calls, gateway failure raises APIConnectionError) - and build_resilient_llm adds it last in the FallbackAdapter when a CLI provider is configured, or returns it alone when no API key builds; tests in tests/test_gateway_llm.py including the end-to-end fake-CLI turn with cost_usd recorded. LATER SLICES: 2 - durable 401 route verdicts in the tier table and per-call / daily CLI cost caps; 3 - Codex and Antigravity providers only where a no-tools mode is verified; 4 - a live text and voice turn through FRIDAY.exe. |
 
 ## Owner direction recorded against a requirement
 

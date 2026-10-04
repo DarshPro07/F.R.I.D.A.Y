@@ -3395,6 +3395,21 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "--clone) and the doctor reports the profile's state. Code signing NOT_CONFIGURED needs a certificate (external). "
             "Tests for each; scripts/validate_exe.py stays 12/12."),
     }),
+    # --- MODEL-012: sliced after a full cascade failed on one oversized brief (2026-10-04)
+    ('MODEL-012', {
+        "status": MISSING,
+        "next_action": (
+            "SLICED 2026-10-04 (controller; advisor design in data/build_runs/MODEL-012.advice.md). Root cause: FRIDAY's live "
+            "turns never reach the model gateway - spoken and typed turns use the AgentSession LLM from "
+            "providers.build_resilient_llm (Gemini or LiveKit inference only), so the gateway's Claude Code provider "
+            "(friday/cli_model_provider.py) is unreachable. CURRENT SLICE 1: friday/gateway_llm.py - GatewayLLM, a "
+            "livekit.agents.llm.LLM over model_gateway.gateway().infer (one assistant chunk, never tool calls, gateway "
+            "failure raises APIConnectionError) - and build_resilient_llm adds it last in the FallbackAdapter when a CLI "
+            "provider is configured, or returns it alone when no API key builds; tests in tests/test_gateway_llm.py "
+            "including the end-to-end fake-CLI turn with cost_usd recorded. LATER SLICES: 2 - durable 401 route verdicts "
+            "in the tier table and per-call / daily CLI cost caps; 3 - Codex and Antigravity providers only where a "
+            "no-tools mode is verified; 4 - a live text and voice turn through FRIDAY.exe."),
+    }),
 ]
 
 
