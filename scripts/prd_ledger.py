@@ -3375,6 +3375,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Doctor now classifies each credential MISSING/PLACEHOLDER/REJECTED/VALID (bounded auth probe, value never printed); placeholders and refused keys give DEGRADED naming them. Launcher skips the voice worker with one line unless LiveKit creds are usable. (build run, commit c8d113df4)',
         "next_action": 'GAPS: Acceptance (clean Windows VM ready-state) is not demonstrated: no fresh-OS run of validate_exe_clean.py was done.; The provisioning stage (Hermes, browser runtime, coding CLI with PASS/DEGRADED/FAIL and a repair path) is not built.; ONB-001 asking for the missing keys is not wired; friday/credentials.py is the classifier it can consume.; The LiveKit probe (signed ListRooms POST) is tested against a fake transport only; no real LiveKit project was available. Google and OpenAI probes were confirmed live to return REJECTED for junk keys.; SARVAM_API_KEY has no auth probe, so it stays UNVERIFIED (set, not a template), never VALID.; Judgement calls: unset LiveKit credentials stay FAIL (existing test_launcher contract) while PLACEHOLDER/REJECTED are DEGRADED; UNVERIFIED (LiveKit unreachable at launch) does not skip the worker, so a network blip does not keep voice off until the next launch.; implementer did not claim acceptance met',
     }),
+    ('BG-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Optional work is now also deferred while the person is active (<120s since last input) or the machine is on battery; URGENT priority skips those two, never pressure. Unknown signals never defer. Real Windows/psutil probes wired into governor(). (build run, commit 8702b66ac)',
+        "next_action": 'GAPS: Optional work already running is not stopped when the person returns or the machine is unplugged; only new admissions are gated (reduce_running still keys on pressure alone).; No production caller of admit(OPTIONAL) exists in friday/ yet, so autolearn/digest callers must pass through this gate when they are wired.; Assumed: two priorities (BACKGROUND default, URGENT) and a 120 s away threshold (Thresholds.user_idle_s); the PRD gives neither. Revisit if the owner wants a finer scale.; Last-input idle time is read only on Windows; elsewhere it is unknown and does not defer.',
+    }),
 ]
 
 
