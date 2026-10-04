@@ -1,0 +1,83 @@
+{
+ "baseline_ram_percent": 76.0,
+ "thresholds": {
+  "ram_elevated": 77.5,
+  "ram_high": 79.0,
+  "ram_critical": 80.5
+ },
+ "steps": [
+  {
+   "allocated_mb": 0,
+   "ram_percent": 76.0,
+   "available_gb": 3.69,
+   "level": "NORMAL",
+   "optional": "ADMIT",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 150,
+   "ram_percent": 76.9,
+   "available_gb": 3.54,
+   "level": "NORMAL",
+   "optional": "ADMIT",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 300,
+   "ram_percent": 78.8,
+   "available_gb": 3.25,
+   "level": "ELEVATED",
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 450,
+   "ram_percent": 78.8,
+   "available_gb": 3.25,
+   "level": "ELEVATED",
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 600,
+   "ram_percent": 79.7,
+   "available_gb": 3.11,
+   "level": "HIGH",
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 750,
+   "ram_percent": 80.6,
+   "available_gb": 2.97,
+   "level": "CRITICAL",
+   "optional": "SHED",
+   "first_worker": "SHED",
+   "second_worker": "SHED",
+   "as_policy_says": true
+  }
+ ],
+ "stopped": "CRITICAL reached",
+ "released": {
+  "ram_percent": 75.6,
+  "available_gb": 3.74,
+  "level": "NORMAL",
+  "optional": "ADMIT",
+  "first_worker": "ADMIT",
+  "second_worker": "ADMIT",
+  "as_policy_says": true
+ },
+ "peak": "CRITICAL",
+ "as_policy_says": true,
+ "demonstrated": true
+}

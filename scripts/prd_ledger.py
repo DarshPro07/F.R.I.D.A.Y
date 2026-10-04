@@ -3380,6 +3380,21 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Optional work is now also deferred while the person is active (<120s since last input) or the machine is on battery; URGENT priority skips those two, never pressure. Unknown signals never defer. Real Windows/psutil probes wired into governor(). (build run, commit 8702b66ac)',
         "next_action": 'GAPS: Optional work already running is not stopped when the person returns or the machine is unplugged; only new admissions are gated (reduce_running still keys on pressure alone).; No production caller of admit(OPTIONAL) exists in friday/ yet, so autolearn/digest callers must pass through this gate when they are wired.; Assumed: two priorities (BACKGROUND default, URGENT) and a 120 s away threshold (Thresholds.user_idle_s); the PRD gives neither. Revisit if the owner wants a finer scale.; Last-input idle time is read only on Windows; elsewhere it is unknown and does not defer.',
     }),
+    # --- PKG-001: one more first-run gap from release candidate bd7c026 (2026-10-04)
+    ('PKG-001', {
+        "status": PARTIAL,
+        "next_action": (
+            "EXE DEFECTS 2026-10-04 (FRIDAY.exe from bd7c026: validate_exe 12/12, validate_exe_clean PASS, doctor DEGRADED). "
+            "(1) The doctor reports voice llm PASS while GOOGLE_API_KEY is rejected (401): check credentials with MODEL-002's "
+            "semantic probe or one cheap authenticated call with a timeout, report FAIL with the provider's reason and the "
+            "variable's name only; flag a key in the wrong format before any call (a Gemini API key starts 'AIza'; the 97-char "
+            "'AQ.' value here is not one); template placeholders FAIL. (2) Register on-disk skills automatically at startup "
+            "(friday-operate was unregistered). (3) Onboarding 0/16 is the person's answers: a setup step, not a degradation. "
+            "(4) First run creates FRIDAY's Hermes profile when Hermes is installed and the profile is missing (the live "
+            "gateway test found: Hermes profile 'friday' does not exist; create it with: hermes profile create friday "
+            "--clone) and the doctor reports the profile's state. Code signing NOT_CONFIGURED needs a certificate (external). "
+            "Tests for each; scripts/validate_exe.py stays 12/12."),
+    }),
 ]
 
 

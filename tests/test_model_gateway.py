@@ -492,14 +492,14 @@ def test_telemetry_summary_and_spikes(tmp_path, clean_env):
 
 
 @pytest.mark.live
-def test_live_hermes_gateway_answers_without_an_agent_loop():
+def test_live_hermes_gateway_answers_without_an_agent_loop(tmp_path):
     """Against the real Hermes install and the friday profile. Proves the
     substrate: a provider answers, usage is reported, no session exists."""
     from friday import hermes_bridge as hb
     if not hb.locate():
         pytest.skip("Hermes not installed here")
-    gw = mg.ModelGateway(telemetry=mg.GatewayTelemetry(
-        Path(__file__).parent.parent / "data" / "gateway_calls_live_test.sqlite3"))
+    # Its own temp store: the live state under data/ is off limits to tests (TEST-ISOLATION-001).
+    gw = mg.ModelGateway(telemetry=mg.GatewayTelemetry(tmp_path / "gateway_calls_live_test.sqlite3"))
     try:
         health = gw.health()
         assert health["state"] in ("READY", "AUTH_REQUIRED"), health

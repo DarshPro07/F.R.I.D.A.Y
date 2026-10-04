@@ -1,0 +1,509 @@
+{
+ "baseline": {
+  "ram_available_gb": 1.3150138854980469,
+  "cpu_percent": 13.1,
+  "commit_available_gb": 3.3899765014648438,
+  "readings": 5,
+  "provisional": false
+ },
+ "thresholds": {
+  "ram_yellow": 0.4,
+  "ram_orange": 0.6,
+  "ram_red": 0.8,
+  "trend_orange_s": 60.0,
+  "trend_yellow_s": 300.0,
+  "dwell_s": 30.0,
+  "ram_critical": 95.0
+ },
+ "steps": [
+  {
+   "allocated_mb": 0,
+   "t_s": 0.01,
+   "ram_percent": 90.4,
+   "available_gb": 1.473,
+   "commit_available_gb": 3.43,
+   "level": "NORMAL",
+   "raw": "NORMAL",
+   "reasons": [],
+   "memory_driven": false,
+   "optional": "ADMIT",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 20,
+   "t_s": 1.66,
+   "ram_percent": 88.9,
+   "available_gb": 1.711,
+   "commit_available_gb": 3.433,
+   "level": "NORMAL",
+   "raw": "NORMAL",
+   "reasons": [],
+   "memory_driven": false,
+   "optional": "ADMIT",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 40,
+   "t_s": 3.18,
+   "ram_percent": 89.0,
+   "available_gb": 1.695,
+   "commit_available_gb": 3.422,
+   "level": "NORMAL",
+   "raw": "NORMAL",
+   "reasons": [],
+   "memory_driven": false,
+   "optional": "ADMIT",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 60,
+   "t_s": 4.71,
+   "ram_percent": 88.9,
+   "available_gb": 1.699,
+   "commit_available_gb": 3.411,
+   "level": "NORMAL",
+   "raw": "NORMAL",
+   "reasons": [],
+   "memory_driven": false,
+   "optional": "ADMIT",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 80,
+   "t_s": 6.23,
+   "ram_percent": 88.9,
+   "available_gb": 1.697,
+   "commit_available_gb": 3.418,
+   "level": "NORMAL",
+   "raw": "NORMAL",
+   "reasons": [],
+   "memory_driven": false,
+   "optional": "ADMIT",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 100,
+   "t_s": 7.75,
+   "ram_percent": 89.7,
+   "available_gb": 1.58,
+   "commit_available_gb": 3.273,
+   "level": "NORMAL",
+   "raw": "NORMAL",
+   "reasons": [],
+   "memory_driven": false,
+   "optional": "ADMIT",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 120,
+   "t_s": 9.28,
+   "ram_percent": 89.6,
+   "available_gb": 1.603,
+   "commit_available_gb": 3.309,
+   "level": "NORMAL",
+   "raw": "NORMAL",
+   "reasons": [],
+   "memory_driven": false,
+   "optional": "ADMIT",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 140,
+   "t_s": 10.79,
+   "ram_percent": 89.6,
+   "available_gb": 1.589,
+   "commit_available_gb": 3.294,
+   "level": "NORMAL",
+   "raw": "NORMAL",
+   "reasons": [],
+   "memory_driven": false,
+   "optional": "ADMIT",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 160,
+   "t_s": 12.31,
+   "ram_percent": 90.5,
+   "available_gb": 1.451,
+   "commit_available_gb": 3.041,
+   "level": "ELEVATED",
+   "raw": "ELEVATED",
+   "reasons": [
+    "available RAM falling 0.48 GB/min: the floor in 118 s"
+   ],
+   "memory_driven": true,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 180,
+   "t_s": 13.84,
+   "ram_percent": 90.8,
+   "available_gb": 1.413,
+   "commit_available_gb": 2.989,
+   "level": "ELEVATED",
+   "raw": "ELEVATED",
+   "reasons": [
+    "available RAM falling 0.77 GB/min: the floor in 71 s"
+   ],
+   "memory_driven": true,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 200,
+   "t_s": 15.38,
+   "ram_percent": 90.9,
+   "available_gb": 1.396,
+   "commit_available_gb": 3.037,
+   "level": "HIGH",
+   "raw": "HIGH",
+   "reasons": [
+    "available RAM falling 0.93 GB/min: the floor in 58 s"
+   ],
+   "memory_driven": true,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 220,
+   "t_s": 16.9,
+   "ram_percent": 90.5,
+   "available_gb": 1.456,
+   "commit_available_gb": 3.106,
+   "level": "HIGH",
+   "raw": "ELEVATED",
+   "reasons": [
+    "available RAM falling 0.89 GB/min: the floor in 64 s",
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": true,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "allocated_mb": 240,
+   "t_s": 18.42,
+   "ram_percent": 90.6,
+   "available_gb": 1.45,
+   "commit_available_gb": 3.08,
+   "level": "HIGH",
+   "raw": "ELEVATED",
+   "reasons": [
+    "available RAM falling 0.85 GB/min: the floor in 67 s",
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": true,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  }
+ ],
+ "stopped": "cap reached",
+ "after_release": [
+  {
+   "t_s": 20.48,
+   "ram_percent": 89.3,
+   "available_gb": 1.648,
+   "commit_available_gb": 3.309,
+   "level": "HIGH",
+   "raw": "ELEVATED",
+   "reasons": [
+    "available RAM falling 0.56 GB/min: the floor in 124 s",
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": true,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 22.49,
+   "ram_percent": 89.2,
+   "available_gb": 1.654,
+   "commit_available_gb": 3.307,
+   "level": "HIGH",
+   "raw": "ELEVATED",
+   "reasons": [
+    "available RAM falling 0.35 GB/min: the floor in 200 s",
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": true,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 24.5,
+   "ram_percent": 89.2,
+   "available_gb": 1.651,
+   "commit_available_gb": 3.298,
+   "level": "HIGH",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 26.51,
+   "ram_percent": 89.4,
+   "available_gb": 1.628,
+   "commit_available_gb": 3.275,
+   "level": "HIGH",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 28.52,
+   "ram_percent": 89.4,
+   "available_gb": 1.621,
+   "commit_available_gb": 3.228,
+   "level": "HIGH",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 30.53,
+   "ram_percent": 90.1,
+   "available_gb": 1.519,
+   "commit_available_gb": 3.164,
+   "level": "HIGH",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 32.55,
+   "ram_percent": 90.4,
+   "available_gb": 1.467,
+   "commit_available_gb": 3.158,
+   "level": "HIGH",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 34.55,
+   "ram_percent": 87.8,
+   "available_gb": 1.867,
+   "commit_available_gb": 3.769,
+   "level": "HIGH",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 36.57,
+   "ram_percent": 87.6,
+   "available_gb": 1.907,
+   "commit_available_gb": 3.816,
+   "level": "HIGH",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 38.58,
+   "ram_percent": 86.1,
+   "available_gb": 2.135,
+   "commit_available_gb": 4.246,
+   "level": "HIGH",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 40.59,
+   "ram_percent": 85.9,
+   "available_gb": 2.162,
+   "commit_available_gb": 4.311,
+   "level": "HIGH",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 42.6,
+   "ram_percent": 85.9,
+   "available_gb": 2.17,
+   "commit_available_gb": 4.318,
+   "level": "HIGH",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 44.61,
+   "ram_percent": 85.8,
+   "available_gb": 2.176,
+   "commit_available_gb": 4.329,
+   "level": "HIGH",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 46.62,
+   "ram_percent": 85.8,
+   "available_gb": 2.176,
+   "commit_available_gb": 4.318,
+   "level": "HIGH",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding ORANGE until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "QUEUE",
+   "as_policy_says": true
+  },
+  {
+   "t_s": 48.62,
+   "ram_percent": 85.8,
+   "available_gb": 2.177,
+   "commit_available_gb": 4.321,
+   "level": "ELEVATED",
+   "raw": "NORMAL",
+   "reasons": [
+    "holding YELLOW until a better reading has lasted 30 s"
+   ],
+   "memory_driven": false,
+   "optional": "SHED",
+   "first_worker": "ADMIT",
+   "second_worker": "ADMIT",
+   "as_policy_says": true
+  }
+ ],
+ "released": {
+  "t_s": 48.62,
+  "ram_percent": 85.8,
+  "available_gb": 2.177,
+  "commit_available_gb": 4.321,
+  "level": "ELEVATED",
+  "raw": "NORMAL",
+  "reasons": [
+   "holding YELLOW until a better reading has lasted 30 s"
+  ],
+  "memory_driven": false,
+  "optional": "SHED",
+  "first_worker": "ADMIT",
+  "second_worker": "ADMIT",
+  "as_policy_says": true
+ },
+ "held_s": 30.1,
+ "peak": "HIGH",
+ "first_pressure": {
+  "allocated_mb": 160,
+  "t_s": 12.31,
+  "ram_percent": 90.5,
+  "available_gb": 1.451,
+  "commit_available_gb": 3.041,
+  "level": "ELEVATED",
+  "raw": "ELEVATED",
+  "reasons": [
+   "available RAM falling 0.48 GB/min: the floor in 118 s"
+  ],
+  "memory_driven": true,
+  "optional": "SHED",
+  "first_worker": "ADMIT",
+  "second_worker": "ADMIT",
+  "as_policy_says": true
+ },
+ "as_policy_says": true,
+ "demonstrated": true
+}

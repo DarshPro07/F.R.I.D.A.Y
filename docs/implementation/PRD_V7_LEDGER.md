@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `e1b8540fdc17e53da06d507ea9faf563fd2a7ffdabfbd4016b04395a327e7142`
 - PRD size: 8182 lines, 291497 bytes
-- Repository HEAD: `e206e9c5f3b25aa1dc81815b3f7e0a78c2dda8e8`
-- Uncommitted paths at generation: 49
-- Generated: 2026-10-04T22:28:33+05:30
+- Repository HEAD: `c99cbb373894f40630ae3a70fef1c97be506812a`
+- Uncommitted paths at generation: 43
+- Generated: 2026-10-04T22:40:54+05:30
 
 ## Status vocabulary
 
@@ -43,7 +43,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| CORE-002 | P0 | **VERIFIED** | Audit current repository before creating duplicate architecture. | Requirement ledger maps current files/tests/state. | - | `scripts/prd_ledger.py`, `scripts/prd_v7_table.py`, `data/prd_v7_requirements.json` | docs/implementation/PRD_V7_LEDGER.md and data/prd_v7_requirements.json map all 69 v7 requirements to files, tests, state and the v1 rows they reuse. scripts/prd_ledger.py --check is clean for both sets; it refuses a VERIFIED row without evidence or without a named test, a crosswalk link to a missing v1 row, and any citation that does not resolve on the tree (file inside the tree, line range, collectable test), and a table with a problem writes no ledger (tests/test_prd_ledger.py; each rule's test goes red when the rule is removed). |
+| CORE-002 | P0 | **VERIFIED** | Audit current repository before creating duplicate architecture. | Requirement ledger maps current files/tests/state. | - | `scripts/prd_ledger.py`, `scripts/prd_v7_table.py`, `docs/implementation/PRD_V7_LEDGER.md` | docs/implementation/PRD_V7_LEDGER.md and data/prd_v7_requirements.json map all 69 v7 requirements to files, tests, state and the v1 rows they reuse. scripts/prd_ledger.py --check is clean for both sets; it refuses a VERIFIED row without evidence or without a named test, a crosswalk link to a missing v1 row, and any citation that does not resolve on the tree (file inside the tree, line range, collectable test), and a table with a problem writes no ledger (tests/test_prd_ledger.py; each rule's test goes red when the rule is removed). |
 
 ## PRD section 5
 
@@ -279,7 +279,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| SCOUT-001 | P2 | **MISSING** | Technology Scout maps adoption to measured need. | Trending repo not auto-installed. | PRD-GATE-022 | `data/prd_requirements.json`, `scripts/prd_ledger.py:487-495` | REBUILD: new friday/toolsets/tech_scout.py implementing detect->search->research->provenance/security/license review->adopt/adapt/build->quarantine, gated on measured-need justification, wired through friday/fabric.py. |
+| SCOUT-001 | P2 | **MISSING** | Technology Scout maps adoption to measured need. | Trending repo not auto-installed. | PRD-GATE-022 | `docs/implementation/PRD_REQUIREMENTS_LEDGER.md`, `scripts/prd_ledger.py:487-495` | REBUILD: new friday/toolsets/tech_scout.py implementing detect->search->research->provenance/security/license review->adopt/adapt/build->quarantine, gated on measured-need justification, wired through friday/fabric.py. |
 
 ## PRD section 60
 
@@ -328,7 +328,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| PKG-001 | P1 | **PARTIAL** | Autonomous clean-machine bootstrap. | Clean Windows VM ready-state. | FR-PKG-001 | `tests/test_launcher.py:105-111`, `tests/test_state_root.py:59-63`, `tests/test_state_root.py:77-81` | GAPS: Acceptance (clean Windows VM ready-state) is not demonstrated: no fresh-OS run of validate_exe_clean.py was done.; The provisioning stage (Hermes, browser runtime, coding CLI with PASS/DEGRADED/FAIL and a repair path) is not built.; ONB-001 asking for the missing keys is not wired; friday/credentials.py is the classifier it can consume.; The LiveKit probe (signed ListRooms POST) is tested against a fake transport only; no real LiveKit project was available. Google and OpenAI probes were confirmed live to return REJECTED for junk keys.; SARVAM_API_KEY has no auth probe, so it stays UNVERIFIED (set, not a template), never VALID.; Judgement calls: unset LiveKit credentials stay FAIL (existing test_launcher contract) while PLACEHOLDER/REJECTED are DEGRADED; UNVERIFIED (LiveKit unreachable at launch) does not skip the worker, so a network blip does not keep voice off until the next launch.; implementer did not claim acceptance met |
+| PKG-001 | P1 | **PARTIAL** | Autonomous clean-machine bootstrap. | Clean Windows VM ready-state. | FR-PKG-001 | `tests/test_launcher.py:105-111`, `tests/test_state_root.py:59-63`, `tests/test_state_root.py:77-81` | EXE DEFECTS 2026-10-04 (FRIDAY.exe from bd7c026: validate_exe 12/12, validate_exe_clean PASS, doctor DEGRADED). (1) The doctor reports voice llm PASS while GOOGLE_API_KEY is rejected (401): check credentials with MODEL-002's semantic probe or one cheap authenticated call with a timeout, report FAIL with the provider's reason and the variable's name only; flag a key in the wrong format before any call (a Gemini API key starts 'AIza'; the 97-char 'AQ.' value here is not one); template placeholders FAIL. (2) Register on-disk skills automatically at startup (friday-operate was unregistered). (3) Onboarding 0/16 is the person's answers: a setup step, not a degradation. (4) First run creates FRIDAY's Hermes profile when Hermes is installed and the profile is missing (the live gateway test found: Hermes profile 'friday' does not exist; create it with: hermes profile create friday --clone) and the doctor reports the profile's state. Code signing NOT_CONFIGURED needs a certificate (external). Tests for each; scripts/validate_exe.py stays 12/12. |
 | PKG-002 | P1 | **VERIFIED** | Durable state separate from application bundle. | Upgrade preserves brain/state. | FR-PKG-001 | `tests/test_state_root.py:206-214`, `tests/test_state_root.py:194-203` | Read the actual test: tests/test_state_root.py:206-214 seeds home/data/ada.sqlite3 with 'new database', runs migrate_legacy_state, and asserts the pre-existing newer file is NOT overwritten ('data/ada.sqlite3' not in moved; home file still reads 'new database'; the old internal copy is left in place for the owner) — this is a direct, load-bearing test of the exact failure mode an upgrade must avoid ('Upgrade preserves brain/state'). Re-run 2026-09-25 on 030795f with a dirty tree: every cited test passed (data/prd_v7_audit/rerun.xml). |
 
 ## PRD section 79

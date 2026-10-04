@@ -1,0 +1,21 @@
+{
+ "intents": {
+  "tools": 190,
+  "baseline_chars": 105164,
+  "starting_chars": 16968,
+  "starting_reduction": 0.8387,
+  "cases": 123,
+  "found": 123,
+  "worst_reduction": 0.817
+ },
+ "development": {
+  "tools": 190,
+  "baseline_chars": 105164,
+  "starting_chars": 16968,
+  "starting_reduction": 0.8387,
+  "cases": 965,
+  "found": 732,
+  "worst_reduction": 0.8151,
+  "recall_at_6": 0.7585
+ }
+}

@@ -1,0 +1,47 @@
+{
+ "measured_at": "2026-09-30T12:16:04+00:00",
+ "cause": "REFERENCE-A qualification (Slice 7 evidence)",
+ "platform": "win32",
+ "ram_total_gb": 15.351802825927734,
+ "baseline": {
+  "ram_available_gb": 2.1095542907714844,
+  "cpu_percent": 11.3,
+  "commit_available_gb": 3.5822811126708984,
+  "readings": 10,
+  "provisional": false
+ },
+ "cpu_logical": 16,
+ "cpu_physical": 8,
+ "gpus": [
+  {
+   "name": "AMD Radeon(TM) Graphics",
+   "vendor": "0x1002",
+   "dedicated_gb": 0.48394775390625,
+   "shared_gb": 7.675901412963867
+  }
+ ],
+ "disk_free_gb": 83.48921966552734,
+ "disk_total_gb": 217.01269149780273,
+ "battery": {
+  "percent": 68,
+  "plugged": false
+ },
+ "browser_mb": 264.8,
+ "policy": {
+  "room_gb": 0.84,
+  "workers": {
+   "max": 2,
+   "basis": "FR-013's bound; a worker's memory is not measured yet"
+  },
+  "browsers": {
+   "max": 2,
+   "basis": "3 of 265 MB fit in 0.84 GB; governor cap 2"
+  },
+  "model": {
+   "ram_budget_gb": 0.84,
+   "gpu_offload_gb": 0.48,
+   "basis": "the room, within A3's 2 GB per artifact; offload up to the largest GPU's dedicated memory (none reported: None)"
+  }
+ },
+ "fingerprint": "34a20603aaf91f46"
+}

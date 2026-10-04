@@ -722,3 +722,12 @@ def test_a_verifier_with_no_budget_left_does_not_run(tmp_path):
     with pytest.raises(build_kernel.SpendCapReached):
         go(repo, runs, rows, runner=boom_runner)
     assert head(repo) == before and build_kernel.spend_committed(runs) == (44.5, 0.0)
+
+
+
+def test_failed_ids_use_forward_slashes_whatever_pytest_printed():
+    # Release gate on bd7c026: under the gate's basetemp pytest printed tests\\test_broken.py,
+    # so a failure that predated the change was compared by the other spelling and blamed on it.
+    lines = ["FAILED tests\\test_broken.py::test_broken - assert 2 == 3",
+             "FAILED tests/test_old.py::test_old"]
+    assert bi.failed_ids(lines) == ["tests/test_broken.py::test_broken", "tests/test_old.py::test_old"]

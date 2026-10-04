@@ -352,7 +352,8 @@ def merge(run: dict, tests_extra: list[str], repo: Path = ROOT, python: str = VE
         pre = still_failing(failing, pre_head, repo, python)
         if failing and set(failing) <= pre:
             return {**ok, "pre_existing": sorted(pre)}
-    failures = [ln for ln in lines if (m := _FAILED.match(ln)) and m.group(1) not in pre][:20]
+    failures = [ln.replace(m.group(1), m.group(1).replace(chr(92), "/")) for ln in lines
+                if (m := _FAILED.match(ln)) and m.group(1).replace(chr(92), "/") not in pre][:20]
     parent = git(repo, "rev-parse", "HEAD^").stdout.strip()
     if parent == pre_head:
         git(repo, "reset", "--hard", pre_head, check=True)
@@ -416,7 +417,9 @@ def gate_run(python: str, cwd: Path, tests: list[str]) -> tuple[int, list[str]]:
 
 
 def failed_ids(lines: list[str]) -> list[str]:
-    return sorted({m.group(1) for ln in lines if (m := _FAILED.match(ln))})
+    """Failing test ids with forward slashes: pytest on Windows may print tests\\x.py,
+    and a pre-existing failure compared by its other spelling was blamed on the change."""
+    return sorted({m.group(1).replace(chr(92), "/") for ln in lines if (m := _FAILED.match(ln))})
 
 
 def still_failing(ids: list[str], sha: str, repo: Path, python: str) -> set[str]:

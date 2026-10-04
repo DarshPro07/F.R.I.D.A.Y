@@ -105,7 +105,10 @@ def _git(args, cwd):
                    capture_output=True)
 
 
-def test_git_identity_is_empty_without_git_and_filled_inside_a_repo(tmp_path):
+def test_git_identity_is_empty_without_git_and_filled_inside_a_repo(tmp_path, monkeypatch):
+    # The release gate's basetemp sits inside the FRIDAY repository: without a ceiling, git walked
+    # up from tmp_path and reported the parent repo's identity (release gate on bd7c026).
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
     assert D.git_identity(tmp_path) == ("", "")
     repo = tmp_path / "repo"
     repo.mkdir()
