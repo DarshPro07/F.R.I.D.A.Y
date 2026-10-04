@@ -587,8 +587,8 @@ def test_launch_ship_uses_class_budget_and_records_base(monkeypatch, repo, tmp_p
     monkeypatch.setattr(K, "_start", lambda cmd, wt: started.append(cmd) or _Proc(None))
     run = K.launch(row("R-1", "P1"), worktrees=tmp_path / "wts", repo=repo, runs_dir=tmp_path / "r")
     assert run.klass == "MICRO" and run.branch == "build/r-1"
-    assert run.base_sha == _git(repo, "rev-parse", "HEAD") and run.wall_s == 1200
-    assert started[0][started[0].index("--max-turns") + 1] == "12"
+    assert run.base_sha == _git(repo, "rev-parse", "HEAD") and run.wall_s == 1500
+    assert started[0][started[0].index("--max-turns") + 1] == "20"
     assert "at most 6 files" in (run.wt / ".build" / "packet.md").read_text()
 
 
@@ -1800,7 +1800,7 @@ def test_a_turn_capped_failure_retries_one_budget_class_up(tmp_path):
     runs.mkdir()
     r = row("BROW-004", "P1")
     assert K.budget_class(r, runs_dir=runs) == "MICRO"
-    (runs / "BROW-004.json").write_text(json.dumps({"state": "FAILED", "budget_class": "MICRO", "turns": 13}))
+    (runs / "BROW-004.json").write_text(json.dumps({"state": "FAILED", "budget_class": "MICRO", "turns": 21}))
     assert K.budget_class(r, runs_dir=runs) == "NORMAL"
     (runs / "BROW-004.json").write_text(json.dumps({"state": "FAILED", "budget_class": "NORMAL", "turns": 26}))
     assert K.budget_class(r, runs_dir=runs) == "COMPLEX"
