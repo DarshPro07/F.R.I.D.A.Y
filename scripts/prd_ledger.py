@@ -3321,6 +3321,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Capability record gains version, backend, provenance, permissions, data_classes, os_support, latency/cost class, tests, last_verified (validated). capabilities.health() is probe-backed: no probe = REGISTERED, failing probe = UNAVAILABLE, never READY by default. (build run, commit 52e9c0bb3)',
         "next_action": 'GAPS: No native capability has a probe registered yet; all report REGISTERED until one calls capabilities.register_probe.; Registry fields default to undeclared; the 160+ existing entries are not back-filled with version/os/latency/tests.; Assumed vocabularies for provenance, data_classes, os_support and latency_class (no documented source); revisit if wrong.; fabric.health still reports READY for an adapter with no probe; out of scope for this packet.',
     }),
+    ('CLI-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Same TaskBundle now runs through the real ClaudeCodeExecutor and HermesExecutor (real bridge, fake gateway). A new friday/executors/work_packet.py maps each terminal ActionResult to the PRD s46 eight-field output; both pass, and a failed run still yields every field. (build run, commit 47ea91e24)',
+        "next_action": 'GAPS: PRD s46 output contract existed only in docs/PRD_V7.md; no code emitted it. work_packet.output_of is my mapping of ActionResult to the 8 fields (assumption: lives in friday/executors/, owned by objective-engine). Owner should confirm the mapping.; output_of has no production caller yet: nothing on the manager-facing path (e.g. DevelopmentRun reporting) consumes it. Wiring that is a separate change.; Hermes adapter reports no changed files, and no executor runs tests, so files_changed is [] for Hermes and tests is always []; remaining_risk says so rather than guessing.; Fail-before is by import: the new tests import friday.executors.work_packet, which did not exist. Not run against the old tree.; Read budget (<=400 lines before first edit) was exceeded: about 800 lines read.',
+    }),
 ]
 
 
