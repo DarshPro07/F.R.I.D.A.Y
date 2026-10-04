@@ -195,6 +195,52 @@ def test_unknown_run_has_no_black_box(store):
         "run_id": "RUN-nope", "found": False, "say": "no objective RUN-nope in the ledger"}
 
 
+class _CappedStore:
+    """A store that answers an event query with at most `cap` rows, as a
+    long log does when it is read a page at a time."""
+
+    def __init__(self, store, cap):
+        self._store, self._cap = store, cap
+
+    def objective_events(self, run_id, limit=1000, **kw):
+        return self._store.objective_events(run_id, limit=min(limit, self._cap), **kw)
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+
+def test_a_long_event_log_is_replayed_whole_not_cut_off(store, monkeypatch):
+    run_id = _blackbox_run(store)
+    whole = OB.reconstruct(run_id, store=store)
+    n = whole["sources"]["objective_events"]
+    assert n > 3                      # more events than one page below
+    monkeypatch.setattr(OB, "_EVENT_PAGE", 3)
+    paged = OB.reconstruct(run_id, store=_CappedStore(store, 3))
+    # The closing event sits at the end of the log; a cut-off replay loses it.
+    assert paged["sources"]["objective_events"] == n
+    assert paged["outcome"]["status"] == "COMPLETED" and paged["consistent"], paged["disagreements"]
+    assert paged["outcome"]["replayed_tally"] == whole["outcome"]["replayed_tally"]
+
+
+def test_a_truncated_audit_listing_is_said_not_hidden(store, monkeypatch):
+    from friday import trust as T
+    run_id = _blackbox_run(store)
+    T.audit().record(actor="friday", action="files.move", tier=T.R2, decision="ASK",
+                     target="C:/y", objective_id=run_id)
+    assert OB.reconstruct(run_id, store=store)["consistent"]
+    monkeypatch.setattr(OB, "_AUDIT_LIMIT", 1)
+    box = OB.reconstruct(run_id, store=store)
+    assert not box["consistent"] and any("audit log holds more" in d for d in box["disagreements"])
+
+
+def test_the_objective_trace_faces_describe_the_black_box_replay():
+    from friday import capabilities as C, tool_cards as TC
+    assert "blackbox" in C.CAPABILITIES["objective_trace"].description
+    assert any("black box" in e for e in C.CAPABILITIES["objective_trace"].intent_examples)
+    card = TC.CARDS["objective_trace"]
+    assert "blackbox" in card.does and "black box" in card.aliases
+
+
 def test_redaction_by_key_and_by_token_shape():
     raw = {"api_key": "plain", "nested": {"Authorization": "Bearer x", "note": "token " + FAKE_ANTHROPIC_KEY,
                                           "access_token": "abc", "tokens_in": 10, "token_budget": 4000},

@@ -129,6 +129,9 @@ def _gateway_calls(run_id: str) -> list[dict]:
         return [{"error": f"gateway ledger unavailable: {exc}"}]
 
 
+_AUDIT_LIMIT = 500
+
+
 def _audit_rows(run_id: str) -> list[dict]:
     try:
         from friday import trust as T
@@ -136,7 +139,7 @@ def _audit_rows(run_id: str) -> list[dict]:
         # times are to the second, and the timeline's sort keeps ties in the
         # order given, so without this a grant revoked in the same second it
         # was issued read as revoked before it existed.
-        return list(reversed(T.audit().query(objective_id=run_id, limit=500)))
+        return list(reversed(T.audit().query(objective_id=run_id, limit=_AUDIT_LIMIT)))
     except Exception as exc:  # noqa: BLE001
         return [{"error": f"audit log unavailable: {exc}"}]
 
@@ -332,7 +335,19 @@ def trace_text(run_id: str, *, store: Store | None = None) -> str:
 # Black box reconstruction (BBOX-001)
 # ---------------------------------------------------------------------------
 
-_EVENT_LIMIT = 5000
+_EVENT_PAGE = 1000
+
+
+def _all_events(db: Store, run_id: str) -> list[dict]:
+    """Every event of the run, paged by id. A replay that stops early would
+    miss the closing event, so it ends only when a page comes back empty."""
+    events: list[dict] = []
+    while True:
+        page = db.objective_events(run_id, limit=_EVENT_PAGE,
+                                   after_id=events[-1]["id"] if events else 0)
+        if not page:
+            return events
+        events.extend(page)
 
 
 def _audit_chain(rows: list[dict]) -> dict:
@@ -367,13 +382,14 @@ def reconstruct(run_id: str, *, store: Store | None = None, redacted: bool = Tru
         return {"run_id": run_id, "found": False,
                 "say": f"no objective {run_id} in the ledger"}
     task_rows = db.objective_tasks(run_id)
-    events = db.objective_events(run_id, limit=_EVENT_LIMIT)
+    events = _all_events(db, run_id)
     tools = _tool_results(db, run_id, task_rows)
     audit = [a for a in _audit_rows(run_id) if "at" in a]
     chain = _audit_chain(audit)
     disagreements: list[str] = []
-    if len(events) >= _EVENT_LIMIT:
-        disagreements.append(f"event log is longer than {_EVENT_LIMIT}; the replay is partial")
+    if len(audit) >= _AUDIT_LIMIT:
+        disagreements.append(f"audit log holds more than {_AUDIT_LIMIT} rows for this run; "
+                             "the decisions listed are the newest")
     if not chain["intact"]:
         disagreements.append("audit chain is broken at or before this run's records")
 

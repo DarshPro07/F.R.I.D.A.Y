@@ -3283,11 +3283,12 @@ class Store:
             rows.append(got)
         return rows
 
-    def objective_events(self, run_id: str, limit: int = 1000) -> list[dict]:
+    def objective_events(self, run_id: str, limit: int = 1000, after_id: int = 0) -> list[dict]:
+        """A run's events in order; `after_id` resumes after the last row of a prior page."""
         rows = []
         for row in self._conn.execute(
-            "SELECT * FROM objective_events WHERE run_id=? ORDER BY id "
-            "LIMIT ?", (run_id, limit),
+            "SELECT * FROM objective_events WHERE run_id=? AND id>? ORDER BY id "
+            "LIMIT ?", (run_id, after_id, limit),
         ):
             got = dict(row)
             if got.get("detail"):
