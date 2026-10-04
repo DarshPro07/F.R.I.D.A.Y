@@ -153,15 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 4313b00 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-04T14:01:16+00:00
+- HEAD: b847986 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-04T14:58:17+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 81, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
 - Unresolved P0: 20
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (111): BRAIN-001=FAILED
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree), TRAJ-001 (partial x2), MCP-001 (NOT_RED), SEC-005 (integration refused), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (partial x2), BG-001 (TEST_TIMEOUT), CLI-001 (partial x2), ASSUME-001 (failed x2), BBOX-001 (partial x2)
-- Open escalations: 79
-  - CTX-002 integration: {"requirement": "CTX-002", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tests
-  - CTX-003 integration: refusing CTX-003: run has no commit
+- Last wave (117): CAP-FORGE-002=SCOUT_DONE
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree), TRAJ-001 (partial x2), MCP-001 (NOT_RED), SEC-005 (integration refused), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (partial x2), BG-001 (TEST_TIMEOUT), CLI-001 (partial x2), ASSUME-001 (failed x2), BBOX-001 (partial x2), CAP-003 (integration refused), BRAIN-001 (cascade exhausted)
+- Open escalations: 81
   - RES-001 integration: {"requirement": "RES-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tests
   - BROW-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\brow-004 already exists
   - BROW-004 resolved: turn-capped at MICRO; retry one class up
@@ -170,5 +168,7 @@ That is the first implementation target of this program.
   - CLI-001 partial: integrated twice without closing its gaps
   - ASSUME-001 attempts: FAILED twice
   - BBOX-001 partial: integrated twice without closing its gaps
-- Next ready: BRAIN-001, BROW-003
+  - CAP-003 integration: refusing CAP-003: run has no commit
+  - BRAIN-001 cascade: 3 repairs spent
+- Next ready: CAP-FORGE-002, CAP-FORGE-003
 <!-- build-program:end -->
