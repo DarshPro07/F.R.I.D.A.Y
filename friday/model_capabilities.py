@@ -56,6 +56,15 @@ def _cap(model_id, backend, **kw) -> ModelCapabilities:
     return ModelCapabilities(model_id=model_id, provider="google", backend=backend, **kw)
 
 
+def _cli_cap(model_id, backend, *, provider, relative_latency) -> ModelCapabilities:
+    """A model reached through a coding-agent CLI used as a text completion."""
+    return ModelCapabilities(
+        model_id=model_id, provider=provider, backend=backend, vision=False,
+        tools=False, structured_output=False, realtime_audio=False,
+        max_context=None, relative_latency=relative_latency, relative_cost="low",
+        notes="signed-in CLI, text completion only; no tools, no vision")
+
+
 # Declared, not derived. max_context is None where not independently confirmed -
 # a wrong number is worse than an absent one, because the router would trust it.
 _ALL: tuple[ModelCapabilities, ...] = (
@@ -86,6 +95,13 @@ _ALL: tuple[ModelCapabilities, ...] = (
     _cap("google/gemini-3-pro", "livekit", vision=True, tools=True,
          structured_output=True, realtime_audio=False, max_context=None,
          relative_latency="high", relative_cost="high"),
+    # --- backend "claude-cli": the signed-in Claude Code CLI (MODEL-012) ----
+    # Run as pure completion: no tools, text in and text out. `tools=False` is
+    # declared on purpose - the gateway fails OPEN on an absent declaration, so
+    # a request that REQUIRES tool use must be refused here, not discover it
+    # from the CLI's answer.
+    *(_cli_cap(name, "claude-cli", provider="anthropic", relative_latency=latency)
+      for name, latency in (("sonnet", "medium"), ("opus", "high"), ("haiku", "low"))),
 )
 
 CAPABILITIES: dict[tuple[str, str], ModelCapabilities] = {
@@ -132,10 +148,14 @@ def undeclared_models() -> list[tuple[str, str]]:
 
 def stale_declarations() -> list[tuple[str, str]]:
     """Declarations for models the installed packages no longer expose."""
+    from friday.cli_model_provider import known_models
+    cli_models = known_models()
     stale = []
     for (backend, model_id) in CAPABILITIES:
         try:
-            if model_id not in installed_llm_models(backend):
+            installed = (cli_models[backend] if backend in cli_models
+                         else installed_llm_models(backend))
+            if model_id not in installed:
                 stale.append((backend, model_id))
         except Exception:  # unknown backend - reported by providers instead
             stale.append((backend, model_id))

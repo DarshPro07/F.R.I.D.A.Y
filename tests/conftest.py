@@ -38,6 +38,11 @@ LIVE_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _SESSION_HOME = tempfile.mkdtemp(prefix="friday-test-home-")
 os.environ["FRIDAY_HOME"] = _SESSION_HOME
 atexit.register(shutil.rmtree, _SESSION_HOME, True)
+#: MODEL-012: the process-wide gateway offers a signed-in coding-agent CLI as a
+#: route. A test must never spend the owner's subscription, so the transport is
+#: off for the session; tests/test_cli_model_provider.py builds its own gateway
+#: around a fake CLI.
+os.environ["FRIDAY_CLI_MODEL_PROVIDERS"] = "off"
 
 
 def _live_store(database, uri: bool) -> Path | None:

@@ -53,6 +53,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from friday import cli_model_provider
 from friday import data_class
 from friday import privacy
 from friday import provider_health
@@ -194,6 +195,7 @@ class ModelGatewayResult:
     call_id: int = 0
     data_class: str = ""                     # FR-PRV-001 classification used to route
     redactions: int = 0                      # spans stripped before this reached a backend
+    cost_usd: float = 0.0                    # what the transport reported; 0 = it reports none
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -323,6 +325,7 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
     output_tokens     INTEGER NOT NULL DEFAULT 0,
     cached_tokens     INTEGER NOT NULL DEFAULT 0,
     reasoning_tokens  INTEGER NOT NULL DEFAULT 0,
+    cost_usd          REAL NOT NULL DEFAULT 0,
     latency_ms        INTEGER NOT NULL DEFAULT 0,
     retries           INTEGER NOT NULL DEFAULT 0,
     failover_count    INTEGER NOT NULL DEFAULT 0,
@@ -343,6 +346,7 @@ CREATE INDEX IF NOT EXISTS idx_gateway_calls_obj ON gateway_calls(objective_id, 
 _ADDED_COLUMNS = (
     ("credential", "TEXT NOT NULL DEFAULT ''"),
     ("context_sections", "TEXT NOT NULL DEFAULT ''"),
+    ("cost_usd", "REAL NOT NULL DEFAULT 0"),
 )
 
 #: Indexes over columns that may have just been added. Created after the
@@ -418,6 +422,7 @@ class GatewayTelemetry:
         return {"objective_id": objective_id, "calls": len(rows),
                 "input_tokens": sum(r["input_tokens"] for r in rows),
                 "output_tokens": sum(r["output_tokens"] for r in rows),
+                "cost_usd": round(sum(r.get("cost_usd") or 0.0 for r in rows), 6),
                 "by_worker": by_worker}
 
     def spikes(self, *, limit: int = 5) -> list[dict]:
@@ -764,13 +769,24 @@ _NO_FAILOVER = frozenset({"BAD_REQUEST", "UNKNOWN_METHOD"})
 class ModelGateway:
     """FRIDAY -> Hermes MODEL_GATEWAY. One instance per process."""
 
+    #: No CLI backends unless __init__ registers them. A class default (only ever read) keeps a
+    #: gateway built without __init__ - as two test modules do - working (MODEL-012 regression).
+    _cli: dict = {}
+
     def __init__(self, *, worker: ModelGatewayWorker | None = None,
                  telemetry: GatewayTelemetry | None = None,
                  guard: GrowthGuard | None = None,
                  tier_table: dict[str, tuple[str, str]] | None = None,
                  max_failover: int = 2,
-                 objective_store=None) -> None:
+                 objective_store=None,
+                 cli_backends: tuple = ()) -> None:
         self.worker = worker or ModelGatewayWorker()
+        #: Signed-in coding-agent CLIs this gateway may think through
+        #: (MODEL-012), by provider id. They are a second transport next to
+        #: the Hermes worker. Empty unless given: only the process-wide
+        #: `gateway()` discovers them, so a gateway built directly never
+        #: spawns a CLI the caller did not ask for.
+        self._cli = {b.id: b for b in cli_backends}
         self.telemetry = telemetry or GatewayTelemetry()
         self.guard = guard or GrowthGuard()
         self.max_failover = max_failover
@@ -801,10 +817,23 @@ class ModelGateway:
             cached = self._providers_cache
             if cached and now - cached[0] < max_age_s:
                 return cached[1]
-        reply = self.worker.call("providers", timeout=30.0)
-        if not reply.get("ok"):
-            raise GatewayUnavailable(f"provider discovery failed: {reply.get('error')}")
-        inventory = reply["result"]
+        try:
+            reply = self.worker.call("providers", timeout=30.0)
+            failure = None if reply.get("ok") else f"provider discovery failed: {reply.get('error')}"
+        except GatewayUnavailable as exc:
+            failure = str(exc)
+        if failure is not None:
+            if not self._cli:
+                raise GatewayUnavailable(failure)
+            # A dead Hermes worker must not hide a signed-in CLI: the CLI is
+            # the route that works when the worker or its keys do not. The
+            # degraded inventory is cached like a good one, so a dead worker
+            # is not relaunched on every routing question.
+            inventory = {"providers": [], "main": {}, "worker_error": failure}
+        else:
+            inventory = reply["result"]
+        inventory["providers"] = list(inventory.get("providers", [])) + [
+            b.entry() for b in self._cli.values()]
         inventory["queried_at"] = now
         # Only authenticated routes are advertised as usable; the rest are
         # listed as configurable so the UI can be truthful about both.
@@ -828,6 +857,8 @@ class ModelGateway:
         can change under a fixed profile are the follow-up, and the column
         holds whatever the transport can honestly name.
         """
+        if provider in self._cli:
+            return f"cli:{provider}"
         try:
             profile = self.worker.profile or ""
         except Exception:  # noqa: BLE001
@@ -848,7 +879,21 @@ class ModelGateway:
         """One worker `infer` call. A local route holds a MODEL lease for the
         call (RES-001 / MODEL-005): the governor refuses it when the machine
         cannot carry another resident model, which fails over like any other
-        unavailable route."""
+        unavailable route.
+
+        A CLI provider never reaches the worker: the backend answers, and its
+        reply is shaped like the worker's so the loop above cannot tell."""
+        backend = self._cli.get(provider)
+        if backend is not None:
+            try:
+                completion = backend.complete(
+                    params["messages"], model=str(params.get("model") or ""),
+                    timeout_s=timeout)
+            except cli_model_provider.CliUnavailable as exc:
+                raise GatewayUnavailable(str(exc)) from exc
+            except cli_model_provider.CliFailure as exc:
+                return {"ok": False, "error": {"code": exc.code, "message": str(exc)}}
+            return {"ok": True, "result": completion.to_result(provider)}
         if self.route_kind(provider) != "local":
             return self.worker.call("infer", params, timeout=timeout)
         from friday import governor as G
@@ -884,7 +929,11 @@ class ModelGateway:
             TIER_STANDARD: (main_provider, table.get(ee.TIER_STANDARD, "")),
             TIER_DEEP: (main_provider, table.get(ee.TIER_DEEP, "")),
         }
-        self._tier_table = out
+        if main_provider:
+            # Not cached while the main provider is unknown: a worker that was
+            # down at the first question must not pin an empty table for the
+            # life of the process.
+            self._tier_table = out
         return out
 
     def candidates(self, request: ModelGatewayRequest) -> list[tuple[str, str, str]]:
@@ -917,8 +966,13 @@ class ModelGateway:
         #: keyed (provider, model), and that loophole retried the same dead
         #: provider under its catalog default (test_provider_health found it).
         tabled: set[str] = set()
+        degraded = self._worker_degraded()
         for t in order:
             provider, model = table.get(t, ("", ""))
+            if not provider and degraded:
+                # "" means "the Hermes profile's main route", and Hermes is
+                # not answering: there is nothing to try for it.
+                continue
             key = (provider, model)
             if provider:
                 tabled.add(provider)
@@ -964,6 +1018,8 @@ class ModelGateway:
             routes = provider_health.assess_routes(self.telemetry)
             credential = self.credential_label("")
             for provider in self._authenticated_providers():
+                if provider in self._cli:
+                    continue                      # CLI routes are appended last, below
                 if provider in tabled and not request.provider_allowlist:
                     continue
                 model = self.default_model(provider)
@@ -993,6 +1049,47 @@ class ModelGateway:
                 if key in cooling or self._unhealthy.get(key, 0.0) > now:
                     continue
                 out.append((tier, provider, model))
+        out.extend(self._cli_candidates(request, tier, cooling, now))
+        return out
+
+    def _worker_degraded(self) -> bool:
+        """True when the Hermes worker is not answering and only the CLI
+        transport is (MODEL-012)."""
+        if not self._cli:
+            return False
+        try:
+            return bool(self.providers().get("worker_error"))
+        except GatewayUnavailable:
+            return False
+
+    def _cli_candidates(self, request: ModelGatewayRequest, tier: str,
+                        cooling: dict, now: float) -> list[tuple[str, str, str]]:
+        """Signed-in CLI routes, always LAST: a CLI is the route for when no
+        API key works, so it comes after every API route and does not depend
+        on whether the tier table gave any. It is offered when the caller
+        allows failover or pins it by name, and never under `local_only`
+        (a CLI is an upstream cloud route)."""
+        if not self._cli or not (request.allow_failover or request.provider_allowlist):
+            return []
+        if request.privacy_policy == "local_only":
+            return []
+        usable = set(self._authenticated_providers())
+        out = []
+        for provider, backend in self._cli.items():
+            if provider not in usable or provider in request.provider_denylist:
+                continue
+            if request.provider_allowlist and provider not in request.provider_allowlist:
+                continue
+            model = backend.default_model
+            key = (provider, model)
+            # No ledger-verdict filter here, unlike the API routes: whether a
+            # CLI is signed in is a cheap live check (`usable` above), so a
+            # durable AUTH_FAILED row must not outlive the person signing in.
+            # The 120 s unhealthy window still stops a failing CLI being
+            # retried on every call.
+            if key in cooling or self._unhealthy.get(key, 0.0) > now:
+                continue
+            out.append((tier, provider, model))
         return out
 
     def route_decision(self, request: ModelGatewayRequest,
@@ -1149,7 +1246,14 @@ class ModelGateway:
         if not request.allow_failover:
             routes = routes[:1]
         else:
-            routes = routes[: 1 + self.max_failover]
+            # CLI routes (MODEL-012) are the last resort and keep their slots
+            # inside the bound: otherwise an API provider with several tier
+            # routes, all failing, would fill `1 + max_failover` and the one
+            # route that works would never be tried.
+            cli_routes = [r for r in routes if r[1] in self._cli][: 1 + self.max_failover]
+            api_routes = [r for r in routes if r[1] not in self._cli]
+            keep = max(1, 1 + self.max_failover - len(cli_routes))
+            routes = api_routes[:keep] + cli_routes
 
         attempts: list[dict] = []
         last_error = ""
@@ -1277,10 +1381,15 @@ class ModelGateway:
                     latency_ms=int(res.get("latency_ms") or elapsed),
                     failover_count=index, entitlement_state="OK",
                     route_kind=kind, boundary="local" if kind == "local" else "upstream_cloud",
-                    attempts=attempts, data_class=content_class, redactions=redactions)
+                    attempts=attempts, data_class=content_class, redactions=redactions,
+                    cost_usd=float(res.get("cost_usd") or 0.0))
+                result.warnings.extend(str(w) for w in res.get("warnings") or ())
                 if res.get("finish_reason") in ("length", "max_tokens"):
                     result.warnings.append("output truncated at max_output_tokens")
-                if model and result.model and result.model != model:
+                # A CLI is asked for an alias ("sonnet") and reports the full
+                # name that served it: that is resolution, not a substitution.
+                if model and result.model and result.model != model \
+                        and provider not in self._cli:
                     result.warnings.append(f"requested {model}, served {result.model}")
                 self.guard.record(request.objective_id,
                                   input_tokens=result.input_tokens or input_tokens,
@@ -1292,7 +1401,8 @@ class ModelGateway:
                     input_tokens=result.input_tokens, output_tokens=result.output_tokens,
                     cached_tokens=result.cached_tokens,
                     reasoning_tokens=result.reasoning_tokens, failover_count=index,
-                    fingerprint=fingerprint, entitlement_state="OK", route_kind=kind)
+                    fingerprint=fingerprint, entitlement_state="OK", route_kind=kind,
+                    cost_usd=result.cost_usd)
                 return result
             err = reply.get("error") or {}
             code = str(err.get("code") or "PROVIDER_ERROR")
@@ -1335,7 +1445,8 @@ class ModelGateway:
                 output_tokens: int = 0, cached_tokens: int = 0,
                 reasoning_tokens: int = 0, failover_count: int = 0,
                 fingerprint: str = "", entitlement_state: str = "",
-                route_kind: str = "", credential: str = "") -> int:
+                route_kind: str = "", credential: str = "",
+                cost_usd: float = 0.0) -> int:
         try:
             return self.telemetry.record(
                 objective_id=request.objective_id, worker=request.worker,
@@ -1346,6 +1457,7 @@ class ModelGateway:
                 status=status, entitlement_state=entitlement_state,
                 input_tokens=input_tokens, output_tokens=output_tokens,
                 cached_tokens=cached_tokens, reasoning_tokens=reasoning_tokens,
+                cost_usd=cost_usd,
                 latency_ms=latency_ms, retries=0, failover_count=failover_count,
                 context_fingerprint=fingerprint,
                 context_sections=(json.dumps(request.context_telemetry, sort_keys=True)
@@ -1412,7 +1524,8 @@ def gateway() -> ModelGateway:
     global _GATEWAY
     with _GATEWAY_LOCK:
         if _GATEWAY is None:
-            _GATEWAY = ModelGateway()
+            _GATEWAY = ModelGateway(
+                cli_backends=cli_model_provider.discover_backends())
         return _GATEWAY
 
 

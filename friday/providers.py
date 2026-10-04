@@ -30,6 +30,8 @@ from typing import get_args
 
 import logging
 
+from friday import cli_model_provider
+
 # Import for the registration side effect as much as for the names. See above.
 from livekit.agents import inference
 from livekit.plugins import google as lk_google
@@ -255,28 +257,52 @@ def fallback_role(role: str = DEFAULT_ROLE) -> str | None:
 
 def build_resilient_llm(backend: str = DEFAULT_LLM_BACKEND, role: str = DEFAULT_ROLE):
     """
-    The primary model with a second one behind it.
+    The primary model with a second one behind it, and the model gateway last.
 
     Returns the plain LLM when there is nothing sensible to fall back to -
     an adapter wrapping a single model is just indirection.
-    """
-    primary = build_llm(backend, role)
-    secondary_role = fallback_role(role)
-    if secondary_role is None:
-        return primary
 
+    When a signed-in coding-agent CLI is enabled (MODEL-012), the gateway is the
+    last resort after the API models, and the only brain when there is no API
+    key at all. The CLI is the last model tried: it is paid per call and cannot
+    call tools.
+    """
+    from friday.gateway_llm import GatewayLLM  # lazy: it imports the gateway
+
+    cli_enabled = bool(cli_model_provider.discover_backends())
     try:
-        secondary = build_llm(backend, secondary_role)
+        primary = build_llm(backend, role)
     except ProviderError:
-        # The fallback role is not installed on this backend. Not a reason to
-        # refuse to start; the primary is the one that matters.
+        # A missing key is the one failure the gateway can cover. A bad role
+        # or backend is a configuration error and still stops startup.
+        if not cli_enabled or not missing_credentials("llm", backend):
+            raise
+        resolve_llm_model(backend, role)
+        logger.warning("llm backend %r has no credentials; answering through the "
+                       "model gateway's CLI route", backend)
+        return GatewayLLM()
+
+    models = [primary]
+    secondary_role = fallback_role(role)
+    if secondary_role is not None:
+        try:
+            models.append(build_llm(backend, secondary_role))
+        except ProviderError:
+            # The fallback role is not installed on this backend. Not a reason to
+            # refuse to start; the primary is the one that matters.
+            pass
+
+    if len(models) == 1 and not cli_enabled:
         return primary
 
     from livekit.agents.llm import FallbackAdapter
 
-    _share_thought_signatures(primary, secondary)
+    if len(models) > 1:
+        _share_thought_signatures(*models)  # the API models only: the gateway has none
+    if cli_enabled:
+        models.append(GatewayLLM())
     return FallbackAdapter(
-        [primary, secondary],
+        models,
         max_retry_per_llm=FALLBACK_RETRIES_PER_MODEL,
         attempt_timeout=FALLBACK_ATTEMPT_TIMEOUT,
     )
