@@ -60,7 +60,7 @@ _DEFAULT_LIMITS = CLASS_LIMITS["STANDARD"]
 #: Capabilities whose execution is a worker delegation.
 WORKER_CAPABILITIES = frozenset({
     "hermes_delegate", "hermes_team", "hermes_team_start", "executor_run",
-    "claude_code_run", "selfdev_run",
+    "claude_code_run", "selfdev_run", "development_run",
 })
 
 EVENT_BUDGET_EXHAUSTED = "run.budget_exhausted"

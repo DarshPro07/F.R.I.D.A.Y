@@ -194,6 +194,12 @@ def _production_calls(names: set[str]) -> set[tuple[str, str]]:
 def test_the_objective_path_reaches_a_development_worker_only_through_the_compiler():
     # for_goal is called from one place, and that place compiles first
     assert _production_calls({"for_goal"}) == {("friday/development.py", "for_request")}
+    # and development.for_request is called from the one capability that starts
+    # a run (semantics.for_request is another function with the same name)
+    callers = [path.relative_to(ROOT).as_posix()
+               for path in sorted((ROOT / "friday").rglob("*.py"))
+               if "development.for_request(" in path.read_text(encoding="utf-8")]
+    assert callers == ["friday/toolsets/development_runs.py"]
     # and a DevelopmentRun is built nowhere else
     assert _production_calls({"DevelopmentRun"}) == {("friday/development.py", "for_goal")}
     source = (ROOT / "friday/development.py").read_text(encoding="utf-8")

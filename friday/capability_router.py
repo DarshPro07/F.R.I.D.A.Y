@@ -173,7 +173,8 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "hermes": ("hermes_delegate", "hermes_status", "hermes_steer", "hermes_interrupt"),
     "model_gateway": ("model_providers", "model_infer", "model_usage"),
     "adversarial": ("decision_deliberate", "change_review"),
-    "selfdev": ("selfdev_run", "selfdev_promote", "selfdev_rollback", "selfdev_status"),
+    "selfdev": ("selfdev_run", "selfdev_promote", "selfdev_rollback", "selfdev_status",
+                "development_run", "development_promote"),
     "governor": ("system_pressure", "system_diagnostics"),
     "observability": ("objective_trace",),
     "connectors": (
@@ -264,7 +265,7 @@ GROUP_PURPOSE: dict[str, str] = {
     'executor': 'answer a development question from project decisions',
     'hermes': 'delegate a sustained engineering task to the Hermes agent, check on it, steer it, or stop it',
     'model_gateway': 'ask which model providers Hermes can broker, run one inference-only request on a stronger model, or read gateway token usage',
-    'selfdev': 'improve Friday itself through the gated loop: sandbox a candidate change, test, review, benchmark, promote on approval, roll back',
+    'selfdev': 'improve Friday itself through the gated loop: sandbox a candidate change, test, review, benchmark, promote on approval, roll back; start a development run for an objective in its own sandbox worktree and land it on a named branch on approval',
     'adversarial': 'deliberate a high-impact decision with proposer, contrarian, failure analyst, evidence checker and judge roles, or have an independent reviewer check a change against its claim',
     'governor': 'why Friday is running fewer workers or browsers right now: resource pressure level, active workers, queue depth; the one diagnostics view',
     'observability': 'the full trace of what happened to an objective: tool calls, workers, model calls, policy decisions, latency, retries, errors, verification',

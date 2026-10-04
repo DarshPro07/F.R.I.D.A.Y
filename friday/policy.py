@@ -553,6 +553,11 @@ TOOL_CATEGORIES: dict[str, str] = {
     'selfdev_promote': COMMAND_EXECUTION,
     'selfdev_rollback': COMMAND_EXECUTION,
     'selfdev_status': READ_LOCAL_SAFE,
+    # CTX-003 (owner ruling 2026-10-03d): a development run starts in its own
+    # sandbox worktree (FILE_WRITE); landing it on a live branch is a command
+    # execution against the live checkout and needs its own yes.
+    'development_run': FILE_WRITE,
+    'development_promote': COMMAND_EXECUTION,
     'model_usage': READ_LOCAL_SAFE,
     # PRD FR-056: the resource governor's status is a local read.
     'system_pressure': READ_LOCAL_SAFE,

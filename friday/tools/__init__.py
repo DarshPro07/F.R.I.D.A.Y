@@ -8,7 +8,7 @@ from friday.tools import (
     audio_control, automation_control, brightness_control, document_control,
     browser_policy_control, brain_control, connector_control,
     executor_control, fabric_control, hardware_control, hermes_control,
-    model_gateway_control, adversarial_control, selfdev_control,
+    model_gateway_control, adversarial_control, selfdev_control, development_control,
     window_control, product_control, file_control, identity_control,
     memory_control, music_control, power_control, process_control,
     profile_control, objective_control, reminder_control, schedule_control, screen_control, system,
@@ -60,6 +60,7 @@ def register_all_tools(mcp):
     model_gateway_control.register(mcp)  # PRD 4.9: inference-only Hermes MODEL_GATEWAY
     adversarial_control.register(mcp)  # PRD FR-008/FR-012: contrarian panel + independent review
     selfdev_control.register(mcp)  # PRD FR-047..051: sandboxed, gated, reversible self-development
+    development_control.register(mcp)  # CTX-003: a development run starts through the context compiler only
     browser_policy_control.register(mcp)
     vnext_control.register(mcp)
     identity_control.register(mcp)  # open things in the browser he is signed into

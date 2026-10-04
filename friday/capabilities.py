@@ -2454,6 +2454,46 @@ _ALL = (
         side_effect='write',
         operation_kind='RECOVERY',
     ),
+    # PRD v7 CTX-003 (owner ruling 2026-10-03d): starting a development run is
+    # a selfdev/FILE_WRITE-class action; landing its work on a live branch is a
+    # separate COMMAND_EXECUTION one.
+    Capability(
+        id='development_run',
+        intent_examples=(
+            'start a development run for this change in the repository',
+            'have the coding team work on this task in a sandbox worktree',
+            'begin development work for the objective in this repo',
+        ),
+        negative_examples=(
+            'delegate this to hermes',
+            'stage a change to your own code in a worktree and run its gates',
+            'merge the development run into the branch',
+            'run the automation',
+        ),
+        description='Start one development run for the objective it serves: the context compiler keeps the objective\'s critical facts, then the run maps the repository and chooses its team, and its work stays in its own sandbox worktree. Asks by default; proceeds without another prompt only inside a valid approval lease for this repository. A run that needs commands is refused until EXEC-SBX-001 exists.',
+        execution_scope='agent_runtime',
+        side_effect='write',
+        operation_kind='START',
+        risk='MEDIUM',
+    ),
+    Capability(
+        id='development_promote',
+        intent_examples=(
+            'merge the development run into the main branch',
+            'land the sandbox worktree work on this branch',
+            'promote the finished development run',
+        ),
+        negative_examples=(
+            'start a development run for this change in the repository',
+            'promote the self-change that passed its gates',
+            'roll back the self-change',
+        ),
+        description='Merge a development run\'s sandbox worktree into a named live branch and return the merge commit and the rollback target. Needs fresh approval unless an approval lease names this exact branch.',
+        execution_scope='agent_runtime',
+        side_effect='write',
+        operation_kind='MUTATE',
+        risk='HIGH',
+    ),
     Capability(
         id='selfdev_status',
         intent_examples=(
