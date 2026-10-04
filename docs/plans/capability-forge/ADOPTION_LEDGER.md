@@ -72,3 +72,11 @@ gateway, a second chat system, or a separately branded product. P1 (UI fabric).
   test-plugin-skill (useful to the Forge for generated MCP servers), the Docker skills (deduplicate, pick one),
   context-memory and memory-context-management (likely REFERENCE_ONLY against FRIDAY's memory).
 - P1 behind the P0 burn-down; nothing downloaded before then.
+
+## muellerberndt/mini-agi - EXTRACT_PATTERN, medium (owner verdict 2026-10-04b)
+
+A small 2023-era autonomous loop (GPT-3.5/4): one action per turn from a tiny command set, summarised short-term
+memory, an optional self-critic. Adopted as designs only: the one-action loop (COG-005, a SIMPLE-task executor tier
+below the Objective OS), the progress critic called only on stagnation (COG-006), bounded recent history, and a strict
+action schema executed by deterministic code. Not installed as a runtime, memory, shell executor or security layer:
+its raw execute_shell / execute_python conflicts with SEC-005 and EXEC-SBX-001.

@@ -1316,4 +1316,17 @@ def table(R7):
            impl='No capability search beyond the local router exists.',
            files=['friday/capability_router.py', 'friday/forge.py'],
            next_action='Ranked P1 behind the P0 burn-down (A11, owner 2026-10-03g: docs/plans/build-harness/00-owner-directive-2026-10-03g.md).'),
+        # --- Amendment A12 (2026-10-04): lightweight loop and progress critic (docs/PRD_V7.md section 106)
+        R7('COG-005', "106", 'FRIDAY provides a low-overhead loop for simple bounded objectives that do not justify Objective OS planning or multi-agent orchestration.', "P1",
+           acceptance='A task the complexity classifier marks SIMPLE runs as one action, observe, update, repeat - each action a strict schema (intent, capability, arguments, expected postcondition, confidence) executed by deterministic code through the ExecutionEnvelope and policy engine, never a raw subprocess - within bounds (max 8 steps, 6,000 tokens, $0.10, one repeat of the same action); a simple task finishes in a few actions; a task found to be complex escalates to the Objective OS instead of growing in place.',
+           status='MISSING',
+           impl='No lightweight loop; every objective goes through the planner.',
+           files=['friday/planner.py', 'friday/objectives.py'],
+           next_action='Ranked P1 behind the P0 burn-down (A12, owner 2026-10-04b: docs/plans/build-harness/00-owner-directive-2026-10-04b.md). Pattern from MiniAGI, not its runtime.'),
+        R7('COG-006', "106", 'FRIDAY detects stagnation - repeated actions, reasoning without action, an objective that does not advance, poor progress per token - and invokes corrective reasoning only then.', "P1",
+           acceptance='A progress score (state changed, tool executed, artifact produced, test improved, requirement moved) is kept per run; when tokens pass a threshold with no real progress, or the same action or failure repeats, the run is marked STALL_DETECTED and a critic or strategy reset runs once; on a healthy run the critic is never called; both the product agent and the build harness use it.',
+           status='MISSING',
+           impl='trajectory.py flags runs that leave their objective contract; no progress-per-token stall detector or on-demand critic exists.',
+           files=['friday/trajectory.py'],
+           next_action='Ranked P1 behind the P0 burn-down (A12, owner 2026-10-04b: docs/plans/build-harness/00-owner-directive-2026-10-04b.md). Pattern from MiniAGI, not its runtime.'),
     ]

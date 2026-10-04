@@ -1877,6 +1877,22 @@ working set, progressive disclosure and context health (CTX-001, CTX-002, CTX-00
 | CAP-MKT-005 | P1 | Activated capabilities have a lifecycle with automatic revalidation and garbage collection. | States QUARANTINED, TESTING, ACTIVE, DEGRADED, REVALIDATE, DEPRECATED, ARCHIVED, REMOVED; a worse security scan, an unexpected source change, a vulnerable dependency, a better duplicate, disuse, a token cost without better results, repeated failures or an obsolete app/API version moves a capability out of ACTIVE, and each trigger has a test. |
 | CAP-MKT-006 | P1 | When FRIDAY lacks a capability for a task it searches its catalogue and then the marketplace, and finishes the original task with what passes the gates. | A request needing a missing capability goes local catalogue -> marketplace -> candidate -> SkillSpector -> sandbox -> test -> activate -> the original task, with the person's approval wherever policy requires it; with no passing candidate FRIDAY says so instead of improvising. |
 
+## 106. Amendment A12 (2026-10-04): the lightweight loop and the progress critic
+
+> **Transcription note (added 2026-10-04; not part of the owner's text).** The owner's directive is kept verbatim in
+> `docs/plans/build-harness/00-owner-directive-2026-10-04b.md`. The owner named these COG-002 and COG-003; those ids were taken, so they are COG-005 and COG-006 (P1).
+
+- MiniAGI (muellerberndt/mini-agi) is EXTRACT_PATTERN: its one-action loop, progress critic, bounded recent history
+  and strict action protocol are adopted as FRIDAY designs; its runtime, raw shell/python execution, memory and
+  model coupling are not installed.
+- Old history may be compressed, but the CriticalFactSet, objective state and blockers never are (CTX-003).
+- The critic runs only on detected stagnation, never every turn.
+
+| ID | Pri | Requirement | Acceptance evidence |
+|---|---|---|---|
+| COG-005 | P1 | FRIDAY provides a low-overhead loop for simple bounded objectives that do not justify Objective OS planning or multi-agent orchestration. | A task the complexity classifier marks SIMPLE runs as one action, observe, update, repeat - each action a strict schema (intent, capability, arguments, expected postcondition, confidence) executed by deterministic code through the ExecutionEnvelope and policy engine, never a raw subprocess - within bounds (max 8 steps, 6,000 tokens, $0.10, one repeat of the same action); a simple task finishes in a few actions; a task found to be complex escalates to the Objective OS instead of growing in place. |
+| COG-006 | P1 | FRIDAY detects stagnation - repeated actions, reasoning without action, an objective that does not advance, poor progress per token - and invokes corrective reasoning only then. | A progress score (state changed, tool executed, artifact produced, test improved, requirement moved) is kept per run; when tokens pass a threshold with no real progress, or the same action or failure repeats, the run is marked STALL_DETECTED and a critic or strategy reset runs once; on a healthy run the critic is never called; both the product agent and the build harness use it. |
+
 ## Appendix C. Implementation controller, updated 2026-09-26 (owner's text, verbatim)
 
 ```text
