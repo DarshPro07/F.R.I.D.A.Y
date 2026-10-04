@@ -3410,6 +3410,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "in the tier table and per-call / daily CLI cost caps; 3 - Codex and Antigravity providers only where a "
             "no-tools mode is verified; 4 - a live text and voice turn through FRIDAY.exe."),
     }),
+    ('BG-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Governor.reduce_running now also stops running BACKGROUND optional work when the person returns or the machine goes on battery (URGENT keeps running; pressure still stops it). Lease records its priority; a raising context probe reads as unknown. (build run, commit da84d62f5)',
+        "next_action": 'GAPS: No production caller of admit(OPTIONAL) exists in friday/ yet, so autolearn/digest callers must pass through this gate when they are wired.; Assumed: two priorities (BACKGROUND default, URGENT) and a 120 s away threshold (Thresholds.user_idle_s); the PRD gives neither. Revisit if the owner wants a finer scale.; Last-input idle time is read only on Windows; elsewhere it is unknown and does not defer.; Running work is re-judged only on a fresh pressure sample (sample_ttl_s, 2 s) and only when something calls pressure(); there is no background ticker.',
+    }),
 ]
 
 
