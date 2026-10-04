@@ -63,7 +63,11 @@ def test_a_capability_changed_since_the_plan_is_refused_at_execution(compiled):
 def test_the_fingerprint_follows_what_the_capability_is_registered_to_do(monkeypatch):
     before = CR.fingerprint("system_get_info")
     original = C.by_id("system_get_info")
-    changed = dataclasses.replace(original, side_effect="external_action")
+    # The hints must agree with side_effect (CAP-004), so a record that now
+    # acts outside the process says so in all of them, not only in one.
+    changed = dataclasses.replace(original, side_effect="external_action",
+                                  read_only=False, external_side_effect=True,
+                                  idempotent=False)
     monkeypatch.setattr(C, "by_id", lambda cid: changed if cid == "system_get_info" else original)
     assert CR.fingerprint("system_get_info") != before
 

@@ -14,7 +14,7 @@ in one screen and testable without importing FastMCP.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timezone
 
 # Where the work physically happens.
@@ -129,6 +129,43 @@ HEALTH_STATES = (REGISTERED, READY, DEGRADED, AUTH_REQUIRED, UNAVAILABLE)
 #: probe that returned it would be contradicting itself.
 PROBE_STATES = (READY, DEGRADED, AUTH_REQUIRED, UNAVAILABLE)
 
+# The six consequence hints (PRD v7 CAP-004). `side_effect` says what a call
+# touches; these say what it means if the call was a mistake, so policy and
+# verification can read the answer instead of re-deriving it from a name.
+#
+#   read_only             observes only; changes nothing anywhere
+#   consequential         a wrong call costs something that matters
+#   reversible            a later call can undo it
+#   idempotent            calling it again leaves the same state
+#   external_side_effect  something happens outside this process
+#   requires_confirmation a person has to say yes first (read from policy)
+HINTS = ("read_only", "consequential", "reversible", "idempotent",
+         "external_side_effect", "requires_confirmation")
+
+#: Mutations whose repeat call lands in the state the first one reached - set
+#: a level, bring a window forward, stop what is already stopped, delete by id.
+#: Everything else that mutates is declared non-idempotent: a second
+#: `reminders_create` is a second reminder.
+_IDEMPOTENT_MUTATIONS = frozenset({
+    "windows_focus", "windows_minimize", "windows_restore", "windows_maximize",
+    "windows_arrange", "audio_session_volume", "audio_session_mute",
+    "audio_master_volume", "brightness_set", "volume_set", "apps_focus",
+    "apps_close", "process_close", "music_pause", "music_resume", "music_stop",
+    "power_cancel", "clipboard_write", "workbench_stop", "desktop_stop",
+    "browser_open", "browser_navigate", "browser_close", "hermes_interrupt",
+    "files_write", "files_recycle", "files_delete", "memory_forget",
+    "brain_forget", "reminders_cancel", "automations_delete",
+    "schedules_delete", "objective_pause", "objective_resume",
+    "objective_cancel", "policy_set", "profile_resolve_conflict",
+})
+
+#: Mutations with no way back that `risk` alone does not call IRREVERSIBLE:
+#: they destroy something no later call can restore.
+_NOT_REVERSIBLE = frozenset({
+    "files_delete", "memory_forget", "brain_forget", "automations_delete",
+    "schedules_delete", "process_terminate",
+})
+
 
 @dataclass(frozen=True)
 class Capability:
@@ -186,6 +223,17 @@ class Capability:
     tests: tuple[str, ...] = ()
     #: ISO date a person or probe last confirmed it works. "" is never.
     last_verified: str = ""
+    #: The consequence hints named in `HINTS`. None means "not declared", the
+    #: same weakest-honest-claim default as the fields above; the registry
+    #: check refuses a registered capability that leaves any of them None.
+    #: Entries below that leave them out are classified once, by
+    #: `_derive_hints`, from `side_effect`, `risk` and the policy table.
+    read_only: bool | None = None
+    consequential: bool | None = None
+    reversible: bool | None = None
+    idempotent: bool | None = None
+    external_side_effect: bool | None = None
+    requires_confirmation: bool | None = None
 
     @property
     def requires_approval(self) -> bool:
@@ -249,6 +297,22 @@ class Capability:
                 raise ValueError(
                     f"{self.id}: last_verified must be an ISO date, got "
                     f"{self.last_verified!r}") from None
+        # A declared hint may not contradict `side_effect`, which stays the one
+        # statement of what the call touches.
+        mutates = self.side_effect in ("write", "external_action")
+        if self.read_only is not None and self.read_only == mutates:
+            raise ValueError(
+                f"{self.id}: read_only={self.read_only} contradicts "
+                f"side_effect {self.side_effect!r}")
+        external = self.side_effect == "external_action"
+        if (self.external_side_effect is not None
+                and self.external_side_effect != external):
+            raise ValueError(
+                f"{self.id}: external_side_effect={self.external_side_effect} "
+                f"contradicts side_effect {self.side_effect!r}")
+        if self.read_only and self.consequential:
+            raise ValueError(f"{self.id}: a read_only capability cannot be "
+                             f"consequential")
 
 
 _ALL = (
@@ -2703,6 +2767,69 @@ _ALL = (
         operation_kind='CANCEL',
     ),
 )
+
+
+def _derive_hints(cap: Capability) -> dict[str, bool]:
+    """
+    The six hints for a capability that did not declare them itself.
+
+    `consequential` is a mutation whose risk is above LOW: a LOW write is
+    something the person can see and redo (a volume, a window), which policy
+    deliberately leaves AUTO. `requires_confirmation` is read from the policy
+    table rather than chosen here, so the declaration cannot start out
+    disagreeing with the decision it describes.
+    """
+    mutates = cap.side_effect in ("write", "external_action")
+    return {
+        "read_only": not mutates,
+        "consequential": mutates and cap.risk != "LOW",
+        "reversible": cap.risk != "IRREVERSIBLE" and cap.id not in _NOT_REVERSIBLE,
+        "idempotent": not mutates or cap.id in _IDEMPOTENT_MUTATIONS,
+        "external_side_effect": cap.side_effect == "external_action",
+        "requires_confirmation": cap.requires_approval,
+    }
+
+
+def _with_hints(cap: Capability) -> Capability:
+    """`cap` with every hint it left undeclared filled in; its own win."""
+    derived = _derive_hints(cap)
+    missing = {name: derived[name] for name in HINTS
+               if getattr(cap, name) is None}
+    return replace(cap, **missing) if missing else cap
+
+
+def registry_problems(capabilities=None) -> list[str]:
+    """
+    Everything wrong with the registry's consequence hints, one line each.
+
+    A capability is refused when it leaves a hint undeclared, when its declared
+    `requires_confirmation` disagrees with the policy table, or when it is
+    consequential and policy would let it run without a yes - a consequential
+    capability with no confirmation path is the gap this exists to close.
+    """
+    problems = []
+    for cap in _ALL if capabilities is None else capabilities:
+        missing = [name for name in HINTS if getattr(cap, name) is None]
+        if missing:
+            problems.append(f"{cap.id}: undeclared hints {missing}")
+            continue
+        asked = cap.requires_approval
+        if cap.requires_confirmation != asked:
+            problems.append(
+                f"{cap.id}: declares requires_confirmation="
+                f"{cap.requires_confirmation} but policy "
+                f"{'asks' if asked else 'does not ask'}")
+        if cap.consequential and not (cap.requires_confirmation and asked):
+            problems.append(
+                f"{cap.id}: consequential with no confirmation path")
+    return problems
+
+
+_ALL = tuple(_with_hints(cap) for cap in _ALL)
+
+_UNSOUND = registry_problems(_ALL)
+if _UNSOUND:
+    raise ValueError("capability registry refused: " + "; ".join(_UNSOUND))
 
 CAPABILITIES: dict[str, Capability] = {cap.id: cap for cap in _ALL}
 

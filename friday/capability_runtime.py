@@ -586,7 +586,9 @@ def fingerprint(capability_id: str) -> str:
         entry.update(side_effect=capability.side_effect,
                      execution_scope=capability.execution_scope,
                      requires_edge=getattr(capability, "requires_edge", False),
-                     policy=list(capability.policy_tool_ids()))
+                     policy=list(capability.policy_tool_ids()),
+                     hints={name: getattr(capability, name, None)
+                            for name in C.HINTS})
     resolution = resolutions().get(capability_id)
     where = [resolution.module, resolution.function] if resolution is not None else []
     source = _function_source(*where) if resolution is not None else ""
