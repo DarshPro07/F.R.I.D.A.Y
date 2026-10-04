@@ -74,11 +74,113 @@ class Question:
     #: What Friday would choose if it had to. Present for SMALL questions,
     #: which are decided rather than asked.
     proposed: str = ""
+    #: For a decided (SMALL) question: how sure Friday is, how bad it is if
+    #: the proposal is wrong, and how it would be confirmed. Optional, because
+    #: a model that says nothing is a model that thinks it is small.
+    confidence: str = "MEDIUM"
+    consequence: str = "LOW"
+    validation: str = ""
 
     @property
     def key(self) -> str:
         """A stable identity for "have I asked this already"."""
         return _key(self.question)
+
+
+#: ASSUME-001: how much, and whether it has been checked.
+LOW, MEDIUM, HIGH = "LOW", "MEDIUM", "HIGH"
+LEVELS = (LOW, MEDIUM, HIGH)
+UNVALIDATED, VALIDATED, REFUTED, WAIVED = (
+    "UNVALIDATED", "VALIDATED", "REFUTED", "WAIVED")
+VALIDATION_STATES = (UNVALIDATED, VALIDATED, REFUTED, WAIVED)
+
+
+@dataclass(frozen=True)
+class Assumption:
+    """
+    Something Friday decided in the absence of an answer, and what rides on it.
+
+    `consequence` is how bad it is if the statement is wrong; `confidence` is
+    how sure Friday is that it is right. Neither is the same as materiality:
+    a decision can be small to reverse and still be wrong in a way that
+    wastes a day of work built on top of it.
+    """
+
+    statement: str
+    #: `request` (the person said it) or `understand:<question key>`.
+    origin: str
+    confidence: str = MEDIUM
+    consequence: str = LOW
+    #: How it would be confirmed or refuted.
+    validation: str = ""
+    state: str = UNVALIDATED
+
+    def __post_init__(self) -> None:
+        for name, allowed in (("confidence", LEVELS), ("consequence", LEVELS),
+                              ("state", VALIDATION_STATES)):
+            if getattr(self, name) not in allowed:
+                raise ValueError(f"assumption {name} {getattr(self, name)!r} "
+                                 f"is not one of {allowed}")
+
+    @property
+    def key(self) -> str:
+        return _key(self.statement)
+
+    @classmethod
+    def from_question(cls, question: Question) -> "Assumption":
+        """The register entry for a question Friday decided rather than asked."""
+        return cls(
+            statement=f"{question.question} -> {question.proposed}",
+            origin=f"understand:{question.key}",
+            confidence=_level(question.confidence, MEDIUM),
+            consequence=_level(question.consequence, LOW),
+            validation=question.validation)
+
+    def to_dict(self) -> dict:
+        return {"statement": self.statement, "origin": self.origin,
+                "confidence": self.confidence, "consequence": self.consequence,
+                "validation": self.validation, "state": self.state}
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "Assumption":
+        return cls(
+            statement=str(raw["statement"]), origin=str(raw["origin"]),
+            confidence=_level(raw.get("confidence"), MEDIUM),
+            consequence=_level(raw.get("consequence"), LOW),
+            validation=str(raw.get("validation") or ""),
+            state=str(raw.get("state") or UNVALIDATED))
+
+
+def _level(value, default: str) -> str:
+    """A model's or a row's level, or the default when it is not one."""
+    text = str(value or "").strip().upper()
+    return text if text in LEVELS else default
+
+
+def _matters(entry: Assumption) -> bool:
+    """High-impact: consequence HIGH, or unsure about something that matters."""
+    return entry.consequence == HIGH or (
+        entry.confidence == LOW and entry.consequence == MEDIUM)
+
+
+def due_for_validation(register) -> tuple[Assumption, ...]:
+    """
+    The entries to validate before work that depends on them starts.
+
+    "High-impact" is consequence HIGH - the packet and the repo define no
+    threshold, so that is the stated assumption - and an unsure (LOW
+    confidence) entry whose consequence is at least MEDIUM. Worst first.
+    """
+    due = [entry for entry in register
+           if entry.state == UNVALIDATED and _matters(entry)]
+    return tuple(sorted(due, key=lambda entry: (
+        -LEVELS.index(entry.consequence), LEVELS.index(entry.confidence))))
+
+
+def refuted_high_impact(register) -> tuple[Assumption, ...]:
+    """Entries found false that work was to be built on: not released, replanned."""
+    return tuple(entry for entry in register
+                 if entry.state == REFUTED and _matters(entry))
 
 
 @dataclass(frozen=True)
@@ -104,6 +206,10 @@ class Understanding:
     def ready(self) -> bool:
         """Whether anything still has to be asked before work can start."""
         return not self.questions
+
+    def register(self) -> tuple[Assumption, ...]:
+        """The assumptions as register entries (ASSUME-001)."""
+        return tuple(Assumption.from_question(item) for item in self.assumptions)
 
     def spoken(self, limit: int = 3) -> str:
         """
@@ -214,6 +320,9 @@ SCHEMA = {
                     "materiality": {"type": "STRING",
                                     "enum": list(MATERIALITY)},
                     "proposed": {"type": "STRING"},
+                    "confidence": {"type": "STRING", "enum": list(LEVELS)},
+                    "consequence": {"type": "STRING", "enum": list(LEVELS)},
+                    "validation": {"type": "STRING"},
                 },
                 "required": ["question", "why", "materiality"],
             },
@@ -244,6 +353,9 @@ answer. Mark it:
             the shape of the thing, what it has to do
   SMALL     reversible, and nobody will remember the decision. Give your
             `proposed` answer; it will be recorded and can be overruled.
+            Also say how sure you are (`confidence`), how bad it is if the
+            proposal is wrong (`consequence`, LOW unless work built on it
+            would be wasted) and how it could be confirmed (`validation`).
 
 Ask about what is missing, not about what they said. If they told you the
 platform, do not ask about the platform.
@@ -347,6 +459,9 @@ def _as_understanding(raw: dict) -> Understanding:
                           if str(option).strip()),
             materiality=materiality,
             proposed=str(item.get("proposed") or "").strip(),
+            confidence=_level(item.get("confidence"), MEDIUM),
+            consequence=_level(item.get("consequence"), LOW),
+            validation=str(item.get("validation") or "").strip(),
         )
         if question.materiality == SMALL and question.proposed:
             # Decided, not asked. Recorded so it can be overruled by somebody
@@ -503,17 +618,17 @@ def still_blocking(text: str, *, db=None) -> tuple[str, list[dict]]:
         return "", []
     return project, outstanding(project, db=db)
 
-def ground_for(text: str, *, db=None) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def grounded_for(text: str, *, db=None) -> tuple[tuple[Assumption, ...], tuple[str, ...]]:
     """
-    (assumptions, open questions) an objective contract records for `text`.
+    (assumption register, open questions) an objective is grounded in.
 
     Open questions are what `still_blocking` says this request needs and does
-    not have. Assumptions are the small decisions `understand` made on the
+    not have. The register holds the small decisions `understand` made on the
     person's behalf when the request describes an idea. A reader that fails
-    leaves that side empty: the contract never costs the objective.
+    leaves that side empty: grounding never costs the objective.
     """
     questions: list[str] = []
-    assumed: list[str] = []
+    assumed: list[Assumption] = []
     try:
         _, blocking = still_blocking(text, db=db)
         questions.extend(str(row["question"]) for row in blocking)
@@ -525,10 +640,19 @@ def ground_for(text: str, *, db=None) -> tuple[tuple[str, ...], tuple[str, ...]]
         except Exception:                                   # noqa: BLE001
             logger.exception("requirements.ground understand failed")
         else:
-            assumed.extend(f"{item.question} -> {item.proposed}"
-                           for item in found.assumptions)
+            assumed.extend(found.register())
             questions.extend(item.question for item in found.questions)
-    return tuple(dict.fromkeys(assumed)), tuple(dict.fromkeys(questions))
+    register = {entry.statement: entry for entry in assumed}
+    return tuple(register.values()), tuple(dict.fromkeys(questions))
+
+
+def ground_for(text: str, *, db=None) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """
+    (assumptions, open questions) an objective contract records for `text`,
+    as the plain statements a contract carries.
+    """
+    register, questions = grounded_for(text, db=db)
+    return tuple(entry.statement for entry in register), questions
 
 
 ANSWER_SCHEMA = {

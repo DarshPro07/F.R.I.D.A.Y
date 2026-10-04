@@ -400,6 +400,7 @@ def objective_start(run: c.Run, objective: str, *, tasks: str = "",
     # An explicit task list has no request text read by the compiler, so it
     # carries no contract; one read from words does (below).
     contract = None
+    register: tuple = ()
     if tasks.strip():
         try:
             specs = json.loads(tasks)
@@ -434,9 +435,11 @@ def objective_start(run: c.Run, objective: str, *, tasks: str = "",
         # and compile holds the plan to the literals in it (INTENT-001).
         from friday import requirements as REQ
 
-        assumed, unanswered = REQ.ground_for(text)
-        contract = SP.contract_for(semantic, text, assumptions=assumed,
-                                   open_questions=unanswered)
+        register, unanswered = REQ.grounded_for(text)
+        contract = SP.contract_for(
+            semantic, text,
+            assumptions=tuple(dict.fromkeys(entry.statement for entry in register)),
+            open_questions=unanswered)
         if not specs:
             return run.record(c.failed(
                 started,
@@ -445,7 +448,8 @@ def objective_start(run: c.Run, objective: str, *, tasks: str = "",
                    if semantic.unresolved else "")))
 
     compile_args = dict(request=text, tasks=specs, manifest=manifest,
-                        objective_summary=text, contract=contract)
+                        objective_summary=text, contract=contract,
+                        assumptions=register)
     try:
         # The objective is the caller's: it keeps their lineage (TRUST-002).
         created = O.compile_objective(db, **compile_args, provenance=run.provenance,
@@ -507,6 +511,10 @@ def objective_status(run: c.Run, run_id: str = "",
         "next_wake": found["next_wake"],
         "summary": found.get("summary") or {},
         "tasks": tasks,
+        "assumptions": [{key: row[key] for key in (
+            "key", "statement", "origin", "confidence", "consequence",
+            "validation", "state")}
+            for row in store().list_assumptions(found["run_id"])],
     }
     return run.record(c.succeeded(
         started, output=_scoped(payload),
@@ -574,14 +582,25 @@ def objective_pause(run: c.Run, run_id: str = "", *, reason: str = "",
 
 
 def objective_resume(run: c.Run, run_id: str = "", *, reason: str = "",
+                     assumption: str = "", state: str = "VALIDATED",
                      engine: PolicyEngine = default_engine):
-    """Resume the named paused run (or the most recent paused one)."""
+    """
+    Resume the named paused run (or the most recent paused one).
+
+    With `assumption` (a key from objective_status) the run is instead the one
+    held for that assumption to be validated: the outcome (`state`: VALIDATED,
+    REFUTED or WAIVED) is recorded, and the run is released once nothing
+    high-impact is left unvalidated.
+    """
     tool_id = "objectives.resume"
     blocked = _gate(run, tool_id, engine)
     if blocked:
         return blocked
     started = c.started(run.run_id, tool_id)
     db = store()
+    if assumption.strip():
+        return _resolve_assumption(run, started, db, run_id.strip(),
+                                   assumption.strip(), state.strip().upper())
     if run_id.strip():
         found = store().objective_run(run_id.strip())
     else:
@@ -608,6 +627,32 @@ def objective_resume(run: c.Run, run_id: str = "", *, reason: str = "",
         verification=c.Verification(
             method="store_status_flip",
             evidence=f"run {found['run_id']} resumed")))
+
+
+def _resolve_assumption(run: c.Run, started, db, run_id: str, key: str,
+                        state: str):
+    """Record the outcome of one assumption on the run held for it."""
+    if not run_id:
+        return run.record(c.failed(
+            started, "name the run_id the assumption belongs to"))
+    found = db.objective_run(run_id)
+    if found is None:
+        return run.record(c.failed(started, f"no objective run {run_id!r}"))
+    try:
+        recorded = O.resolve_assumption(db, run_id, key, state)
+    except ValueError as exc:
+        return run.record(c.failed(started, str(exc)))
+    if not recorded:
+        return run.record(c.failed(
+            started, f"{run_id} has no assumption {key!r}"))
+    after = db.objective_run(run_id) or {}
+    return run.record(c.succeeded(
+        started, output=_scoped({"run_id": run_id, "assumption": key,
+                                 "state": state,
+                                 "status": after.get("status", "")}),
+        verification=c.Verification(
+            method="store_status_flip",
+            evidence=f"assumption on {run_id} recorded as {state}")))
 
 
 def objective_cancel(run: c.Run, run_id: str = "", *, reason: str = "",

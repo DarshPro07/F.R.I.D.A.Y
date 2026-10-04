@@ -100,10 +100,21 @@ def register(mcp):
                         O.objective_pause, run_id, reason=reason)
 
     @mcp.tool()
-    def objective_resume(run_id: str = "", reason: str = "") -> dict:
-        """Resume a paused objective run exactly where it paused."""
+    def objective_resume(run_id: str = "", reason: str = "",
+                         assumption: str = "", state: str = "VALIDATED") -> dict:
+        """
+        Resume a paused objective run exactly where it paused.
+
+        A run can instead be held because Friday assumed something high-impact
+        for the person and has not confirmed it (objective_status lists each
+        assumption with its `key`). Confirm it with the person, then pass
+        `run_id`, that `assumption` key and the outcome as `state`:
+        VALIDATED, WAIVED (proceed anyway) or REFUTED (it was wrong; the run
+        stays held to be replanned).
+        """
         return _execute(f"resume objective: {reason or run_id or 'run'}",
-                        O.objective_resume, run_id, reason=reason)
+                        O.objective_resume, run_id, reason=reason,
+                        assumption=assumption, state=state)
 
     @mcp.tool()
     def objective_cancel(run_id: str = "", reason: str = "") -> dict:

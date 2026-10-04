@@ -873,6 +873,26 @@ CREATE TABLE IF NOT EXISTS objective_tasks (
 CREATE INDEX IF NOT EXISTS idx_objective_tasks_run
     ON objective_tasks(run_id, status);
 
+-- ASSUME-001: what Friday decided for the person while compiling this
+-- objective, with how sure it was, what it costs if wrong, how it would be
+-- confirmed and whether it has been. `key` is the statement's stable identity,
+-- so recording the same assumption again updates the row rather than
+-- duplicating it.
+CREATE TABLE IF NOT EXISTS assumption_register (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    statement   TEXT NOT NULL,
+    origin      TEXT NOT NULL,
+    confidence  TEXT NOT NULL,
+    consequence TEXT NOT NULL,
+    validation  TEXT NOT NULL DEFAULT '',
+    state       TEXT NOT NULL DEFAULT 'UNVALIDATED',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    UNIQUE (run_id, key)
+);
+
 -- The continuation trace: every state transition, in order, with the
 -- payload that explains it. Without it "the run completed" is a claim
 -- nobody can check the morning after.
@@ -1793,6 +1813,37 @@ class Store:
             cur = conn.execute(
                 "UPDATE open_questions SET answer=?, answered_at=? WHERE id=? AND answer IS NULL",
                 (answer, now_iso(), question_id))
+            return cur.rowcount > 0
+
+    def save_assumption(self, run_id: str, *, key: str, statement: str,
+                        origin: str, confidence: str, consequence: str,
+                        validation: str = "", state: str = "UNVALIDATED") -> None:
+        """Record an assumption against an objective run; the same key updates."""
+        stamp = now_iso()
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO assumption_register (run_id, key, statement, origin, "
+                "confidence, consequence, validation, state, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(run_id, key) DO UPDATE SET statement=excluded.statement, "
+                "origin=excluded.origin, confidence=excluded.confidence, "
+                "consequence=excluded.consequence, validation=excluded.validation, "
+                "state=excluded.state, updated_at=excluded.updated_at",
+                (run_id, key, statement, origin, confidence, consequence,
+                 validation, state, stamp, stamp))
+
+    def list_assumptions(self, run_id: str) -> list[dict]:
+        """The run's register, in the order it was recorded."""
+        return [dict(r) for r in self._conn.execute(
+            "SELECT * FROM assumption_register WHERE run_id=? ORDER BY id",
+            (run_id,))]
+
+    def set_assumption_state(self, run_id: str, key: str, state: str) -> bool:
+        """True if the run had that assumption."""
+        with self._tx() as conn:
+            cur = conn.execute(
+                "UPDATE assumption_register SET state=?, updated_at=? "
+                "WHERE run_id=? AND key=?", (state, now_iso(), run_id, key))
             return cur.rowcount > 0
 
     _SHADOW_COLUMNS = (

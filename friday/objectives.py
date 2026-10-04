@@ -20,6 +20,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 
 from friday import contracts, dag
+from friday import requirements as REQ
 from friday.contracts import new_run_id, now_iso
 from friday.store import Store
 
@@ -134,6 +135,9 @@ class FailureKind:
 #: Events the engine appends to the continuation trace.
 EVENT_RUN_CREATED = "run.created"
 EVENT_RUN_STARTED = "run.started"
+#: ASSUME-001: a high-impact assumption must be validated before work starts.
+EVENT_ASSUMPTION_DUE = "assumption.validation_due"
+EVENT_ASSUMPTION_RESOLVED = "assumption.resolved"
 EVENT_TASK_STARTED = "task.started"
 EVENT_TASK_SUCCEEDED = "task.succeeded"
 EVENT_TASK_FAILED = "task.failed"
@@ -728,7 +732,8 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
                       run_id: str | None = None,
                       envelope: contracts.Envelope | None = None,
                       composition_confirmed: bool = False,
-                      contract: contracts.ObjectiveContract | None = None) -> dict:
+                      contract: contracts.ObjectiveContract | None = None,
+                      assumptions: tuple[REQ.Assumption, ...] = ()) -> dict:
     """
     Turn an LLM-produced plan into a durable, validated task graph.
 
@@ -855,13 +860,34 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
     stored_ids = [f"{run_id}-{task_id}" for task_id in task_ids]
     translate = dict(zip(task_ids, stored_ids))
     stamp = now_iso()
+    # ASSUME-001: a high-impact assumption nobody has validated is validated
+    # before the work that rests on it starts. The run waits on the person
+    # (a legitimate wait, not a stranded run) and every task starts QUEUED;
+    # `resolve_assumption` releases them.
+    register = tuple(assumptions)
+    due = REQ.due_for_validation(register)
     store.open_objective_run(
         run_id, request=request, objective_summary=objective_summary,
-        status=RUN_RUNNING, next_wake=stamp,
+        status=RUN_WAITING_QUESTION if due else RUN_RUNNING,
+        next_wake=None if due else stamp,
         provenance=envelope.provenance, attended=envelope.attended,
         envelope=envelope.to_dict(),
         contract=None if contract is None else contract.to_dict(),
     )
+    for entry in register:
+        store.save_assumption(run_id, key=entry.key, **entry.to_dict())
+    if due:
+        # A legitimate wait: no wake is scheduled, and the blocker says what
+        # the person is being asked to confirm.
+        store.touch_objective_run(
+            run_id, blocker="assumption to validate: " + "; ".join(
+                entry.statement for entry in due)[:300])
+        store.append_objective_event(
+            run_id, EVENT_ASSUMPTION_DUE,
+            detail={"assumptions": [
+                {"statement": entry.statement, "consequence": entry.consequence,
+                 "confidence": entry.confidence, "validation": entry.validation}
+                for entry in due]})
     # PRD FR-001/FR-002: the objective is classified once, at admission,
     # and the class, risk tier, budgets and required capabilities are
     # durable columns - inspectable, resumable, traceable (FR-001
@@ -892,7 +918,7 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
         if task.children:
             _save_composite(store, run_id=run_id, task_id=task_id, task=task,
                             dependencies=dependencies, arguments=arguments,
-                            known=known)
+                            known=known, hold=bool(due))
             continue
         if task.capability not in known:
             # A hallucinated tool is a fact about the plan, not a runtime
@@ -915,11 +941,44 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
             task_id=task_id, run_id=run_id, capability=task.capability,
             arguments=json_dumps(arguments),
             dependencies=json_dumps(dependencies),
-            status=TASK_READY if not task.dependencies else TASK_QUEUED,
+            status=(TASK_READY if not task.dependencies and not due
+                    else TASK_QUEUED),
             attempts=0,
         )
     store.touch_objective_run(run_id)
     return store.objective_run(run_id) or {"run_id": run_id}
+
+
+def resolve_assumption(store: Store, run_id: str, key: str, state: str) -> bool:
+    """
+    Record what became of an assumption, and release the run if it was the
+    last thing holding it.
+
+    VALIDATED and WAIVED settle it. REFUTED does not: work built on a premise
+    that turned out false is replanned, not released. Once nothing in the
+    register is due or refuted, a run still waiting on it resumes and the
+    tasks held at compile start (QUEUED with no dependencies) become READY.
+    Returns False when the run has no such assumption.
+    """
+    if state not in REQ.VALIDATION_STATES or state == REQ.UNVALIDATED:
+        raise ValueError(f"cannot resolve an assumption to {state!r}")
+    if not store.set_assumption_state(run_id, key, state):
+        return False
+    store.append_objective_event(run_id, EVENT_ASSUMPTION_RESOLVED,
+                                 detail={"key": key, "state": state})
+    register = [REQ.Assumption.from_dict(row)
+                for row in store.list_assumptions(run_id)]
+    run = store.objective_run(run_id)
+    if (run is None or run["status"] != RUN_WAITING_QUESTION
+            or REQ.due_for_validation(register)
+            or REQ.refuted_high_impact(register)):
+        return True
+    for task in store.objective_tasks(run_id):
+        if task["status"] == TASK_QUEUED and not task.get("dependencies"):
+            store.update_objective_task(task["task_id"], status=TASK_READY)
+    store.touch_objective_run(run_id, status=RUN_RUNNING, next_wake=now_iso(),
+                              blocker="")
+    return True
 
 
 def _why_it_cannot_run(capability: str, arguments: dict) -> str:
@@ -939,7 +998,7 @@ def _why_it_cannot_run(capability: str, arguments: dict) -> str:
 
 def _save_composite(store: Store, *, run_id: str, task_id: str,
                     task: CompiledTask, dependencies: list[str],
-                    arguments: dict, known: set) -> None:
+                    arguments: dict, known: set, hold: bool = False) -> None:
     """Write a group row plus its leaves.
 
     The group is written non-terminal and is never dispatched: it settles
@@ -992,7 +1051,7 @@ def _save_composite(store: Store, *, run_id: str, task_id: str,
             arguments=json_dumps(child.arguments),
             dependencies=json_dumps(dependencies),
             parent_id=task_id,
-            status=TASK_READY if not dependencies else TASK_QUEUED,
+            status=TASK_READY if not dependencies and not hold else TASK_QUEUED,
             attempts=0)
 
 

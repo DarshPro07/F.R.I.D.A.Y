@@ -267,6 +267,7 @@ UNSCOPED = {
     "objective_events": "child rows of `objective_runs`",
     "objective_tasks": "child rows of `objective_runs`",
     "objective_deliveries": "child rows of `objective_runs`",
+    "assumption_register": "child rows of `objective_runs`",
     "automation_runs": "child rows of `automations`",
     "automation_executions": "child rows of `automation_runs`",
     "schedule_runs": "child rows of `schedules`",
