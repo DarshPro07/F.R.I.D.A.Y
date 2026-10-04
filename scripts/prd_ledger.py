@@ -3415,6 +3415,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Governor.reduce_running now also stops running BACKGROUND optional work when the person returns or the machine goes on battery (URGENT keeps running; pressure still stops it). Lease records its priority; a raising context probe reads as unknown. (build run, commit da84d62f5)',
         "next_action": 'GAPS: No production caller of admit(OPTIONAL) exists in friday/ yet, so autolearn/digest callers must pass through this gate when they are wired.; Assumed: two priorities (BACKGROUND default, URGENT) and a 120 s away threshold (Thresholds.user_idle_s); the PRD gives neither. Revisit if the owner wants a finer scale.; Last-input idle time is read only on Windows; elsewhere it is unknown and does not defer.; Running work is re-judged only on a fresh pressure sample (sample_ttl_s, 2 s) and only when something calls pressure(); there is no background ticker.',
     }),
+    ('PKG-001', {
+        "status": PARTIAL,
+        "current_implementation": "Voice row FAILs on a template/refused/wrong-format key (Gemini 'AIza' checked pre-call; provider reason code, name only). Startup registers on-disk skills and creates the friday Hermes profile; doctor reports the profile; onboarding is a setup step (PASS). (build run, commit 9bd8a1324)",
+        "next_action": 'GAPS: Acceptance is a clean Windows VM ready-state: not run here (no VM, no rebuilt FRIDAY.exe); scripts/validate_exe.py 12/12 not re-run against a rebuilt exe; Skills are registered at launcher start (run_all) only, not when server.py runs outside FRIDAY.exe; Provider credentials row stays DEGRADED for a refused key; only the voice row (the stage that cannot run) is FAIL; New tests were not run against the pre-change tree (git checkout is denied); they call new functions or assert FAIL/REJECTED where the old code gave PASS/UNVERIFIED; implementer did not claim acceptance met',
+    }),
 ]
 
 
