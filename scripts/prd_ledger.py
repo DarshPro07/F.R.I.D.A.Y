@@ -3257,6 +3257,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "ambiguous-intent handling, acceptable p95 latency and chooser invocation rate, no golden-journey regression. "
             "Tests: each mode, the fallback, that shadow never changes the executed tool, the invocation-rate metric."),
     }),
+    ('CTX-003', {
+        "status": PARTIAL,
+        "current_implementation": 'Registered development_run (FILE_WRITE, selfdev group; only caller of development.for_request) and development_promote (COMMAND_EXECUTION). Both ask unless an APPROVAL-001 lease covers them; commands refused citing EXEC-SBX-001. 16 new tests plus seam pin. (build run, commit 67dc6b573)',
+        "next_action": 'GAPS: development_run stages the run (facts compiled, repo mapped, team chosen) but does not execute a worker: choosing/building an executor is not wired, and any command-running worker waits on EXEC-SBX-001.; needs_commands is declared by the caller; below it, delegation_scope.refuse_commands (SEC-005) is what stops a worker running commands.; Lease coverage uses the existing APPROVAL-001 per-action record (same capability, arguments, plan, blast radius); no broader repo-wide lease format was added.; Wider sweep of 94 impacted test files: only failures were test_phase1b live-browser (@live, excluded from gate) and test_prd_ledger::test_the_real_ledgers_are_clean (data/prd_v7_requirements.json absent in this worktree; not touched).; docs/golden/objectives.jsonl shows modified in git status after the suite ran (line-ending only, no content diff); not part of this change.',
+    }),
 ]
 
 
