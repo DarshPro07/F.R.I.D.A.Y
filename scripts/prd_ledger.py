@@ -3365,6 +3365,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "degradation. Code signing NOT_CONFIGURED needs a certificate (external; report it, do not fake it). Tests for "
             "each; scripts/validate_exe.py stays 12/12."),
     }),
+    ('BROW-003', {
+        "status": PARTIAL,
+        "current_implementation": 'BrowserSession now launches ProfileChoice.directory as a persistent on-disk context, deletes a TEMPORARY profile when the session closes or is abandoned, and refuses a profile switch on a running session. The loop reports the profile actually launched. (build run, commit b92e3f53e)',
+        "next_action": "GAPS: Launch is verified against a faked Playwright, not a live Chromium; launch_persistent_context on a real user-data dir is unverified.; No production caller passes a ProfileChoice to browser_act/_loop_browser yet: the MCP wrapper still starts ISOLATED, and the source of the person's approval for a temporary profile is not wired.; Browser.resume() is still only pulled by the next state-changing primitive; no explicit caller exists.; tests/test_phase1b.py::test_live_browser_opens_and_closes (live, needs network) failed in one run on the page-text assertion (example.com returned Spanish text); not touched by this change and excluded from the not-live gate. The new tests were not run against the pre-change tree (git checkout denied); they call session.page(profile=...), which did not exist before.",
+    }),
 ]
 
 
