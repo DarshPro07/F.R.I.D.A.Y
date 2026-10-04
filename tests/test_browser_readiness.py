@@ -163,6 +163,82 @@ def test_a_failed_start_is_retried_not_cached(monkeypatch, run, engine, fresh_se
     assert first.stopped and second.stopped
 
 
+# --- the control-room browser names the same typed reason (BROW-004) --------
+
+
+class _SyncChromium:
+    def __init__(self, error):
+        self.error = error
+
+    def launch_persistent_context(self, *args, **kwargs):
+        raise self.error
+
+
+class _SyncPlaywright:
+    def __init__(self, error):
+        self.chromium = _SyncChromium(error)
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
+
+
+def _fake_sync_playwright(monkeypatch, driver):
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", types.SimpleNamespace(
+        sync_playwright=lambda: types.SimpleNamespace(start=lambda: driver)))
+
+
+@pytest.fixture
+def ui(monkeypatch, tmp_path):
+    from friday import ui_browser
+
+    monkeypatch.setattr(ui_browser, "_PROFILE_DIR", tmp_path / "profile")
+    monkeypatch.setattr(ui_browser, "_worker", ui_browser._Worker())
+    return ui_browser
+
+
+def test_the_control_room_browser_names_a_missing_chromium_build(monkeypatch, ui):
+    driver = _SyncPlaywright(RuntimeError("BrowserType.launch_persistent_context: "
+                                          "Executable doesn't exist at C:/x/chrome.exe"))
+    _fake_sync_playwright(monkeypatch, driver)
+    with pytest.raises(B.BrowserUnavailable) as caught:
+        ui._worker.call(lambda page: page, timeout=5)
+    assert caught.value.readiness.state == B.BINARY_MISSING
+    assert "playwright install chromium" in str(caught.value)
+    assert driver.stopped, "the driver started before the failed launch must be released"
+    assert ui._worker.running is False
+
+
+def test_the_control_room_browser_names_a_missing_package(monkeypatch, ui):
+    monkeypatch.setitem(sys.modules, "playwright", None)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", None)
+    with pytest.raises(B.BrowserUnavailable) as caught:
+        ui._worker.call(lambda page: page, timeout=5)
+    assert caught.value.readiness.state == B.NOT_INSTALLED and "[browser]" in str(caught.value)
+
+
+def test_a_failed_control_room_boot_is_retried_not_cached(monkeypatch, ui):
+    first = _SyncPlaywright(RuntimeError("sandbox denied"))
+    _fake_sync_playwright(monkeypatch, first)
+    with pytest.raises(B.BrowserUnavailable):
+        ui._worker.call(lambda page: page, timeout=5)
+    second = _SyncPlaywright(RuntimeError("sandbox denied again"))
+    _fake_sync_playwright(monkeypatch, second)
+    with pytest.raises(B.BrowserUnavailable) as caught:
+        ui._worker.call(lambda page: page, timeout=5)
+    assert "sandbox denied again" in str(caught.value)
+    assert first.stopped and second.stopped
+
+
+def test_open_url_reports_an_unavailable_browser_as_a_typed_status(monkeypatch, ui):
+    _fake_sync_playwright(monkeypatch, _SyncPlaywright(RuntimeError("sandbox denied")))
+    out = ui.open_url("https://example.com/")
+    assert out["status"] == "unavailable" and out["readiness"] == B.LAUNCH_FAILED
+    assert "sandbox denied" in out["verdict"] and out["content"] == ""
+    study = ui.study_url("https://example.com/")
+    assert study["status"] == "unavailable" and study["readiness"] == B.LAUNCH_FAILED
+
+
 @pytest.mark.live
 def test_a_real_launch_is_ready():
     pytest.importorskip("playwright")

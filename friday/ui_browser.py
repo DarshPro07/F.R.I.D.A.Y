@@ -27,6 +27,7 @@ import time
 from pathlib import Path
 
 from friday import browser_capability as bc
+from friday import browser_readiness
 from friday import confirmation as C
 
 logger = logging.getLogger("friday-agent.ui_browser")
@@ -67,8 +68,10 @@ class _Worker:
 
     def __init__(self):
         self._q = queue.Queue()
+        self._lock = threading.Lock()   # orders a call's enqueue against a failed boot's drain
         self._thread = None
-        self._boot_error = None
+        self._boot_error = None         # the Readiness of the last failed boot
+        self._pw = None
         self._page = None
 
     def _ensure(self):
@@ -76,6 +79,33 @@ class _Worker:
             self._thread = threading.Thread(target=self._loop, daemon=True,
                                             name="friday-browser")
             self._thread.start()
+
+    def _release_driver(self):
+        pw, self._pw = self._pw, None
+        if pw is None:
+            return
+        try:
+            pw.stop()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("browser driver did not stop cleanly: %s", exc)
+
+    def _fail_boot(self, exc):
+        """A boot that failed answers every waiting call with the probe's typed
+        reason, frees the driver it started, and lets the next call boot again
+        (the owner may have just installed the Chromium build)."""
+        readiness = browser_readiness.classify_failure(exc)
+        logger.warning("browser boot failed: %s: %s", readiness.state, readiness.detail)
+        self._release_driver()
+        with self._lock:
+            self._boot_error = readiness
+            self._thread = None
+            waiting = []
+            while not self._q.empty():
+                waiting.append(self._q.get_nowait())
+        for fn, box in waiting:
+            if fn is not None:
+                box["error"] = browser_readiness.BrowserUnavailable(readiness)
+                box["done"].set()
 
     def _loop(self):
         try:
@@ -87,9 +117,8 @@ class _Worker:
                 viewport={"width": 1380, "height": 860})
             self._page = (self._ctx.pages[0] if self._ctx.pages
                           else self._ctx.new_page())
-        except Exception as exc:  # noqa: BLE001
-            self._boot_error = exc
-            logger.warning("browser boot failed: %s", exc)
+        except Exception as exc:  # noqa: BLE001 - typed by browser_readiness
+            self._fail_boot(exc)
             return
         while True:
             fn, box = self._q.get()
@@ -103,12 +132,11 @@ class _Worker:
                 box["done"].set()
 
     def call(self, fn, timeout=45):
-        self._ensure()
         box = {"done": threading.Event()}
-        self._q.put((fn, box))
+        with self._lock:
+            self._ensure()
+            self._q.put((fn, box))
         if not box["done"].wait(timeout):
-            if self._boot_error is not None:
-                raise RuntimeError("browser did not start: %s" % self._boot_error)
             raise TimeoutError("browser op timed out")
         if "error" in box:
             raise box["error"]
@@ -129,6 +157,16 @@ def _snap(page):
     return {"screenshot": name, "title": page.title(), "final_url": page.url}
 
 
+def _observe(url, capture):
+    """observe_page through the worker; a browser that cannot start is a typed
+    status naming the probe's reason, not an exception out of a read."""
+    try:
+        return bc.observe_page(url, lambda: _worker.call(capture))
+    except browser_readiness.BrowserUnavailable as exc:
+        return {"status": "unavailable", "verdict": str(exc), "content": "",
+                "readiness": exc.readiness.state}
+
+
 def open_url(url):
     """Open a URL in the persistent headed browser -- a READ, policy-gated.
 
@@ -146,7 +184,7 @@ def open_url(url):
                 "BLOCKED_SENSITIVE_DOMAIN: redirected to %s" % final)
         return page.inner_text("body")
 
-    out = bc.observe_page(url, lambda: _worker.call(lambda page: capture(page)))
+    out = _observe(url, capture)
     out["url"] = url
     if out.get("status") == "ok":
         try:
@@ -212,7 +250,7 @@ def study_url(url):
         import json as _json
         return _json.dumps(page.evaluate(_DESIGN_JS))
 
-    out = bc.observe_page(url, lambda: _worker.call(lambda page: capture(page)))
+    out = _observe(url, capture)
     out["url"] = url
     if out.get("status") == "ok":
         try:
