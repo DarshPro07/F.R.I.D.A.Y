@@ -3241,6 +3241,22 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "traversal, absolute, UNC or network paths, case variations, symlinks or junctions. The same sandbox is "
             "the preferred runtime for the Capability Marketplace's dynamic evaluation (CAP-MKT-003)."),
     }),
+    # --- CTX-002: owner rulings 2026-10-04 (key, holdout, flag + shadow)
+    ('CTX-002', {
+        "status": PARTIAL,
+        "next_action": (
+            "RULINGS 2026-10-04 (docs/plans/build-harness/00-owner-directive-2026-10-04.md). (1) No raw API key: the stage-2 "
+            "chooser runs through a coding-agent CLI (Claude Code `claude -p`, Codex or Antigravity) via the model gateway, "
+            "on a bounded dev sample, each call's cost recorded in the day ledger. (2) Measure the sealed holdout exactly "
+            "once, after the chooser and thresholds are fixed on dev; never tune on it. (3) Wire the staged router into "
+            "capability_router search behind tool_router_mode = legacy | shadow | staged (default legacy; plan under "
+            "docs/plans/ctx-002/). shadow: legacy decides, the staged router also runs and logs legacy choice, staged top-k, "
+            "confidence, latency, would-clarify and the observed successful tool, with no effect on execution; stage 2 only "
+            "on a bounded sample or a configured evaluator. staged: owns routing with automatic fallback to legacy on error "
+            "or timeout. Promotion to staged needs held-out and shadow evidence: Success@1 >= 0.90, Success@3 >= 0.97, "
+            "ambiguous-intent handling, acceptable p95 latency and chooser invocation rate, no golden-journey regression. "
+            "Tests: each mode, the fallback, that shadow never changes the executed tool, the invocation-rate metric."),
+    }),
 ]
 
 
