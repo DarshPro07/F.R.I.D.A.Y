@@ -323,6 +323,74 @@ def test_the_users_own_chrome_profile_is_not_a_workspaces_to_withhold(tmp_path):
     assert choice.kind == B.AUTHORIZED
 
 
+@pytest.fixture
+def browser_state(tmp_path, monkeypatch):
+    monkeypatch.setattr("friday.config.STATE_ROOT", tmp_path)
+    return tmp_path
+
+
+def test_a_temporary_profile_needs_the_persons_yes(browser_state):
+    """BROW-003: without the approval a profile is never temporary; with it,
+    the choice names a fresh directory owned by the asking workspace."""
+    from friday import browser as B
+    with W.use("brand-a"):
+        none = B.choose_profile(worker="friday", authorized_by_approval=False)
+        yes = B.choose_profile(worker="friday", authorized_by_approval=False,
+                               temporary_by_approval=True)
+        again = B.choose_profile(worker="friday", authorized_by_approval=False,
+                                 temporary_by_approval=True)
+    assert none.kind == B.ISOLATED and none.directory == ""
+    assert yes.kind == B.TEMPORARY and yes.kind in B.PROFILE_KINDS
+    assert yes.directory != again.directory, "two sessions share one temporary profile"
+    with W.use("brand-a"):
+        assert B.owns_profile_dir(yes.directory)
+    with W.use("brand-b"):
+        assert not B.owns_profile_dir(yes.directory)
+
+
+def test_a_temporary_profile_of_one_workspace_is_refused_to_another(browser_state):
+    from friday import browser as B
+    with W.use("brand-a"):
+        temp = B.choose_profile(worker="friday", authorized_by_approval=False,
+                                temporary_by_approval=True)
+    with W.use("brand-b"):
+        theirs = B.choose_profile(worker="friday", authorized_by_approval=True,
+                                  authorized_dir=temp.directory)
+    assert theirs.kind == B.ISOLATED
+    assert "another workspace" in theirs.reason
+
+
+def test_discarding_a_temporary_profile_deletes_only_that_profile(browser_state):
+    from friday import browser as B
+    from pathlib import Path
+    with W.use("brand-a"):
+        temp = Path(B.new_temporary_profile_dir())
+        temp.mkdir(parents=True)
+        (temp / "Cookies").write_text("session")
+        dedicated = B.workspace_profile_dir()
+        dedicated.mkdir(parents=True)
+        (dedicated / "Cookies").write_text("signed in")
+        mine = browser_state / "MyChrome"
+        mine.mkdir()
+        assert B.discard_temporary_profile(str(temp)) is True
+        assert not temp.exists()
+        assert B.discard_temporary_profile(str(temp)) is False
+        # Anything else is refused loudly, and survives.
+        for keep in (dedicated, mine, B.temporary_profiles_root(), browser_state):
+            with pytest.raises(ValueError):
+                B.discard_temporary_profile(str(keep))
+        assert (dedicated / "Cookies").read_text() == "signed in"
+        assert mine.exists()
+    other = None
+    with W.use("brand-b"):
+        other = Path(B.new_temporary_profile_dir())
+        other.mkdir(parents=True)
+    with W.use("brand-a"):
+        with pytest.raises(ValueError):
+            B.discard_temporary_profile(str(other))
+    assert other.exists()
+
+
 # --- the ratchet ------------------------------------------------------------
 
 def test_every_table_is_declared(store):

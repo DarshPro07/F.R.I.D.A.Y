@@ -53,6 +53,18 @@ PAGES = {
         "text": "Checking your browser before accessing bot.example. Verify you are human. reCAPTCHA",
         "elements": [{"tag": "button", "role": "button", "text": "I am not a robot", "name": "cb", "selector": "#cb"}],
         "markers": ["g-recaptcha"]},
+    "https://sso.example/login": {
+        "title": "Sign in", "text": "Sign in to continue.",
+        "elements": [{"tag": "input", "role": "input", "text": "", "name": "user", "selector": "#user"}]},
+    "https://sso.example/step2": {
+        "title": "Two-step verification", "text": "Enter the code we sent to your phone.",
+        "elements": [{"tag": "input", "role": "input", "text": "", "name": "otp", "selector": "#otp"}]},
+    "https://sso.example/passkey": {
+        "title": "Welcome back", "text": "Use your passkey to sign in.",
+        "elements": [{"tag": "button", "role": "button", "text": "Continue", "name": "c", "selector": "#c"}]},
+    "https://sso.example/hwkey": {
+        "title": "Welcome back", "text": "Insert your security key and touch it.",
+        "elements": [{"tag": "button", "role": "button", "text": "Continue", "name": "c", "selector": "#c"}]},
     "https://mail.example/inbox": {
         "title": "Inbox", "text": "token=" + FAKE_KEY + " hello",
         "elements": [{"tag": "a", "role": "link", "text": "Compose", "selector": "#compose"}]},
@@ -264,6 +276,59 @@ def test_landing_on_a_verification_page_after_an_action_is_flagged():
     run(b.run("open", args={"url": "https://shop.example/product"}))
     step = run(b.run("click", "Reviews"))
     assert step.handoff and "HANDOFF" in step.evidence
+
+
+# -- BROW-003: OTP / passkey / hardware key pause for the person, then resume --
+
+
+@pytest.mark.parametrize("url", ["https://sso.example/step2", "https://sso.example/passkey",
+                                 "https://sso.example/hwkey"])
+def test_an_otp_passkey_or_hardware_key_step_pauses_for_the_person(url):
+    d = FakeDriver(url)
+    b = browser(d, approvals={"click": True, "type": True})
+    run(b.observe())
+    with pytest.raises(B.Handoff):
+        run(b.run("click", "Continue" if "step2" not in url else "otp"))
+    assert not any(e[0] in ("click", "fill") for e in d.log)
+    assert b.pending_handoff
+
+
+def test_the_loop_resumes_once_the_person_has_finished_the_handoff():
+    """The person completes the OTP in the tab; the next state-changing
+    step must see the page they left, not the one that stopped it."""
+    d = FakeDriver("https://sso.example/step2")
+    b = browser(d, approvals={"click": True})
+    run(b.observe())
+    with pytest.raises(B.Handoff):
+        run(b.run("click", "otp"))
+    # Still on the OTP page: asking to resume changes nothing and acts on nothing.
+    with pytest.raises(B.Handoff) as still:
+        run(b.resume())
+    assert "still waiting for the person" in str(still.value)
+    with pytest.raises(B.Handoff):
+        run(b.run("click", "otp"))
+    assert not any(e[0] == "click" for e in d.log)
+    # The person finishes; the tab is now somewhere else.
+    d.url = "https://shop.example/product"
+    step = run(b.run("click", "Add to cart"))
+    assert step.ok and ("click", "#add") in d.log
+    assert b.pending_handoff == ""
+
+
+def test_a_login_page_holds_state_changes_until_the_person_leaves_it():
+    d = FakeDriver()
+    b = browser(d, approvals={"type": True})
+    opened = run(b.run("open", args={"url": "https://sso.example/login"}))
+    assert opened.handoff and b.pending_handoff
+    with pytest.raises(B.Handoff):
+        run(b.run("type", "user", {"text": "someone"}))
+    assert not any(e[0] == "fill" for e in d.log)
+    # Reads are not held: the person can be told what the page says.
+    assert run(b.run("inspect")).ok
+    d.url = "https://shop.example/product"
+    assert run(b.resume()).url == "https://shop.example/product"
+    assert b.pending_handoff == ""
+    assert run(b.run("type", "q", {"text": "widget"})).ok
 
 
 # -- FR-033 -----------------------------------------------------------------

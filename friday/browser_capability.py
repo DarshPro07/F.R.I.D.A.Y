@@ -124,14 +124,22 @@ def classify_url(url: str, *, net: dict | None = None) -> BrowserVerdict:
             BLOCK_NETWORK, f"this address could not be checked "
                            f"({type(exc).__name__})")
 
-    lowered = (url or "").lower()
-    for pattern in _AUTH_PATTERNS:
-        if re.search(pattern, lowered):
-            return BrowserVerdict(
-                AUTH_HANDOFF,
-                "authentication surface: Friday navigates, the user "
-                "completes credentials/MFA, Friday resumes after")
+    if is_auth_url(url):
+        return BrowserVerdict(AUTH_HANDOFF, AUTH_HANDOFF_REASON)
     return BrowserVerdict(ALLOW, "no policy match")
+
+
+AUTH_HANDOFF_REASON = ("authentication surface: Friday navigates, the user "
+                       "completes credentials/MFA, Friday resumes after")
+
+
+def is_auth_url(url: str) -> bool:
+    """True when the URL has a login/MFA shape. The one place that shape is
+    decided: `classify_url` uses it before a navigation, and the browser loop
+    uses it to see whether a person's hand-off is finished (the page they
+    were given no longer looks like an authentication surface)."""
+    lowered = (url or "").lower()
+    return any(re.search(pattern, lowered) for pattern in _AUTH_PATTERNS)
 
 
 def redact_secrets(text: str) -> tuple[str, int]:

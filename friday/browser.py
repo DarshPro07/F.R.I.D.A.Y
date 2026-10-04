@@ -35,7 +35,9 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -108,11 +110,15 @@ HUMAN_VERIFICATION = (
     r"\bone[- ]time (code|password)\b", r"\bverification code\b",
     r"\benter the code (we )?sent\b", r"\bauthenticator app\b",
     r"\bpress and hold\b", r"\bprove you're human\b",
+    # Passkey and hardware-key prompts need the person's own device or touch.
+    r"\b(use|verify with|sign in with|continue with) (your |a )?pass ?key\b",
+    r"\b(use|insert|touch|tap|connect) (your )?(hardware |usb |physical )?security key\b",
 )
 
 ISOLATED = "isolated"
 AUTHORIZED = "authorized"
-PROFILE_KINDS = (ISOLATED, AUTHORIZED)
+TEMPORARY = "temporary"
+PROFILE_KINDS = (ISOLATED, AUTHORIZED, TEMPORARY)
 
 #: The policy label a FR-034 external write carries: it is a CONFIRM-class
 #: action whatever the primitive's own category says.
@@ -134,12 +140,13 @@ class ProfileChoice:
 
     kind: str
     reason: str
-    directory: str = ""      # the persistent user-data dir (AUTHORIZED only)
+    directory: str = ""      # the user-data dir (AUTHORIZED and TEMPORARY only)
 
 
 def choose_profile(*, worker: str, authorized_by_approval: bool,
                    authorized_dir: str = "",
-                   workspace_id: str | None = None) -> ProfileChoice:
+                   workspace_id: str | None = None,
+                   temporary_by_approval: bool = False) -> ProfileChoice:
     """A worker runs ISOLATED unless the objective's approval explicitly
     named the authorized profile. Friday's own foreground session may use
     AUTHORIZED; the cookies never leave that context either way.
@@ -152,6 +159,12 @@ def choose_profile(*, worker: str, authorized_by_approval: bool,
     read as "any workspace may use it". A caller that hands a directory
     approved by one workspace to another gets ISOLATED and the reason says
     why - refused, not silently honoured.
+
+    BROW-003: `temporary_by_approval` is the person's yes to a throwaway
+    on-disk profile for this workspace: its own cookies and storage, no
+    access to the signed-in profile, deleted by `discard_temporary_profile`
+    when the session ends. Without that yes a profile is never temporary -
+    the default stays the in-memory ISOLATED context.
     """
     from friday.workspace import resolve
     owner = resolve(workspace_id)
@@ -166,6 +179,10 @@ def choose_profile(*, worker: str, authorized_by_approval: bool,
     if authorized_by_approval and not authorized_dir:
         return ProfileChoice(ISOLATED, "approval named the signed-in profile but no "
                                        "profile directory is configured; isolated instead")
+    if temporary_by_approval:
+        return ProfileChoice(TEMPORARY, f"approval named a temporary profile for {worker}; "
+                                        f"it is deleted when the session ends",
+                             str(new_temporary_profile_dir(owner)))
     return ProfileChoice(ISOLATED, f"{worker} gets an ephemeral context: no cookies, "
                                    f"no signed-in state (FR-033)")
 
@@ -184,27 +201,66 @@ def workspace_profile_dir(workspace_id: str | None = None) -> Path:
     return STATE_ROOT / "browser" / "workspaces" / resolve(workspace_id)
 
 
+def temporary_profiles_root(workspace_id: str | None = None) -> Path:
+    """Where a workspace's throwaway profiles live (BROW-003). Kept beside
+    `workspaces/` rather than inside a workspace's dedicated profile, so a
+    temporary profile is never a sub-directory of a signed-in one."""
+    from friday.config import STATE_ROOT
+    from friday.workspace import resolve
+    return STATE_ROOT / "browser" / "temporary" / resolve(workspace_id)
+
+
+def new_temporary_profile_dir(workspace_id: str | None = None) -> Path:
+    """A fresh, unique directory path for one temporary profile. Nothing is
+    created: the browser makes it on launch, and every call is a new name so
+    two sessions never share cookies."""
+    return temporary_profiles_root(workspace_id) / uuid.uuid4().hex
+
+
+def discard_temporary_profile(directory: str, workspace_id: str | None = None) -> bool:
+    """Delete one temporary profile; True if it existed.
+
+    This is the only deletion of a browser profile in the module, so it
+    refuses anything that is not exactly one directory directly under this
+    workspace's temporary root - never the dedicated profile, another
+    workspace's temporary one, or the user's own Chrome profile. Refusal
+    raises: a silent no-op would let a caller believe a signed-in profile had
+    been cleaned up (or worse, that deleting it was fine).
+    """
+    root = temporary_profiles_root(workspace_id).resolve()
+    candidate = Path(directory).resolve()
+    if candidate.parent != root:
+        raise ValueError(f"{str(directory)!r} is not a temporary profile of this "
+                         f"workspace; refusing to delete it")
+    if not candidate.exists():
+        return False
+    shutil.rmtree(candidate)
+    return True
+
+
 def owns_profile_dir(directory: str, workspace_id: str | None = None) -> bool:
     """True when `directory` is this workspace's own profile, or a profile
-    outside FRIDAY's managed tree entirely.
+    outside FRIDAY's managed trees entirely.
 
     The second case is deliberate: the user's real Chrome profile is theirs,
     not a workspace's, and the owner's recorded direction is that FRIDAY
     mostly works in it. What this refuses is one workspace reaching into the
-    dedicated profile FRIDAY created for another - the case the user never
-    approved because they never saw it.
+    dedicated or temporary profile FRIDAY created for another - the case the
+    user never approved because they never saw it.
     """
     from friday.config import STATE_ROOT
     from friday.workspace import resolve
     owner = resolve(workspace_id)
     try:
         candidate = Path(directory).resolve()
-        managed = (STATE_ROOT / "browser" / "workspaces").resolve()
+        managed = [(STATE_ROOT / "browser" / name).resolve()
+                   for name in ("workspaces", "temporary")]
     except OSError:
         return False
-    if not candidate.is_relative_to(managed):
-        return True                       # not a FRIDAY-managed profile
-    return candidate.is_relative_to((managed / owner))
+    for root in managed:
+        if candidate.is_relative_to(root):
+            return candidate.is_relative_to(root / owner)
+    return True                           # not a FRIDAY-managed profile
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +403,15 @@ def human_verification(state: PageState) -> str:
         if re.search(pattern, hay):
             return f"human verification present ({pattern.strip(chr(92) + 'b')})"
     return ""
+
+
+def handoff_reason(state: PageState) -> str:
+    """BROW-003: why this page still belongs to a person, or ''. Either a
+    human-verification step (OTP, passkey, hardware key, captcha) or an
+    authentication surface (a login/MFA URL). The same answer decides when a
+    hand-off starts and when the person has finished it."""
+    return human_verification(state) or (
+        bc.AUTH_HANDOFF_REASON if bc.is_auth_url(state.url) else "")
 
 
 def external_write_intent(state: PageState, element: Element | None, text: str = "") -> str:
@@ -564,6 +629,11 @@ class Browser:
         self.approvals = dict(approvals or {})
         self.steps: list[Step] = []
         self.last: PageState | None = None
+        #: BROW-003: why the tab was last handed to a person, until `resume`
+        #: sees the page no longer needs them. While set, a state-changing
+        #: primitive re-reads the live page first instead of planning against
+        #: the observation that stopped it.
+        self.pending_handoff = ""
 
     # -- observe -----------------------------------------------------------
 
@@ -638,6 +708,7 @@ class Browser:
         hv = human_verification(state)
         if hv and changes_state:
             step.handoff = hv
+            self.pending_handoff = hv
             raise Handoff(step, f"{hv}; hand the tab to the user or use an approved API path")
 
         if changes_state:
@@ -733,9 +804,15 @@ class Browser:
             step.ok, step.detail = False, str(exc)
             step.after = self.last
         if step.after is not None:
-            hv = human_verification(step.after)
+            hv = handoff_reason(step.after)
             if hv:
                 step.handoff = hv
+            # The live page is the truth about whether a person is still
+            # needed, not the reason a step recorded on the way in (a login
+            # URL that redirected to the inbox is no longer a hand-off).
+            self.pending_handoff = hv
+        else:
+            self.pending_handoff = step.handoff
         self.verify(step)
         self.steps.append(step)
         return step
@@ -768,11 +845,38 @@ class Browser:
         step.evidence = "; ".join(parts)
         return step
 
+    async def resume(self) -> PageState:
+        """BROW-003: pick the session back up after a hand-off to a person.
+
+        Re-reads the live page (through `observe`, so the sensitive-domain
+        boundary and secret redaction apply to it like any other read). While
+        the page still needs the person - the OTP/passkey/captcha step is
+        still on screen, or the tab is still on a login URL - this raises
+        `Handoff` and nothing runs. Once it does not, the hand-off is cleared
+        and the fresh observation is returned, so the next primitive plans
+        against what the person left behind rather than the page that stopped
+        the loop. Friday never supplies the person's part: it only looks."""
+        state = await self.observe()
+        why = handoff_reason(state)
+        if why:
+            self.pending_handoff = why
+            raise Handoff(Step(INSPECT, state.url, handoff=why, before=state),
+                          f"{why}; still waiting for the person to finish")
+        self.pending_handoff = ""
+        return state
+
     async def run(self, primitive: str, target: str = "", args: dict | None = None,
                   *, timeout_ms: int = 30000, confirmed: bool = False,
                   net: dict | None = None) -> Step:
         """observe (if needed) -> plan -> act -> observe -> verify.
-        `confirmed`: see `plan` - trusted callers only."""
+        `confirmed`: see `plan` - trusted callers only.
+
+        A state-changing primitive after a hand-off first `resume`s: it
+        proceeds only once the person has finished, on a fresh observation.
+        Reads and navigation are not held, so the person can still be told
+        what the page says and the tab can be moved on."""
+        if self.pending_handoff and PRIMITIVES.get(primitive, ("", False))[1]:
+            await self.resume()
         if self.last is None and primitive not in (OPEN, NAVIGATE, TABS):
             await self.observe()
         step = self.plan(primitive, target, args, confirmed=confirmed, net=net)
