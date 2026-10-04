@@ -1329,4 +1329,11 @@ def table(R7):
            impl='trajectory.py flags runs that leave their objective contract; no progress-per-token stall detector or on-demand critic exists.',
            files=['friday/trajectory.py'],
            next_action='Ranked P1 behind the P0 burn-down (A12, owner 2026-10-04b: docs/plans/build-harness/00-owner-directive-2026-10-04b.md). Pattern from MiniAGI, not its runtime.'),
+        # --- Amendment A13 (2026-10-04): a signed-in coding-agent CLI as FRIDAY's brain (docs/PRD_V7.md section 107)
+        R7('MODEL-012', "107", "FRIDAY can think through a signed-in coding-agent CLI (Claude Code, Codex, Antigravity) as a model-gateway provider when no API key works.", "P0",
+           acceptance="With no working API key, model.infer routes to the CLI provider: it is registered in the model registry, passes MODEL-002's semantic probe, and FRIDAY answers a text and a voice turn end to end through FRIDAY.exe; each call's cost is recorded; the CLI runs as pure completion with no tools, its output treated as model text, never as commands; an absent or signed-out CLI reports UNAVAILABLE and the route fails over or says so.",
+           status='MISSING',
+           impl='The model gateway has API providers only (Gemini, OpenAI, local); no CLI provider exists. On this host the Gemini key is rejected (401) and the OpenAI key is invalid, so FRIDAY.exe has no working brain.',
+           files=['friday/model_gateway.py', 'friday/model_capabilities.py'],
+           next_action="Owner 2026-10-04 (CTX-002 answer): 'we will try to use claude code or codex and antigravity instead of api key'. Build the Claude Code provider first: `claude -p` with --output-format json, --max-turns 1, no tools (--allowedTools '' / --strict-mcp-config), the prompt on stdin, a timeout, cost from total_cost_usd; register it so routes can select it; semantic probe; failover order API key -> CLI; then Codex and Antigravity behind the same interface."),
     ]

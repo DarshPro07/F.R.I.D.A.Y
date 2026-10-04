@@ -42,7 +42,7 @@ def test_the_v7_set_covers_exactly_the_prd_matrix():
     does not name."""
     matrix = _matrix()
     rows = PL._load_v7()
-    assert len(matrix) == 69 + 37 + 14 + 4 + 6 + 2 + 9 + 14 + 14 + 10 + 1 + 6 + 2  # A8 Capability Forge (+013/014), A9 Workflow Fabric, A10 scoped commands, A11 marketplace, A12 loop/critic
+    assert len(matrix) == 69 + 37 + 14 + 4 + 6 + 2 + 9 + 14 + 14 + 10 + 1 + 6 + 2 + 1  # A8 Capability Forge (+013/014), A9 Workflow Fabric, A10 scoped commands, A11 marketplace, A12 loop/critic, A13 CLI brain
     assert [r["id"] for r in rows] == list(matrix)
     assert {r["id"]: r["priority"] for r in rows} == matrix
 

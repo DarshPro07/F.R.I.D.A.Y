@@ -3351,6 +3351,20 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'New friday/repo_classifier.py: bounded read-only build_dossier() plus deterministic, model-free classify() into the ten classes. A prose-dominant tree with no resolvable entry point or skill/MCP/model signal is a research corpus, so a prompt corpus is never executable. (build run, commit 12604c2a8)',
         "next_action": "GAPS: Skipped here: test_hostile_tree_file_symlinks_are_not_followed needs a symlink privilege this Windows user lacks. Directory links are proven via a junction fallback; the file-link branch shares the same reparse-point check.; Assumption: 'skill pack' in the labelled set is capability_pack (several SKILL.md); exactly one SKILL.md is skill. Revisit if the PRD means one skill.; Known limit: a documentation-heavy library with no entry point (>=70% prose/data files) classifies as research_corpus, the safe direction.; The licence table is a second copy of scripts/upstream_lock.py SIGNATURES (that script must run without friday importable); a test fails if they drift.; friday/reachability.py DECLARED gets a FUTURE entry for the module: no live caller until CAP-FORGE-003/004/014 land; without it the unreachable-symbols ratchet fails (verified).; PRD_V7_LEDGER.md row left to the kernel (moves from the build run). Class-to-integration-mode mapping and sandboxed analysis are out of scope (CAP-FORGE-003/004/014).",
     }),
+    # --- PKG-001: defects found testing release candidate bd7c026, 2026-10-04
+    ('PKG-001', {
+        "status": PARTIAL,
+        "next_action": (
+            "EXE DEFECTS 2026-10-04 (FRIDAY.exe built from bd7c026; validate_exe 12/12, doctor DEGRADED). (1) The doctor "
+            "reports voice llm PASS while GOOGLE_API_KEY is rejected (401) - credentials must be checked by MODEL-002's "
+            "semantic probe or at least one cheap authenticated call with a timeout, reported FAIL with the provider's reason "
+            "and the variable's name only; a key in the wrong format is flagged before any call (a Gemini API key starts "
+            "'AIza'; the 97-char 'AQ.' value here is not one); template placeholders (wss://your-project..., sk-...xxxx) FAIL. "
+            "(2) Skills on disk are not registered on first run (friday-operate unregistered) - register on-disk skills "
+            "automatically at startup. (3) Onboarding 0/16 is the person's answers: report it as a setup step, not a "
+            "degradation. Code signing NOT_CONFIGURED needs a certificate (external; report it, do not fake it). Tests for "
+            "each; scripts/validate_exe.py stays 12/12."),
+    }),
 ]
 
 

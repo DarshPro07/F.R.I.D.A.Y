@@ -66,7 +66,8 @@ def test_owner_rows_excluded_unless_asked():
 def test_config_has_order_and_depends():
     cfg = K.load_config()
     # The owner's 2026-10-03 sequence leads the order (00-owner-directive-2026-10-03.md).
-    assert cfg["order"][:5] == ["CTX-002", "APPROVAL-001", "SEC-005", "CTX-003", "MCP-001"]
+    assert cfg["order"][:2] == ["MODEL-012", "PKG-001"]  # the exe fixes first (2026-10-04)
+    assert cfg["order"][2:7] == ["CTX-002", "APPROVAL-001", "SEC-005", "CTX-003", "MCP-001"]
     assert "BROW-001" in cfg["order"] and cfg["depends"]["MODEL-010"] == ["MODEL-009"]
 
 

@@ -1893,6 +1893,17 @@ working set, progressive disclosure and context health (CTX-001, CTX-002, CTX-00
 | COG-005 | P1 | FRIDAY provides a low-overhead loop for simple bounded objectives that do not justify Objective OS planning or multi-agent orchestration. | A task the complexity classifier marks SIMPLE runs as one action, observe, update, repeat - each action a strict schema (intent, capability, arguments, expected postcondition, confidence) executed by deterministic code through the ExecutionEnvelope and policy engine, never a raw subprocess - within bounds (max 8 steps, 6,000 tokens, $0.10, one repeat of the same action); a simple task finishes in a few actions; a task found to be complex escalates to the Objective OS instead of growing in place. |
 | COG-006 | P1 | FRIDAY detects stagnation - repeated actions, reasoning without action, an objective that does not advance, poor progress per token - and invokes corrective reasoning only then. | A progress score (state changed, tool executed, artifact produced, test improved, requirement moved) is kept per run; when tokens pass a threshold with no real progress, or the same action or failure repeats, the run is marked STALL_DETECTED and a critic or strategy reset runs once; on a healthy run the critic is never called; both the product agent and the build harness use it. |
 
+## 107. Amendment A13 (2026-10-04): a signed-in coding-agent CLI as FRIDAY's brain
+
+> **Transcription note (added 2026-10-04).** From the owner's answer recorded in
+> `docs/plans/build-harness/00-owner-directive-2026-10-04.md` (item 1) and the release-candidate test of bd7c026,
+> where FRIDAY.exe had no working model: the Gemini key is rejected (401), the OpenAI key is invalid. P0 because
+> without it the exe cannot answer (assumed; the owner may re-rank).
+
+| ID | Pri | Requirement | Acceptance evidence |
+|---|---|---|---|
+| MODEL-012 | P0 | FRIDAY can think through a signed-in coding-agent CLI (Claude Code, Codex, Antigravity) as a model-gateway provider when no API key works. | With no working API key, model.infer routes to the CLI provider, which passes the semantic probe; FRIDAY.exe answers a text and a voice turn end to end; each call's cost recorded; the CLI runs with no tools and its output is model text, never commands; an absent CLI reports UNAVAILABLE. |
+
 ## Appendix C. Implementation controller, updated 2026-09-26 (owner's text, verbatim)
 
 ```text
