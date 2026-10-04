@@ -92,6 +92,10 @@ class DevelopmentRun:
     review_evidence: "object | None" = None
     boundary: dict = field(default_factory=dict)
     changed: tuple[str, ...] = ()
+    #: PRD v7 section 46 output of the executor's terminal result (CLI-001):
+    #: the same eight fields whichever CLI ran. None until `execute` returns
+    #: an `ActionResult`.
+    work_packet: dict | None = None
     error: str = ""
     seconds: float = 0.0
     #: The durable objective this run serves and the store that holds it
@@ -311,6 +315,7 @@ class DevelopmentRun:
                 result = await asyncio.to_thread(
                     self._execute_via_team, bundle, team_profiles)
                 if result is not None:
+                    self._record_work_packet(result)
                     self.stage = EXECUTED
                     return result
                 # kanban unavailable or refused: fall back to the single-
@@ -318,6 +323,7 @@ class DevelopmentRun:
                 # HERMES_SINGLE.
             result = await executor.execute(bundle, timeout=timeout,
                                             **held, **kwargs)
+            self._record_work_packet(result)
             self.stage = EXECUTED
             return result
         except Exception as exc:                            # noqa: BLE001
@@ -327,6 +333,15 @@ class DevelopmentRun:
             return None
         finally:
             self.seconds = time.monotonic() - started
+
+    def _record_work_packet(self, result) -> None:
+        """Keep the section-46 reading of what the executor returned. The
+        contract is an `ActionResult`; anything looser has no packet rather
+        than an invented one."""
+        if isinstance(result, c.ActionResult):
+            from friday.executors import work_packet
+
+            self.work_packet = work_packet.output_of(result)
 
     def _execute_via_team(self, bundle, team_profiles: tuple[str, ...]):
         """
@@ -531,6 +546,7 @@ class DevelopmentRun:
             "verdict": self.attempt.verdict if self.attempt else None,
             "review": self.review_evidence.to_dict() if self.review_evidence else None,
             "changed": list(self.changed),
+            "work_packet": self.work_packet,
             "gate": self.decision.as_dict() if self.decision else None,
         }
 

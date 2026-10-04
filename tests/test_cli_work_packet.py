@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from friday import contracts as c
+from friday import development
 from friday import hermes_bridge as hb
 from friday.executors import claude_code as CC
 from friday.executors import cli
@@ -56,17 +57,22 @@ class _FakeRun:
                                    "num_turns": 2})
 
 
-def _claude_result(tmp_path, bundle, monkeypatch):
+def _direct(executor, bundle):
+    """Drive an executor the way its own tests do: straight at `execute`."""
+    return asyncio.run(executor.execute(bundle, timeout=20))
+
+
+def _claude_result(tmp_path, bundle, monkeypatch, drive=_direct):
     _FakeRun.instances = []
     monkeypatch.setattr(cli, "available", lambda: True)
     monkeypatch.setattr(cli, "Run", _FakeRun)
     monkeypatch.setattr(CC.ClaudeCodeExecutor, "changed_files",
                         staticmethod(lambda workspace: ["friday/uploader.py"]))
     executor = CC.ClaudeCodeExecutor(Store(tmp_path / "ada.sqlite3"))
-    return asyncio.run(executor.execute(bundle))
+    return drive(executor, bundle)
 
 
-def _hermes_result(tmp_path, bundle, monkeypatch):
+def _hermes_result(tmp_path, bundle, monkeypatch, drive=_direct):
     for key in ("FAKE_HERMES_CLARIFY", "FAKE_HERMES_HANG", "FAKE_HERMES_DIE",
                 "FAKE_HERMES_CAPPED"):
         monkeypatch.delenv(key, raising=False)
@@ -75,8 +81,7 @@ def _hermes_result(tmp_path, bundle, monkeypatch):
         command=[sys.executable, FAKE_GATEWAY], profile="")
     supervisor.READY_TIMEOUT = 20
     try:
-        return asyncio.run(HermesExecutor(None, supervisor=supervisor)
-                           .execute(bundle, timeout=20))
+        return drive(HermesExecutor(None, supervisor=supervisor), bundle)
     finally:
         supervisor.stop()
 
@@ -116,6 +121,38 @@ def test_both_adapters_return_the_section_46_output(tmp_path, bundle, monkeypatc
         packets["hermes"]["remaining_risk"])
     assert "did not report which files changed" not in " ".join(
         packets["claude"]["remaining_risk"])
+
+
+def test_the_manager_report_carries_the_packet_from_either_adapter(
+        tmp_path, bundle, monkeypatch):
+    # The team path needs a kanban board; this is the single-executor path.
+    monkeypatch.setattr(development.hermes_team, "plan_team", lambda *a, **k: ())
+    runs = {}
+
+    def through_a_run(executor, packet_bundle):
+        run = development.DevelopmentRun(
+            goal=packet_bundle.goal, project=packet_bundle.project,
+            root=packet_bundle.workspace)
+        result = asyncio.run(run.execute(executor, timeout=20))
+        runs[len(runs)] = (run, result)
+        return result
+
+    _claude_result(tmp_path, bundle, monkeypatch, drive=through_a_run)
+    _hermes_result(tmp_path, bundle, monkeypatch, drive=through_a_run)
+
+    for run, result in runs.values():
+        reported = run.report()["work_packet"]
+        assert reported == output_of(result)
+        assert tuple(reported) == OUTPUT_FIELDS
+        assert reported["status"] == c.SUCCEEDED
+    claude, hermes = (run.report()["work_packet"] for run, _ in runs.values())
+    assert claude["files_changed"] == ["friday/uploader.py"]
+    assert hermes["files_changed"] == []
+
+
+def test_a_run_that_never_executed_reports_no_packet(tmp_path):
+    run = development.DevelopmentRun(goal="x", project="p", root=str(tmp_path))
+    assert run.report()["work_packet"] is None
 
 
 def test_a_failed_run_still_returns_every_field(tmp_path, bundle, monkeypatch):
