@@ -3336,6 +3336,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Closed both listed gaps: reconstruct() now pages the whole event log instead of cutting at 5000, flags a truncated audit listing, and objective_trace's capability text, intent example and tool card describe the blackbox replay. (build run, commit a1c8fea92)",
         "next_action": "GAPS: The three new tests were not run against the pre-change tree; they fail there by construction (no _EVENT_PAGE/_AUDIT_LIMIT, no 'blackbox' in the card text, a 3-row cap loses the closing event).; Audit decisions are still capped at the newest 500 rows (now reported as a disagreement, not paged).; Only 22 of the 116 impact-selected test files were run, to stay within the host's memory limits; the rest were not run.",
     }),
+    ('BROW-003', {
+        "status": PARTIAL,
+        "current_implementation": 'Browser loop now resumes after an auth/OTP/passkey hand-off (Browser.resume, pending_handoff) instead of planning on the stale page; added approved TEMPORARY profile kind with workspace ownership and guarded discard; passkey/hardware-key pages hand off. (build run, commit a41c205ac)',
+        "next_action": 'GAPS: No launcher consumes ProfileChoice.directory yet: web.py still starts an in-memory Playwright context, so a TEMPORARY profile is chosen, owned and discardable but not launched on disk (needs live Chromium to verify).; Resume is pulled by the next state-changing primitive or an explicit Browser.resume(); no caller outside Browser invokes resume() or discard_temporary_profile() yet.; Did not run the new tests against the pre-change tree (git checkout is denied here); they depend on the new Browser.resume/pending_handoff and choose_profile(temporary_by_approval), so they cannot pass without the change.',
+    }),
 ]
 
 
