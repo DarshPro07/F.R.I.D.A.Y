@@ -303,6 +303,9 @@ def test_a_wide_affected_set_is_recorded_with_its_chunk_count(tmp_path, monkeypa
         write(repo, t, "def test_x():\n    pass\n")
     monkeypatch.setattr(bi, "affected", lambda run, extra, repo=None: many)
     monkeypatch.setattr(bi, "gate_run", lambda python, cwd, tests: (0, ["ok"]))
+    # gate_workers asks the host governor for memory slots: pin it, or the count follows the
+    # machine's free memory (2026-10-05: it failed MODEL-012's gate with more memory free).
+    monkeypatch.setattr(bi, "concurrency", lambda *a, **kw: (1, "pinned"))
     out = go(repo, runs, rows, runner=pass_runner())
     assert out["impact"] == "WIDE" and out["gate_chunks"] == 2 and out["gate_workers"] == 1
 
