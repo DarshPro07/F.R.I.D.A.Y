@@ -82,7 +82,60 @@ Decisions:
   requests, in the top 20 for 93.2%. A chooser can only be right on the first
   number's share; a larger k is the cheap lever (measure it with the live chooser).
 
+## Rollout: legacy | shadow | staged (owner rulings 2026-10-04)
+`friday/tool_router_rollout.py` puts the staged router behind `Router.search`
+(`FRIDAY_TOOL_ROUTER_MODE`, default `legacy`; the shipped scorer is now
+`Router.legacy_search`, which the benchmark and the staged router's own shipped
+ranking call, so nothing recurses).
+
+- **legacy**: unchanged; nothing is built or logged.
+- **shadow**: legacy's answer is returned untouched. A one-worker background
+  queue (8 pending, extras are counted as `dropped`, never waited for) runs the
+  staged router and logs one record per request: legacy choice and top, staged
+  top-k and choice, decision, stage, confidence, latency, would-clarify,
+  uncertain, chooser-called, fallback. `Router.note_succeeded` (called by
+  `use_capability` after a call returns without raising) logs the observed tool
+  against the latest search. Stage 2 calls a chooser only for a deterministic
+  sample (`SAMPLE_RATE` of request hashes) inside a hard `SAMPLE_BUDGET` of calls
+  per process; both default to 0, so shadow costs no model call until configured.
+  Records hold a hash of the request, never its text; `FRIDAY_TOOL_ROUTER_LOG`
+  adds a JSON-lines copy.
+- **staged**: the staged router answers (chooser's tool first, then the other
+  candidates). A failed or missing build, an exception or a missed
+  `FRIDAY_TOOL_ROUTER_TIMEOUT_S` deadline serves the legacy answer for that
+  request; a failed build is not retried for 300 s. The deadline covers the
+  first index build too: build and route both run on the route pool, the caller
+  waits at most the timeout (default 2 s, so `search_capabilities` can be held
+  that long in staged mode; legacy mode is never held), and a build that
+  outlives the deadline finishes in the background for the next request.
+  `Router.load` -> `reset()` never waits for a build in flight (its result is
+  dropped as stale). A `TimeoutError` raised by the build or route is an error,
+  not a missed deadline. CLARIFY keeps every candidate and adds a `clarify`
+  line to the `search_capabilities` result; ABSTAIN serves the legacy answer
+  (counted as `abstain` and `fallbacks`, recorded with `fallback: "abstain"`):
+  no candidate does what was asked, so the staged shortlist would only mislead.
+- **Metrics** (`Rollout.metrics.snapshot()`): requests, chooser calls and
+  `chooser_invocation_rate`, fallbacks, errors, timeouts, clarify, dropped,
+  `p95_latency_ms`.
+- **Promotion to staged** needs held-out and shadow evidence: Success@1 >= 0.90,
+  Success@3 >= 0.97, ambiguous-intent handling, acceptable p95 latency and
+  chooser invocation rate, no golden-journey regression. None of that evidence
+  exists yet; the default stays legacy.
+
+Tests: `tests/test_tool_router_rollout.py` (each mode, the fallbacks including a
+slow first build, a `TimeoutError` from build or route and a stopped pool, shadow
+never changes the answer, sample and budget, the invocation-rate and p95
+metrics, the Router wiring) and the `chooser_called` / `use_chooser` cases in
+`tests/test_tool_router.py`.
+
 ## Open (listed as evidence gaps)
+- Ruling 1 not done: the stage-2 chooser through a coding-agent CLI (`claude -p`,
+  Codex, Antigravity) needs a CLI provider in the model gateway, which does not
+  exist (`model_gateway.py` has none); no chooser is configured, so staged mode
+  today discloses the top candidates as `uncertain`. The seam is `Rollout(chooser=)`.
+- Ruling 2 not done: the sealed holdout has not been measured; it is measured
+  once, after the chooser and thresholds are fixed on dev.
+- No shadow run has happened, so no shadow metrics exist to promote on.
 - Live stage-2 accuracy: no paid call from the benchmark, the OpenAI key was
   invalid 2026-10-02 and the Gemini key rejected; `GatewayChooser` is tested with
   a fake only.

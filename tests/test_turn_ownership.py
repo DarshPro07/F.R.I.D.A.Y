@@ -342,7 +342,16 @@ class _Router:
     def search(self, query, limit=4):
         return [{'capability': name} for name in self._names if query in name][:limit]
 
+    def legacy_search(self, query, limit=4):
+        return [{'capability': name} for name in self._names if query in name][:limit]
+
     def note_used(self, name):
+        pass
+
+    def note_succeeded(self, name):
+        pass
+
+    def note_turn(self):
         pass
 
 

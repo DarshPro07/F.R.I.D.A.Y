@@ -962,6 +962,9 @@ class FridayAgent(Agent):
             return (f"nothing matches {query!r}. Capability areas: "
                     f"{', '.join(sorted(capability_router.GROUPS))}")
         result: dict = {"found": len(matches), "capabilities": matches}
+        if self._router.needs_clarification():
+            result["clarify"] = ("The request names no target or fits several of these equally. "
+                                 "Ask the boss which one they mean before calling any.")
         if families:
             # Skill-shaped work (a diagram, a report, an expert review): reach
             # these through the fabric with capability_use(family, ...) rather
@@ -1018,7 +1021,9 @@ class FridayAgent(Agent):
             })
         tool = self._router.invocable(capability)
         if tool is None:
-            hint = self._router.search(capability, limit=4)
+            # A name-similarity hint, not the owner's request: it must not
+            # count as a routing search in the staged-router evidence.
+            hint = self._router.legacy_search(capability, limit=4)
             return json.dumps({
                 "error": f"no capability called {capability!r}",
                 "did_you_mean": [h["capability"] for h in hint],
@@ -1105,6 +1110,7 @@ class FridayAgent(Agent):
         # result is the person's request being answered, not something read.
         if capability not in MEMORY_WRITES:
             self._read_this_turn = True
+        self._router.note_succeeded(capability)
         # What actually ACTED this turn, for the completion gate in tts_node.
         # Recorded after the call returned without raising: a capability that
         # threw is handled above and never reaches here, so it can never back
@@ -1482,6 +1488,7 @@ class FridayAgent(Agent):
         self._acted_this_turn = ()
         self._read_this_turn = False
         self._spoke_this_turn = False
+        self._router.note_turn()
         if await stop_or_resume(
                 text,
                 say=lambda note: self.session.say(note, allow_interruptions=False),

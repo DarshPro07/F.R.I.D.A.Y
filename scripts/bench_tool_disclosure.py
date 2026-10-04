@@ -14,7 +14,7 @@ Two request sets over the full registered catalogue:
                   router's intent examples were not written from, with the labels
                   adjudicated by docs/plans/ctx-002/label_overlay.json (the
                   corpus files keep their original labels). The locked holdout
-                  split is never read here.
+                  split is never read by a default run.
 
 For each request: its schema characters (the starting surface plus the one
 search result the model receives) against every tool's full schema, and
@@ -22,8 +22,13 @@ whether that one search found the capability the request needed. The staged
 router is measured as ranking quality (Success@k, MRR, latency, peak RAM) and as
 a routing policy (how many requests it routes directly, how often that is right,
 how many it would hand to a chooser, and whether the chooser's candidates cover
-the needed tool). No chooser is called: a chooser is a paid model call and the
-benchmark makes none, so chooser accuracy is not measured here.
+the needed tool). No chooser is called unless --chooser cli is given: a chooser is a
+paid model call, so that run needs --sample N (a hard cap on calls), reserves each
+call against the build kernel's day spend lease and writes its cost to the day ledger.
+
+The sealed holdout is opened only by --split holdout --chooser cli --sample N
+--frozen <a development result> --i-am-promoting, with the chooser and thresholds the
+development run froze; an existing --out is never overwritten.
 """
 from __future__ import annotations
 
@@ -33,13 +38,20 @@ import json
 import os
 import sys
 import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import build_kernel  # noqa: E402
+
 DEVELOPMENT = ROOT / "data" / "corpus" / "development.jsonl"
+HOLDOUT = ROOT / "data" / "corpus" / "holdout.jsonl"
+REQ = "CTX-002"
+CHOOSER_CAP_USD = 0.05        # one chooser call's budget: reserved before it, and the CLI's own cap
 KS = (1, 3, 5, 10, 20)
 TARGET_PRECISION = 0.95       # of requests routed directly, the share that must be right
 
@@ -68,12 +80,12 @@ def _router():
     return router
 
 
-def _rows() -> list[dict]:
+def _rows(path: Path = DEVELOPMENT) -> list[dict]:
     from label_adjudication import load_overlay
 
     overlay = load_overlay()
     rows = []
-    for line in DEVELOPMENT.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         row = json.loads(line)
         extra = overlay.get(row["id"], {})
         row["also_correct"] = sorted({*(row.get("also_correct") or []), *extra.get("also_correct", [])})
@@ -82,9 +94,9 @@ def _rows() -> list[dict]:
     return rows
 
 
-def _development_cases(router) -> list[tuple[str, set[str]]]:
+def _development_cases(router, path: Path = DEVELOPMENT) -> list[tuple[str, set[str]]]:
     active = set(router.active_names())
-    return [(row["text"], {row["expect"], *row["also_correct"]}) for row in _rows()
+    return [(row["text"], {row["expect"], *row["also_correct"]}) for row in _rows(path)
             if not row.get("turns") and row["expect"] in router.all_tools
             and row["expect"] not in active]
 
@@ -104,23 +116,109 @@ def _peak_rss_mb() -> float:
     return round(getattr(info, "peak_wset", info.rss) / 2**20, 1)
 
 
-def _staged(router, *, embedder, revision: str, cards: bool):
-    from friday import capabilities, capability_router as R, tool_models, tool_router
+def _staged(router, *, embedder, revision: str, cards: bool, chooser=None, thresholds=None):
+    from friday import tool_models, tool_router
 
-    names = sorted(router.all_tools)
-
-    def text(name):
-        meta = capabilities.by_id(name)
-        return tool_router.tool_text(
-            name, router._schema_of(name).get("description", ""),
-            meta.intent_examples if meta else (), R.GROUP_PURPOSE.get(R.group_of(name) or "", ""),
-            cards=cards)
-
+    names, texts, descriptions = router.staged_inputs(cards=cards)
+    extra = {"thresholds": thresholds} if thresholds is not None else {}
     return tool_router.StagedRouter(
-        names, [text(n) for n in names],
-        shipped=lambda q: [m["capability"] for m in router.search(q, limit=20)],
+        names, texts,
+        shipped=lambda q: [m["capability"] for m in router.legacy_search(q, limit=20)],
         embedder=embedder, cache_dir=tool_models.models_dir() / "vectors", revision=revision,
-        descriptions={n: router._schema_of(n).get("description", "") for n in names})
+        descriptions=descriptions, chooser=chooser, **extra)
+
+
+class ChooserStopped(Exception):
+    """The sample cap or the day's spend cap refused a chooser call."""
+
+
+class LedgeredChooser:
+    """A paid chooser held to a hard call cap and to the build kernel's day spend lease.
+
+    Before each call it reserves `cap_usd` against the day budget; after it, the cost the
+    call reported goes into the invocation ledger and the reservation is released. A call
+    that reported no cost (a timeout) is recorded at the reserved cap: the spend may have
+    happened. A refused call sets `stopped`, so the measurement ends instead of counting the
+    router's fallback as the chooser's answer."""
+
+    def __init__(self, inner, *, sample: int, cap_usd: float, runs_dir: Path | None = None,
+                 req: str = REQ):
+        self.inner, self.sample, self.cap_usd, self.req = inner, sample, cap_usd, req
+        self.runs_dir = runs_dir or build_kernel.RUNS_DIR
+        self.calls, self.spent_usd, self.stopped = 0, 0.0, None
+        self._reported = None
+        inner.on_cost = self._on_cost
+
+    def _on_cost(self, usd: float) -> None:
+        self._reported = usd
+
+    def choose(self, query: str, cards: list[str]) -> dict:
+        if self.calls >= self.sample:
+            self.stopped = f"sample cap of {self.sample} chooser calls reached"
+            raise ChooserStopped(self.stopped)
+        attempt_id = f"bench-{uuid.uuid4()}"
+        try:
+            build_kernel.spend_guard(attempt_id, "bench", self.req, "CHOOSER", self.cap_usd,
+                                     self.runs_dir)
+        except build_kernel.SpendCapReached as exc:
+            self.stopped = str(exc)
+            raise ChooserStopped(self.stopped) from exc
+        self.calls += 1
+        self._reported = None
+        try:
+            return self.inner.choose(query, cards)
+        finally:
+            cost = self._reported if self._reported is not None else self.cap_usd
+            self.spent_usd += cost
+            build_kernel.ledger_append({
+                "attempt_id": attempt_id, "req": self.req, "kind": "CHOOSER",
+                "model": self.inner.model, "cost_usd": float(cost),
+                "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}, self.runs_dir)
+            build_kernel.spend_release(attempt_id, self.runs_dir)
+
+
+def chooser_benchmark(staged, cases, chooser: LedgeredChooser, *, sample: int) -> dict:
+    """Success@1/3 of the stage-2 chooser over a deterministic sample of `cases`: the
+    chosen tool first, then the other candidates, as the staged search hands them to the
+    model. A request the chooser declined counts as a miss."""
+    from friday import tool_router
+    from friday.tool_router_rollout import query_id
+
+    picked = sorted(cases, key=lambda case: query_id(case[0]))[:sample]
+    hit1 = hit3 = answered = 0
+    for text, ok in picked:
+        route = staged.route(text)
+        if chooser.stopped:
+            break
+        answered += 1
+        names = list(route.candidates)
+        if route.decision == tool_router.TOOL and route.tool_id:
+            names = [route.tool_id, *(n for n in names if n != route.tool_id)]
+        hit1 += bool(names[:1] and names[0] in ok and route.decision == tool_router.TOOL)
+        hit3 += bool(set(names[:3]) & ok)
+    return {"requests": answered, "success_at_1": round(hit1 / answered, 4) if answered else None,
+            "success_at_3": round(hit3 / answered, 4) if answered else None,
+            "chooser_calls": chooser.calls, "spent_usd": round(chooser.spent_usd, 4),
+            "stopped": chooser.stopped}
+
+
+def frozen_run(path: str | None) -> dict:
+    """The development result a holdout run is measured against: the chooser and the
+    thresholds fixed on dev. Without one the holdout is not opened."""
+    if not path:
+        raise SystemExit("the holdout is measured once, against a chooser and thresholds fixed on "
+                         "development: pass --frozen <development result.json>")
+    try:
+        run = json.loads(Path(path).read_text(encoding="utf-8")).get("chooser_run") or {}
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"--frozen {path} is not a readable development result: {exc}")
+    thresholds = run.get("thresholds") or {}
+    if (run.get("split") != "development" or not run.get("chooser")
+            or not isinstance(thresholds.get("agree"), (int, float))
+            or not isinstance(thresholds.get("margin"), (int, float))):
+        raise SystemExit(f"--frozen {path} has no development chooser_run naming the chooser and "
+                         "its thresholds")
+    return run
 
 
 def _measure(rank, cases) -> tuple[dict, list]:
@@ -169,7 +267,7 @@ def retrieval_benchmark(router, cases, embedder_id: str, embedder) -> tuple[dict
     revision = tool_models.PINS[embedder_id].revision if embedder else ""
 
     def shipped(text):
-        names = [m["capability"] for m in router.search(text, limit=20)]
+        names = [m["capability"] for m in router.legacy_search(text, limit=20)]
         return names, 0.0, 0.0
 
     out["router"], _ = _measure(shipped, cases)
@@ -224,11 +322,59 @@ def sweep_thresholds(rows, abstain_rows) -> dict:
             "grid": grid}
 
 
+def _chooser_run(args, router, embedder, swept: dict | None, frozen: dict | None) -> dict:
+    """Measure the CLI chooser on `args.split`. On development the thresholds are the sweep's
+    choice when this run swept, else the shipped defaults; on the holdout they are the frozen
+    development run's, never recomputed."""
+    from friday import tool_models, tool_router
+
+    cell = frozen["thresholds"] if frozen else ((swept or {}).get("chosen") or {})
+    thresholds = (tool_router.Thresholds(agree=cell["agree"], margin=cell["margin"]) if cell
+                  else tool_router.Thresholds())
+    cli = tool_router.CliChooser(model=args.chooser_model, max_budget_usd=CHOOSER_CAP_USD)
+    chooser = LedgeredChooser(cli, sample=args.sample, cap_usd=CHOOSER_CAP_USD)
+    staged = _staged(router, embedder=embedder, cards=True, chooser=chooser, thresholds=thresholds,
+                     revision=tool_models.PINS[args.embedder].revision if embedder else "")
+    cases = _development_cases(router, HOLDOUT if args.split == "holdout" else DEVELOPMENT)
+    return {"split": args.split, "chooser": f"cli:{args.chooser_model}", "embedder": args.embedder,
+            "thresholds": {"agree": thresholds.agree, "margin": thresholds.margin},
+            "sample": args.sample, **chooser_benchmark(staged, cases, chooser, sample=args.sample)}
+
+
+def _check_chooser_args(args) -> dict | None:
+    """Refuse a paid or sealed run that is not set up to be bounded and honest, before any
+    model loads. Returns the frozen development run for a holdout measurement."""
+    if args.chooser == "cli" and args.sample < 1:
+        raise SystemExit("--chooser cli is a paid call per request: pass --sample N (N >= 1), "
+                         "the hard cap on chooser calls")
+    if args.split == "development":
+        return None
+    if args.chooser != "cli" or not args.i_am_promoting:
+        raise SystemExit("the holdout is sealed: it is measured once, with --chooser cli --sample N "
+                         "--frozen <development result.json> --i-am-promoting")
+    frozen = frozen_run(args.frozen)
+    if frozen["chooser"] != f"cli:{args.chooser_model}":
+        raise SystemExit(f"the frozen development run used {frozen['chooser']}, not "
+                         f"cli:{args.chooser_model}: the chooser is fixed before the holdout")
+    if Path(args.out).exists():
+        raise SystemExit(f"{args.out} exists: a holdout result is never overwritten")
+    return frozen
+
+
 def main(argv: list[str] | None = None) -> int:
     from friday import capability_router as R, tool_models, tool_router
 
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--out", required=True)
+    parser.add_argument("--chooser", choices=("none", "cli"), default="none",
+                        help="cli measures stage 2 through `claude -p` (paid; needs --sample)")
+    parser.add_argument("--chooser-model", default="haiku")
+    parser.add_argument("--sample", type=int, default=0,
+                        help="hard cap on chooser calls, and on requests measured with it")
+    parser.add_argument("--split", choices=("development", "holdout"), default="development")
+    parser.add_argument("--frozen", help="the development result whose chooser and thresholds "
+                        "a holdout run is measured with")
+    parser.add_argument("--i-am-promoting", action="store_true", help="required to open the holdout")
     parser.add_argument("--models-dir", help="where the pinned model files are "
                         "(default FRIDAY_MODELS_DIR, else <cache>/models)")
     parser.add_argument("--embedder", default=tool_models.EMBEDDER.id,
@@ -236,17 +382,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--thresholds", action="store_true",
                         help="sweep the direct-route thresholds on development")
     args = parser.parse_args(argv)
+    frozen = _check_chooser_args(args)
     if args.models_dir:
         os.environ["FRIDAY_MODELS_DIR"] = args.models_dir
 
     embedder = resolve_embedder(args.embedder)
     router = _router()
+    if args.split == "holdout":
+        result = {"chooser_run": _chooser_run(args, router, embedder, None, frozen)}
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(json.dumps(result, indent=1), encoding="utf-8")
+        print(json.dumps(result, indent=1))
+        return 0
     result = {"intents": _summary(R.disclosure_report(router, R.intent_cases(router)))}
     if DEVELOPMENT.exists():
         cases = _development_cases(router)
         report = R.disclosure_report(router, [(text, sorted(ok)[0]) for text, ok in cases])
         found = sum(1 for (text, ok) in cases
-                    if any(m["capability"] in ok for m in router.search(text, limit=6)))
+                    if any(m["capability"] in ok for m in router.legacy_search(text, limit=6)))
         retrievers, kept = retrieval_benchmark(router, cases, args.embedder, embedder)
         result["development"] = {**_summary(report), "found": found,
                                  "recall_at_6": round(found / len(cases), 4) if cases else 0.0,
@@ -260,6 +413,8 @@ def main(argv: list[str] | None = None) -> int:
                 abstain.append((agree, tool_router.margin_of(fused)))
             result["thresholds"] = sweep_thresholds(kept["hybrid+cards"], abstain)
             result["thresholds"]["abstain_requests"] = len(abstain)
+        if args.chooser == "cli":
+            result["chooser_run"] = _chooser_run(args, router, embedder, result.get("thresholds"), None)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(json.dumps({k: v for k, v in result.items() if k != "thresholds"}, indent=1))

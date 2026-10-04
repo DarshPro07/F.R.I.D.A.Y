@@ -49,7 +49,8 @@ class _Stub:
         self._learner = _Learner()
         self._turn_owned_by = ''
         self._toolset = type('T', (), {'_tools': []})()
-        self._router = type('R', (), {'active_tools': lambda self: []})()
+        self._router = type('R', (), {'active_tools': lambda self: [],
+                                      'note_turn': lambda self: None})()
 
     def _apply_tools(self):
         self._toolset._tools = []

@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+import shutil
+import subprocess
+from dataclasses import dataclass, field, replace
 from typing import Callable, Protocol
 
 from friday import tool_cards
@@ -64,6 +66,7 @@ class Route:
     candidates: tuple[str, ...]
     uncertain: bool = False                # retrieval was unsure and no chooser settled it
     reason: str = ""
+    chooser_called: bool = False           # a chooser was asked, whatever it answered
 
 
 class Chooser(Protocol):
@@ -120,7 +123,10 @@ class StagedRouter:
                  if fused else 0.0)
         return fused, agree
 
-    def route(self, query: str) -> Route:
+    def route(self, query: str, *, use_chooser: bool = True) -> Route:
+        """`use_chooser=False` keeps stage 2 off the model for this request (the
+        shadow rollout's default): an unsure retrieval then returns its top
+        candidate marked `uncertain`, exactly as with no chooser configured."""
         fused, agree = self.rank(query)
         if not fused:
             return Route(ABSTAIN, None, 1, 0.0, (), reason="nothing matched")
@@ -130,12 +136,13 @@ class StagedRouter:
         if agree >= t.agree and margin >= t.margin:
             return Route(TOOL, names[0], 1, round(min(agree, 1.0), 3), names,
                          reason=f"agree={agree:.2f} margin={margin:.2f}")
-        return self._stage_two(query, names, agree, margin)
+        return self._stage_two(query, names, agree, margin, use_chooser)
 
-    def _stage_two(self, query: str, names: tuple[str, ...], agree: float, margin: float) -> Route:
+    def _stage_two(self, query: str, names: tuple[str, ...], agree: float, margin: float,
+                   use_chooser: bool = True) -> Route:
         fallback = Route(TOOL, names[0], 1, round(agree, 3), names, uncertain=True,
                          reason=f"unsure: agree={agree:.2f} margin={margin:.2f}")
-        if self.chooser is None:
+        if self.chooser is None or not use_chooser:
             return fallback
         cards = [tool_cards.compact(n, self.descriptions.get(n, "")) for n in names]
         try:
@@ -144,8 +151,9 @@ class StagedRouter:
             # A provider failure must not fail the request; say so and fall back.
             log.warning("tool chooser failed: %s", exc)
             return Route(fallback.decision, fallback.tool_id, 1, fallback.confidence, names,
-                         uncertain=True, reason=f"chooser failed: {type(exc).__name__}")
-        return self._accept(answer, names, fallback)
+                         uncertain=True, reason=f"chooser failed: {type(exc).__name__}",
+                         chooser_called=True)
+        return replace(self._accept(answer, names, fallback), chooser_called=True)
 
     @staticmethod
     def _accept(answer, names: tuple[str, ...], fallback: Route) -> Route:
@@ -166,6 +174,26 @@ class StagedRouter:
         return Route(decision, None, 2, float(confidence), names, reason="chooser")
 
 
+CHOOSER_SYSTEM = (
+    "You choose which tool serves a user's request. You are given the request and "
+    "candidate tools, one per line. Answer with one JSON object and nothing else: "
+    '{"decision": "TOOL" | "CLARIFY" | "ABSTAIN", "tool_id": <candidate name or null>, '
+    '"confidence": <0 to 1>}. TOOL when exactly one candidate does what was asked. '
+    "CLARIFY when the request names no target or fits several candidates equally. "
+    "ABSTAIN when no candidate does what was asked, or several separate tasks are asked at once.")
+
+
+def _chooser_user(query: str, cards: list[str]) -> str:
+    return "Request: " + json.dumps(query) + "\nCandidates:\n" + "\n".join(cards)
+
+
+def _parse_answer(text: str) -> dict:
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`").removeprefix("json").strip()
+    return json.loads(text)
+
+
 @dataclass
 class GatewayChooser:
     """Stage 2 through FRIDAY's model gateway (friday/model_gateway.py).
@@ -176,20 +204,10 @@ class GatewayChooser:
     again by the router."""
 
     infer: Callable[[str, str], str]
-    system: str = field(default=(
-        "You choose which tool serves a user's request. You are given the request and "
-        "candidate tools, one per line. Answer with one JSON object and nothing else: "
-        '{"decision": "TOOL" | "CLARIFY" | "ABSTAIN", "tool_id": <candidate name or null>, '
-        '"confidence": <0 to 1>}. TOOL when exactly one candidate does what was asked. '
-        "CLARIFY when the request names no target or fits several candidates equally. "
-        "ABSTAIN when no candidate does what was asked, or several separate tasks are asked at once."))
+    system: str = field(default=CHOOSER_SYSTEM)
 
     def choose(self, query: str, cards: list[str]) -> dict:
-        user = "Request: " + json.dumps(query) + "\nCandidates:\n" + "\n".join(cards)
-        text = self.infer(self.system, user).strip()
-        if text.startswith("```"):
-            text = text.strip("`").removeprefix("json").strip()
-        return json.loads(text)
+        return _parse_answer(self.infer(self.system, _chooser_user(query, cards)))
 
 
 def gateway_infer(task_class: str = "SIMPLE", timeout_s: float = 8.0) -> Callable[[str, str], str]:
@@ -208,3 +226,51 @@ def gateway_infer(task_class: str = "SIMPLE", timeout_s: float = 8.0) -> Callabl
         return result.response
 
     return infer
+
+
+def run_cli(cmd: list[str], prompt: str, timeout_s: float) -> str:
+    """Run `cmd` with `prompt` on stdin and return its stdout. No shell; raises
+    subprocess.TimeoutExpired past `timeout_s`."""
+    return subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=timeout_s).stdout
+
+
+@dataclass
+class CliChooser:
+    """Stage 2 through the `claude` CLI, for measuring a chooser (the benchmark) without
+    the model gateway, which has no CLI route (friday/model_gateway.py).
+
+    The request is untrusted text, so the whole prompt travels on stdin and never in argv.
+    `run(cmd, prompt, timeout_s) -> stdout` is injected so tests use a fake. Each call's
+    reported cost goes to `on_cost(usd)` - also when the call then fails, since the spend
+    happened. A CLI error result or an unparseable answer raises, and the router falls
+    back to its retrieval top-1 marked `chooser_called`."""
+
+    model: str = "haiku"
+    max_budget_usd: float = 0.05
+    timeout_s: float = 60.0
+    exe: str | None = None
+    run: Callable[[list[str], str, float], str] = run_cli
+    on_cost: Callable[[float], None] | None = None
+    system: str = field(default=CHOOSER_SYSTEM)
+
+    def command(self) -> list[str]:
+        return [self.exe or shutil.which("claude") or "claude", "-p", "--model", self.model,
+                "--output-format", "json", "--max-turns", "1",
+                "--max-budget-usd", f"{self.max_budget_usd:.2f}",
+                "--strict-mcp-config", "--settings", '{"disableAllHooks": true}']
+
+    def choose(self, query: str, cards: list[str]) -> dict:
+        prompt = self.system + "\n\n" + _chooser_user(query, cards)
+        outer = json.loads(self.run(self.command(), prompt, self.timeout_s))
+        if not isinstance(outer, dict):
+            raise ValueError("claude CLI result is not a JSON object")
+        cost = outer.get("total_cost_usd")
+        if self.on_cost is not None and isinstance(cost, (int, float)) and not isinstance(cost, bool):
+            self.on_cost(float(cost))
+        if outer.get("is_error") or str(outer.get("subtype", "")).startswith("error"):
+            raise RuntimeError(f"claude CLI stopped: {outer.get('subtype') or 'is_error'}")
+        result = outer.get("result")
+        if not isinstance(result, str):
+            raise ValueError("claude CLI result has no text")
+        return _parse_answer(result)

@@ -228,6 +228,7 @@ def test_the_turn_entry_settles_the_yes(monkeypatch, books):
     agent = A.FridayAgent.__new__(A.FridayAgent)
     agent.prepare_turn = lambda turn_ctx, text: None
     agent.stop_re_reading = lambda: None
+    agent._router = type('R', (), {'note_turn': lambda self: None})()
 
     class Ctx:
         def __init__(self):

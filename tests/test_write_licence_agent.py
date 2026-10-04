@@ -13,6 +13,7 @@ for the turn are the licence, checked structurally before dispatch.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 
 import pytest
@@ -33,6 +34,7 @@ class _Tool:
 class _Router:
     def __init__(self, names, calls):
         self._names, self._calls = list(names), calls
+        self.searches, self.name_lookups, self.turns = [], [], 0
 
     def active_tools(self):
         return [_Tool(n, self._calls) for n in self._names]
@@ -41,10 +43,22 @@ class _Router:
         return _Tool(name, self._calls) if name in self._names else None
 
     def search(self, query, limit=4):
+        self.searches.append(query)
         return []
+
+    def legacy_search(self, query, limit=4):
+        self.name_lookups.append(query)
+        close = difflib.get_close_matches(query, self._names, n=limit, cutoff=0.8)
+        return [{"capability": n} for n in close]
 
     def note_used(self, name):
         pass
+
+    def note_succeeded(self, name):
+        pass
+
+    def note_turn(self):
+        self.turns += 1
 
 
 def _agent(owner_words: str, calls: list):
@@ -109,6 +123,18 @@ def test_the_same_call_with_his_own_words_is_dispatched(capability, arguments, s
     assert calls and calls[0][0] == capability, (calls, out)
 
 
+def test_an_unknown_name_hint_is_not_a_routing_search(monkeypatch):
+    """The did-you-mean lookup matches a mistyped NAME; routed through
+    Router.search it would be logged as a request the owner made."""
+    from friday import ownership
+    monkeypatch.setattr(ownership, "claimed_by", lambda *a, **k: None)
+    agent = _agent("hmm", [])
+    out = _use(agent, "files_reed")
+    assert out["error"] == "no capability called 'files_reed'"
+    assert out["did_you_mean"][0] == "files_read"        # the closest name leads; weaker ones may follow
+    assert agent._router.name_lookups == ["files_reed"] and agent._router.searches == []
+
+
 def test_reads_and_control_plane_are_never_licensed_by_words(monkeypatch):
     calls = []
     from friday import ownership
@@ -126,6 +152,7 @@ def test_the_owner_words_are_recorded_before_the_model_sees_the_turn(monkeypatch
     import agent_friday
     agent = object.__new__(agent_friday.FridayAgent)
     agent._owner_words = "stale words from the previous turn"
+    agent._router = _Router([], [])
     seen = {}
     monkeypatch.setattr(agent_friday, "remember_the_project", lambda t: None)
     monkeypatch.setattr(agent_friday, "note_the_requirements", lambda *a, **k: None)
@@ -138,6 +165,7 @@ def test_the_owner_words_are_recorded_before_the_model_sees_the_turn(monkeypatch
     asyncio.run(agent.read_before_answering(None, "write a note saying hello"))
     assert agent._owner_words == "write a note saying hello"
     assert seen["prepared"] == "write a note saying hello"
+    assert agent._router.turns == 1                      # the router learns a new turn began
 
 
 def test_both_paths_share_one_table():

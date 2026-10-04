@@ -310,6 +310,7 @@ def test_the_voice_turn_stops_before_the_model_and_silences_itself(monkeypatch):
     class Stub:
         """`session` is a read-only property on the real agent."""
         session = Session()
+        _router = type('R', (), {'note_turn': lambda self: None})()
 
         def prepare_turn(self, turn_ctx, text):
             later.append(True)

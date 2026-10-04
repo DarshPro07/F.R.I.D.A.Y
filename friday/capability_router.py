@@ -332,6 +332,9 @@ class Router:
     #: friday/runcontext.py's job, over the database, and answers a different
     #: question.
     started: dict[str, list[str]] = field(default_factory=dict)
+    #: legacy | shadow | staged search (friday/tool_router_rollout.py), built on
+    #: first search from FRIDAY_TOOL_ROUTER_MODE; legacy unless the owner promotes it.
+    rollout: object = field(default=None, repr=False, compare=False)
 
     def load(self, tools) -> None:
         """Take the tools an MCPToolset fetched."""
@@ -340,6 +343,8 @@ class Router:
             name = getattr(getattr(tool, "info", None), "name", None)
             if name:
                 self.all_tools[name] = tool
+        if self.rollout is not None:
+            self.rollout.reset()
 
     @property
     def known_names(self) -> list[str]:
@@ -407,8 +412,53 @@ class Router:
         }
 
     def search(self, query: str, *, limit: int = 6) -> list[dict]:
+        """Find capabilities by what the user wants to do: the shipped keyword
+        router (`legacy_search`), shadowed by or replaced with the staged router
+        according to FRIDAY_TOOL_ROUTER_MODE (friday/tool_router_rollout.py)."""
+        return self._rollout().search(query, limit)
+
+    def _rollout(self):
+        if self.rollout is None:
+            from friday import tool_router_rollout
+            self.rollout = tool_router_rollout.Rollout(
+                legacy=lambda text, n: self.legacy_search(text, limit=n), describe=self.describe_tool,
+                inputs=self.staged_inputs, config=tool_router_rollout.Config.from_env())
+        return self.rollout
+
+    def needs_clarification(self) -> bool:
+        """Staged mode only: the latest search's chooser found the request names no
+        target or fits several tools equally, so the caller should ask which."""
+        return self.rollout is not None and self.rollout.clarifying()
+
+    def note_turn(self) -> None:
+        """The owner spoke again: shadow evidence must not pair a capability that runs
+        from now on with a search from an earlier turn."""
+        if self.rollout is not None:
+            self.rollout.new_turn()
+
+    def note_succeeded(self, name: str) -> None:
+        """A capability ran to the end without raising: the outcome shadow evidence
+        pairs with the search that preceded it."""
+        if self.rollout is not None:
+            self.rollout.observe(name)
+
+    def staged_inputs(self, *, cards: bool = True) -> tuple[list[str], list[str], dict[str, str]]:
+        """(ids, texts, descriptions) the staged router indexes: every registered
+        tool, found by the same text the benchmark measures."""
+        from friday import tool_router
+        names = sorted(self.all_tools)
+        descriptions = {name: self._schema_of(name).get("description", "") for name in names}
+        texts = []
+        for name in names:
+            meta = capabilities.by_id(name)
+            texts.append(tool_router.tool_text(
+                name, descriptions[name], meta.intent_examples if meta else (),
+                GROUP_PURPOSE.get(group_of(name) or "", ""), cards=cards))
+        return names, texts, descriptions
+
+    def legacy_search(self, query: str, *, limit: int = 6) -> list[dict]:
         """
-        Find capabilities by what the user wants to do.
+        Find capabilities by what the user wants to do, with the shipped scorer.
 
         Deliberately keyword scoring rather than embeddings: it needs no model
         call, adds no latency to a voice turn, and the tool names and
@@ -612,7 +662,7 @@ def disclosure_report(router: Router, cases, *, limit: int = 6) -> dict:
              + len(catalogue()))
     rows = []
     for request, needed in cases:
-        found = router.search(request, limit=limit)
+        found = router.legacy_search(request, limit=limit)
         spent = start + _chars({"found": len(found), "capabilities": found})
         rows.append({"request": request, "needed": needed,
                      "found": any(match["capability"] == needed for match in found),

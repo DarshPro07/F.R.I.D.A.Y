@@ -1556,7 +1556,7 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "(`--resume` or 'resume everything') and the latch survives a restart until then. Scope: a "
             "browser primitive already in flight ends within its own timeout; the latch refuses the next."),
         "files": ["friday/stop.py:51,122,139,165,177", "friday/capability_runtime.py:344",
-                  "friday/ownership.py:228", "friday/launcher.py:557", "agent_friday.py:1807",
+                  "friday/ownership.py:228", "friday/launcher.py:557", "agent_friday.py:1811",
                   "server.py:32", "friday/objectives.py:485"],
         "tests": ["tests/test_emergency_stop.py::test_a_worker_that_ignores_the_stop_is_killed_by_pid",
                   "tests/test_emergency_stop.py::test_the_voice_turn_stops_before_the_model_and_silences_itself",
@@ -1694,7 +1694,7 @@ PROGRESS_V7: list[tuple[str, dict]] = [
                   "tests/test_emergency_stop.py::test_no_repair_runs_once_the_stop_is_latched"],
         "files": ["friday/stop.py:51,122,139,165,177", "friday/capability_runtime.py:333",
                   "friday/continuous.py:629,909", "friday/ownership.py:228", "friday/launcher.py:557",
-                  "agent_friday.py:1807", "server.py:32", "friday/objectives.py:519"],
+                  "agent_friday.py:1811", "server.py:32", "friday/objectives.py:519"],
         "evidence": (
             "2026-09-26: 19 tests pass. A real OS worker that never stops on its own is killed by PID; the text "
             "brain and the voice turn stop without their model being asked; a stop pressed through one store "
@@ -1772,7 +1772,7 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "files": ["friday/objectives.py:414,441,541", "friday/contracts.py:721",
                   "friday/continuous.py:104,629", "friday/capability_runtime.py:333",
                   "friday/store.py:1002,1007,2265,2594", "friday/toolsets/schedules.py:353,397,536,572",
-                  "friday/toolsets/objectives.py:403", "friday/policy.py:225,228", "agent_friday.py:1534"],
+                  "friday/toolsets/objectives.py:403", "friday/policy.py:225,228", "agent_friday.py:1538"],
         "tests": ["tests/test_envelope_lineage.py::test_read_material_is_refused_a_destructive_capability_on_the_durable_path",
                   "tests/test_envelope_lineage.py::test_a_read_material_objective_cannot_delegate_to_a_terminal",
                   "tests/test_envelope_lineage.py::test_a_port_that_cannot_carry_the_run_still_meets_the_lineage",
@@ -1900,7 +1900,7 @@ PROGRESS_V7: list[tuple[str, dict]] = [
                   "friday/objective_budget.py:144,158", "friday/execution.py:139,142",
                   "friday/executors/cli.py:80,154,194", "friday/executors/brokers.py:153,176,190,203",
                   "friday/executors/claude_code.py:263,287,333,339,376", "friday/hermes_bridge.py:471,617,627,1946,1965",
-                  "friday/tools/hermes_control.py:101,140", "agent_friday.py:1538,1569",
+                  "friday/tools/hermes_control.py:101,140", "agent_friday.py:1542,1573",
                   "friday/development.py:259", "friday/progress_digest.py:241",
                   "friday/self_upgrade.py:55-60"],
         "tests": ["tests/test_envelope.py::test_nothing_can_be_widened",
@@ -2550,7 +2550,7 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "suspends. Gaps: nothing in a live path calls inspect for a server Hermes or Claude Code workers "
             "configure, so the external lifecycle runs from the CLI and tests only, never yet against a live "
             "Hermes."),
-        "files": ["friday/mcp_firewall.py:149,225,241,303,336,360,474,538,718,752,862,932", "agent_friday.py:739,1324"],
+        "files": ["friday/mcp_firewall.py:149,225,241,303,336,360,474,538,718,752,862,932", "agent_friday.py:739,1330"],
         "tests": ["tests/test_mcp_firewall.py::test_a_new_server_is_pinned_and_admitted",
                   "tests/test_mcp_firewall.py::test_an_unexpected_change_suspends_the_server",
                   "tests/test_mcp_firewall.py::test_a_description_that_instructs_the_model_is_refused_before_pinning",
@@ -2882,7 +2882,7 @@ PROGRESS_V7: list[tuple[str, dict]] = [
     ('ACT-001', {
         "status": PARTIAL,
         "current_implementation": 'contracts.ActionResult refuses status succeeded without a verification at construction; honesty.py matches claims to evidence. Gap: the per-type proof set (file hash/readback, code diff and tests, web post-state, email message id, simulation artifact) and the full correlation key are not demonstrated as a whole.',
-        "next_action": "PARKED after five build attempts (2026-10-02); branch build/act-001 (9739a8d) holds the library work and the live wiring, not integrated. The verifier accepts the library (typed proof shapes keyed to the real ids executor.claude_code*, executor.hermes, cad.generate; correlation enforced; failure claims need a recorded attempt). Open: (1) BUG on the wired voice path - a capability that raises records its FAILED attempt but is never added to _acted_this_turn (agent_friday.py:1102-1115), so an honest failure report is refused; add the browser path's test (a failure claim matching a recorded failure passes) for voice; (2) live audits run strict_proof=False because the live paths only hold tool text - per-type proof needs tools and executors to emit structured proof tokens (sha256=, diff_files=, tests_passed=, post_state=, message_id=); (3) executors do not record test results, so a real executor.claude_code success cannot satisfy the code proof shape. (2)+(3) are a cross-cutting design change: resume ACT-001 with an advisor (strong model) design packet for structured tool proof, then a fresh implementer on top of the branch.",
+        "next_action": "PARKED after five build attempts (2026-10-02); branch build/act-001 (9739a8d) holds the library work and the live wiring, not integrated. The verifier accepts the library (typed proof shapes keyed to the real ids executor.claude_code*, executor.hermes, cad.generate; correlation enforced; failure claims need a recorded attempt). Open: (1) BUG on the wired voice path - a capability that raises records its FAILED attempt but is never added to _acted_this_turn (agent_friday.py:1105-1119), so an honest failure report is refused; add the browser path's test (a failure claim matching a recorded failure passes) for voice; (2) live audits run strict_proof=False because the live paths only hold tool text - per-type proof needs tools and executors to emit structured proof tokens (sha256=, diff_files=, tests_passed=, post_state=, message_id=); (3) executors do not record test results, so a real executor.claude_code success cannot satisfy the code proof shape. (2)+(3) are a cross-cutting design change: resume ACT-001 with an advisor (strong model) design packet for structured tool proof, then a fresh implementer on top of the branch.",
     }),
     ('DOMAIN-001', {
         "status": PARTIAL,
@@ -3275,7 +3275,7 @@ PROGRESS_V7: list[tuple[str, dict]] = [
     ('MCP-001', {
         "status": PARTIAL,
         "current_implementation": "Closed the legacy-pin hole in _offer: a handshake whose sensitive capability set is empty (e.g. only logging) dropped the capabilities key, which _reconnect reads as a pin made before capabilities were recorded, so a later prompts/resources/sampling/experimental declaration was silently adopted. An empty list is now stored as a pinned value, so the same change suspends with 'capabilities: [] -> [...]'. 8 regression cases (4 capabilities x binding/no-binding) failed first with KeyError, pass now. MCP-001 next_action text refreshed. The friday/mcp_firewall.py line count is unchanged, so the ledger citations still land. (build run, commit 9eeae9784)",
-        "next_action": 'GAPS: tests/test_prd_ledger.py::test_the_real_ledgers_are_clean fails in this worktree (103 passed, 1 failed across the two files): 7 problems on CORE-002, CTX-002, RES-001 (x2), SCOUT-001, RES-002, RES-003 cite data/ files that are not present here. None is MCP-001 (PL.check(v1) is clean); data/ is off limits; needs the main checkout\'s data/ to confirm green.; A pin made from a handshake but with no binding now stores {"capabilities": []}. If a binding with an endpoint arrives later it suspends with \'transport class: None -> remote\' (observed with a throwaway script, not pinned by a test). Pins of [\'tools\'] already behave this way.; No live path calls Firewall.inspect for a server that Hermes or Claude Code workers configure, so the external lifecycle (discover, verify, approve, waive) runs only from the CLI and tests. It has not been exercised against a live Hermes; that needs a live run outside this worktree.; Assumption, revisit if wrong: server metadata (the title and instructions a server hands the model) is treated as authority-bearing, so a change suspends. The owner ruling that ordinary non-authority metadata does not prompt could be read to exclude it; tests/test_mcp_firewall.py:204 pins the current reading.; The voice-agent wiring (agent_friday.py:739, 1324) was not changed and was not re-run against a live LiveKit session.',
+        "next_action": 'GAPS: tests/test_prd_ledger.py::test_the_real_ledgers_are_clean fails in this worktree (103 passed, 1 failed across the two files): 7 problems on CORE-002, CTX-002, RES-001 (x2), SCOUT-001, RES-002, RES-003 cite data/ files that are not present here. None is MCP-001 (PL.check(v1) is clean); data/ is off limits; needs the main checkout\'s data/ to confirm green.; A pin made from a handshake but with no binding now stores {"capabilities": []}. If a binding with an endpoint arrives later it suspends with \'transport class: None -> remote\' (observed with a throwaway script, not pinned by a test). Pins of [\'tools\'] already behave this way.; No live path calls Firewall.inspect for a server that Hermes or Claude Code workers configure, so the external lifecycle (discover, verify, approve, waive) runs only from the CLI and tests. It has not been exercised against a live Hermes; that needs a live run outside this worktree.; Assumption, revisit if wrong: server metadata (the title and instructions a server hands the model) is treated as authority-bearing, so a change suspends. The owner ruling that ordinary non-authority metadata does not prompt could be read to exclude it; tests/test_mcp_firewall.py:204 pins the current reading.; The voice-agent wiring (agent_friday.py:739, 1328) was not changed and was not re-run against a live LiveKit session.',
     }),
     # --- CTX-002: slice the 2026-10-04 rulings so each run (and its verifier) has one scope
     ('CTX-002', {

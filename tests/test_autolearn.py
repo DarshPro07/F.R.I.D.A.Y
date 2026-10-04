@@ -272,6 +272,7 @@ class Stub:
     def __init__(self, learner):
         self._learner = learner
         self._chat_ctx = chat_ctx()
+        self._router = type('R', (), {'note_turn': lambda self: None})()
 
     @property
     def chat_ctx(self):
