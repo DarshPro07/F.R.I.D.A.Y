@@ -3311,6 +3311,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Control-room browser (ui_browser) now reports a failed boot as the probe's typed state (BrowserUnavailable via classify_failure), fails fast instead of a 45 s hang, frees its driver, and retries on the next call; open_url/study_url return status 'unavailable' with the reason. (build run, commit 1c832b477)",
         "next_action": "GAPS: REFERENCE-B has not run the probe; it needs that machine (this machine: BROWSER_READY, 1.7 s, 283.3 MB, Playwright 1.59.0); tests/test_phase1b.py::test_live_browser_opens_and_closes (live) failed on page text in the earlier run (example.com body lacked 'Example Domain'); not re-run here, not caused by this change; contracts.ActionResult.honest_summary has no NOT_CONFIGURED branch (falls through to 'still working'); UNSUPPORTED is used because its summary reads 'not available on this machine'; voice_brain/ui_server callers of ui_browser.open_url show a generic 'I couldn't open' for status 'unavailable'; the typed reason is in the returned dict, not yet spoken or shown; the new ui_browser tests use a faked Playwright, so a real control-room launch failure was not exercised; implementer did not claim acceptance met",
     }),
+    ('BBOX-001', {
+        "status": PARTIAL,
+        "current_implementation": "observability.reconstruct() replays a run's outcome and task statuses from the event log and verifies the audit chain, then names every disagreement with the ledger rows. Reachable via objective_trace(blackbox=True). 4 new tests + 1 extended. (build run, commit 91e5f53b6)",
+        "next_action": 'GAPS: No new capability/tool id: the replay is a flag on objective_trace, so the capability description, tool card and intent examples still describe only the timeline trace.; reconstruct reads at most 5000 events; a longer log is reported as a partial replay, not paged.',
+    }),
 ]
 
 
