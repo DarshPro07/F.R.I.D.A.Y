@@ -3331,6 +3331,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'DevelopmentRun.execute now records work_packet.output_of(result) and report() exposes it, so the manager sees the same PRD s46 eight fields from Claude Code or Hermes. Tests drive both adapters through a run. (build run, commit 2048ad98c)',
         "next_action": "GAPS: Owner should still confirm the ActionResult -> s46 field mapping in work_packet.output_of (assumed it lives in friday/executors/, objective-engine).; Hermes reports no changed files and no executor runs tests, so files_changed is [] for Hermes and tests is always []; remaining_risk says so.; A result that is not a contracts.ActionResult (loose test fakes) records no packet (work_packet None) rather than an invented one.; The kanban team path (_execute_via_team) packet is output_of over per-profile statuses, so result is empty and remaining_risk says no files were reported; the new test stubs plan_team to stay on the single-executor path.; Fail-before for the new tests is by absence (report() had no work_packet key); not run against the old tree.; An unfiltered run of tests/test_adversarial.py fails test_live_panel_runs_through_the_model_gateway (verdict UNAVAILABLE): a @pytest.mark.live test needing a model gateway, excluded by the gate's marker filter and not touching development.py.",
     }),
+    ('BBOX-001', {
+        "status": PARTIAL,
+        "current_implementation": "Closed both listed gaps: reconstruct() now pages the whole event log instead of cutting at 5000, flags a truncated audit listing, and objective_trace's capability text, intent example and tool card describe the blackbox replay. (build run, commit a1c8fea92)",
+        "next_action": "GAPS: The three new tests were not run against the pre-change tree; they fail there by construction (no _EVENT_PAGE/_AUDIT_LIMIT, no 'blackbox' in the card text, a 3-row cap loses the closing event).; Audit decisions are still capped at the newest 500 rows (now reported as a disagreement, not paged).; Only 22 of the 116 impact-selected test files were run, to stay within the host's memory limits; the rest were not run.",
+    }),
 ]
 
 
