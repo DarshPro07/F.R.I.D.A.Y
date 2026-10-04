@@ -40,6 +40,8 @@ import httpx
 
 from friday import breaker
 
+from friday import browser_readiness
+
 from friday import contracts as c
 
 from friday import netguard
@@ -465,12 +467,19 @@ class BrowserSession:
                 return self._page
             self._abandon()
 
-        from playwright.async_api import async_playwright
+        try:
+            from playwright.async_api import async_playwright
 
-        self._pw = await async_playwright().start()
-        self._browser = await self._pw.chromium.launch(
-            headless=_headless() if headless is None else headless
-        )
+            self._pw = await async_playwright().start()
+            self._browser = await self._pw.chromium.launch(
+                headless=_headless() if headless is None else headless
+            )
+        except Exception as exc:  # noqa: BLE001 - typed by browser_readiness
+            # A driver started before the launch failed would otherwise be
+            # orphaned, and the next call would start a second one.
+            await self.close()
+            raise browser_readiness.BrowserUnavailable(
+                browser_readiness.classify_failure(exc)) from exc
         context = await self._browser.new_context(
             viewport={"width": 1440, "height": 900}, user_agent=USER_AGENT
         )
@@ -491,6 +500,18 @@ class BrowserSession:
         return was_running
 
 session = BrowserSession()
+
+
+def _unavailable(run: c.Run, started: c.ActionResult,
+                 exc: browser_readiness.BrowserUnavailable) -> c.ActionResult:
+    """The browser is not ready on this machine: UNSUPPORTED, with the probe's
+    typed state and reason, rather than a bare launch error at call time."""
+    return run.record(started.finish(
+        status=c.UNSUPPORTED,
+        error=f"browser unavailable - {exc}",
+        output=_scoped({"readiness": exc.readiness.state, "detail": exc.readiness.detail},
+                       BROWSER_SCOPE),
+    ))
 
 
 # --- PRD FR-031/036: the primitive loop over the same session --------------
@@ -562,6 +583,8 @@ async def browser_act(
 
     try:
         loop = await _loop_browser()
+    except browser_readiness.BrowserUnavailable as exc:
+        return _unavailable(run, started, exc)
     except Exception as exc:  # noqa: BLE001
         return run.record(c.failed(started, f"browser could not start: {exc}"))
     # The policy engine has already said AUTO/approved for this call, so the
@@ -655,6 +678,8 @@ async def browser_open(
     try:
         page = await session.page(headless=headless)
         response = await page.goto(url, timeout=timeout_ms)
+    except browser_readiness.BrowserUnavailable as exc:
+        return _unavailable(run, started, exc)
     except Exception as exc:
         return run.record(c.failed(started, f"browser could not open {url!r}: {exc}"))
 
@@ -874,6 +899,8 @@ async def browser_automate(
             types.Part(text=task),
             types.Part.from_bytes(data=shot, mime_type="image/png"),
         ])]
+    except browser_readiness.BrowserUnavailable as exc:
+        return _unavailable(run, started, exc)
     except Exception as exc:
         return run.record(c.failed(started, f"automation setup failed: {exc}"))
 

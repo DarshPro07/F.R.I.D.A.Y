@@ -37,6 +37,41 @@ class Readiness:
     memory_mb: float = 0.0
 
 
+class BrowserUnavailable(RuntimeError):
+    """The browser cannot be started here; `readiness` says why, typed."""
+
+    def __init__(self, readiness: Readiness) -> None:
+        super().__init__(f"{readiness.state}: {readiness.detail}")
+        self.readiness = readiness
+
+
+def _playwright_version() -> str:
+    import importlib.metadata
+
+    try:
+        return importlib.metadata.version("playwright")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def classify_failure(exc: BaseException) -> Readiness:
+    """The not-ready state that failing to import or launch Playwright means.
+
+    One classification for the probe and for the browser tools, so a tool that
+    cannot start the browser names the same cause the probe would.
+    """
+    if isinstance(exc, ImportError):
+        return Readiness(NOT_INSTALLED, f"Playwright is not installed ({exc}); install the "
+                                        f"browser extra: uv pip install -e .[browser]")
+    version = _playwright_version()
+    reason = f"{type(exc).__name__}: {exc}"[:400]
+    if "Executable doesn't exist" in str(exc):
+        return Readiness(BINARY_MISSING, f"the Chromium build Playwright {version} drives is "
+                                         f"missing ({reason}); run: python -m playwright "
+                                         f"install chromium", version)
+    return Readiness(LAUNCH_FAILED, reason, version)
+
+
 def _started_processes_mb() -> float:
     import psutil
 
@@ -58,14 +93,8 @@ def probe(*, url: str = PROBE_URL, timeout_ms: int = 20_000) -> Readiness:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
-        return Readiness(NOT_INSTALLED, f"Playwright is not installed ({exc}); install the "
-                                        f"browser extra: uv pip install -e .[browser]")
-    import importlib.metadata
-
-    try:
-        version = importlib.metadata.version("playwright")
-    except importlib.metadata.PackageNotFoundError:
-        version = "unknown"
+        return classify_failure(exc)
+    version = _playwright_version()
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True, timeout=timeout_ms)
@@ -76,13 +105,8 @@ def probe(*, url: str = PROBE_URL, timeout_ms: int = 20_000) -> Readiness:
                 memory_mb = _started_processes_mb()
             finally:
                 browser.close()
-    except Exception as exc:  # noqa: BLE001 - every launch failure is reported, typed below
-        reason = f"{type(exc).__name__}: {exc}"[:400]
-        if "Executable doesn't exist" in str(exc):
-            return Readiness(BINARY_MISSING, f"the Chromium build Playwright {version} drives is "
-                                             f"missing ({reason}); run: python -m playwright "
-                                             f"install chromium", version)
-        return Readiness(LAUNCH_FAILED, reason, version)
+    except Exception as exc:  # noqa: BLE001 - every launch failure is reported, typed by classify_failure
+        return classify_failure(exc)
     seconds = round(time.monotonic() - started, 2)
     if not title:
         return Readiness(LAUNCH_FAILED, f"Chromium launched but read nothing from {url}",
