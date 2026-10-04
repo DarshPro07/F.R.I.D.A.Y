@@ -13,7 +13,9 @@ in one screen and testable without importing FastMCP.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from datetime import date, datetime, timezone
 
 # Where the work physically happens.
 #   agent_runtime - inside the process running the tool (a container in cloud)
@@ -88,6 +90,45 @@ NEEDS_THE_WORLD = ("DEVICE_REAL", "EXTERNAL_REAL")
 # without also holding the policy table in their head.
 RISK_LEVELS = ("LOW", "MEDIUM", "HIGH", "IRREVERSIBLE")
 
+# Where the implementation came from.
+#
+#   first_party  written in this repository
+#   vendored     third-party code copied in and pinned
+#   third_party  reached through the fabric; pinned in UPSTREAM_LOCK.json
+PROVENANCES = ("first_party", "vendored", "third_party")
+
+# What kind of data a call can read or emit. A declaration, not a policy: the
+# point is that the registry says it, so a reader does not have to open the
+# implementation to learn that a "status" tool touches credentials.
+DATA_CLASSES = ("public", "personal", "credential", "financial", "files",
+                "device_state")
+
+OS_NAMES = ("windows", "macos", "linux")
+
+#: Rough speed of one call, coarse for the same reason `fabric.COST_ORDER` is.
+LATENCY_CLASSES = ("instant", "fast", "slow")
+
+#: Same vocabulary as `fabric.COST_ORDER`, so a native tool and a fabric
+#: provider are comparable on one scale.
+COST_CLASSES = ("free", "cheap", "moderate", "expensive", "paid")
+
+# Runtime state. The strings are `fabric`'s, so a native capability and a
+# fabric provider report health in one vocabulary (a test pins that).
+#
+# Being declared here means installed, and installed is not healthy: the only
+# route to READY is a probe that ran and agreed. A capability nobody has
+# probed is REGISTERED - an honest weak claim - never READY.
+REGISTERED = "REGISTERED"        # installed; no probe has vouched for it
+READY = "READY"                  # a probe ran and agrees it works
+DEGRADED = "DEGRADED"            # answering, but not fully
+AUTH_REQUIRED = "AUTH_REQUIRED"  # a person must supply a credential
+UNAVAILABLE = "UNAVAILABLE"      # a probe ran and it does not work
+HEALTH_STATES = (REGISTERED, READY, DEGRADED, AUTH_REQUIRED, UNAVAILABLE)
+
+#: What a probe may report. REGISTERED is excluded: it means "no probe", so a
+#: probe that returned it would be contradicting itself.
+PROBE_STATES = (READY, DEGRADED, AUTH_REQUIRED, UNAVAILABLE)
+
 
 @dataclass(frozen=True)
 class Capability:
@@ -125,6 +166,26 @@ class Capability:
     #: name that was already right is how a read of public headlines came back
     #: claiming it needed approval.
     policy_tool_id: str = ""
+    #: Registry record. Every default is the weakest honest claim - "" or an
+    #: empty tuple means "not declared", never "none" - so nothing asserts more
+    #: than its author wrote down. Health is deliberately not a field: a
+    #: stored value is a claim nobody re-checked, and `health()` below asks a
+    #: probe instead.
+    version: str = ""
+    #: Where the implementation lives: "native" for in-process code, or
+    #: "fabric:<provider id>" for something reached through the fabric.
+    backend: str = "native"
+    provenance: str = "first_party"
+    #: Friday permission ids that must be granted before this may run.
+    permissions: tuple[str, ...] = ()
+    data_classes: tuple[str, ...] = ()
+    os_support: tuple[str, ...] = ()
+    latency_class: str = ""
+    cost_class: str = ""
+    #: pytest node ids that exercise this capability.
+    tests: tuple[str, ...] = ()
+    #: ISO date a person or probe last confirmed it works. "" is never.
+    last_verified: str = ""
 
     @property
     def requires_approval(self) -> bool:
@@ -166,6 +227,28 @@ class Capability:
                 f"{self.verification_scope!r}")
         if self.risk not in RISK_LEVELS:
             raise ValueError(f"{self.id}: bad risk {self.risk!r}")
+        if not self.backend:
+            raise ValueError(f"{self.id}: backend must be named")
+        if self.provenance not in PROVENANCES:
+            raise ValueError(f"{self.id}: bad provenance {self.provenance!r}")
+        for name, given, allowed in (
+                ("data_classes", self.data_classes, DATA_CLASSES),
+                ("os_support", self.os_support, OS_NAMES)):
+            unknown = [v for v in given if v not in allowed]
+            if unknown:
+                raise ValueError(f"{self.id}: bad {name} {unknown!r}")
+        if self.latency_class and self.latency_class not in LATENCY_CLASSES:
+            raise ValueError(
+                f"{self.id}: bad latency_class {self.latency_class!r}")
+        if self.cost_class and self.cost_class not in COST_CLASSES:
+            raise ValueError(f"{self.id}: bad cost_class {self.cost_class!r}")
+        if self.last_verified:
+            try:
+                date.fromisoformat(self.last_verified)
+            except ValueError:
+                raise ValueError(
+                    f"{self.id}: last_verified must be an ISO date, got "
+                    f"{self.last_verified!r}") from None
 
 
 _ALL = (
@@ -2673,3 +2756,58 @@ def requiring_edge() -> tuple[Capability, ...]:
 
 def as_dicts() -> list[dict]:
     return [asdict(cap) for cap in _ALL]
+
+
+#: Health probes by capability id. Kept beside the table rather than on the
+#: frozen record: a callable in `asdict()` output would break the JSON manifest.
+_PROBES: dict[str, Callable[[], object]] = {}
+
+
+def register_probe(tool_id: str, probe: Callable[[], object]) -> None:
+    """
+    Let `probe` vouch for - or against - a declared capability.
+
+    The probe returns a bool, or a dict with a ``state`` in `PROBE_STATES` and
+    an optional ``detail``; raising counts as failing.
+    """
+    get(tool_id)                       # an undeclared id is a typo, not a probe
+    _PROBES[tool_id] = probe
+
+
+def unregister_probe(tool_id: str) -> None:
+    _PROBES.pop(tool_id, None)
+
+
+def health(tool_id: str) -> dict:
+    """
+    Ask a capability whether it is actually working.
+
+    Declared means installed, and installed is never reported healthy on its
+    own: with no probe the state is REGISTERED and ``healthy`` is False. A
+    probe that raises or answers falsy yields UNAVAILABLE, with the reason in
+    ``detail`` - the failure is reported, not swallowed.
+    """
+    get(tool_id)
+    probe = _PROBES.get(tool_id)
+    if probe is None:
+        return _health_report(tool_id, REGISTERED,
+                              "installed; no health probe registered")
+    try:
+        result = probe()
+    except Exception as exc:                       # noqa: BLE001 - reported
+        return _health_report(tool_id, UNAVAILABLE,
+                              f"health probe raised: {exc}")
+    if isinstance(result, dict):
+        state = result.get("state", READY)
+        if state not in PROBE_STATES:
+            raise ValueError(
+                f"{tool_id}: health probe returned unknown state {state!r}")
+        return _health_report(tool_id, state, result.get("detail", ""))
+    return _health_report(tool_id, READY if result else UNAVAILABLE,
+                          "health probe returned a bare boolean")
+
+
+def _health_report(tool_id: str, state: str, detail: str) -> dict:
+    return {"id": tool_id, "state": state, "healthy": state == READY,
+            "detail": detail,
+            "checked_at": datetime.now(timezone.utc).isoformat()}
