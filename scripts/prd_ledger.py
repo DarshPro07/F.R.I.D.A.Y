@@ -3306,6 +3306,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'assumption_register (added in 1e0811d) was in neither workspace.SCOPED nor UNSCOPED, failing test_every_table_is_declared. Declared it UNSCOPED as child rows of objective_runs, like objective_tasks/events/deliveries. (build run, commit 14dc8244b)',
         "next_action": "GAPS: 'High-impact' threshold (consequence HIGH, or LOW confidence with MEDIUM+ consequence) is an assumption; owner to confirm.; Model-emitted confidence/consequence for SMALL questions was only tested with a stub, never live.; Full four-chunk baseline_suite.py was not run; only the six test files named in the packet were re-run for this fix.; The 'failed before' state of test_every_table_is_declared was established by reading, not by a pre-edit run: grep showed assumption_register only in friday/store.py, so it was undeclared before the edit.",
     }),
+    ('BROW-004', {
+        "status": PARTIAL,
+        "current_implementation": "Control-room browser (ui_browser) now reports a failed boot as the probe's typed state (BrowserUnavailable via classify_failure), fails fast instead of a 45 s hang, frees its driver, and retries on the next call; open_url/study_url return status 'unavailable' with the reason. (build run, commit 1c832b477)",
+        "next_action": "GAPS: REFERENCE-B has not run the probe; it needs that machine (this machine: BROWSER_READY, 1.7 s, 283.3 MB, Playwright 1.59.0); tests/test_phase1b.py::test_live_browser_opens_and_closes (live) failed on page text in the earlier run (example.com body lacked 'Example Domain'); not re-run here, not caused by this change; contracts.ActionResult.honest_summary has no NOT_CONFIGURED branch (falls through to 'still working'); UNSUPPORTED is used because its summary reads 'not available on this machine'; voice_brain/ui_server callers of ui_browser.open_url show a generic 'I couldn't open' for status 'unavailable'; the typed reason is in the returned dict, not yet spoken or shown; the new ui_browser tests use a faked Playwright, so a real control-room launch failure was not exercised; implementer did not claim acceptance met",
+    }),
 ]
 
 
