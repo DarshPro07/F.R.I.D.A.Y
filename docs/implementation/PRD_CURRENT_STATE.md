@@ -153,14 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: bd3aa04 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-04T06:39:25+00:00
+- HEAD: f8d91da on prd-v7/slice-7-adaptive-hardware, updated 2026-10-04T07:28:06+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 79, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
 - Unresolved P0: 20
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (88): CTX-002=REBASE_REQUIRED
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree), TRAJ-001 (partial x2), MCP-001 (NOT_RED), SEC-005 (integration refused), CTX-002 (REBASE_REQUIRED)
-- Open escalations: 68
-  - SEC-005 resolved: REBASE_REQUIRED: clean controller rebase onto main; re-integrating
+- Last wave (91): CTX-002=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree), TRAJ-001 (partial x2), MCP-001 (NOT_RED), SEC-005 (integration refused)
+- Open escalations: 69
   - CTX-002 blocked: OWNER: a working model-gateway key (OpenAI invalid 2026-10-02, Gemini rejected) and approval to spen
   - CTX-002 resolved: owner rulings 2026-10-04 (CLI chooser, holdout once, flag + shadow) in its next_action
   - MCP-001 integration: {"requirement": "MCP-001", "result": "NOT_RED", "red_green": {"result": "NOT_RED", "tests": ["tests/
@@ -170,5 +169,6 @@ That is the first implementation target of this program.
   - SEC-005 integration: refusing SEC-005: run has no commit
   - CTX-002 resolved: slice 1 scoped in the ledger (d74b22d); implementer fixes the verifier's three slice findings
   - CTX-002 rebase: {"requirement": "CTX-002", "result": "REBASE_REQUIRED", "red_green": {}, "verifier": null, "integrat
+  - CTX-002 resolved: slice 1 verifier found two localized timeout/fallback bugs and a stale plan line; fresh REPAIR from 
 - Next ready: CTX-003, RES-001
 <!-- build-program:end -->
