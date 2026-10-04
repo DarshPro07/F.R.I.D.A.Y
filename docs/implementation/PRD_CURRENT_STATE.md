@@ -153,14 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 5342a82 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-04T08:29:23+00:00
+- HEAD: dc0f95a on prd-v7/slice-7-adaptive-hardware, updated 2026-10-04T08:45:40+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 79, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
 - Unresolved P0: 20
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (94): RES-001=VERIFIER_FAIL
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree), TRAJ-001 (partial x2), MCP-001 (NOT_RED), SEC-005 (integration refused), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL)
-- Open escalations: 72
-  - CTX-002 cascade: 3 repairs spent
+- Last wave (97): ASSUME-001=FAILED
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree), TRAJ-001 (partial x2), MCP-001 (NOT_RED), SEC-005 (integration refused), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (stale worktree)
+- Open escalations: 73
   - CTX-002 resolved: implementer out of turns on a three-part brief; re-queued for one slice (flag + shadow) from the wor
   - CTX-002 integration: {"requirement": "CTX-002", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tests
   - SEC-005 integration: refusing SEC-005: run has no commit
@@ -170,5 +169,6 @@ That is the first implementation target of this program.
   - CTX-002 integration: {"requirement": "CTX-002", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tests
   - CTX-003 integration: refusing CTX-003: run has no commit
   - RES-001 integration: {"requirement": "RES-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tests
-- Next ready: BROW-004, ASSUME-001
+  - BROW-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\brow-004 already exists
+- Next ready: ASSUME-001, BBOX-001
 <!-- build-program:end -->
