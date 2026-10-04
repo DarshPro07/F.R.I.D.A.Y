@@ -145,6 +145,44 @@ def release_lock(path: Path) -> None:
 
 # -------------------------------------------------------------------- state
 
+#: The controller's queued state edits, applied by the next run under the program lock.
+INBOX = "controller_inbox.jsonl"
+
+
+def apply_inbox(state: dict, runs_dir: Path) -> list[str]:
+    """Apply the controller's queued edits - {"action": "unpark"|"requeue", "req", "step", "why"} per
+    line - then archive the inbox. Edits written to the state file while a run held it were lost to
+    that run's next write, and waiters racing the lock died to quoting bugs and memory reaping
+    (2026-10-02..04): one reader, under the lock, removes the race."""
+    path = Path(runs_dir) / INBOX
+    if not path.exists():
+        return []
+    applied = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            cmd = json.loads(line)
+        except ValueError:
+            continue
+        req, action = cmd.get("req") if isinstance(cmd, dict) else None, (cmd or {}).get("action")
+        if not req or action not in ("unpark", "requeue"):
+            continue
+        state["parked"].pop(req, None)
+        state["partials"].pop(req, None)
+        state["attempts"].pop(req, None)
+        state["cascade"].pop(req, None)
+        if action == "requeue":
+            state["repairs"][req] = int(cmd.get("step") or 0)
+            state["repair_queue"][req] = {"result": str(cmd.get("result") or "CONTROLLER"), "at": now()}
+        else:
+            state["repairs"].pop(req, None)
+            state["repair_queue"].pop(req, None)
+        state["escalations"].append({"req": req, "kind": "resolved", "at": now(),
+                                     "detail": f"controller {action}: {cmd.get('why', '')}"})
+        applied.append(f"{action} {req}")
+    path.replace(path.with_name(f"controller_inbox.applied-{int(time.time())}.jsonl"))
+    return applied
+
+
 def load_state(path: Path) -> dict:
     try:
         old = json.loads(path.read_text(encoding="utf-8"))
@@ -549,6 +587,9 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
         return {"stop_reason": "dirty tree", "waves": []}
     worktrees = worktrees or k._worktrees_root()
     state = load_state(state_file)
+    if not dry_run:
+        for done in apply_inbox(state, runs_dir or k.RUNS_DIR):
+            out(f"inbox: {done}")
     integrated: set[str] = set()
     resumed: set[str] = set()
     if not dry_run:  # jobs a dead controller left STARTED are adopted, never relaunched

@@ -1295,3 +1295,21 @@ def test_a_cascade_step_whose_worker_fails_hands_on_to_the_next_step(env):
     st = state_of(env)
     assert k.steps == ["REPAIR", "ADVISOR", "IMPLEMENTER"]
     assert st["parked"]["A"] == "VERIFIER_FAIL"
+
+
+
+def test_the_controllers_inbox_is_applied_under_the_lock_and_archived(env, tmp_path):
+    # 2026-10-04: a waiter that edited the state file between runs died to a quoting bug
+    # and to memory reaping; the program now applies the controller's edits itself.
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / BP.INBOX).write_text(
+        json.dumps({"action": "requeue", "req": "A", "step": 2, "why": "diagnosed"}) + "\n"
+        + json.dumps({"action": "unpark", "req": "B"}) + "\n" + "not json\n", encoding="utf-8")
+    env.state.parent.mkdir(parents=True, exist_ok=True)
+    env.state.write_text(json.dumps({"parked": {"A": "TEST_TIMEOUT", "B": "blocked"}}), encoding="utf-8")
+    k = FakeKernel(ids=(), level=0)
+    go(env, k, runs_dir=runs)
+    st = state_of(env)
+    assert st["parked"] == {} and st["repairs"]["A"] == 2 and "A" in st["repair_queue"]
+    assert not (runs / BP.INBOX).exists() and list(runs.glob("controller_inbox.applied-*.jsonl"))
