@@ -1790,3 +1790,43 @@ def test_rebase_run_aborts_a_conflict_and_leaves_the_worktree_clean(repo, tmp_pa
     assert K.rebase_run("R-1", repo=repo, runs_dir=runs) is False
     assert _git(wt, "rev-parse", "HEAD") == rec["commit"]
     assert json.loads((runs / "R-1.json").read_text())["commit"] == rec["commit"]
+
+
+
+def test_a_turn_capped_failure_retries_one_budget_class_up(tmp_path):
+    # 2026-10-04: BROW-004 (P1, one cited file) got MICRO's 12 turns, ran out, and would
+    # have been relaunched with the same 12.
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    r = row("BROW-004", "P1")
+    assert K.budget_class(r, runs_dir=runs) == "MICRO"
+    (runs / "BROW-004.json").write_text(json.dumps({"state": "FAILED", "budget_class": "MICRO", "turns": 13}))
+    assert K.budget_class(r, runs_dir=runs) == "NORMAL"
+    (runs / "BROW-004.json").write_text(json.dumps({"state": "FAILED", "budget_class": "NORMAL", "turns": 26}))
+    assert K.budget_class(r, runs_dir=runs) == "COMPLEX"
+    (runs / "BROW-004.json").write_text(json.dumps({"state": "FAILED", "budget_class": "MICRO", "turns": 3}))
+    assert K.budget_class(r, runs_dir=runs) == "MICRO"  # a failure before the cap is not a budget problem
+
+
+def test_discard_worktree_removes_only_an_empty_one(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    assert K.discard_worktree({"worktree": str(wt), "branch": "build/r-1"}, repo=repo) is True
+    assert not wt.exists()
+    run2, wt2 = _done_run(repo, tmp_path / "second")
+    (wt2 / "left.py").write_text("x = 1")
+    assert K.discard_worktree({"worktree": str(wt2), "branch": "build/r-1"}, repo=repo) is False
+    assert wt2.exists()
+
+
+
+def test_a_one_day_budget_override_applies_only_to_its_day(tmp_path):
+    # Owner, 2026-10-04: "increase the budget to $70 for today only".
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / K.DAY_BUDGET_FILE).write_text(json.dumps({K._today(): {"soft": 65.0, "hard": 70.0},
+                                                      "2020-01-01": {"soft": 1.0, "hard": 2.0}}))
+    assert K.day_limits(runs) == (65.0, 70.0)
+    _spent(runs, 50.0)
+    assert K.spend_reserve("a1", "launch", "R", "SHIP", 7.5, runs)[0]  # over 40, under 65
+    (runs / K.DAY_BUDGET_FILE).write_text(json.dumps({"2020-01-01": {"soft": 65.0, "hard": 70.0}}))
+    assert K.day_limits(runs) == (K.DAY_SOFT_USD, K.DAY_HARD_USD)

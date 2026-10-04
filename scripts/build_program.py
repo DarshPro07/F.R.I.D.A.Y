@@ -505,6 +505,10 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
         # could only park the worktree as stale (2026-10-03, SEC-005).
         state["repair_queue"][req] = {"result": f"WORKER_{st}", "at": now()}
         return st, spend, False
+    if st in k.WORKER_FAILURES:
+        # Nothing on disk to keep: drop the worktree so the retry launches (a bigger budget class
+        # when it ran out of turns) instead of the next run parking it as stale (2026-10-04, BROW-004).
+        k.discard_worktree(rec, repo=repo)
     state["attempts"][req] = state["attempts"].get(req, 0) + 1
     if state["attempts"][req] >= MAX_ATTEMPTS:
         park(state, req, f"{st.lower()} x{state['attempts'][req]}", "attempts", f"{st} twice")

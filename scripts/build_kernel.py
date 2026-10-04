@@ -188,16 +188,28 @@ def agent_utility(row: dict, context: dict | None = None) -> tuple[dict, list[st
             "escalate": escalate, "step": step}, reasons
 
 
-def budget_class(row: dict, findings: dict | None = None) -> str:
+CLASS_LADDER = ("MICRO", "NORMAL", "COMPLEX")
+
+
+def budget_class(row: dict, findings: dict | None = None, runs_dir: Path | None = None) -> str:
     if row.get("priority") == "P0":
         return "P0"
     found = (findings or {}).get("budget_class")
     if found in BUDGETS and found != "SCOUT":
-        return found
-    n = len(surface(row))
-    if n >= 4:
-        return "COMPLEX"
-    return "MICRO" if n <= 1 else "NORMAL"
+        base = found
+    else:
+        n = len(surface(row))
+        base = "COMPLEX" if n >= 4 else "MICRO" if n <= 1 else "NORMAL"
+    # The last attempt ran out of turns at its class's cap: the retry gets the next class up
+    # (2026-10-04: BROW-004 failed at MICRO's 12 turns and would have retried with 12).
+    last = _read_json(_runs(runs_dir) / f"{row.get('id')}.json")
+    cls = last.get("budget_class")
+    if (last.get("state") in WORKER_FAILURES and cls in CLASS_LADDER
+            and int(last.get("turns") or 0) >= BUDGETS[cls][0]):
+        bumped = CLASS_LADDER[min(CLASS_LADDER.index(cls) + 1, len(CLASS_LADDER) - 1)]
+        if base not in CLASS_LADDER or CLASS_LADDER.index(bumped) > CLASS_LADDER.index(base):
+            return bumped
+    return base
 
 
 # ---------------------------------------------------------------- queue
@@ -575,6 +587,23 @@ VERIFIER_SHARE = 0.25
 FINISHING = ("continue", "verify")
 
 
+#: The owner's one-day overrides of the standing budget: {"YYYY-MM-DD": {"soft": x, "hard": y}}.
+DAY_BUDGET_FILE = "day_budget.json"
+
+
+def day_limits(runs_dir: Path | None = None) -> tuple[float, float]:
+    """(soft stop, hard ceiling) for today: the owner's standing DAY_SOFT_USD / DAY_HARD_USD
+    unless a one-day override is recorded for today's local date."""
+    data = _read_json(_runs(runs_dir) / DAY_BUDGET_FILE)
+    today = data.get(_today()) if isinstance(data, dict) else None
+    if isinstance(today, dict):
+        try:
+            return float(today["soft"]), float(today["hard"])
+        except (KeyError, TypeError, ValueError):
+            pass  # a malformed override falls back to the standing budget, never to no budget
+    return DAY_SOFT_USD, DAY_HARD_USD
+
+
 class SpendCapReached(KernelError):
     """A paid call would pass the owner's day budget; nothing was started."""
 
@@ -670,12 +699,13 @@ def spend_reserve(key: str, purpose: str, req: str, kind: str, usd: float,
         spent = day_cost(datetime.now().astimezone().date(), runs_dir)
         reserved = sum(float(x.get("usd") or 0) for x in leases)
         committed = spent + reserved
-        if purpose not in FINISHING and committed >= DAY_SOFT_USD:
+        soft, hard = day_limits(runs_dir)
+        if purpose not in FINISHING and committed >= soft:
             return False, (f"SPEND_SOFT_STOP: ${committed:.2f} committed today (${spent:.2f} spent, "
-                           f"${reserved:.2f} reserved), soft stop ${DAY_SOFT_USD:.2f}")
-        if committed + usd > DAY_HARD_USD:
+                           f"${reserved:.2f} reserved), soft stop ${soft:.2f}")
+        if committed + usd > hard:
             return False, (f"SPEND_CAP: ${committed:.2f} committed today + ${usd:.2f} for {req} {kind} "
-                           f"would pass the ${DAY_HARD_USD:.2f} day ceiling")
+                           f"would pass the ${hard:.2f} day ceiling")
         leases.append({"key": key, "purpose": purpose, "req": req, "kind": kind,
                        "usd": round(float(usd), 4), "day": today, "at": _iso()})
         _spend_store(leases, runs_dir)
@@ -1369,6 +1399,21 @@ def rebase_run(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR) -> boo
     if meta:
         _write_run_meta(wt, {**meta, "base_sha": head})
     return True
+
+
+def discard_worktree(rec: dict, *, repo: Path = ROOT) -> bool:
+    """Remove a failed run's worktree when it holds nothing (the kernel's .build/ aside), so
+    the retry launches fresh instead of the next run parking it as stale. True when removed."""
+    wt = Path(rec.get("worktree") or "")
+    if not wt.is_dir():
+        return False
+    try:
+        if _changes(wt).strip():
+            return False
+    except KernelError:
+        return False  # git cannot read it: keep it for a person to look at
+    _remove_worktree(repo, wt, rec.get("branch") or None)
+    return not wt.exists()
 
 
 def has_work(rec: dict) -> bool:

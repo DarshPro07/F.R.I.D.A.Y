@@ -111,7 +111,7 @@ def seconds_to_next_day() -> float:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--day-usd", type=float, default=K.DAY_HARD_USD)
+    ap.add_argument("--day-usd", type=float, default=None, help="cap below today's budget (default: none)")
     ap.add_argument("--total-usd", type=float, default=45.0)
     ap.add_argument("--run-usd", type=float, default=15.0)
     ap.add_argument("--waves", type=int, default=6)
@@ -138,7 +138,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         spent_today, reserved = K.spend_committed(RUNS)
         today = spent_today + reserved
-        stop_at = min(a.day_usd, K.DAY_SOFT_USD)
+        soft, hard = K.day_limits(RUNS)
+        day_cap = hard if a.day_usd is None else min(a.day_usd, hard)
+        stop_at = min(day_cap, soft)
         if today >= stop_at:
             why = (f"day spend cap ${stop_at:.2f} reached (${spent_today:.2f} spent, "
                    f"${reserved:.2f} reserved today)")
@@ -153,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue  # waiting is WAITING_RESOURCES, never the end of the build
             return 0
         budget_left = a.run_usd if a.until_done else a.total_usd - used
-        run_usd = min(a.run_usd, budget_left, min(a.day_usd, K.DAY_HARD_USD) - today)
+        run_usd = min(a.run_usd, budget_left, day_cap - today)
         waves_before = waves()
         mark("RUNNING", f"{priority} program, up to {a.waves} waves, ${run_usd:.2f}")
         log(f"RUN {priority} program (${run_usd:.2f}, {a.waves} waves); spent so far ${used:.2f}")

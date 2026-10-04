@@ -59,6 +59,7 @@ class FakeKernel:
         self.with_work: set[str] = set()  # requirements whose failed worker left changes on disk
         self.rebases_clean: set[str] = set()  # requirements whose branch rebases onto HEAD cleanly
         self.rebased: list[str] = []
+        self.discarded: list[str] = []
         self.spend: list[tuple[str, str, float]] = []  # (req, kind, usd) of each spend lease taken
         self.released: list[str] = []  # memory leases given back
         self.events: list[tuple] = []  # job-state writes and lease attempts, in order
@@ -81,6 +82,10 @@ class FakeKernel:
     def rebase_run(self, req, *, repo=None, runs_dir=None):
         self.rebased.append(req)
         return req in self.rebases_clean
+
+    def discard_worktree(self, rec, *, repo=None):
+        self.discarded.append(rec["requirement"])
+        return True
 
     def has_work(self, rec):
         return rec["requirement"] in self.with_work
@@ -346,6 +351,8 @@ def test_a_worker_that_fails_with_nothing_on_disk_is_an_attempt(env):
     go(env, k, max_waves=1)
     st = state_of(env)
     assert st["attempts"]["A"] == 1 and "A" not in st["repair_queue"]
+    # Its empty worktree is dropped, so the retry launches instead of parking "stale worktree".
+    assert k.discarded == ["A"] and "A" not in st["parked"]
 
 
 def test_a_run_whose_only_admissible_job_is_an_unaffordable_repair_stops_on_spend(env):
