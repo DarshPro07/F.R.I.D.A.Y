@@ -153,15 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 3d45250 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-03T16:02:00+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 73, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
+- HEAD: 839f568 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-04T04:29:22+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 79, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 36}
 - Unresolved P0: 20
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (73): SEC-005=REBASE_REQUIRED
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree), TRAJ-001 (partial x2), SEC-005 (REBASE_REQUIRED)
-- Open escalations: 58
-  - SEC-005 owner: verifier FAIL 2026-10-03: bridge_run_command and interpreters stay available in a scoped delegation;
-  - SEC-005 resolved: owner ruling 2026-10-03c: commands disabled for scoped delegations; packet refreshed; repair queued 
+- Last wave (76): MCP-001=FAILED
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), APPROVAL-001 (stale worktree), TRAJ-001 (partial x2), CTX-002 (blocked)
+- Open escalations: 60
   - CTX-003 blocked: Owner decision needed: the policy category (what authority starting a development run in a repo carr
   - TRAJ-001 partial: integrated twice without closing its gaps
   - MCP-001 partial: integrated twice without closing its gaps
@@ -170,5 +168,7 @@ That is the first implementation target of this program.
   - MCP-001 resolved: owner rulings 2026-10-03e (Hermes config.yaml discovery, approval waivers, protocol policy) in its n
   - CTX-002 resolved: the 19:32 repair's DONE commit 6be3cc4 failed only on a 15-turn verifier; re-integrating with the si
   - SEC-005 rebase: {"requirement": "SEC-005", "result": "REBASE_REQUIRED", "red_green": {}, "verifier": null, "integrat
-- Next ready: CTX-002, CTX-003
+  - SEC-005 resolved: REBASE_REQUIRED: clean controller rebase onto main; re-integrating
+  - CTX-002 blocked: OWNER: a working model-gateway key (OpenAI invalid 2026-10-02, Gemini rejected) and approval to spen
+- Next ready: SEC-005, MCP-001
 <!-- build-program:end -->
