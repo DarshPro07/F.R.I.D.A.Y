@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -226,6 +227,207 @@ def test_doctor_never_prints_a_secret_value(tmp_path, monkeypatch):
     (root / "ui" / "index.html").write_text("", encoding="utf-8")
     rendered = "\n".join(f"{n} {s} {d}" for n, s, d in L.doctor_checks(root=root, env_path=None))
     assert "FRIDAY_TEST_SECRET_9f3a" not in rendered
+
+
+# --- credentials: set is not usable ---------------------------------------
+
+_REAL_LOOKING = {
+    "LIVEKIT_URL": "wss://friday-7k2m9q.livekit.cloud",
+    "LIVEKIT_API_KEY": "APIkq3Zb8Hn2WvTt",
+    "LIVEKIT_API_SECRET": "Q8sD2fGh1JkL4zXcV7bN0mP3oI6uY9tR5eW2aS1d",
+}
+
+
+def _template_env() -> dict[str, str]:
+    values = {}
+    for line in (Path(__file__).resolve().parents[1] / ".env.example").read_text(
+            encoding="utf-8").splitlines():
+        name, sep, value = line.partition("=")
+        if sep and not line.lstrip().startswith("#"):
+            values[name.strip()] = value.strip()
+    return values
+
+
+def _doctor_rows(tmp_path, monkeypatch, env: dict[str, str], **probes):
+    """doctor_checks against a scratch root with exactly `env` as credentials."""
+    monkeypatch.setenv("ADA_DB", str(tmp_path / "doctor.sqlite3"))
+    for name in (*L.REQUIRED_FOR_AGENT, *L.provider_credential_names()):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    root = tmp_path / "root"
+    (root / "ui").mkdir(parents=True, exist_ok=True)
+    (root / "ui" / "index.html").write_text("", encoding="utf-8")
+    return {n: (s, d) for n, s, d in L.doctor_checks(root=root, env_path=None, **probes)}
+
+
+def _provider_env(**override) -> dict[str, str]:
+    """A realistic-looking key for every provider credential, then `override`."""
+    env = {name: f"k{index}Zq8Wm3Xc7Vb1Nl5Hj9Gf2Ds4" for index, name
+           in enumerate(L.provider_credential_names())}
+    env.update(override)
+    return env
+
+
+def test_a_template_livekit_credential_degrades_the_doctor_and_is_named(tmp_path, monkeypatch):
+    """The 2026-10-02 defect: .env.example values reported PASS."""
+    template = _template_env()
+    env = {name: template[name] for name in L.REQUIRED_FOR_AGENT}
+    row = _doctor_rows(tmp_path, monkeypatch, env, **_accepting())["livekit credentials"]
+    assert row[0] == L.DEGRADED
+    for name in L.REQUIRED_FOR_AGENT:
+        assert name in row[1]
+    assert "placeholder" in row[1]
+    assert template["LIVEKIT_API_SECRET"] not in row[1]
+
+
+def test_a_template_provider_key_degrades_the_doctor_and_is_named(tmp_path, monkeypatch):
+    env = {**_REAL_LOOKING, **_provider_env(OPENAI_API_KEY=_template_env()["OPENAI_API_KEY"],
+                                            GOOGLE_API_KEY=_template_env()["GOOGLE_API_KEY"])}
+    row = _doctor_rows(tmp_path, monkeypatch, env, **_accepting())["provider credentials"]
+    assert row[0] == L.DEGRADED
+    assert "placeholder: " in row[1] and "OPENAI_API_KEY" in row[1] and "GOOGLE_API_KEY" in row[1]
+
+
+def test_a_key_the_provider_rejects_degrades_the_doctor_and_is_named(tmp_path, monkeypatch):
+    """GOOGLE_API_KEY non-empty and not a template, but Google answers 401."""
+    from friday import credentials
+
+    def provider(name, value):
+        if name == "GOOGLE_API_KEY":
+            return credentials.Verdict(credentials.REJECTED, "rejected (HTTP 401)")
+        return credentials.Verdict(credentials.VALID, "accepted")
+
+    env = {**_REAL_LOOKING, **_provider_env()}
+    rows = _doctor_rows(tmp_path, monkeypatch, env, provider_probe=provider,
+                        livekit_probe=_accept_livekit)
+    state, detail = rows["provider credentials"]
+    assert state == L.DEGRADED
+    assert "rejected: GOOGLE_API_KEY" in detail
+    assert env["GOOGLE_API_KEY"] not in detail
+    assert rows["livekit credentials"][0] == L.PASS
+
+
+def test_a_refused_livekit_key_pair_degrades_the_doctor(tmp_path, monkeypatch):
+    from friday import credentials
+
+    def refuse(url, key, secret):
+        return credentials.Verdict(credentials.REJECTED, "rejected (HTTP 401)")
+
+    state, detail = _doctor_rows(tmp_path, monkeypatch, {**_REAL_LOOKING, **_provider_env()},
+                                 livekit_probe=refuse)["livekit credentials"]
+    assert state == L.DEGRADED
+    assert "rejected: LIVEKIT_API_KEY, LIVEKIT_API_SECRET" in detail
+
+
+def test_credentials_the_providers_accept_pass_and_say_so(tmp_path, monkeypatch):
+    rows = _doctor_rows(tmp_path, monkeypatch, {**_REAL_LOOKING, **_provider_env()},
+                        **_accepting())
+    assert rows["livekit credentials"][0] == L.PASS
+    assert "accepted" in rows["livekit credentials"][1]
+    assert rows["provider credentials"][0] == L.PASS
+    assert "valid: " in rows["provider credentials"][1]
+
+
+def test_without_live_the_doctor_makes_no_network_call_and_claims_no_validity(tmp_path, monkeypatch):
+    from friday import netguard
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("a static doctor must not reach the network")
+
+    monkeypatch.setattr(netguard, "fetch", no_network)
+    rows = _doctor_rows(tmp_path, monkeypatch, {**_REAL_LOOKING, **_provider_env()})
+    assert "unverified: " in rows["provider credentials"][1]
+    assert "valid: " not in rows["provider credentials"][1]
+
+
+def _accept_livekit(url, key, secret):
+    from friday import credentials
+
+    return credentials.Verdict(credentials.VALID, "accepted")
+
+
+def _accepting() -> dict:
+    from friday import credentials
+
+    return {"provider_probe": lambda name, value: credentials.Verdict(credentials.VALID, "accepted"),
+            "livekit_probe": _accept_livekit}
+
+
+# --- the launcher and the voice worker --------------------------------------
+
+def _run_all_roles(tmp_path, monkeypatch, capsys, env: dict[str, str]) -> tuple[list[str], str]:
+    """Run L.run_all against fakes; returns (roles it started, its output)."""
+    for name in L.REQUIRED_FOR_AGENT:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    started: list[str] = []
+    monkeypatch.setattr(L, "app_root", lambda: tmp_path)
+    monkeypatch.setattr(L, "state_root", lambda: tmp_path / "state")
+    monkeypatch.setattr(L, "adopt_legacy_state", lambda: [])
+    monkeypatch.setattr(L, "ensure_state_dirs", lambda root=None: [])
+    monkeypatch.setattr(L, "load_env", lambda: None)
+    monkeypatch.setattr(L, "port_open", lambda host, port, timeout=0.5: True)   # attach, start no server/ui
+    monkeypatch.setattr(L, "start_role",
+                        lambda role, extra, logs_dir, jobs: started.append(role))
+
+    def stop(_seconds):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(L.time, "sleep", stop)
+    assert L.run_all() == 0
+    return started, capsys.readouterr().out
+
+
+def test_the_launcher_does_not_start_the_voice_worker_on_template_livekit_credentials(
+        tmp_path, monkeypatch, capsys):
+    template = _template_env()
+    started, out = _run_all_roles(tmp_path, monkeypatch, capsys,
+                                  {name: template[name] for name in L.REQUIRED_FOR_AGENT})
+    assert "agent" not in started
+    assert out.count("not starting the voice worker") == 1
+    assert "placeholder" in out and "LIVEKIT_URL" in out
+    assert "browser voice" in out
+    assert template["LIVEKIT_API_SECRET"] not in out
+
+
+def test_the_launcher_does_not_start_the_voice_worker_without_livekit_credentials(
+        tmp_path, monkeypatch, capsys):
+    started, out = _run_all_roles(tmp_path, monkeypatch, capsys, {})
+    assert "agent" not in started
+    assert "missing" in out
+
+
+def test_the_launcher_does_not_start_the_voice_worker_on_a_refused_key_pair(
+        tmp_path, monkeypatch, capsys):
+    from friday import credentials
+
+    monkeypatch.setattr(credentials, "probe_livekit",
+                        lambda url, key, secret: credentials.Verdict(credentials.REJECTED, "401"))
+    started, out = _run_all_roles(tmp_path, monkeypatch, capsys, _REAL_LOOKING)
+    assert "agent" not in started
+    assert "rejected: LIVEKIT_API_KEY, LIVEKIT_API_SECRET" in out
+
+
+def test_the_launcher_starts_the_voice_worker_when_livekit_accepts_the_credentials(
+        tmp_path, monkeypatch, capsys):
+    from friday import credentials
+
+    monkeypatch.setattr(credentials, "probe_livekit", _accept_livekit)
+    started, out = _run_all_roles(tmp_path, monkeypatch, capsys, _REAL_LOOKING)
+    assert started == ["agent"]
+    assert "not starting the voice worker" not in out
+
+
+def test_an_unreachable_livekit_does_not_keep_the_voice_worker_off(tmp_path, monkeypatch, capsys):
+    """A network blip at launch is the worker's own retry loop's business."""
+    from friday import credentials
+
+    monkeypatch.setattr(credentials, "probe_livekit",
+                        lambda url, key, secret: credentials.Verdict(credentials.UNVERIFIED, "timed out"))
+    started, _ = _run_all_roles(tmp_path, monkeypatch, capsys, _REAL_LOOKING)
+    assert started == ["agent"]
 
 
 # ---------------------------------------------------------------------------

@@ -47,6 +47,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from friday import credentials
+
 ROLES = ("server", "ui", "agent")
 
 MCP_HOST, MCP_PORT = "127.0.0.1", 8000
@@ -446,6 +448,22 @@ def terminate_tree(process: subprocess.Popen, grace: float = 8.0) -> None:
         process.kill()
 
 
+def voice_worker_refusal(probe=None) -> str | None:
+    """Why the voice worker must not be started, or None when it may be.
+
+    A worker started on a template or refused LiveKit credential retries its
+    401 until ADA_MAX_RETRY is spent, so MISSING, PLACEHOLDER and REJECTED
+    stop it. UNVERIFIED (LiveKit did not answer within the probe's bound) does
+    not: the worker has its own retry for an outage, and refusing here would
+    keep voice off until the next launch for a transient network blip."""
+    verdicts = credentials.check_livekit(*(os.getenv(name) for name in REQUIRED_FOR_AGENT),
+                                         live=True, probe=probe)
+    worst = credentials.worst_livekit(verdicts)
+    if worst.state in (credentials.MISSING, credentials.PLACEHOLDER, credentials.REJECTED):
+        return f"LiveKit credentials are not usable ({worst.detail})"
+    return None
+
+
 def run_all(*, with_ui: bool = True, with_agent: bool = True,
             ui_args: list[str] | None = None, agent_args: list[str] | None = None) -> int:
     root = app_root()
@@ -493,8 +511,13 @@ def run_all(*, with_ui: bool = True, with_agent: bool = True,
                 _say(f"control room up: {ui_url}")
 
         if with_agent:
-            _say("starting the voice worker (LiveKit, production mode)")
-            start_role("agent", list(agent_args or ["start"]), logs_dir, jobs)
+            refusal = voice_worker_refusal()
+            if refusal:
+                _say(f"not starting the voice worker: {refusal}; "
+                     "the control room still has its own browser voice")
+            else:
+                _say("starting the voice worker (LiveKit, production mode)")
+                start_role("agent", list(agent_args or ["start"]), logs_dir, jobs)
 
         _say("running. Ctrl+C stops everything this launcher started.")
         while True:
@@ -668,13 +691,62 @@ CORE_IMPORTS = ("mcp.server.fastmcp", "starlette", "uvicorn", "livekit.agents",
                 "trafilatura", "friday.store", "friday.tools", "friday.ui_server")
 
 
+def _grouped(verdicts: dict) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {}
+    for name, verdict in verdicts.items():
+        groups.setdefault(verdict.state, []).append(name)
+    return groups
+
+
+def _describe(groups: dict[str, list[str]], order: tuple[str, ...]) -> str:
+    return "; ".join(f"{state.lower()}: {', '.join(groups[state])}"
+                     for state in order if groups.get(state))
+
+
+def livekit_check(verdicts: dict) -> tuple[str, str]:
+    """(status, detail) for the LiveKit variables. Unset is a FAIL (the voice
+    worker cannot register); a template or refused value is DEGRADED, because
+    the control room keeps its own browser voice; UNVERIFIED is not a defect
+    anyone observed, so it is reported as such and does not lower the status."""
+    groups = _grouped(verdicts)
+    order = (credentials.MISSING, credentials.PLACEHOLDER, credentials.REJECTED,
+             credentials.UNVERIFIED, credentials.VALID)
+    detail = _describe(groups, order)
+    if credentials.MISSING in groups:
+        return FAIL, f"{detail} - the voice worker cannot register"
+    if credentials.PLACEHOLDER in groups or credentials.REJECTED in groups:
+        return DEGRADED, f"{detail} - the voice worker is not started; set real LiveKit credentials"
+    if credentials.UNVERIFIED in groups:
+        return PASS, f"{detail} (set; LiveKit did not confirm them)"
+    return PASS, "LIVEKIT_URL / API_KEY / API_SECRET were accepted by LiveKit"
+
+
+def provider_check(verdicts: dict) -> tuple[str, str]:
+    """(status, detail) for the STT/LLM/TTS keys. DEGRADED when any key is a
+    template or refused, or when nothing usable is set; an unset key alone is
+    normal (a provider may be deliberately unused)."""
+    groups = _grouped(verdicts)
+    order = (credentials.VALID, credentials.UNVERIFIED, credentials.PLACEHOLDER,
+             credentials.REJECTED, credentials.MISSING)
+    bad = credentials.PLACEHOLDER in groups or credentials.REJECTED in groups
+    usable = credentials.VALID in groups or credentials.UNVERIFIED in groups
+    if not usable and not bad:
+        return DEGRADED, ("none set - no STT, LLM or TTS provider can be used"
+                          if verdicts else "no provider credentials are defined")
+    return (DEGRADED if bad else PASS), _describe(groups, order)
+
+
 def doctor_checks(root: Path | None = None, env_path: Path | None = None,
-                  state: Path | None = None) -> list[tuple[str, str, str]]:
+                  state: Path | None = None, *, live: bool = False,
+                  provider_probe=None, livekit_probe=None) -> list[tuple[str, str, str]]:
     """
     (name, PASS|DEGRADED|FAIL, detail) per check. Values of secrets are
-    never read; only whether a name is set. `root` is the application
-    (ui assets); `state` the user's state root, defaulting to `root` when
-    a caller passes only that (tests) and to friday.config otherwise.
+    never printed; only names are. `root` is the application (ui assets);
+    `state` the user's state root, defaulting to `root` when a caller passes
+    only that (tests) and to friday.config otherwise. `live` asks each
+    provider whether it accepts its credential (bounded probes); without it
+    a credential is only checked for being set and not a template. The
+    probe arguments replace the live ones (tests).
     """
     explicit_root = root is not None
     root = root or app_root()
@@ -714,19 +786,17 @@ def doctor_checks(root: Path | None = None, env_path: Path | None = None,
     else:
         checks.append(("env file", PASS, str(env_path)))
 
-    missing = [name for name in REQUIRED_FOR_AGENT if not os.getenv(name)]
-    checks.append(("livekit credentials", FAIL if missing else PASS,
-                   f"missing {', '.join(missing)} - the voice worker cannot register"
-                   if missing else "LIVEKIT_URL / API_KEY / API_SECRET are set"))
+    provider_probe = provider_probe or (credentials.live_probe if live else None)
+    livekit = credentials.check_livekit(
+        *(os.getenv(name) for name in REQUIRED_FOR_AGENT),
+        live=live or livekit_probe is not None, probe=livekit_probe)
+    checks.append(("livekit credentials", *livekit_check(livekit)))
 
     try:
         keys = provider_credential_names()
-        present = [name for name in keys if os.getenv(name)]
-        absent = [name for name in keys if not os.getenv(name)]
-        checks.append(("provider credentials", PASS if present else DEGRADED,
-                       (f"set: {', '.join(present)}" if present
-                        else "none set - no STT, LLM or TTS provider can be used")
-                       + (f"; unset: {', '.join(absent)}" if absent else "")))
+        verdicts = credentials.check_credentials({name: os.getenv(name) for name in keys},
+                                                 probe=provider_probe)
+        checks.append(("provider credentials", *provider_check(verdicts)))
     except Exception as exc:                                # noqa: BLE001
         checks.append(("provider credentials", FAIL, f"friday.config failed to import: {exc}"))
 
@@ -958,7 +1028,7 @@ def doctor() -> int:
     if moved:
         print(f"  moved {len(moved)} item(s) of an earlier build's state into {state_root()}", flush=True)
     env_path = load_env()
-    checks = doctor_checks(env_path=env_path)
+    checks = doctor_checks(env_path=env_path, live=True)
     width = max(len(name) for name, _, _ in checks)
     for name, state, detail in checks:
         print(f"  {state:<8} {name:<{width}}  {detail}", flush=True)
