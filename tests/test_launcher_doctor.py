@@ -12,6 +12,9 @@ from friday import launcher as L
 
 def test_doctor_reports_skills_voice_and_security_sections(tmp_path, monkeypatch):
     monkeypatch.setenv("ADA_DB", str(tmp_path / "doctor.sqlite3"))
+    # This machine's .env may hold a refused key, which is a voice FAIL by design.
+    for name in (*L.REQUIRED_FOR_AGENT, *L.provider_credential_names()):
+        monkeypatch.delenv(name, raising=False)
     root = tmp_path / "root"
     (root / "ui").mkdir(parents=True)
     (root / "ui" / "index.html").write_text("", encoding="utf-8")
@@ -31,6 +34,39 @@ def test_skills_check_degrades_when_skills_are_on_disk_but_unregistered(tmp_path
     assert name == "skills"
     # the repository ships friday-operate (built-in) and friday-windows-exe (project)
     assert state == L.DEGRADED and "unregistered" in detail and "friday-operate" in detail
+
+
+def test_startup_registers_the_skills_on_disk_so_the_doctor_finds_none_unregistered(tmp_path, monkeypatch):
+    """The 2026-10-04 defect: friday-operate was on disk and never registered."""
+    monkeypatch.setenv("ADA_DB", str(tmp_path / "doctor.sqlite3"))
+    assert "friday-operate" in L.skills_check(tmp_path)[0][2]          # unregistered before
+    note = L.register_skills_at_startup()
+    assert note.startswith("skills: registered") and "friday-operate" in note
+    name, state, detail = L.skills_check(tmp_path)[0]
+    assert "unregistered" not in detail
+    assert L.register_skills_at_startup() == ""                         # nothing left to do
+
+
+def test_registering_at_startup_leaves_an_already_registered_skill_untouched(tmp_path):
+    from friday.skills import cli, files
+
+    services = cli.Services(str(tmp_path / "skills.sqlite3"), files.tier_roots())
+    first = cli.register_unregistered(services)
+    assert first and all(state for _, _, state in first)
+    before = {record.name: (record.state, record.tier) for record in services.registry.list()}
+    assert cli.register_unregistered(services) == []
+    assert {record.name: (record.state, record.tier) for record in services.registry.list()} == before
+
+
+def test_a_registry_that_cannot_open_is_reported_not_raised(monkeypatch):
+    from friday.skills import cli
+
+    def broken(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cli, "Services", broken)
+    note = L.register_skills_at_startup()
+    assert "could not register" in note and "OSError" in note and "sync" in note
 
 
 def test_debug_mode_is_read_from_the_executable_name_or_the_environment(monkeypatch):

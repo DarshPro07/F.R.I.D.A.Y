@@ -7,7 +7,8 @@ as configured. This module is the one place that tells the two apart:
 
     MISSING      unset or blank
     PLACEHOLDER  a template value that was never replaced
-    REJECTED     the provider refused it (a bounded live auth probe)
+    REJECTED     the provider refused it (a bounded live auth probe), or the
+                 value cannot be that provider's key (wrong format, no call made)
     VALID        the provider accepted it
     UNVERIFIED   set and not a template, but the provider could not be asked:
                  no probe exists for it, or the network did not answer
@@ -18,6 +19,7 @@ logged or put into a returned detail string; only its name is.
 
 from __future__ import annotations
 
+import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -42,6 +44,11 @@ _PLACEHOLDER = re.compile(
     re.IGNORECASE)
 
 _URL_SCHEMES = ("ws", "wss", "http", "https")
+
+#: The shape a provider's key must have, checked before any call: a key in the
+#: wrong format cannot be accepted, so asking the provider only adds a round
+#: trip and a refusal. (name -> (required prefix, what the key is))
+_FORMATS = {"GOOGLE_API_KEY": ("AIza", "a Gemini API key")}
 
 
 class Verdict(NamedTuple):
@@ -68,6 +75,9 @@ def classify_static(name: str, value: str | None) -> Verdict:
         parts = urlsplit(text)
         if parts.scheme not in _URL_SCHEMES or not parts.hostname:
             return Verdict(REJECTED, f"{name} is not a ws/wss/http/https URL")
+    shape = _FORMATS.get(name)
+    if shape and not text.startswith(shape[0]):
+        return Verdict(REJECTED, f"{name} is not {shape[1]} (those start '{shape[0]}')")
     return Verdict(UNVERIFIED, f"{name} is set; not checked against the provider")
 
 
@@ -76,11 +86,35 @@ def classify_static(name: str, value: str | None) -> Verdict:
 # VALID only on its explicit acceptance; every other outcome is UNVERIFIED.
 # ---------------------------------------------------------------------------
 
-def _answer(name: str, status: int, refused: tuple[int, ...]) -> Verdict:
+_CODE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
+
+
+def _reason(content) -> str:
+    """The provider's machine-readable refusal code (API_KEY_INVALID,
+    invalid_api_key, UNAUTHENTICATED), or "". Never its prose: OpenAI's
+    message quotes a masked copy of the key, and a detail string must carry
+    the variable's name and nothing of its value."""
+    try:
+        error = json.loads(content)["error"]
+    except (TypeError, ValueError, KeyError):
+        return ""
+    if not isinstance(error, dict):
+        return ""
+    details = error.get("details")
+    candidates = [d.get("reason") for d in details if isinstance(d, dict)] \
+        if isinstance(details, list) else []
+    for code in (*candidates, error.get("code"), error.get("status")):
+        if isinstance(code, str) and _CODE.fullmatch(code):
+            return code
+    return ""
+
+
+def _answer(name: str, status: int, refused: tuple[int, ...], reason: str = "") -> Verdict:
     if 200 <= status < 300:
         return Verdict(VALID, f"{name} was accepted by the provider")
     if status in refused:
-        return Verdict(REJECTED, f"{name} was rejected by the provider (HTTP {status})")
+        why = f", {reason}" if reason else ""
+        return Verdict(REJECTED, f"{name} was rejected by the provider (HTTP {status}{why})")
     return Verdict(UNVERIFIED, f"{name}: the provider answered HTTP {status}; cannot tell")
 
 
@@ -98,8 +132,8 @@ def _get(name: str, url: str, headers: dict, refused: tuple[int, ...],
         return _unreachable(name, exc)
     status = reply["status"]
     if status == 400 and refusal_marker and refusal_marker in reply["content"]:
-        return Verdict(REJECTED, f"{name} was rejected by the provider (HTTP 400)")
-    return _answer(name, status, refused)
+        return _answer(name, status, (400,), _reason(reply["content"]))
+    return _answer(name, status, refused, _reason(reply["content"]) if status in refused else "")
 
 
 def probe_openai(name: str, value: str, timeout: float = PROBE_TIMEOUT_S) -> Verdict:

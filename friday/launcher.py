@@ -36,6 +36,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import runpy
 import shutil
 import socket
@@ -357,6 +358,76 @@ def _say(message: str) -> None:
     print(f"[friday] {message}", flush=True)
 
 
+#: A Hermes profile name is a directory name and a CLI argument; the one that
+#: comes from the environment is held to the shape Hermes itself accepts.
+_PROFILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+
+#: `hermes profile create` imports Hermes's whole runtime, tens of seconds on a
+#: loaded host (hermes_version's measurement); this is the one place it is run.
+HERMES_PROFILE_TIMEOUT_S = 120.0
+
+
+def hermes_profile_name() -> str:
+    """The profile FRIDAY's gateway runs under; empty when the override is off."""
+    from friday import hermes_bridge
+
+    return os.getenv(hermes_bridge.ENV_PROFILE, hermes_bridge.DEFAULT_PROFILE).strip()
+
+
+def ensure_hermes_profile(binary: str | None, *, timeout: float = HERMES_PROFILE_TIMEOUT_S,
+                          runner=subprocess.run, announce=lambda message: None) -> str:
+    """Create FRIDAY's Hermes profile when Hermes is installed and the profile
+    is missing. Returns one console line about what happened, or "" when there
+    was nothing to do. Never raises: a failed creation is reported and the
+    launch goes on, because the gateway is only started when work needs it.
+
+    A profile pinned by FRIDAY_HERMES_PROFILE_HOME is the operator's own and is
+    left alone, as is an install without Hermes (the doctor reports that)."""
+    from friday import hermes_bridge
+
+    if not binary or os.getenv(hermes_bridge.ENV_PROFILE_HOME, "").strip():
+        return ""
+    name = hermes_profile_name()
+    if not name:
+        return ""
+    if not _PROFILE_NAME.fullmatch(name):
+        return f"hermes profile: '{name}' is not a valid profile name; not created"
+    if hermes_bridge.profile_home(name):
+        return ""
+    command = f"hermes profile create {name} --clone"
+    announce(f"creating the Hermes profile '{name}' (first run only; Hermes starts slowly)")
+    try:
+        done = runner([binary, "profile", "create", name, "--clone"], capture_output=True,
+                      text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return f"hermes profile: '{name}' was not created within {timeout:.0f}s; run: {command}"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"hermes profile: could not run hermes ({type(exc).__name__}); run: {command}"
+    if done.returncode != 0:
+        lines = ((done.stderr or done.stdout or "").strip().splitlines() or ["no output"])
+        return (f"hermes profile: '{name}' was not created (exit {done.returncode}: "
+                f"{lines[-1].strip()[:160]}); run: {command}")
+    if not hermes_bridge.profile_home(name):
+        return f"hermes profile: hermes reported success but '{name}' is still missing; run: {command}"
+    return f"hermes profile: created '{name}' (cloned from the default profile)"
+
+
+def register_skills_at_startup() -> str:
+    """Register the skills found on disk that the registry does not know, so a
+    fresh install has them without a manual `sync`. One console line, or ""
+    when there was nothing to register; never raises."""
+    try:
+        from friday.skills import cli as skills_cli
+
+        added = skills_cli.register_unregistered(skills_cli.Services())
+    except Exception as exc:                                # noqa: BLE001
+        return (f"skills: could not register the skills on disk ({type(exc).__name__}: "
+                f"{str(exc)[:120]}); run: FRIDAY.exe -m friday.skills.cli sync")
+    if not added:
+        return ""
+    return f"skills: registered {len(added)} from disk ({', '.join(name for name, _, _ in added[:6])})"
+
+
 def console_will_close() -> bool:
     """
     Whether this process is the only one attached to its console - the
@@ -483,6 +554,11 @@ def run_all(*, with_ui: bool = True, with_agent: bool = True,
 
     if not (root / "ui" / "index.html").is_file() and with_ui:
         _say("ui/index.html is missing from this build - the control room will not serve")
+
+    for note in (register_skills_at_startup(),
+                 ensure_hermes_profile(shutil.which("hermes"), announce=_say)):
+        if note:
+            _say(note)
 
     jobs: list[tuple[str, subprocess.Popen]] = []
     try:
@@ -792,6 +868,7 @@ def doctor_checks(root: Path | None = None, env_path: Path | None = None,
         live=live or livekit_probe is not None, probe=livekit_probe)
     checks.append(("livekit credentials", *livekit_check(livekit)))
 
+    verdicts: dict = {}
     try:
         keys = provider_credential_names()
         verdicts = credentials.check_credentials({name: os.getenv(name) for name in keys},
@@ -853,6 +930,7 @@ def doctor_checks(root: Path | None = None, env_path: Path | None = None,
     checks.append(("hermes", PASS if hermes else DEGRADED,
                    f"{hermes} ({hermes_version(hermes)})" if hermes
                    else "hermes not on PATH; execution delegation is unavailable"))
+    checks.append(hermes_profile_check(hermes))
 
     for label, host, port in (("mcp", MCP_HOST, MCP_PORT), ("ui", UI_HOST, UI_PORT)):
         checks.append((f"port {port} ({label})", PASS,
@@ -860,12 +938,36 @@ def doctor_checks(root: Path | None = None, env_path: Path | None = None,
 
     checks.extend(skills_check(home))
     checks.append(onboarding_check(home))
-    checks.append(voice_check())
+    checks.append(voice_check({**livekit, **verdicts}))
     checks.append(security_check(home, env_path))
 
     signed = manifest().get("signing_status") or "NOT_CONFIGURED"
     checks.append(("code signing", PASS if signed == "SIGNED" else DEGRADED, signed))
     return checks
+
+
+def hermes_profile_check(binary: str | None) -> tuple[str, str, str]:
+    """The Hermes profile FRIDAY's gateway runs under. Read-only: the first
+    start creates it (ensure_hermes_profile); the doctor says whether it is
+    there. Without Hermes there is no profile to want, and the `hermes` row
+    already carries that."""
+    name = "hermes profile"
+    if not binary:
+        return (name, PASS, "not applicable: hermes is not installed")
+    try:
+        from friday import hermes_bridge
+
+        profile = hermes_profile_name()
+        if not profile:
+            return (name, PASS, "none selected (FRIDAY_HERMES_PROFILE is empty); "
+                    "the gateway uses the profile the environment resolves")
+        home = hermes_bridge.profile_home(profile)
+    except Exception as exc:                                # noqa: BLE001
+        return (name, DEGRADED, f"could not be read: {type(exc).__name__}: {str(exc)[:120]}")
+    if home:
+        return (name, PASS, f"'{profile}' at {home}")
+    return (name, DEGRADED, f"'{profile}' does not exist; the first start creates it, or run: "
+            f"hermes profile create {profile} --clone")
 
 
 def hermes_version(binary: str, timeout: float = 45.0) -> str:
@@ -918,9 +1020,10 @@ def skills_check(home: Path) -> list[tuple[str, str, str]]:
 def onboarding_check(home: Path) -> tuple[str, str, str]:
     """How far the interview has got, and whether FRIDAY is useful yet.
 
-    DEGRADED rather than FAIL on an unfinished interview: an install that
-    has not been asked about its owner works, it just works generically,
-    and a doctor that said FAIL would be crying wolf on a fresh machine.
+    PASS even when it has not started: the answers are the person's to give,
+    so an unanswered interview is a setup step still to take, not a defect in
+    the install. The detail says how many essential questions are left and
+    how to answer them; only an interview that cannot load is a FAIL.
     """
     try:
         from friday.onboarding import Onboarding, state_root_marker
@@ -933,35 +1036,50 @@ def onboarding_check(home: Path) -> tuple[str, str, str]:
             return ("onboarding", PASS,
                     detail + "; the essentials are done" +
                     ("; marker present" if marker.exists() else ""))
-        return ("onboarding", DEGRADED,
-                detail + f"; {progress['essential_remaining']} essential question(s) left "
-                "(run: FRIDAY.exe -m friday.onboarding next)")
+        return ("onboarding", PASS,
+                detail + f"; setup step: {progress['essential_remaining']} essential question(s) "
+                "left to answer (run: FRIDAY.exe -m friday.onboarding next)")
     except Exception as exc:                                # noqa: BLE001
         return ("onboarding", FAIL,
                 f"the interview failed to load: {type(exc).__name__}: {str(exc)[:120]}")
 
 
-def voice_check() -> tuple[str, str, str]:
+def voice_check(verdicts: dict | None = None) -> tuple[str, str, str]:
     """Speech in and out: provider selection and its credentials (names
-    only), and whether a microphone is visible to the audio stack."""
-    parts, degraded = [], False
+    only), and whether a microphone is visible to the audio stack.
+
+    `verdicts` are the credential verdicts the doctor already has, by
+    variable name. A key is set is not a key that works: a stage whose own key
+    is a template, the wrong format, or refused by its provider cannot run, so
+    that is a FAIL naming the variable and the provider's reason. A stage whose
+    key is simply unset is DEGRADED, as before."""
+    parts, degraded, failed = [], False, False
+    verdicts = verdicts or {}
     try:
-        from friday import health
+        from friday import health, providers
 
         report = health.report()
-        for label in ("stt", "tts"):
+        tables = {"stt": providers.STT_CREDENTIALS, "llm": providers.LLM_CREDENTIALS,
+                  "tts": providers.TTS_CREDENTIALS}
+        for label in ("stt", "tts", "llm"):
             block = report.get(label) or {}
             provider = block.get("provider", "?")
-            if block.get("error"):
-                parts.append(f"{label} {provider}: {block['error'][:60]}")
+            refused = [verdicts[name].detail for name in tables[label].get(provider, ())
+                       if name in verdicts and verdicts[name].state in
+                       (credentials.PLACEHOLDER, credentials.REJECTED)]
+            shown = f"{label} {provider}" if label != "llm" else \
+                f"llm {block.get('backend', '?')}/{block.get('model', '?')}"
+            if refused:
+                parts.append(f"{shown}: {'; '.join(refused)}")
+                failed = True
+            elif block.get("error"):
+                parts.append(f"{shown}: {block['error'][:60]}")
                 degraded = True
             elif block.get("configured"):
-                parts.append(f"{label} {provider} configured")
+                parts.append(f"{shown} configured" if label != "llm" else shown)
             else:
-                parts.append(f"{label} {provider} missing {', '.join(block.get('missing', []))}")
+                parts.append(f"{shown} missing {', '.join(block.get('missing', []))}")
                 degraded = True
-        llm = report.get("llm") or {}
-        parts.append(f"llm {llm.get('backend', '?')}/{llm.get('model', '?')}")
     except Exception as exc:                                # noqa: BLE001
         parts.append(f"provider report failed: {type(exc).__name__}")
         degraded = True
@@ -975,7 +1093,7 @@ def voice_check() -> tuple[str, str, str]:
     except Exception as exc:                                # noqa: BLE001
         parts.append(f"microphone unknown ({type(exc).__name__})")
         degraded = True
-    return ("voice", DEGRADED if degraded else PASS, "; ".join(parts))
+    return ("voice", FAIL if failed else DEGRADED if degraded else PASS, "; ".join(parts))
 
 
 def security_check(home: Path, env_path: Path | None) -> tuple[str, str, str]:

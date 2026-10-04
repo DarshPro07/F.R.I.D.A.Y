@@ -126,6 +126,43 @@ def test_google_answers_an_unknown_key_with_400_api_key_invalid(monkeypatch):
     assert C.probe_google("GOOGLE_API_KEY", REAL_LOOKING["GOOGLE_API_KEY"]).state == C.UNVERIFIED
 
 
+def test_a_gemini_key_in_the_wrong_format_is_refused_before_any_call(monkeypatch):
+    """The 2026-10-04 defect: a 97-char 'AQ.' value is not a Gemini key."""
+    from friday import netguard
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("a wrong-format key must not reach the provider")
+
+    monkeypatch.setattr(netguard, "fetch", no_network)
+    wrong = "AQ." + "Ab3dE5gH7jK9mN1pQ3rS5tU7vW9yZ1aB" * 3
+    verdict = C.check_credential("GOOGLE_API_KEY", wrong, probe=C.live_probe)
+    assert verdict.state == C.REJECTED
+    assert "GOOGLE_API_KEY" in verdict.detail and "AIza" in verdict.detail
+    assert wrong not in verdict.detail and wrong[:6] not in verdict.detail.replace("AIza", "")
+
+
+@pytest.mark.parametrize("probe,key,body,code", [
+    (C.probe_google, "GOOGLE_API_KEY",
+     b'{"error": {"code": 400, "message": "API key not valid.", "status": "INVALID_ARGUMENT", '
+     b'"details": [{"reason": "API_KEY_INVALID"}]}}', "API_KEY_INVALID"),
+    (C.probe_google, "GOOGLE_API_KEY",
+     b'{"error": {"code": 401, "message": "bad", "status": "UNAUTHENTICATED"}}', "UNAUTHENTICATED"),
+    (C.probe_openai, "OPENAI_API_KEY",
+     b'{"error": {"message": "Incorrect API key provided: sk-proj-****Z1aB.", '
+     b'"type": "invalid_request_error", "code": "invalid_api_key"}}', "invalid_api_key"),
+])
+def test_a_refusal_carries_the_providers_reason_code_and_never_its_prose(monkeypatch, probe, key, body, code):
+    from friday import netguard
+
+    status = 400 if code == "API_KEY_INVALID" else 401
+    monkeypatch.setattr(netguard, "fetch", FakeFetch(status, body))
+    verdict = probe(key, REAL_LOOKING[key])
+    assert verdict.state == C.REJECTED
+    assert key in verdict.detail and code in verdict.detail
+    assert "Incorrect" not in verdict.detail and "****" not in verdict.detail
+    assert REAL_LOOKING[key] not in verdict.detail
+
+
 def test_an_unreachable_provider_is_unverified_not_rejected(monkeypatch):
     from friday import netguard
 

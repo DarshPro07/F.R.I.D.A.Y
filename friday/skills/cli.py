@@ -57,16 +57,33 @@ class Services:
         return found
 
 
+def _register(services: Services, tier: str, skill: F.SkillFiles, known, actor: str):
+    return services.lifecycle.register(
+        skill, tier=known.tier if known else tier,
+        trust=known.trust if known else TRUST_BY_TIER.get(tier, K.TRUST_AGENT),
+        source=known.source if known else f"sync:{tier}", actor=actor)
+
+
+def register_unregistered(services: Services, actor: str = "startup") -> list[tuple[str, str, str]]:
+    """Register every on-disk skill the registry does not know yet, as
+    (name, tier, state). A skill already registered is left alone: re-reading
+    one can drop an ACTIVE skill to DRAFT, and that is `sync`'s call to make,
+    not something a launch should do to the owner's skills."""
+    registered = []
+    for tier, skill in services.discover():
+        if services.registry.get(skill.name) is None:
+            record = _register(services, tier, skill, None, actor)
+            registered.append((skill.name, tier, record.state))
+    return registered
+
+
 def cmd_sync(services: Services, args) -> int:
     """Register what is on disk; re-read what is already registered (an
     ACTIVE skill whose file changed drops to DRAFT until re-evaluated)."""
     added = refreshed = 0
     for tier, skill in services.discover():
         known = services.registry.get(skill.name)
-        record = services.lifecycle.register(
-            skill, tier=known.tier if known else tier,
-            trust=known.trust if known else TRUST_BY_TIER.get(tier, K.TRUST_AGENT),
-            source=known.source if known else f"sync:{tier}", actor="cli")
+        record = _register(services, tier, skill, known, "cli")
         if known is None:
             print(f"  registered {skill.name:<40} {tier:<16} {record.state}")
             added += 1

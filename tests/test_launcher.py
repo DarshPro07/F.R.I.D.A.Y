@@ -207,7 +207,7 @@ def test_provider_credentials_are_keys_not_settings_with_defaults(tmp_path, monk
     assert by_name["provider credentials"][0] == L.DEGRADED
     assert "none set" in by_name["provider credentials"][1]
 
-    monkeypatch.setenv(names[0], "x")
+    monkeypatch.setenv(names[0], _provider_env()["GOOGLE_API_KEY"])      # key-shaped for any provider
     by_name = {n: (s, d) for n, s, d in L.doctor_checks(root=root, env_path=None)}
     assert by_name["provider credentials"][0] == L.PASS
     assert names[0] in by_name["provider credentials"][1]
@@ -265,6 +265,7 @@ def _provider_env(**override) -> dict[str, str]:
     """A realistic-looking key for every provider credential, then `override`."""
     env = {name: f"k{index}Zq8Wm3Xc7Vb1Nl5Hj9Gf2Ds4" for index, name
            in enumerate(L.provider_credential_names())}
+    env["GOOGLE_API_KEY"] = "AIzaSyD4kQ9mZ2pL7vB1nX8cF3hJ6tR0wE5yU"       # a Gemini key's shape
     env.update(override)
     return env
 
@@ -354,10 +355,171 @@ def _accepting() -> dict:
             "livekit_probe": _accept_livekit}
 
 
+# --- the 2026-10-04 exe defects: voice credentials, setup, first run ---------
+
+def _voice_row(tmp_path, monkeypatch, env: dict[str, str], **probes):
+    base = {**_REAL_LOOKING, **_provider_env()}
+    return _doctor_rows(tmp_path, monkeypatch, {**base, **env}, **probes)["voice"]
+
+
+def test_a_refused_llm_key_fails_the_voice_row_naming_the_variable_and_the_reason(tmp_path, monkeypatch):
+    """The doctor reported voice llm PASS while GOOGLE_API_KEY was refused (401)."""
+    from friday import credentials
+
+    def provider(name, value):
+        if name == "GOOGLE_API_KEY":
+            return credentials.Verdict(
+                credentials.REJECTED, "GOOGLE_API_KEY was rejected by the provider (HTTP 401, UNAUTHENTICATED)")
+        return credentials.Verdict(credentials.VALID, "accepted")
+
+    monkeypatch.setenv("LLM_BACKEND", "google")
+    state, detail = _voice_row(tmp_path, monkeypatch, {}, provider_probe=provider,
+                               livekit_probe=_accept_livekit)
+    assert state == L.FAIL
+    assert "GOOGLE_API_KEY" in detail and "UNAUTHENTICATED" in detail
+    assert _provider_env()["GOOGLE_API_KEY"] not in detail
+
+
+def test_a_gemini_key_in_the_wrong_format_fails_the_voice_row_before_any_call(tmp_path, monkeypatch):
+    from friday import netguard
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("a wrong-format key must not reach the provider")
+
+    monkeypatch.setattr(netguard, "fetch", no_network)
+    monkeypatch.setenv("LLM_BACKEND", "google")
+    wrong = "AQ." + "Ab3dE5gH7jK9mN1pQ3rS5tU7vW9yZ1aB" * 3
+    state, detail = _voice_row(tmp_path, monkeypatch, {"GOOGLE_API_KEY": wrong},
+                               **_accepting())
+    assert state == L.FAIL
+    assert "GOOGLE_API_KEY" in detail and "AIza" in detail
+    assert wrong not in detail
+
+
+def test_a_template_llm_key_fails_the_voice_row(tmp_path, monkeypatch):
+    monkeypatch.setenv("LLM_BACKEND", "google")
+    state, detail = _voice_row(
+        tmp_path, monkeypatch, {"GOOGLE_API_KEY": _template_env()["GOOGLE_API_KEY"]}, **_accepting())
+    assert state == L.FAIL and "GOOGLE_API_KEY" in detail and "template" in detail
+
+
+def test_an_unset_llm_key_degrades_the_voice_row_and_an_accepted_one_does_not(monkeypatch):
+    from friday import credentials
+
+    monkeypatch.setenv("LLM_BACKEND", "google")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    _, state, detail = L.voice_check({})
+    assert state == L.DEGRADED and "missing GOOGLE_API_KEY" in detail
+
+    monkeypatch.setenv("GOOGLE_API_KEY", _provider_env()["GOOGLE_API_KEY"])
+    _, state, detail = L.voice_check({"GOOGLE_API_KEY": credentials.Verdict(credentials.VALID, "accepted")})
+    assert "llm google/" in detail and "GOOGLE_API_KEY" not in detail
+    assert state != L.FAIL
+
+
+def test_an_unanswered_interview_is_a_setup_step_not_a_degradation(tmp_path, monkeypatch):
+    from friday import onboarding
+
+    monkeypatch.setattr(onboarding.Onboarding, "progress", lambda self: {
+        "answered": 0, "total": 16, "essential_remaining": 5, "useful_now": False})
+    name, state, detail = L.onboarding_check(tmp_path)
+    assert name == "onboarding" and state == L.PASS
+    assert "0/16 answered" in detail and "setup step" in detail and "friday.onboarding next" in detail
+
+
+class _Ran:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+
+def _hermes_profile_world(monkeypatch, tmp_path, *, exists_after: bool):
+    """A Hermes whose `profile create` makes (or fails to make) the directory."""
+    from friday import hermes_bridge
+
+    home = tmp_path / "profiles" / "friday"
+    monkeypatch.delenv(hermes_bridge.ENV_PROFILE, raising=False)
+    monkeypatch.delenv(hermes_bridge.ENV_PROFILE_HOME, raising=False)
+    monkeypatch.setattr(hermes_bridge, "profile_home", lambda profile: str(home) if home.is_dir() else "")
+    commands: list[list[str]] = []
+
+    def runner(command, **kwargs):
+        commands.append(command)
+        assert kwargs["timeout"] > 0                       # bounded
+        if exists_after:
+            home.mkdir(parents=True)
+        return _Ran(0 if exists_after else 1, stderr="boom: profile exists\nlast line")
+
+    return commands, runner, home
+
+
+def test_first_run_creates_the_friday_hermes_profile_when_it_is_missing(tmp_path, monkeypatch):
+    commands, runner, home = _hermes_profile_world(monkeypatch, tmp_path, exists_after=True)
+    said: list[str] = []
+    note = L.ensure_hermes_profile("C:/hermes/hermes.exe", runner=runner, announce=said.append)
+    assert commands == [["C:/hermes/hermes.exe", "profile", "create", "friday", "--clone"]]
+    assert "created 'friday'" in note and home.is_dir()
+    assert said and "first run" in said[0]
+    # the second start finds it and does nothing
+    assert L.ensure_hermes_profile("C:/hermes/hermes.exe", runner=runner) == ""
+    assert len(commands) == 1
+
+
+def test_a_failed_profile_creation_is_reported_with_the_manual_command_and_does_not_raise(
+        tmp_path, monkeypatch):
+    commands, runner, _ = _hermes_profile_world(monkeypatch, tmp_path, exists_after=False)
+    note = L.ensure_hermes_profile("hermes", runner=runner)
+    assert "was not created" in note and "last line" in note
+    assert "hermes profile create friday --clone" in note
+
+    def hangs(command, **kwargs):
+        raise L.subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    assert "not created within" in L.ensure_hermes_profile("hermes", runner=hangs, timeout=3)
+
+
+def test_no_hermes_or_an_operator_pinned_profile_creates_nothing(tmp_path, monkeypatch):
+    from friday import hermes_bridge
+
+    commands, runner, _ = _hermes_profile_world(monkeypatch, tmp_path, exists_after=True)
+    assert L.ensure_hermes_profile(None, runner=runner) == ""
+    monkeypatch.setenv(hermes_bridge.ENV_PROFILE_HOME, str(tmp_path / "mine"))
+    assert L.ensure_hermes_profile("hermes", runner=runner) == ""
+    monkeypatch.delenv(hermes_bridge.ENV_PROFILE_HOME)
+    monkeypatch.setenv(hermes_bridge.ENV_PROFILE, "../escape --flag")
+    assert "not a valid profile name" in L.ensure_hermes_profile("hermes", runner=runner)
+    assert commands == []
+
+
+def test_the_doctor_reports_the_hermes_profile_state(tmp_path, monkeypatch):
+    _, runner, home = _hermes_profile_world(monkeypatch, tmp_path, exists_after=True)
+    assert L.hermes_profile_check(None)[1:] == (L.PASS, "not applicable: hermes is not installed")
+    name, state, detail = L.hermes_profile_check("hermes")
+    assert name == "hermes profile" and state == L.DEGRADED
+    assert "hermes profile create friday --clone" in detail
+    home.mkdir(parents=True)
+    state, detail = L.hermes_profile_check("hermes")[1:]
+    assert state == L.PASS and str(home) in detail
+
+
+def test_the_launcher_registers_skills_and_creates_the_hermes_profile_at_startup(
+        tmp_path, monkeypatch, capsys):
+    calls: list[str] = []
+    _, out = _run_all_roles(
+        tmp_path, monkeypatch, capsys, {},
+        skills=lambda: calls.append("skills") or "skills: registered 1 from disk (friday-operate)",
+        hermes=lambda binary, **kw: calls.append("hermes") or "hermes profile: created 'friday'")
+    assert calls == ["skills", "hermes"]
+    assert "skills: registered 1 from disk (friday-operate)" in out
+    assert "hermes profile: created 'friday'" in out
+
+
 # --- the launcher and the voice worker --------------------------------------
 
-def _run_all_roles(tmp_path, monkeypatch, capsys, env: dict[str, str]) -> tuple[list[str], str]:
-    """Run L.run_all against fakes; returns (roles it started, its output)."""
+def _run_all_roles(tmp_path, monkeypatch, capsys, env: dict[str, str], *,
+                   skills=lambda: "", hermes=lambda binary, **kw: "") -> tuple[list[str], str]:
+    """Run L.run_all against fakes; returns (roles it started, its output).
+    The skill registration and the Hermes profile are this machine's, so they
+    are fakes too."""
     for name in L.REQUIRED_FOR_AGENT:
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
@@ -368,6 +530,8 @@ def _run_all_roles(tmp_path, monkeypatch, capsys, env: dict[str, str]) -> tuple[
     monkeypatch.setattr(L, "adopt_legacy_state", lambda: [])
     monkeypatch.setattr(L, "ensure_state_dirs", lambda root=None: [])
     monkeypatch.setattr(L, "load_env", lambda: None)
+    monkeypatch.setattr(L, "register_skills_at_startup", skills)
+    monkeypatch.setattr(L, "ensure_hermes_profile", hermes)
     monkeypatch.setattr(L, "port_open", lambda host, port, timeout=0.5: True)   # attach, start no server/ui
     monkeypatch.setattr(L, "start_role",
                         lambda role, extra, logs_dir, jobs: started.append(role))
