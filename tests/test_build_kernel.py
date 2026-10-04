@@ -545,7 +545,7 @@ def test_mode_for_scouts_vague_rows_until_findings_exist(tmp_path):
 
 
 def test_budget_table_and_class_choice():
-    assert K.BUDGETS == {"SCOUT": (8, 0.75, 900), "MICRO": (12, 1.0, 1200),
+    assert K.BUDGETS == {"SCOUT": (8, 0.75, 900), "MICRO": (20, 1.5, 1500),
                          "NORMAL": (25, 3.0, 2700), "COMPLEX": (40, 6.0, 4500),
                          "P0": (40, 6.0, 4500)}
     many = ["friday/a.py", "friday/b.py", "friday/c.py", "friday/d.py"]

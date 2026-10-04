@@ -87,7 +87,9 @@ _PRIORITY = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 SCOUT_TOOLS = ",".join(("Read", "Glob", "Grep",
                         "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)"))
 # class -> (max turns, max budget USD, wall seconds)
-BUDGETS = {"SCOUT": (8, 0.75, 15 * 60), "MICRO": (12, 1.0, 20 * 60),
+# MICRO was 12 turns: every MICRO first attempt on record needed more (2026-10-04: two failed at 13,
+# one finished in 18 with a continuation).
+BUDGETS = {"SCOUT": (8, 0.75, 15 * 60), "MICRO": (20, 1.5, 25 * 60),
            "NORMAL": (25, 3.0, 45 * 60), "COMPLEX": (40, 6.0, 75 * 60),
            "P0": (40, 6.0, 75 * 60)}
 READ_FILES = {"SCOUT": 12, "MICRO": 6, "NORMAL": 8, "COMPLEX": 12, "P0": 12}
