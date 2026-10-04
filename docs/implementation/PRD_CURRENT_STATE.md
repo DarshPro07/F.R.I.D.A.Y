@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 8dcbcf9 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-04T18:59:36+00:00
+- HEAD: b09a9e4 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-04T21:45:09+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 81, "PARKED_BY_OWNER": 1, "PARTIAL": 60, "VERIFIED": 36}
 - Unresolved P0: 21
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (130): MODEL-012=VERIFIER_FAIL
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), TRAJ-001 (partial x2), MCP-001 (NOT_RED), SEC-005 (integration refused), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (partial x2), CLI-001 (partial x2), ASSUME-001 (failed x2), BBOX-001 (partial x2), CAP-003 (integration refused), BRAIN-001 (cascade exhausted), BROW-003 (partial x2), CAP-004 (integration refused), CAP-FORGE-003 (TEST_TIMEOUT), APPROVAL-001 (stale worktree), MODEL-012 (VERIFIER_FAIL)
-- Open escalations: 89
-  - CAP-003 integration: refusing CAP-003: run has no commit
-  - BRAIN-001 cascade: 3 repairs spent
-  - BG-001 resolved: controller requeue: gate hung: governor read the real machine activity in tests; implementer on the 
-  - APPROVAL-001 resolved: controller unpark: CAP-004 landed its six effect flags; swap them into the blast-radius binding
+- Last wave (135): CHAOS-001=FAILED
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), TRAJ-001 (partial x2), MCP-001 (NOT_RED), SEC-005 (integration refused), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (partial x2), CLI-001 (partial x2), ASSUME-001 (failed x2), BBOX-001 (partial x2), CAP-003 (integration refused), BRAIN-001 (cascade exhausted), BROW-003 (partial x2), CAP-004 (integration refused), CAP-FORGE-003 (TEST_TIMEOUT), APPROVAL-001 (stale worktree), MODEL-012 (VERIFIER_FAIL), BG-001 (partial x2), PKG-001 (partial x2), CAP-FORGE-002 (integration refused), CAPB-001 (TEST_TIMEOUT)
+- Open escalations: 93
   - BROW-003 partial: integrated twice without closing its gaps
   - CAP-004 integration: refusing CAP-004: run has no commit
   - CAP-FORGE-003 test_timeout: {"requirement": "CAP-FORGE-003", "result": "TEST_TIMEOUT", "red_green": {"result": "OK", "tests": ["
   - APPROVAL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\approval-001 already exists
   - MODEL-012 resolved: controller requeue: sliced: slice 1 = GatewayLLM adapter + build_resilient_llm wiring
   - MODEL-012 integration: {"requirement": "MODEL-012", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tes
-- Next ready: PKG-001, BG-001
+  - BG-001 partial: integrated twice without closing its gaps
+  - PKG-001 partial: integrated twice without closing its gaps
+  - CAP-FORGE-002 integration: refusing CAP-FORGE-002: run has no commit
+  - CAPB-001 test_timeout: {"requirement": "CAPB-001", "result": "TEST_TIMEOUT", "red_green": {"result": "OK", "tests": ["tests
+- Next ready: CHAOS-001, CODE-001
 <!-- build-program:end -->
