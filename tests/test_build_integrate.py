@@ -491,6 +491,17 @@ def build_kernel_mod():
     return build_kernel
 
 
+def test_a_partial_step_is_judged_against_its_slice_not_the_whole_acceptance(tmp_path):
+    # 2026-10-04/05: CTX-002 and MODEL-012 slices were failed for acceptance items their own
+    # next action deferred to later slices ("this is ledger slice 2/3/4"), three times.
+    repo, runs, run, rows = setup(tmp_path)
+    partial = bi.verifier_prompt(rows[0], {**run, "evidence": {**run["evidence"], "acceptance_met": False}},
+                                 {"result": "OK"}, repo)
+    assert "integrates as PARTIAL" in partial and "later slices are not failures" in partial
+    full = bi.verifier_prompt(rows[0], run, {"result": "OK"}, repo)  # setup's evidence claims acceptance_met
+    assert "judge the change against all of it" in full and "later slices" not in full
+
+
 def test_verifier_prompt_and_command(tmp_path):
     repo, runs, run, rows = setup(tmp_path)
     prompt = bi.verifier_prompt(rows[0], run, {"result": "OK"}, repo)

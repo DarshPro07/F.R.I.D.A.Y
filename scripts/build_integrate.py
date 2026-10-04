@@ -185,7 +185,16 @@ def verifier_prompt(row: dict, run: dict, rg: dict, repo: Path = ROOT) -> str:
         files = git(repo, "diff", "--name-only", run["base_sha"], run["commit"]).stdout.split()
         note = (f"\nTRUNCATED: the patch is {len(raw) // 1024} KB and only the first {PATCH_CAP // 1024} KB "
                 "is shown. Read the changed files in this worktree before judging: " + ", ".join(files) + "\n")
-    return f"""You are an independent verifier. Judge whether this change meets the requirement.
+    claimed = bool((run.get("evidence") or {}).get("acceptance_met"))
+    scope = ("The implementer claims the full acceptance is met: judge the change against all of it."
+             if claimed else
+             "The implementer does NOT claim the full acceptance: this change is one step, and if it passes it "
+             "integrates as PARTIAL, never VERIFIED. Judge it against the step the next action asks for now (its "
+             "current slice, when one is named). PASS when that step is delivered correctly and every remaining "
+             "acceptance item is listed honestly as a gap; acceptance items the next action defers to later slices "
+             "are not failures. FAIL for a defect in what the change delivers, a claim the code does not back, or a "
+             "gap that is hidden rather than listed.")
+    return f"""You are an independent verifier. {scope}
 Use the material below and read-only tools (read any file you need). Reply with ONE JSON object and nothing else:
 {{"verdict": "PASS|FAIL|INSUFFICIENT_EVIDENCE", "requirement_ids": [...], "failing_criteria": [...], "evidence_refs": ["file:line", ...]}}
 
