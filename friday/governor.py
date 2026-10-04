@@ -698,10 +698,14 @@ class OwnedProcess:
     #: Set by the first `heartbeat()`: a lease whose owner never reports in
     #: has no heartbeat to go stale, only a deadline.
     beats: bool = False
+    #: The priority it was admitted at: BACKGROUND optional work is also
+    #: stopped when the person returns or the power goes to battery.
+    priority: str = BACKGROUND
 
     def to_dict(self, now: float | None = None) -> dict:
         return {"lease": self.lease, "kind": self.kind, "owner": self.owner,
                 "objective_id": self.objective_id, "label": self.label,
+                "priority": self.priority,
                 "pid": self.pid, "started": self.started,
                 "heartbeat": self.heartbeat, "deadline": self.deadline,
                 "cleanup": bool(self.cleanup)}
@@ -756,8 +760,15 @@ class Governor:
 
     def context(self) -> Context:
         """The person's activity and the power state now; unknown (nothing
-        deferred) when the governor has no way to read them."""
-        return self._context() if self._context else Context()
+        deferred) when the governor has no way to read them. A probe that
+        raises is unknown too: `pressure()` reads this on every sample."""
+        if not self._context:
+            return Context()
+        try:
+            return self._context()
+        except Exception as exc:  # noqa: BLE001 - an unreadable context is unknown, never a crash
+            logger.warning("governor context probe failed: %s", exc)
+            return Context()
 
     def pressure(self, *, fresh: bool = False) -> Pressure:
         now = time.time()
@@ -833,13 +844,23 @@ class Governor:
         """Under pressure, reduce work already running (not just refuse new
         work): optional work is stopped at ELEVATED and above, a resident
         model at HIGH and above; work past its deadline or without a heartbeat
-        is reaped at any level. Each victim's `cleanup` runs outside the lock;
-        a victim with no cleanup is reported, not released, because the
-        governor cannot stop what it was not told how to stop."""
+        is reaped at any level. BACKGROUND optional work is also stopped while
+        the person is active or the machine is on battery (BG-001), as
+        admission defers it; URGENT work keeps running through both. Each
+        victim's `cleanup` runs outside the lock; a victim with no cleanup is
+        reported, not released, because the governor cannot stop what it was
+        not told how to stop."""
         p = p or self.pressure()
         now = time.time()
         stale = self.thresholds.heartbeat_stale_s
         victims: list[tuple[OwnedProcess, str]] = []
+        with self._lock:
+            watching = any(o.kind == OPTIONAL and o.priority == BACKGROUND
+                           and o.lease not in self._unreapable
+                           for o in self._owned.values())
+        # Read outside the lock, and only when such work runs: a probe per reading
+        # that nothing depends on is waste.
+        wait = self.context().deferral(self.thresholds) if watching else ""
         with self._lock:
             # Workers and browsers beyond the one allowed at HIGH are stopped
             # newest first; the oldest keeps running, as admission does.
@@ -858,6 +879,8 @@ class Governor:
                     victims.append((o, f"no heartbeat for {now - o.heartbeat:.0f}s"))
                 elif o.kind == OPTIONAL and p.level != NORMAL:
                     victims.append((o, f"optional work stopped under {p.level} pressure"))
+                elif o.kind == OPTIONAL and o.priority == BACKGROUND and wait:
+                    victims.append((o, f"optional work stopped: {wait}"))
                 elif o.kind == MODEL and p.level in (HIGH, CRITICAL):
                     victims.append((o, f"resident model evicted under {p.level} pressure"))
                 elif o.lease in surplus:
@@ -935,7 +958,7 @@ class Governor:
                         objective_id=objective_id, label=label, pid=pid,
                         started=now, heartbeat=now,
                         deadline=None if deadline_s is None else now + deadline_s,
-                        cleanup=cleanup)
+                        cleanup=cleanup, priority=priority)
                 elif decision == QUEUE:
                     self._queue.append((kind, label, time.time()))
                 d = Decision(decision, kind, reason, p.level, lease,

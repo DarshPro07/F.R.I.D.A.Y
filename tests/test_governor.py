@@ -645,6 +645,85 @@ def test_urgent_work_skips_the_activity_and_power_gates_but_not_pressure():
     assert d.decision == G.SHED and "pressure" in d.reason, d.reason
 
 
+def test_running_background_work_stops_when_the_person_returns():
+    ctx = Ctx(idle_s=600.0)
+    gov, _ = make_ctx(ctx)
+    stopped = []
+    opt = gov.admit(G.OPTIONAL, label="digest", cleanup=lambda: stopped.append("digest"))
+    worker = gov.admit(G.WORKER, label="job", cleanup=lambda: stopped.append("job"))
+    assert opt.admitted and worker.admitted
+    assert gov.pressure(fresh=True).level == G.NORMAL and stopped == []   # still away
+    ctx.idle_s = 3.0                                  # the person is back at the keyboard
+    assert gov.pressure(fresh=True).level == G.NORMAL  # headroom alone would not stop it
+    assert stopped == ["digest"]
+    assert gov.active(G.OPTIONAL) == 0 and gov.active(G.WORKER) == 1
+    record = gov.reductions[-1]
+    assert record["lease"] == opt.lease and record["released"]
+    assert "person is active" in record["reason"], record["reason"]
+
+
+def test_running_background_work_stops_when_the_machine_is_unplugged():
+    ctx = Ctx(on_battery=False)
+    gov, _ = make_ctx(ctx)
+    stopped = []
+    gov.admit(G.OPTIONAL, label="index", cleanup=lambda: stopped.append("index"))
+    gov.pressure(fresh=True)
+    assert stopped == []
+    ctx.on_battery = True
+    gov.pressure(fresh=True)
+    assert stopped == ["index"] and gov.active(G.OPTIONAL) == 0
+    assert "battery" in gov.reductions[-1]["reason"]
+
+
+def test_running_urgent_work_keeps_going_when_the_person_returns_or_unplugs():
+    ctx = Ctx()
+    gov, dial = make_ctx(ctx)
+    stopped = []
+    gov.admit(G.OPTIONAL, label="urgent", priority=G.URGENT,
+              cleanup=lambda: stopped.append("urgent"))
+    ctx.idle_s, ctx.on_battery = 1.0, True
+    gov.pressure(fresh=True)
+    assert stopped == [] and gov.active(G.OPTIONAL) == 1
+    assert gov.owned_processes()[0]["priority"] == G.URGENT
+    dial.s = sample(cpu=90)                           # pressure still stops it
+    gov.pressure(fresh=True)
+    assert stopped == ["urgent"]
+
+
+def test_running_background_work_is_not_stopped_by_an_unknown_or_failing_context():
+    ctx = Ctx(idle_s=None, on_battery=None)
+    gov, _ = make_ctx(ctx)
+    gov.admit(G.OPTIONAL, label="digest", cleanup=lambda: None)
+    gov.pressure(fresh=True)
+    assert gov.active(G.OPTIONAL) == 1
+
+    def broken() -> G.Context:
+        raise OSError("probe gone")
+
+    failing, _ = make_ctx(broken)
+    assert failing.context() == G.Context()
+    assert failing.admit(G.OPTIONAL, cleanup=lambda: None).admitted
+    failing.pressure(fresh=True)                      # must not raise
+    assert failing.active(G.OPTIONAL) == 1
+
+
+def test_the_context_is_not_probed_when_no_background_work_runs():
+    probes = []
+
+    def counting() -> G.Context:
+        probes.append(1)
+        return G.Context(user_idle_s=600.0, on_battery=False)
+
+    gov, _ = make_ctx(counting)
+    gov.admit(G.WORKER, label="job")
+    gov.pressure(fresh=True)
+    assert probes == []
+    gov.admit(G.OPTIONAL, label="digest", cleanup=lambda: None)
+    probes.clear()
+    gov.pressure(fresh=True)
+    assert probes == [1]
+
+
 def test_an_unreadable_context_never_defers_work():
     assert G.Context(user_idle_s=None, on_battery=None).deferral(G.Thresholds()) == ""
     unknown, _ = make_ctx(Ctx(idle_s=None, on_battery=None))
