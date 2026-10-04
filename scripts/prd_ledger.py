@@ -2527,20 +2527,30 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "status": PARTIAL,
         "current_implementation": (
             "friday/mcp_firewall.py pins an MCP server FRIDAY does not run itself the first time it is seen: "
-            "its identity (the URL it was reached at) and a hash of every tool's schema and description, each "
-            "description scanned with the skill linter's unsafe-instruction patterns first - a description "
-            "that tries to instruct the model is refused before anything is pinned. From then on any change "
-            "(a tool changed, added or removed, a description rewritten) moves the server ACTIVE to "
-            "SUSPENDED and withholds all its tools; it stays suspended even if it changes back, until the owner "
-            "revalidates it (python -m friday.mcp_firewall revalidate URL), which re-pins after scanning "
-            "again. The pins persist in data/mcp_pins.json. The voice agent's one MCP connection goes through "
-            "it when MCP_URL is not loopback (the cloud-to-PC path), and a suspended server is reported as a "
-            "safety stop, not an outage. Assumed: FRIDAY's own tool server on this machine is first-party code "
-            "whose tools change with every update, so a loopback URL is not pinned. Gaps: the identity is the "
-            "URL only (no server name, version or TLS identity from the handshake); tool output from a pinned "
-            "server is not yet typed as untrusted by the runtime; MCP servers used by Hermes or Claude Code "
-            "workers are configured outside FRIDAY and not seen here."),
-        "files": ["friday/mcp_firewall.py:95,149,162,176,201,242,363,384,435,486", "agent_friday.py:739,1324"],
+            "the handshake server name, a binding (endpoint or executable hash, authenticated relationship, "
+            "permissions, credential scope, risk class, workspace, sensitive capabilities, server metadata) and "
+            "a hash of every tool's schema, description and authority, each description scanned with the skill "
+            "linter's unsafe-instruction patterns first - a description that tries to instruct the model is "
+            "refused before anything is pinned. The protocol is a policy (allowed eras and versions, the "
+            "registered preference, the last version and era observed), never identity: a compatible new SDK "
+            "or negotiated version is recorded and the tools are scanned again; a version outside the policy "
+            "or an unapproved legacy/modern change suspends. A changed tool schema or description, an added or "
+            "removed tool, a tool gaining authority, or a changed identity, endpoint, executable, credential "
+            "scope or capability moves the server ACTIVE to SUSPENDED and withholds all its tools; it stays "
+            "suspended even if it changes back, until the owner revalidates it (python -m friday.mcp_firewall "
+            "revalidate URL). A server configured outside FRIDAY walks EXTERNAL_DISCOVERED, EXTERNAL_UNVERIFIED, "
+            "VERIFIED_PENDING_APPROVAL, ACTIVE; only the owner, an admin policy or a lease approves or waives "
+            "(a model's waiver is refused), and discovery reads Hermes' $HERMES_HOME/config.yaml mcp_servers "
+            "(default and named profile) plus mcpServers JSON imports, from the CLI. The pins persist in "
+            "data/mcp_pins.json. The voice agent's one MCP connection goes through it when MCP_URL is not "
+            "loopback (the cloud-to-PC path), its tool output is typed untrusted, and a suspended server is "
+            "reported as a safety stop, not an outage. Assumed: FRIDAY's own tool server on this machine is "
+            "first-party code whose tools change with every update, so a loopback URL is not pinned; server "
+            "metadata (the title and instructions a server hands the model) is authority-bearing, so a change "
+            "suspends. Gaps: nothing in a live path calls inspect for a server Hermes or Claude Code workers "
+            "configure, so the external lifecycle runs from the CLI and tests only, never yet against a live "
+            "Hermes."),
+        "files": ["friday/mcp_firewall.py:149,225,241,303,336,360,474,538,718,752,862,932", "agent_friday.py:739,1324"],
         "tests": ["tests/test_mcp_firewall.py::test_a_new_server_is_pinned_and_admitted",
                   "tests/test_mcp_firewall.py::test_an_unexpected_change_suspends_the_server",
                   "tests/test_mcp_firewall.py::test_a_description_that_instructs_the_model_is_refused_before_pinning",
@@ -2555,9 +2565,9 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "kept, every URL treated as first-party, revalidation activating without a fresh scan, and the "
             "agent loading tools despite a suspension."),
         "next_action": (
-            "EXTEND: pin the server name and version from the MCP handshake, type a pinned server's tool "
-            "output as untrusted in the capability runtime, and route any future third-party MCP client "
-            "through the same firewall."),
+            "EXTEND: call Firewall.inspect from a live path for the MCP servers Hermes and Claude Code "
+            "workers configure, and run the external lifecycle (discover, verify, approve, waive) against "
+            "a live Hermes."),
     }),
     # --- SEC-003: FRIDAY's own state is not a file for its tools (V7-D56), 2026-09-29
     ("SEC-003", {
