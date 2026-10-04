@@ -125,6 +125,76 @@ def test_unknown_run_is_said_not_invented(store):
     assert t == {"run_id": "RUN-nope", "found": False, "say": "no objective RUN-nope in the ledger"}
 
 
+def _blackbox_run(store):
+    """A completed objective with a privileged decision recorded against it."""
+    from friday import trust as T
+    run_id = asyncio.run(_run_objective(store, []))
+    T.audit().record(actor="friday", action="files.delete", tier=T.R2, decision="ASK",
+                     target="C:/x", objective_id=run_id)
+    return run_id
+
+
+def test_a_completed_run_is_reconstructed_from_its_black_box(store):
+    run_id = _blackbox_run(store)
+    box = OB.reconstruct(run_id, store=store)
+    assert box["found"] and box["consistent"], box["disagreements"]
+    # The outcome comes from the event log, and it is the one the engine reached.
+    assert box["outcome"]["status"] == "COMPLETED" and box["outcome"]["event"] == "run.completed"
+    assert box["outcome"]["replayed_tally"]["succeeded"] == 2
+    assert box["outcome"]["recorded_summary"]["succeeded"] == 2
+    assert box["ledger_status"] == "COMPLETED"
+    # Each task is replayed from events - including the one that failed once
+    # and was retried - and ends where the ledger says it does, with its evidence.
+    assert {t["capability"] for t in box["tasks"]} == {"steady", "flaky"}
+    assert all(t["replayed_status"] == "SUCCEEDED" and t["agrees"] for t in box["tasks"])
+    assert box["evidence"]["tasks_with_evidence"] == 2
+    # The audit side: the chain verifies and the decision made for the run is in it.
+    assert box["audit"]["chain"]["ok"] and box["audit"]["chain"]["intact"]
+    assert [d["action"] for d in box["audit"]["decisions"] if d["action"] == "files.delete"]
+
+
+def test_reconstruction_trusts_the_events_not_the_ledger_rows(store):
+    run_id = _blackbox_run(store)
+    flaky = next(t for t in store.objective_tasks(run_id) if t["capability"] == "flaky")
+    with store._tx() as conn:
+        conn.execute("UPDATE objective_tasks SET status='FAILED' WHERE task_id=?", (flaky["task_id"],))
+        conn.execute("UPDATE objective_runs SET status='RUNNING' WHERE run_id=?", (run_id,))
+    box = OB.reconstruct(run_id, store=store)
+    # The black box still says what happened; the doctored rows are what is named.
+    assert box["outcome"]["status"] == "COMPLETED"
+    assert next(t for t in box["tasks"] if t["task_id"] == flaky["task_id"])["replayed_status"] == "SUCCEEDED"
+    assert not box["consistent"]
+    assert any(flaky["task_id"] in d and "FAILED" in d for d in box["disagreements"])
+    assert any("COMPLETED" in d and "RUNNING" in d for d in box["disagreements"])
+
+
+def test_an_edited_audit_row_makes_the_black_box_untrusted(store):
+    import sqlite3
+
+    from friday import trust as T
+    run_id = _blackbox_run(store)
+    other = T.audit().record(actor="friday", action="files.delete", tier=T.R2,
+                             decision="ASK", objective_id="RUN-other")
+    # An edit after this run's rows leaves them provable ...
+    with sqlite3.connect(T.audit().path) as conn:
+        conn.execute("UPDATE audit_log SET decision='AUTO' WHERE id=?", (other,))
+    later = OB.reconstruct(run_id, store=store)
+    assert not later["audit"]["chain"]["ok"] and later["audit"]["chain"]["intact"]
+    assert later["consistent"], later["disagreements"]
+    # ... an edit to one of this run's own rows does not.
+    mine = T.audit().query(objective_id=run_id, limit=1)[0]["id"]
+    with sqlite3.connect(T.audit().path) as conn:
+        conn.execute("UPDATE audit_log SET decision='AUTO' WHERE id=?", (mine,))
+    box = OB.reconstruct(run_id, store=store)
+    assert not box["audit"]["chain"]["intact"] and not box["consistent"]
+    assert any("audit chain" in d for d in box["disagreements"])
+
+
+def test_unknown_run_has_no_black_box(store):
+    assert OB.reconstruct("RUN-nope", store=store) == {
+        "run_id": "RUN-nope", "found": False, "say": "no objective RUN-nope in the ledger"}
+
+
 def test_redaction_by_key_and_by_token_shape():
     raw = {"api_key": "plain", "nested": {"Authorization": "Bearer x", "note": "token " + FAKE_ANTHROPIC_KEY,
                                           "access_token": "abc", "tokens_in": 10, "token_budget": 4000},
@@ -188,6 +258,11 @@ def test_toolset_faces_run(store, monkeypatch):
     run = c.Run.create("trace text", capability="objective")
     out = MG.objective_trace(run, run_id, as_text=True)
     assert out.output["text"].startswith(run_id)
+    run = c.Run.create("trace blackbox", capability="objective")
+    out = MG.objective_trace(run, run_id, blackbox=True)
+    assert out.status == c.SUCCEEDED and out.output["consistent"]
+    assert out.output["outcome"]["status"] == "COMPLETED"
+    assert "consistent=True" in out.verification.evidence
     run = c.Run.create("nothing", capability="objective")
     assert MG.objective_trace(run, "RUN-missing").status == c.FAILED
     run = c.Run.create("diag", capability="system")

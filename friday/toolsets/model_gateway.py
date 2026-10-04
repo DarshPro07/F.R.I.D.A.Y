@@ -148,10 +148,13 @@ def system_diagnostics(run: c.Run, *, sections: str = "",
 
 
 def objective_trace(run: c.Run, run_id: str = "", *, as_text: bool = False,
+                    blackbox: bool = False,
                     engine: PolicyEngine = default_engine) -> c.ActionResult:
     """FR-054: one trace reconstructs what happened to an objective - state
     transitions, tool calls, workers, model calls, policy decisions,
-    latency, retries, errors and verification - from durable state only."""
+    latency, retries, errors and verification - from durable state only.
+    `blackbox` instead replays the outcome from the event log and audit
+    chain and reports where it disagrees with the ledger (BBOX-001)."""
     from friday import objectives as O
     from friday import observability as OB
     from friday.toolsets.objectives import store as objective_store
@@ -162,6 +165,15 @@ def objective_trace(run: c.Run, run_id: str = "", *, as_text: bool = False,
         return run.record(c.failed(
             started, f"no objective run {run_id!r}" if run_id.strip()
             else "no objective has been started"))
+    if blackbox:
+        out = OB.reconstruct(found["run_id"], store=db)
+        return run.record(c.succeeded(
+            started, output=out,
+            verification=c.Verification(
+                method="store_read",
+                evidence=f"black box replayed from {out['sources']['objective_events']} events "
+                         f"and {out['sources']['audit_rows']} audit rows; "
+                         f"consistent={out['consistent']}")))
     if as_text:
         out = {"run_id": found["run_id"], "text": OB.trace_text(found["run_id"], store=db)}
     else:

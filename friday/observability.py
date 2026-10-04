@@ -13,6 +13,12 @@ Two things, both read-only and both assembled from durable state only:
                   trace reconstructs what happened without reading raw
                   model thoughts").
 
+  reconstruct(run_id)
+                  the black box read back (BBOX-001): the run's outcome and
+                  each task's status rebuilt from the event log and the audit
+                  chain alone, then checked against what the ledger rows say.
+                  A disagreement is named, not smoothed over.
+
   diagnostics()   the single operational view (12.3): build identity,
                   objective store health, memory store health, provider
                   status, Hermes/worker health, browser connection, voice
@@ -191,6 +197,15 @@ def _tool_results(store: Store, run_id: str, task_rows: list[dict]) -> list[dict
     return out
 
 
+def _verification(task_rows: list[dict], tools: list[dict]) -> dict:
+    return {
+        "tasks_with_evidence": sum(1 for t in task_rows if t.get("evidence")),
+        "tasks": len(task_rows),
+        "tool_calls_verified": sum(1 for t in tools if t.get("verify_method")),
+        "tool_calls": sum(1 for t in tools if "tool_id" in t),
+    }
+
+
 def trace(run_id: str, *, store: Store | None = None, redacted: bool = True) -> dict:
     """The whole story of one objective, in time order, from durable state."""
     db = store or Store()
@@ -263,12 +278,7 @@ def trace(run_id: str, *, store: Store | None = None, redacted: bool = True) -> 
     retries = sum(max(0, int(t.get("attempts") or 0) - 1) for t in task_rows)
     errors = [row for row in timeline if row.get("error") or
               str(row.get("event", "")).endswith((".failed", ".FAILED", ".error"))]
-    verification = {
-        "tasks_with_evidence": sum(1 for t in task_rows if t.get("evidence")),
-        "tasks": len(task_rows),
-        "tool_calls_verified": sum(1 for t in tools if t.get("verify_method")),
-        "tool_calls": sum(1 for t in tools if "tool_id" in t),
-    }
+    verification = _verification(task_rows, tools)
     usage = {
         "gateway_calls": sum(1 for g in gateway if "created_at" in g),
         "tokens_in": sum(int(g.get("input_tokens") or 0) for g in gateway if "created_at" in g),
@@ -316,6 +326,122 @@ def trace_text(run_id: str, *, store: Store | None = None) -> str:
         err = f" ! {row['error']}" if row.get("error") else ""
         lines.append(f"  {at} [{row['kind']}] {what} {extra}{lat}{err}".rstrip())
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Black box reconstruction (BBOX-001)
+# ---------------------------------------------------------------------------
+
+_EVENT_LIMIT = 5000
+
+
+def _audit_chain(rows: list[dict]) -> dict:
+    """The audit chain's verdict, and whether every one of this run's rows
+    sits before any break (rows ahead of a break are still proven)."""
+    try:
+        from friday import trust as T
+        chain = T.audit().verify_chain()
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "intact": False, "error": f"audit log unavailable: {exc}"}
+    broken_at = chain.get("broken_at")
+    intact = bool(chain.get("ok")) or (
+        broken_at is not None and all(int(r["id"]) < int(broken_at) for r in rows))
+    return {**chain, "intact": intact}
+
+
+def reconstruct(run_id: str, *, store: Store | None = None, redacted: bool = True) -> dict:
+    """A run's outcome rebuilt from its black box, and checked against the ledger.
+
+    The black box is the append-only record of what was observable: the
+    objective event log, the tool-result evidence and the hash-chained audit
+    log. No model thoughts are in it. The status of the run and of every task
+    is derived from the events alone (`objectives.replay_task_statuses` for
+    tasks), never read off the ledger rows; the rows are only the thing the
+    replay is compared to. `consistent` is True only when nothing disagrees,
+    and each disagreement is named."""
+    from friday import objectives as O
+
+    db = store or Store()
+    run = db.objective_run(run_id)
+    if run is None:
+        return {"run_id": run_id, "found": False,
+                "say": f"no objective {run_id} in the ledger"}
+    task_rows = db.objective_tasks(run_id)
+    events = db.objective_events(run_id, limit=_EVENT_LIMIT)
+    tools = _tool_results(db, run_id, task_rows)
+    audit = [a for a in _audit_rows(run_id) if "at" in a]
+    chain = _audit_chain(audit)
+    disagreements: list[str] = []
+    if len(events) >= _EVENT_LIMIT:
+        disagreements.append(f"event log is longer than {_EVENT_LIMIT}; the replay is partial")
+    if not chain["intact"]:
+        disagreements.append("audit chain is broken at or before this run's records")
+
+    # The run's status is whatever its latest run-level event says it became.
+    implied = {
+        O.EVENT_RUN_STARTED: O.RunStatus.RUNNING, O.EVENT_RUN_RESUMED: O.RunStatus.RUNNING,
+        O.EVENT_RUN_PAUSED: O.RunStatus.PAUSED,
+        O.EVENT_RUN_COMPLETED: O.RunStatus.COMPLETED, O.EVENT_RUN_PARTIAL: O.RunStatus.PARTIAL,
+        O.EVENT_RUN_FAILED: O.RunStatus.FAILED, O.EVENT_RUN_CANCELLED: O.RunStatus.CANCELLED,
+    }
+    status, closing = None, None
+    for e in events:
+        if e.get("event") in implied:
+            status = implied[e["event"]]
+            closing = e if status in O.RUN_TERMINAL else None
+    recorded = (closing or {}).get("detail")
+    recorded = recorded.get("summary") if isinstance(recorded, dict) else None
+
+    if closing is not None and run.get("status") != status:
+        disagreements.append(f"events end the run {status}, the ledger row says {run.get('status')}")
+
+    replayed = O.replay_task_statuses(events)
+    tasks = []
+    for t in task_rows:
+        seen = replayed.get(t["task_id"])
+        # A task no event mentions can only honestly be one that never ran.
+        agrees = (seen == t.get("status")) if seen is not None else (
+            t.get("status") in (O.TaskStatus.QUEUED, O.TaskStatus.READY))
+        if not agrees:
+            disagreements.append(
+                f"task {t['task_id']}: events say {seen or 'never ran'}, ledger row says {t.get('status')}")
+        tasks.append({
+            "task_id": t["task_id"], "capability": t.get("capability"),
+            "replayed_status": seen, "ledger_status": t.get("status"), "agrees": agrees,
+            "attempts": t.get("attempts"), "evidence": (t.get("evidence") or "")[:400],
+        })
+
+    # The closing event also states the tally the engine reached; the replay
+    # must arrive at the same numbers by itself.
+    top = {t["task_id"] for t in task_rows if not t.get("parent_id")}
+    tally = {
+        "succeeded": O.TaskStatus.SUCCEEDED, "failed": O.TaskStatus.FAILED,
+        "skipped": O.TaskStatus.SKIPPED, "interrupted": O.TaskStatus.INTERRUPTED,
+        "blocked": O.TaskStatus.BLOCKED,
+    }
+    replayed_tally = {k: sum(1 for tid in top if replayed.get(tid) == v) for k, v in tally.items()}
+    if isinstance(recorded, dict):
+        for k, n in replayed_tally.items():
+            if k in recorded and recorded[k] != n:
+                disagreements.append(f"closing event records {recorded[k]} {k}, the replay finds {n}")
+
+    out = {
+        "run_id": run_id, "found": True, "request": run.get("request"),
+        "outcome": {"status": status, "event": (closing or {}).get("event"),
+                    "at": _stamp((closing or {}).get("at")), "recorded_summary": recorded,
+                    "replayed_tally": replayed_tally},
+        "ledger_status": run.get("status"),
+        "tasks": tasks,
+        "evidence": _verification(task_rows, tools),
+        "audit": {"chain": chain,
+                  "decisions": [{k: a.get(k) for k in ("at", "actor", "action", "tier",
+                                                       "decision", "target", "result")}
+                                for a in audit]},
+        "consistent": not disagreements, "disagreements": disagreements,
+        "sources": {"objective_events": len(events), "audit_rows": len(audit),
+                    "tool_results": sum(1 for t in tools if "tool_id" in t)},
+    }
+    return redact(out) if redacted else out
 
 
 # ---------------------------------------------------------------------------
