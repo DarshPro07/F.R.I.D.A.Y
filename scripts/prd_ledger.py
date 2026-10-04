@@ -3291,6 +3291,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "3 - the one-time holdout measurement after dev is fixed; 4 - promotion to staged when Success@1 >= 0.90, "
             "Success@3 >= 0.97, ambiguity handling, p95 latency, chooser invocation rate and golden journeys pass."),
     }),
+    ('CTX-002', {
+        "status": PARTIAL,
+        "current_implementation": "Five test stand-ins gain note_turn so turns no longer crash on the router's new method. Agent-level tests prove ABSTAIN serves legacy with no question, and shadow mode leaves the answer and executed tool unchanged. MCP-001 ledger cite agent_friday.py:1328 moved to 1330. (build run, commit a2d9cf40d)",
+        "next_action": "GAPS: Staged search runs synchronously and can hold up search_capabilities (agent_friday.py:942) for up to timeout_s, 2 s by default.; Slices 2-4 are still open.; CLARIFY depends on the model following the instruction, which a unit test cannot check.; upstream_lock --check was not run because the clones are empty.; tests/test_prd_ledger.py::test_the_real_ledgers_are_clean fails in this worktree on 7 cited data/ files that are absent here (CORE-002, CTX-002, RES-001 x2, SCOUT-001, RES-002, RES-003); it is not in the required command and none of the 7 is a cite this change touched.; Items 1-5 were not re-run against ba44fac to watch them fail first; the packet's root cause was taken as given. Items 6-7 were mutation-checked: ABSTAIN returning the staged shortlist, and shadow serving the staged answer, each fail the new tests.; implementer did not claim acceptance met",
+    }),
 ]
 
 
