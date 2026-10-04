@@ -52,10 +52,12 @@ def test_corpus_rejects_a_case_without_acceptance():
 
 def test_corpus_generator_is_idempotent(tmp_path):
     import subprocess, sys
-    before = G.CORPUS.read_text(encoding="utf-8")
+    # Bytes, not text: read_text hides a CRLF rewrite, which left the tracked corpus "modified"
+    # (and the shared checkout dirty) after every run of this test on Windows (2026-10-04).
+    before = G.CORPUS.read_bytes()
     subprocess.run([sys.executable, "scripts/golden_corpus.py"], check=True,
                    capture_output=True, cwd=str(G.ROOT))
-    assert G.CORPUS.read_text(encoding="utf-8") == before
+    assert G.CORPUS.read_bytes() == before
 
 
 # -- scoring is deterministic and criteria-driven ---------------------------
