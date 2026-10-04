@@ -1347,6 +1347,30 @@ def failure_capsule(req: str, integration: dict, run_rec: dict, wt: Path, base_s
 WORKER_FAILURES = ("FAILED", "TIMEOUT")
 
 
+def rebase_run(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR) -> bool:
+    """Replay a finished run's commit onto the repository's HEAD in its own worktree
+    when that is a clean rebase, and record the new commit and base. A conflict is
+    aborted, leaving the run as it was (2026-10-03/04: SEC-005 and CTX-002 each sat
+    parked REBASE_REQUIRED until the controller did exactly this by hand)."""
+    rec_path = runs_dir / f"{req}.json"
+    rec = _read_json(rec_path)
+    wt = Path(rec.get("worktree") or "")
+    if not rec.get("commit") or not wt.is_dir():
+        return False
+    head = _git(["rev-parse", "HEAD"], repo)
+    r = subprocess.run(["git", "-c", "user.name=DarshPro07", "-c", "user.email=DarshPro07", "rebase", head],
+                       cwd=wt, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        subprocess.run(["git", "rebase", "--abort"], cwd=wt, capture_output=True, timeout=60)
+        return False
+    rec.update(commit=_git(["rev-parse", "HEAD"], wt), base_sha=head)
+    rec_path.write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8", newline="\n")
+    meta = _run_meta(wt)
+    if meta:
+        _write_run_meta(wt, {**meta, "base_sha": head})
+    return True
+
+
 def has_work(rec: dict) -> bool:
     """Whether a run left changes in its worktree (the kernel's .build/ aside). A
     worktree git cannot read counts as holding nothing: the run is then an ordinary

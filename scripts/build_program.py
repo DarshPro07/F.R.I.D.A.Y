@@ -465,6 +465,10 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
         head = git_out(repo, "rev-parse", "HEAD", runner=runner)
         try:
             res = bi.integrate(req)
+            # Main moved under a finished change: rebase it when that is clean, then try once more.
+            if res["result"] == "REBASE_REQUIRED" and k.rebase_run(req, repo=repo):
+                head = git_out(repo, "rev-parse", "HEAD", runner=runner)
+                res = bi.integrate(req)
         except k.KernelError as exc:
             park(state, req, "integration refused", "integration", str(exc))
             return "REFUSED", spend, False

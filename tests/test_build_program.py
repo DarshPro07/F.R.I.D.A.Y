@@ -57,6 +57,8 @@ class FakeKernel:
         self.over_budget: set[str] = set()  # requirements the day's spend lease refuses
         self.too_big: set[str] = set()  # requirements whose predicted memory does not fit now
         self.with_work: set[str] = set()  # requirements whose failed worker left changes on disk
+        self.rebases_clean: set[str] = set()  # requirements whose branch rebases onto HEAD cleanly
+        self.rebased: list[str] = []
         self.spend: list[tuple[str, str, float]] = []  # (req, kind, usd) of each spend lease taken
         self.released: list[str] = []  # memory leases given back
         self.events: list[tuple] = []  # job-state writes and lease attempts, in order
@@ -75,6 +77,10 @@ class FakeKernel:
 
     def concurrency(self, cap=2):
         return min(self.level, cap), "fake"
+
+    def rebase_run(self, req, *, repo=None, runs_dir=None):
+        self.rebased.append(req)
+        return req in self.rebases_clean
 
     def has_work(self, rec):
         return rec["requirement"] in self.with_work
@@ -194,6 +200,8 @@ class FakeIntegrator:
     def integrate(self, req):
         self.calls.append(req)
         res = self.results.get(req, "INTEGRATED")
+        if isinstance(res, list):  # one result per call, in order
+            res = res.pop(0)
         if isinstance(res, Exception):
             raise res
         if res == "INTEGRATED" and self.close:
@@ -949,6 +957,18 @@ def test_a_failed_advisor_parks_instead_of_building_blind(env):
     st = state_of(env)
     assert k.steps == ["REPAIR", "ADVISOR"] and st["parked"]["A"] == "advisor failed"
     assert any(e["kind"] == "advisor" for e in st["escalations"])
+
+
+def test_a_clean_rebase_is_done_by_the_program_and_integrated(env):
+    # 2026-10-03/04: SEC-005 and CTX-002 finished, then needed only a clean rebase onto main
+    # (the ledger or a neighbour's file had moved), and each sat parked until the controller did it.
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+    k.rebases_clean = {"A"}
+    bi = FakeIntegrator(k, {"A": ["REBASE_REQUIRED", "INTEGRATED"]})
+    go(env, k, bi=bi, max_waves=1)
+    assert bi.calls == ["A", "A"] and k.rebased == ["A"] and "A" in k.closed
+    assert "A" not in state_of(env)["parked"]
 
 
 def test_a_rebase_required_candidate_is_parked_with_a_rebase_escalation(env):

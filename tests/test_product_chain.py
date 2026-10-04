@@ -141,3 +141,9 @@ def test_until_done_backs_off_and_retries_a_no_progress_or_busy_stop(monkeypatch
 def test_until_done_stops_for_good_on_a_crash(monkeypatch, tmp_path):
     cmds, _ = _until_done(monkeypatch, tmp_path, ["integration crash"])
     assert len(cmds) == 1
+
+
+def test_until_done_waits_out_a_dirty_tree(monkeypatch, tmp_path):
+    # 2026-10-04: a controller edit left the checkout dirty for a few minutes and the loop ended.
+    cmds, sleeps = _until_done(monkeypatch, tmp_path, ["dirty tree"] + ["no ready work"] * 4)
+    assert sleeps[0] == PC.RETRY_AFTER_S and len(cmds) == 5

@@ -37,7 +37,7 @@ PRESSURE_BACKOFF_S = 300
 PRIORITIES = ("P0", "P1", "P2", "P3")
 #: In --until-done mode a run that made no progress (its requirements failed or parked) is retried
 #: after this long - parks keep the same failure from being paid for again; crashes still stop.
-RETRYABLE = ("no progress", "costly wave without progress")
+RETRYABLE = ("no progress", "costly wave without progress", "dirty tree")  # a controller edit is transient
 RETRY_AFTER_S = 1800
 BUSY = "another program is running"  # build_program.BUSY
 BUSY_RETRY_S = 120

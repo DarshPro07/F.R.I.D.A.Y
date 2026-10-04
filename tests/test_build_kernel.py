@@ -1759,3 +1759,34 @@ def test_no_continuation_past_the_day_ceiling(tmp_path, monkeypatch):
     run = K.Running("EVAL-001", _Proc(1), wt, mode="SHIP", base_sha="abc", branch="build/eval-001",
                     model="opus", kind="ADVISOR", runs_dir=runs)
     assert K.continuation(run) is False
+
+
+
+def test_rebase_run_replays_a_finished_commit_onto_head(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    (wt / "a.py").write_text("a = 1\n")
+    _evidence_done(wt)
+    runs = tmp_path / "runs"
+    rec = K.finalize(run, None, runs)
+    (repo / "other.py").write_text("o = 1\n")
+    _git(repo, "add", "other.py")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t", "commit", "-qm", "main moves")
+    head = _git(repo, "rev-parse", "HEAD")
+    assert K.rebase_run("R-1", repo=repo, runs_dir=runs) is True
+    after = json.loads((runs / "R-1.json").read_text())
+    assert after["base_sha"] == head and after["commit"] != rec["commit"]
+    assert _git(wt, "rev-parse", "HEAD") == after["commit"] and (wt / "other.py").exists()
+
+
+def test_rebase_run_aborts_a_conflict_and_leaves_the_worktree_clean(repo, tmp_path):
+    run, wt = _done_run(repo, tmp_path)
+    (wt / "a.py").write_text("a = 1\n")
+    _evidence_done(wt)
+    runs = tmp_path / "runs"
+    rec = K.finalize(run, None, runs)
+    (repo / "a.py").write_text("a = 2\n")
+    _git(repo, "add", "a.py")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t", "commit", "-qm", "main conflicts")
+    assert K.rebase_run("R-1", repo=repo, runs_dir=runs) is False
+    assert _git(wt, "rev-parse", "HEAD") == rec["commit"]
+    assert json.loads((runs / "R-1.json").read_text())["commit"] == rec["commit"]
