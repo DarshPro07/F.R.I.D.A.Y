@@ -3604,6 +3604,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             'its, do not apply it blindly.'
         ),
     }),
+    ('LEARN-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Added friday/adaptor_promotion.py: an AdaptorLadder that promotes a neural/adaptor version only via a stored friday.arena report whose gates include no_regression (holdout >= active - tolerance) and holdout_floor. A regression blocks promotion and the active version keeps serving. Reuses the arena gate (ArenaKind.NEURAL_ADAPTOR), no second mechanism. (build run, commit ceab4f975)',
+        "next_action": "GAPS: NEURAL-001 (training the policy networks + dataset capture) is not built; this is the promotion/regression seam only. It takes an already-measured held-out score per version and decides promotion; it does not train. Assumed the LEARN-001 acceptance ('promotion blocked on threshold regression') is satisfied by the promotion gate alone, reusing arena rather than waiting on NEURAL-001.",
+    }),
 ]
 
 
