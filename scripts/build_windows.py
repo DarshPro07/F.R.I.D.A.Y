@@ -29,7 +29,7 @@ What it does, in order:
      signs when a certificate is configured (and says NOT_CONFIGURED
      otherwise - never pretends), writes SHA256SUMS.txt;
   6. smoke-tests the artifact itself: `FRIDAY.exe --version` must answer
-     and `FRIDAY.exe --doctor` must not FAIL.
+     and `FRIDAY.exe --doctor --doctor-scope artifact` must not FAIL (setup checks are shown, not judged).
 
 Exit code is non-zero when any step fails; the artifact path is the last
 line printed on success.
@@ -249,7 +249,7 @@ def smoke() -> int:
         print(version.stderr, file=sys.stderr)
         return fail("--version did not answer", 3)
     say("smoke: FRIDAY.exe --doctor")
-    doctor = subprocess.run([str(EXE), "--doctor"], capture_output=True, text=True,
+    doctor = subprocess.run([str(EXE), "--doctor", "--doctor-scope", "artifact"], capture_output=True, text=True,
                             timeout=300, cwd=str(APP))
     print(doctor.stdout.rstrip(), flush=True)
     if doctor.returncode == 2:

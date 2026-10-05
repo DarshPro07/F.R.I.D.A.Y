@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `e1b8540fdc17e53da06d507ea9faf563fd2a7ffdabfbd4016b04395a327e7142`
 - PRD size: 8182 lines, 291497 bytes
-- Repository HEAD: `7a99fe3e8c6d2d64239b78bd9c203f947f65396c`
+- Repository HEAD: `3369287067f5fc2b62179d8207b75747913774bf`
 - Uncommitted paths at generation: 43
-- Generated: 2026-10-05T06:42:06+05:30
+- Generated: 2026-10-05T07:43:12+05:30
 
 ## Status vocabulary
 
@@ -27,8 +27,8 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 81 |
-| PARTIAL | 60 |
+| MISSING | 80 |
+| PARTIAL | 61 |
 | VERIFIED | 36 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
@@ -526,7 +526,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| MODEL-012 | P0 | **MISSING** | FRIDAY can think through a signed-in coding-agent CLI (Claude Code, Codex, Antigravity) as a model-gateway provider when no API key works. | With no working API key, model.infer routes to the CLI provider: it is registered in the model registry, passes MODEL-002's semantic probe, and FRIDAY answers a text and a voice turn end to end through FRIDAY.exe; each call's cost is recorded; the CLI runs as pure completion with no tools, its output treated as model text, never as commands; an absent or signed-out CLI reports UNAVAILABLE and the route fails over or says so. | - | `friday/model_gateway.py`, `friday/model_capabilities.py` | SLICED 2026-10-04 (controller; advisor design in data/build_runs/MODEL-012.advice.md). Root cause: FRIDAY's live turns never reach the model gateway - spoken and typed turns use the AgentSession LLM from providers.build_resilient_llm (Gemini or LiveKit inference only), so the gateway's Claude Code provider (friday/cli_model_provider.py) is unreachable. CURRENT SLICE 1: friday/gateway_llm.py - GatewayLLM, a livekit.agents.llm.LLM over model_gateway.gateway().infer (one assistant chunk, never tool calls, gateway failure raises APIConnectionError) - and build_resilient_llm adds it last in the FallbackAdapter when a CLI provider is configured, or returns it alone when no API key builds; tests in tests/test_gateway_llm.py including the end-to-end fake-CLI turn with cost_usd recorded. LATER SLICES: 2 - durable 401 route verdicts in the tier table and per-call / daily CLI cost caps; 3 - Codex and Antigravity providers only where a no-tools mode is verified; 4 - a live text and voice turn through FRIDAY.exe. |
+| MODEL-012 | P0 | **PARTIAL** | FRIDAY can think through a signed-in coding-agent CLI (Claude Code, Codex, Antigravity) as a model-gateway provider when no API key works. | With no working API key, model.infer routes to the CLI provider: it is registered in the model registry, passes MODEL-002's semantic probe, and FRIDAY answers a text and a voice turn end to end through FRIDAY.exe; each call's cost is recorded; the CLI runs as pure completion with no tools, its output treated as model text, never as commands; an absent or signed-out CLI reports UNAVAILABLE and the route fails over or says so. | - | `friday/model_gateway.py`, `friday/model_capabilities.py` | GAPS: 3 failures in tests/test_voice_path.py (tts_produces_real_audio, tts_stt_round_trip, stt_needs_an_http_session_outside_a_job): real OpenAI TTS calls get 401 invalid_api_key on this host; they use build_tts/build_stt, untouched by this slice. Not run against the pre-change tree.; Slice 2: durable 401 route verdicts in the tier table (a rejected key is still retried every ~2 min) and per-call / daily CLI cost caps (owner cap $40 soft / $45 hard is not enforced on this route).; Slice 3: Codex and Antigravity backends - only where a no-tools mode is verified (Codex 0.121.0 here is too old; Antigravity has no headless completion command).; Slice 4: a live text and voice turn through FRIDAY.exe; voice also needs working LiveKit and TTS keys (.env holds placeholders). Nothing here was run against the real claude CLI or the exe.; build_resilient_llm treats 'CLI configured' as discover_backends() non-empty (no configured() exists): enabled, not installed or signed in. With no API key and no usable CLI the failure surfaces at turn time as APIConnectionError, not at startup.; With the CLI route the voice agent has no tools: GatewayLLM ignores them, so a fallback turn cannot act, only reply.; A cancelled stream (barge-in) cannot stop the in-flight CLI call in its thread; the call completes, is paid and recorded, and its text is discarded. FallbackAdapter recovery probes also issue a real CLI call after a GatewayLLM failure (one at a time).; implementer did not claim acceptance met |
 
 ## Owner direction recorded against a requirement
 

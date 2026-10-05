@@ -97,3 +97,20 @@ def test_security_check_flags_credentials_inside_a_packaged_application(tmp_path
     outside.parent.mkdir(parents=True)
     outside.write_text("X=1\n", encoding="utf-8")
     assert L.security_check(tmp_path, outside)[1] == L.PASS
+
+
+
+def test_the_artifact_scope_ignores_this_machines_setup(monkeypatch, capsys):
+    # Release candidate 4c0815d: the exe built and passed its own checks, but the build failed
+    # because this host's API keys were placeholders - a setup problem, not a build defect.
+    from friday import launcher as L
+    monkeypatch.setattr(L, "adopt_legacy_state", lambda: [])
+    monkeypatch.setattr(L, "load_env", lambda: None)
+    setup_fail = [("application", L.PASS, "ok"), ("voice", L.FAIL, "keys are placeholders"),
+                  ("livekit credentials", L.FAIL, "missing")]
+    monkeypatch.setattr(L, "doctor_checks", lambda **kw: setup_fail)
+    assert L.doctor("all") == 2 and L.doctor("artifact") == 0
+    broken = setup_fail + [("core imports", L.FAIL, "friday.server failed to import")]
+    monkeypatch.setattr(L, "doctor_checks", lambda **kw: broken)
+    assert L.doctor("artifact") == 2
+    assert "voice" in capsys.readouterr().out  # setup problems are still shown

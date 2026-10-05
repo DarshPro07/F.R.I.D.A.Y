@@ -1130,6 +1130,23 @@ def security_check(home: Path, env_path: Path | None) -> tuple[str, str, str]:
     return ("security", PASS, detail)
 
 
+#: Checks about this machine's setup rather than the build: credentials, voice, LiveKit, Hermes,
+#: skills, onboarding, signing. A fresh install has none of them yet, and FRIDAY.exe --no-agent
+#: runs without LiveKit, so they never make the artifact itself FAIL (release candidate 4c0815d's
+#: build failed only because this host's API keys were placeholders).
+CONFIGURATION_CHECKS = frozenset({
+    "env file", "livekit credentials", "provider credentials", "voice", "hermes", "hermes profile",
+    "skills", "onboarding", "code signing",
+})
+
+
+def in_scope(checks: list[tuple[str, str, str]], scope: str) -> list[tuple[str, str, str]]:
+    """`artifact` keeps the checks about the build itself; `all` keeps everything."""
+    if scope == "artifact":
+        return [c for c in checks if c[0] not in CONFIGURATION_CHECKS]
+    return list(checks)
+
+
 def verdict(checks: list[tuple[str, str, str]]) -> str:
     states = {state for _, state, _ in checks}
     if FAIL in states:
@@ -1139,7 +1156,7 @@ def verdict(checks: list[tuple[str, str, str]]) -> str:
     return PASS
 
 
-def doctor() -> int:
+def doctor(scope: str = "all") -> int:
     # The migration runs here too: a doctor that bootstrapped an empty
     # database in the new state root would make the old one unreachable.
     moved = adopt_legacy_state()
@@ -1150,8 +1167,9 @@ def doctor() -> int:
     width = max(len(name) for name, _, _ in checks)
     for name, state, detail in checks:
         print(f"  {state:<8} {name:<{width}}  {detail}", flush=True)
-    result = verdict(checks)
-    print(f"\nFRIDAY doctor: {result}", flush=True)
+    result = verdict(in_scope(checks, scope))
+    print(f"\nFRIDAY doctor: {result}" + (" (artifact checks; setup checks listed above)"
+                                          if scope == "artifact" else ""), flush=True)
     return {PASS: 0, DEGRADED: 1, FAIL: 2}[result]
 
 
@@ -1171,6 +1189,8 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--doctor", action="store_true", help="diagnostics (exit 0 PASS, 1 DEGRADED, 2 FAIL)")
     group.add_argument("--paths", action="store_true", help="every resolved location, as JSON")
     group.add_argument("--version", action="store_true")
+    parser.add_argument("--doctor-scope", choices=("all", "artifact"), default="all",
+                        help="with --doctor: 'artifact' judges the build only, not this machine's setup")
     parser.add_argument("--no-ui", action="store_true", help="do not start the control room")
     parser.add_argument("--no-agent", action="store_true", help="do not start the voice worker")
     parser.add_argument("--no-browser", action="store_true", help="serve the control room without opening a window")
@@ -1225,7 +1245,7 @@ def main(argv: list[str] | None = None) -> int:
     if options.paths:
         return paths()
     if options.doctor:
-        return doctor()
+        return doctor(options.doctor_scope)
     if options.stop:
         return emergency_stop_everything()
     if options.resume:
