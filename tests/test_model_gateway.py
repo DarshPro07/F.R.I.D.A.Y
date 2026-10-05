@@ -311,6 +311,27 @@ def test_a_pinned_provider_outside_the_tier_table_gets_its_own_default(tmp_path,
         gw.close()
 
 
+def test_a_main_route_that_fails_during_the_call_fails_over_in_the_same_call(tmp_path, clean_env):
+    """Live, 2026-10-05, after the Hermes update: every tier resolved to the
+    profile's main route (openai-codex) and it answered 429. openrouter was
+    authenticated and answering, but other providers were offered only when the
+    tier table was empty at PLANNING time, so this call failed and only the
+    next one succeeded."""
+    clean_env.setenv("FAKE_GW_FAIL_PROVIDERS", "anthropic:RATE_LIMITED")
+    main = ("anthropic", "fake-main")
+    gw = make(tmp_path, tiers={mg.TIER_FAST: main, mg.TIER_STANDARD: main, mg.TIER_DEEP: main})
+    try:
+        res = gw.infer(request())
+        assert res.status == "ok", res
+        assert res.provider == "openai-codex" and res.model == "fake-codex-default"
+        assert [a["provider"] for a in res.attempts][:1] == ["anthropic"]
+        # Without failover the main route is the only one, as before.
+        clean = gw.candidates(request(allow_failover=False))
+        assert all(p == "anthropic" for _, p, _ in clean), clean
+    finally:
+        gw.close()
+
+
 def test_a_provider_with_no_catalog_default_is_no_route(tmp_path, clean_env):
     """opencode-free is authenticated but Hermes knows no default model for
     it. Guessing is exactly the failure Requirement 10 forbids: NO_ROUTE."""

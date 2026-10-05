@@ -1036,18 +1036,21 @@ class ModelGateway:
 
         # Routes beyond the tier table: every provider Hermes reports as
         # authenticated, at ITS OWN default model. They are reached when the
-        # caller pins one (`provider_allowlist`) or when failover is allowed
-        # and the tier table gave nothing usable - a second authenticated
-        # provider is a real fallback, an unauthenticated one is not (the
-        # live suite found the allowlist path returned NO_ROUTE for every
-        # provider but the main one, 2026-09-05).
+        # caller pins one (`provider_allowlist`) or when failover is allowed -
+        # after the tier routes, so they are tried only when those fail. A
+        # second authenticated provider is a real fallback, an unauthenticated
+        # one is not (the live suite found the allowlist path returned NO_ROUTE
+        # for every provider but the main one, 2026-09-05). Until 2026-10-05 they
+        # were offered only when the tier table gave nothing at PLANNING time,
+        # so a main route that failed during the call (openai-codex, 429) had no
+        # fallback until the next call, while openrouter answered fine.
         #
         # Requirement 10: the model is resolved HERE, from the provider's
         # catalog, never left blank. A blank model reaches Hermes's
         # `resolve_provider_client`, which pre-fills the profile's MAIN model
         # - and that is how openai-api was asked for `claude-opus-5`. A
         # provider with no default of its own is not a route.
-        wants_more = bool(request.provider_allowlist) or (request.allow_failover and not out)
+        wants_more = bool(request.provider_allowlist) or request.allow_failover
         if wants_more:
             verdicts = self.provider_health(self._authenticated_providers())
             # Per-ROUTE evidence, keyed (provider, model, credential). The

@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `ebba0dd283c9d83aa3888596d93f5901cb6043a278d603a760c522568046eaa5`
 - PRD size: 8204 lines, 295141 bytes
-- Repository HEAD: `10c2622d9159da52f626e013d70a3343526965a9`
+- Repository HEAD: `d3dad0954dc175420ab72c7d2ed2a80a8c0e37cb`
 - Uncommitted paths at generation: 44
-- Generated: 2026-10-05T23:27:06+05:30
+- Generated: 2026-10-05T23:51:18+05:30
 
 ## Status vocabulary
 
@@ -27,8 +27,8 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 81 |
-| PARTIAL | 68 |
+| MISSING | 80 |
+| PARTIAL | 69 |
 | VERIFIED | 36 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
@@ -185,7 +185,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| FAIL-001 | P1 | **MISSING** | Root-cause failures become Failure Genome patterns. | Similar failure retrieves prior repair. | - | `friday/evaluation.py:128-199` | REBUILD: define a FailureRecord schema (symptom/env/task_class/failed_approach/wrong_assumption/root_cause/repair/prevention/regression_test/skill_candidate/applicability) and a retrieval path triggered before repeating a known failure pattern; likely lives beside friday/evaluation.py or friday/memory_stack.py as a new tier. |
+| FAIL-001 | P1 | **PARTIAL** | Root-cause failures become Failure Genome patterns. | Similar failure retrieves prior repair. | - | `friday/evaluation.py:128-199` | GAPS: No product-code producer yet: capture() is public API and only tests call it, so the genome stays empty until a call site (an MCP tool for Friday, or the Hermes handoff path) records a root-caused failure. Retrieval is wired; capture is not.; Matching is lexical (memory_stack._tokens overlap, Jaccard >= 0.35 + task_class/environment bonuses). A recurrence described in entirely different words will not match; embeddings would, and are not in the memory stack today.; applicability conditions are returned unevaluated (free prose), so the caller must check them. |
 
 ## PRD section 37
 
