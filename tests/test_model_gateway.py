@@ -488,6 +488,80 @@ def test_telemetry_summary_and_spikes(tmp_path, clean_env):
         gw.close()
 
 
+def _hermes_with(call_llm, monkeypatch):
+    """A stand-in for Hermes's agent.auxiliary_client with this call_llm."""
+    import types
+
+    module = types.ModuleType("agent.auxiliary_client")
+    module.call_llm = call_llm
+    module.extract_content_or_reasoning = lambda r: r.choices[0].message.content
+    package = types.ModuleType("agent")
+    package.auxiliary_client = module
+    monkeypatch.setitem(sys.modules, "agent", package)
+    monkeypatch.setitem(sys.modules, "agent.auxiliary_client", module)
+
+
+def _reply(text="PONG", model="claude-x"):
+    import types
+
+    message = types.SimpleNamespace(content=text)
+    choice = types.SimpleNamespace(message=message, finish_reason="stop")
+    usage = types.SimpleNamespace(prompt_tokens=8, completion_tokens=1, total_tokens=9)
+    return types.SimpleNamespace(choices=[choice], model=model, usage=usage)
+
+
+def test_a_hermes_without_route_info_still_answers_and_says_what_it_did_not_take(monkeypatch):
+    # FRIDAY.exe live test, 2026-10-05: the installed Hermes (2026-05-23) has no
+    # route_info/latency_info/reasoning_config, and every call raised TypeError.
+    from friday import hermes_model_gateway_worker as W
+    seen = {}
+
+    def call_llm(task=None, *, provider=None, model=None, base_url=None, api_key=None,
+                 main_runtime=None, messages, temperature=None, max_tokens=None,
+                 tools=None, timeout=None, extra_body=None):
+        seen.update(provider=provider, model=model, max_tokens=max_tokens)
+        return _reply()
+
+    _hermes_with(call_llm, monkeypatch)
+    out = W._infer({"messages": [{"role": "user", "content": "ping"}], "provider": "anthropic",
+                    "model": "claude-x", "max_output_tokens": 16, "reasoning": {"effort": "low"}})
+    assert out["status"] == "ok" and out["response"] == "PONG"
+    assert out["provider"] == "anthropic" and out["model"] == "claude-x"
+    assert seen == {"provider": "anthropic", "model": "claude-x", "max_tokens": 16}
+    assert out["unsupported_arguments"] == ["route_info", "latency_info", "reasoning_config"]
+
+
+def test_a_hermes_that_takes_route_info_gets_it_and_reports_its_route(monkeypatch):
+    from friday import hermes_model_gateway_worker as W
+
+    def call_llm(task=None, *, provider=None, model=None, messages, temperature=None,
+                 max_tokens=None, timeout=None, route_info=None, latency_info=None,
+                 reasoning_config=None):
+        route_info.update(provider="openai-codex", model="gpt-x")
+        assert reasoning_config == {"effort": "low"}
+        return _reply(model="")
+
+    _hermes_with(call_llm, monkeypatch)
+    out = W._infer({"messages": [{"role": "user", "content": "ping"}],
+                    "reasoning": {"effort": "low"}})
+    assert out["provider"] == "openai-codex" and out["model"] == "gpt-x"
+    assert out["unsupported_arguments"] == []
+
+
+def test_a_hermes_missing_a_required_argument_still_fails_loudly(monkeypatch):
+    # Only the optional arguments are negotiated; a call_llm without `messages`
+    # is a different API, and pretending otherwise would hide it.
+    from friday import hermes_model_gateway_worker as W
+
+    def call_llm(task=None, *, provider=None, model=None, prompt=None, max_tokens=None,
+                 temperature=None, timeout=None):
+        return _reply()
+
+    _hermes_with(call_llm, monkeypatch)
+    with pytest.raises(TypeError, match="messages"):
+        W._infer({"messages": [{"role": "user", "content": "ping"}], "provider": "anthropic"})
+
+
 # -- live -----------------------------------------------------------------
 
 

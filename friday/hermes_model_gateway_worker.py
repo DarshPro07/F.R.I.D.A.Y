@@ -30,6 +30,7 @@ structured error on the first request instead of failing to start.
 """
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import sys
@@ -244,6 +245,24 @@ def _providers() -> dict:
             "fallback_providers": list(fallbacks or [])}
 
 
+#: call_llm arguments that arrived after the Hermes builds of 2026-05: the
+#: install on a user's machine is not pinned, so these are offered, not assumed.
+#: Everything else _infer passes has been in call_llm's signature throughout.
+_OPTIONAL_KWARGS = ("route_info", "latency_info", "reasoning_config")
+
+
+def _accepted(fn, kwargs: dict) -> tuple[dict, list[str]]:
+    """`kwargs` without the optional arguments `fn` does not take, and their names.
+
+    A Hermes from 2026-05-23 raised TypeError on route_info for every call
+    while its provider list said READY (FRIDAY.exe live test, 2026-10-05)."""
+    params = inspect.signature(fn).parameters
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return kwargs, []
+    dropped = [k for k in _OPTIONAL_KWARGS if k in kwargs and k not in params]
+    return {k: v for k, v in kwargs.items() if k not in dropped}, dropped
+
+
 def _infer(params: dict) -> dict:
     from agent.auxiliary_client import call_llm, extract_content_or_reasoning
 
@@ -269,6 +288,8 @@ def _infer(params: dict) -> dict:
         kwargs["provider"] = provider
         if model:
             kwargs["model"] = model
+    kwargs, unsupported = _accepted(call_llm, kwargs)
+    if provider:
         response = call_llm(**kwargs)
     else:
         # No explicit provider: Hermes's configured main model for this
@@ -293,6 +314,9 @@ def _infer(params: dict) -> dict:
         "provider_latency": latency,
         "usage": _usage_dict(response),
         "entitlement_state": "OK",
+        # Arguments this Hermes does not take: a requested reasoning effort it
+        # never saw is recorded, not implied.
+        "unsupported_arguments": unsupported,
     }
 
 
