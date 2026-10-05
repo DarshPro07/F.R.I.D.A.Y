@@ -609,15 +609,17 @@ DAY_BUDGET_FILE = "day_budget.json"
 
 
 def day_limits(runs_dir: Path | None = None) -> tuple[float, float]:
-    """(soft stop, hard ceiling) for today: the owner's standing DAY_SOFT_USD / DAY_HARD_USD
-    unless a one-day override is recorded for today's local date."""
+    """(soft stop, hard ceiling) for today: a one-day override recorded for today's local
+    date, else the owner's standing entry in the same file ("standing", owner 2026-10-05:
+    "leave the budget from now"), else DAY_SOFT_USD / DAY_HARD_USD."""
     data = _read_json(_runs(runs_dir) / DAY_BUDGET_FILE)
-    today = data.get(_today()) if isinstance(data, dict) else None
-    if isinstance(today, dict):
-        try:
-            return float(today["soft"]), float(today["hard"])
-        except (KeyError, TypeError, ValueError):
-            pass  # a malformed override falls back to the standing budget, never to no budget
+    data = data if isinstance(data, dict) else {}
+    for entry in (data.get(_today()), data.get("standing")):
+        if isinstance(entry, dict):
+            try:
+                return float(entry["soft"]), float(entry["hard"])
+            except (KeyError, TypeError, ValueError):
+                pass  # a malformed entry falls through to the next, never to no budget
     return DAY_SOFT_USD, DAY_HARD_USD
 
 

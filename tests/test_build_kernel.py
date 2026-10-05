@@ -1907,3 +1907,21 @@ def test_the_real_roster_names_every_job_kind_and_no_verifier():
     real = K.roster()
     assert {"SHIP", "REPAIR", "SCOUT", "ADVISOR", "ESCALATE"} <= set(real)
     assert "VERIFIER" not in real
+
+
+
+def test_a_standing_entry_replaces_the_coded_budget_and_a_day_override_still_wins(tmp_path, monkeypatch):
+    # Owner 2026-10-05: "leave the budget from now" - a standing change, not one day's.
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    monkeypatch.setattr(K, "_today", lambda: "2026-10-06")
+    assert K.day_limits(runs) == (K.DAY_SOFT_USD, K.DAY_HARD_USD)
+    (runs / K.DAY_BUDGET_FILE).write_text(json.dumps({
+        "standing": {"soft": 500.0, "hard": 600.0}}), encoding="utf-8")
+    assert K.day_limits(runs) == (500.0, 600.0)
+    (runs / K.DAY_BUDGET_FILE).write_text(json.dumps({
+        "standing": {"soft": 500.0, "hard": 600.0},
+        "2026-10-06": {"soft": 20.0, "hard": 25.0}}), encoding="utf-8")
+    assert K.day_limits(runs) == (20.0, 25.0)
+    (runs / K.DAY_BUDGET_FILE).write_text(json.dumps({"standing": {"soft": "x"}}), encoding="utf-8")
+    assert K.day_limits(runs) == (K.DAY_SOFT_USD, K.DAY_HARD_USD)
