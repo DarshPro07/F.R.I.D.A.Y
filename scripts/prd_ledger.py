@@ -3440,6 +3440,51 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Chaos report regenerated 9/9 green. New invalid-model-answer injection at the planner found a real defect: wrong-shape JSON or empty text crashed or was memoised. Planner now falls back to the deterministic plan and caches nothing. (build run, commit 8d420c294)',
         "next_action": 'GAPS: PRD_V7_LEDGER.md CHAOS-001 row not edited: the kernel records the status from the run.; .venv-verify does not exist on this machine; the report was generated with .venv-build (interpreter path is printed in the report).; hermes_crash, provider_outage and db_contention still reuse earlier tests rather than new injections.; Browser crash is a Playwright-style TargetClosedError raised by the capability port; no real browser process is killed and friday/browser*.py was not read.; Network loss is simulated by raising ConnectionError/socket.gaierror and a NOT_CONFIGURED envelope from the port; no real link is dropped.; Reboot is simulated by dropping the Store and opening the file with a new executor id; a real OS reboot / Modern Standby run was not performed.; Invalid model answer is injected at planner_model.interpret with a scripted genai client; the other model doors (ModelGateway.infer) were not injected.',
     }),
+    ('SEC-005', {
+        "status": PARTIAL,
+        "next_action": (
+            "RULING 2026-10-05b (owner, docs/plans/build-harness/00-owner-directive-2026-10-05b.md): keep Hermes'"
+            " own tools - 'i want hermes files and other thing to be used by friday too and hermes too'. The frid"
+            'ay profile keeps its native file/terminal toolsets ON, and a scoped delegation is no longer refused '
+            'for that (friday/hermes_bridge.py delegate: the OutsideEnvelope raised when native_file_toolsets_ena'
+            'bled() is non-empty). STATICALLY_CONFIRMED (installed Hermes, hermes-agent/tui_gateway/server.py): _'
+            'load_enabled_toolsets() (line 933) reads HERMES_TUI_TOOLSETS, a comma list, and _make_agent passes e'
+            "nabled_toolsets=_load_enabled_toolsets() (line 2039), so the variable replaces the profile's toolset"
+            's for that gateway process; session.create takes no toolset parameter. DESIGN (decided): an unscoped'
+            ' delegation runs on the shared gateway exactly as now; a scoped delegation runs on a second gateway '
+            "process started with HERMES_TUI_TOOLSETS = the profile's enabled toolsets minus file and terminal, w"
+            "ith FRIDAY's exec bridge registered as now - so its only file access is the jail-backed capability a"
+            'nd commands stay DISABLED (ruling 2026-10-03c). Start it on the first scoped delegation and stop it '
+            'when none holds it. If the profile names no toolsets, refuse the scoped delegation with that reason '
+            "rather than guess Hermes' defaults. Tests (Windows, the fake gateway of tests/test_delegation_scope."
+            'py): with native tools on in the profile config a scoped delegation is accepted and its gateway env '
+            'carries HERMES_TUI_TOOLSETS without file/terminal; an unscoped one uses the shared gateway with no o'
+            'verride; an override that would still contain file or terminal refuses the delegation; the existing '
+            "scope tests stay green. Do not edit Hermes' internals."
+        ),
+    }),
+    ('MODEL-012', {
+        "status": PARTIAL,
+        "next_action": (
+            "RULING 2026-10-05b (owner, docs/plans/build-harness/00-owner-directive-2026-10-05b.md): 'use opencod"
+            "e free models and codex and claude code login on ur own if they are signed in just use them'. SLICE "
+            '3 now: an OpenCodeBackend in friday/cli_model_provider.py (BACKENDS; DEFAULT_ENABLED gains it after '
+            "claude) for opencode's free models. STATICALLY_CONFIRMED on this host 2026-10-05: opencode 1.18.32 o"
+            'n PATH; `opencode models` lists free models (opencode/big-pickle, opencode/nemotron-3.5-lightning-fr'
+            'ee, opencode/mimo-v2.6-flash-free, ...); `opencode run -m opencode/big-pickle --format json "<prompt'
+            '>"` with stdin CLOSED answered PONG, exit 0, JSON events step_start / text (part.text) / step_finish'
+            ' (part.cost=0, part.tokens.input=58898); with stdin left open it hung (120 s timeout, no output). Th'
+            "e 58,898 input tokens are opencode's default agent prompt and tool definitions, so run it with a FRI"
+            'DAY-owned no-tools agent (an opencode config in the scratch cwd with every tool disabled, selected w'
+            'ith --agent or OPENCODE_CONFIG) and prove the input tokens drop and no tool event appears. route_kin'
+            'd cli, cost 0 recorded, cwd a scratch dir. Codex: the controller upgraded codex-cli 0.121.0 -> 0.160'
+            ".0, still 'Logged in using ChatGPT'; `codex exec` has `-s read-only` and `--skip-git-repo-check`. Bu"
+            'ild a CodexBackend only if a no-tools or read-only answer-only mode is verified with a fake and one '
+            'live call; otherwise record why not. Claude Code stays the first CLI route. Tests: fake opencode and'
+            " codex binaries in the style of tests/test_cli_model_provider.py's fake claude (parse, no-tools conf"
+            'ig, closed stdin, timeout, sign-in check); one live test each, marked live.'
+        ),
+    }),
 ]
 
 
