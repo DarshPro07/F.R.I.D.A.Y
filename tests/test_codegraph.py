@@ -304,3 +304,17 @@ def test_the_synthetic_module_symbol_stays_out_of_readable_queries(project):
     assert G.MODULE_SCOPE not in [s.name for s in graph.api_of('pkg/core.py')]
     assert G.MODULE_SCOPE not in [s.name for s in graph.find('module')]
     assert graph.repo_map()['symbols'] == len(graph.named())
+
+
+def test_worktrees_build_state_and_any_virtualenv_are_not_walked(tmp_path):
+    # 2026-10-05: in FRIDAY's own checkout the graph walked .worktrees/ (a dozen full copies of
+    # the tree) and .venv-build, so test_reachability's graph fixture ran past the gate's limit.
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "real.py").write_text("x = 1", encoding="utf-8")
+    for d in (".worktrees/copy", ".build/home", ".venv-build/Lib"):
+        (tmp_path / d).mkdir(parents=True)
+        (tmp_path / d / "dup.py").write_text("x = 2", encoding="utf-8")
+    (tmp_path / ".venv-build" / "pyvenv.cfg").write_text("home = x", encoding="utf-8")
+    walked = sorted(p.relative_to(tmp_path).as_posix() for p in G._walk(tmp_path))
+    assert "pkg/real.py" in walked
+    assert not [p for p in walked if p.startswith((".worktrees/", ".build/", ".venv-build/"))]

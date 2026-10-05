@@ -74,6 +74,9 @@ SKIP_DIRS = frozenset(
         '.tox',
         '.venv',
         '.vscode',
+        # git worktrees and the build kernel's per-worktree state: full copies of the tree
+        '.worktrees',
+        '.build',
         '__pycache__',
         'build',
         'coverage',
@@ -551,7 +554,9 @@ def _walk(root: Path):
             continue
         for entry in entries:
             if entry.is_dir():
-                if entry.name not in SKIP_DIRS and not entry.is_symlink():
+                # A virtualenv by any name (.venv-build, .venv-verify ...) carries pyvenv.cfg.
+                if (entry.name not in SKIP_DIRS and not entry.is_symlink()
+                        and not (entry / "pyvenv.cfg").is_file()):
                     stack.append(entry)
             elif entry.is_file():
                 yield entry
