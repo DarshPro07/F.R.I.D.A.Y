@@ -19,7 +19,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from friday.providers import LLM_ROLE_MODELS, installed_llm_models
+# Not friday.providers: that imports the LiveKit plugins, which may only register on
+# the main thread, and the gateway reads this module while routing a worker thread's turn.
+from friday.llm_roles import LLM_ROLE_MODELS
 
 LATENCY = ("very_low", "low", "medium", "high")
 COST = ("very_low", "low", "medium", "high")
@@ -149,6 +151,7 @@ def undeclared_models() -> list[tuple[str, str]]:
 def stale_declarations() -> list[tuple[str, str]]:
     """Declarations for models the installed packages no longer expose."""
     from friday.cli_model_provider import known_models
+    from friday.providers import installed_llm_models   # a diagnostic, not the routing path
     cli_models = known_models()
     stale = []
     for (backend, model_id) in CAPABILITIES:

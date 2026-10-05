@@ -324,3 +324,27 @@ def test_a_failed_cli_route_says_why_instead_of_pretending(monkeypatch):
     out = V.reply("what day is it?")
     assert out.get("degraded") and "signed out" in out["reply"]
     assert ("assistant", out["reply"]) not in remembered
+
+
+
+def test_the_gateway_routes_on_a_worker_thread_without_loading_livekit_plugins():
+    # FRIDAY.exe 2026-10-05: /api/ask answers on a worker thread; routing imported
+    # model_capabilities -> providers -> livekit.plugins.google, and a plugin may only
+    # register on the main thread: "Plugins must be registered on the main thread".
+    import subprocess
+    import sys
+    code = (
+        "import sys, threading\n"
+        "errors = []\n"
+        "def route():\n"
+        "    try:\n"
+        "        from friday import model_capabilities, model_gateway\n"
+        "        model_capabilities.undeclared_models()\n"
+        "    except BaseException as exc:\n"
+        "        errors.append(repr(exc))\n"
+        "t = threading.Thread(target=route); t.start(); t.join()\n"
+        "plugins = sorted(m for m in sys.modules if m.startswith('livekit.plugins'))\n"
+        "print(errors, plugins)\n"
+        "sys.exit(1 if errors or plugins else 0)\n")
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stdout + done.stderr[-800:]
