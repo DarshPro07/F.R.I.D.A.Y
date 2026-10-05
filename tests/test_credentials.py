@@ -70,8 +70,8 @@ def test_a_probe_decides_only_credentials_that_are_not_templates():
 
 
 def test_a_provider_without_a_probe_stays_unverified_never_valid():
-    assert C.live_probe("SARVAM_API_KEY", "anything") is None
-    verdict = C.check_credential("SARVAM_API_KEY", "k3Jd9sLp2QwErTy", probe=C.live_probe)
+    assert C.live_probe("GROQ_API_KEY", "anything") is None
+    verdict = C.check_credential("GROQ_API_KEY", "k3Jd9sLp2QwErTy", probe=C.live_probe)
     assert verdict.state == C.UNVERIFIED
 
 
@@ -225,6 +225,48 @@ def test_livekit_probe_timeout_is_unverified(monkeypatch):
     monkeypatch.setattr(FakeClient, "error", TimeoutError("timed out"))
     verdict = C.probe_livekit(REAL_LOOKING["LIVEKIT_URL"], "k", "s")
     assert verdict.state == C.UNVERIFIED
+
+
+def test_sarvam_probe_refuses_a_key_sarvam_refuses_and_never_calls_one_valid(monkeypatch):
+    # FRIDAY.exe 2026-10-05: the doctor said "stt sarvam configured" while Sarvam
+    # answered 403 invalid_api_key_error to every call.
+    import httpx
+
+    class Reply:
+        def __init__(self, status, content=b""):
+            self.status_code, self.content = status, content
+
+    answers = {403: Reply(403, b'{"error":{"message":"Invalid or missing authentication '
+                                b'credentials","code":"invalid_api_key_error"}}'),
+               422: Reply(422, b'{"detail":"text field required"}'), 200: Reply(200)}
+
+    class Client(FakeClient):
+        def post(self, url, **kwargs):
+            type(self).seen.append((url, kwargs))
+            return answers[FakeClient.status]
+
+    monkeypatch.setattr(httpx, "Client", Client)
+    key = "sk_k3Jd9sLp2QwErTy0aB1cD2eF3gH4"
+    for status, expected in ((403, C.REJECTED), (422, C.UNVERIFIED), (200, C.UNVERIFIED)):
+        monkeypatch.setattr(FakeClient, "status", status)
+        verdict = C.live_probe("SARVAM_API_KEY", key)
+        assert verdict.state == expected, status
+        assert key not in verdict.detail
+    monkeypatch.setattr(FakeClient, "status", 403)
+    detail = C.probe_sarvam("SARVAM_API_KEY", key).detail
+    assert "HTTP 403, invalid_api_key_error" in detail and "Invalid or missing" not in detail
+    init, (url, kwargs) = Client.seen
+    assert init["follow_redirects"] is False and init["timeout"] == C.PROBE_TIMEOUT_S
+    assert url == C.SARVAM_PROBE_URL and kwargs["json"] == {}
+    assert kwargs["headers"] == {"api-subscription-key": key}
+
+
+def test_sarvam_probe_timeout_is_unverified(monkeypatch):
+    import httpx
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    monkeypatch.setattr(FakeClient, "error", TimeoutError("timed out"))
+    assert C.probe_sarvam("SARVAM_API_KEY", "sk_x").state == C.UNVERIFIED
 
 
 def livekit_args(**override):

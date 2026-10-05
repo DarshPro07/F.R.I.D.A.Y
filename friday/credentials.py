@@ -176,8 +176,40 @@ def probe_livekit(url: str, key: str, secret: str, timeout: float = PROBE_TIMEOU
     return _answer(name, reply.status_code, (401, 403))
 
 
+#: Sarvam's text-to-speech endpoint, the probe's only destination: a fixed
+#: provider host, never configuration.
+SARVAM_PROBE_URL = "https://api.sarvam.ai/text-to-speech"
+
+
+def probe_sarvam(name: str, value: str, timeout: float = PROBE_TIMEOUT_S) -> Verdict:
+    """POST an empty body to text-to-speech.
+
+    Sarvam has no read-only endpoint to ask (a GET is 405 before the key is
+    looked at). It checks the key before the body: an invalid one is 403
+    invalid_api_key_error, measured 2026-10-05. An empty body synthesises
+    nothing, so the probe costs nothing. A key it accepts then fails body
+    validation, which says nothing about the key: that stays UNVERIFIED,
+    never VALID. Single hop, redirects refused, bounded by `timeout`.
+    """
+    import httpx
+
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+            reply = client.post(SARVAM_PROBE_URL, json={},
+                                headers={"api-subscription-key": value})
+    except Exception as exc:                                # noqa: BLE001
+        return _unreachable(name, exc)
+    status = reply.status_code
+    if 200 <= status < 300:   # an empty body cannot succeed; do not read that as acceptance
+        return Verdict(UNVERIFIED, f"{name}: the provider answered HTTP {status}; cannot tell")
+    refused = (401, 403)
+    return _answer(name, status, refused,
+                   _reason(reply.content) if status in refused else "")
+
+
 #: Providers that have a probe. Anything else stays UNVERIFIED.
-_PROBES: dict[str, Probe] = {"OPENAI_API_KEY": probe_openai, "GOOGLE_API_KEY": probe_google}
+_PROBES: dict[str, Probe] = {"OPENAI_API_KEY": probe_openai, "GOOGLE_API_KEY": probe_google,
+                             "SARVAM_API_KEY": probe_sarvam}
 
 
 def live_probe(name: str, value: str) -> Verdict | None:
