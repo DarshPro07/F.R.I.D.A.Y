@@ -48,7 +48,8 @@ NETWORK = "network"
 #: Model providers that run on this machine. Checked by name because that is
 #: what `providers.py` is configured with. Empty of cloud names on purpose -
 #: a provider absent from this tuple is treated as remote, so a new cloud
-#: backend is refused by default rather than allowed by omission.
+#: backend is refused by default rather than allowed by omission. What a local
+#: model may be (artifact size, residency, context) is `local_model_policy`'s.
 LOCAL_BACKENDS = ("ollama", "llamacpp", "llama_cpp", "vllm", "localai",
                   "lmstudio", "local")
 

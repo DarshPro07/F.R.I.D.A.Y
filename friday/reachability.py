@@ -196,7 +196,11 @@ DECLARED = {
                              "against a simulated 8 GB machine on the real governor; "
                              "its callers are the loaders for the Needle, embedding "
                              "and vision experts, the next wiring step. The governor "
-                             "already calls its reconcile through add_observer"),
+                             "already calls its reconcile through add_observer. "
+                             "MODEL-007: it enforces friday.local_model_policy (2 GB "
+                             "artifact cap with owner override, one resident general "
+                             "model, vision on demand); the policy's default context "
+                             "is already read live by hardware_profile.derive_policy"),
     "friday/onboarding": (PRODUCTION,
                           "the owner's interview console: friday.onboarding "
                           "subcommands are dispatched by argparse "

@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from friday import governor as G
+from friday import local_model_policy as LMP
 from friday.config import DATA_DIR
 
 logger = logging.getLogger("friday.hardware_profile")
@@ -39,7 +40,8 @@ logger = logging.getLogger("friday.hardware_profile")
 PROFILE_PATH = Path(DATA_DIR) / "hardware_profile.json"
 
 #: Amendment A3: an individual default local model artifact stays below 2 GB.
-MODEL_ARTIFACT_CAP_GB = 2.0
+#: The number is owned by the local model policy, which enforces it.
+MODEL_ARTIFACT_CAP_GB = LMP.ARTIFACT_CAP_GB
 
 
 @dataclass(frozen=True)
@@ -204,7 +206,9 @@ def derive_policy(profile: Profile, thresholds: G.Thresholds | None = None) -> d
     are as many as the room holds at the measured cost of one, within the
     governor's cap and never fewer than one; a local model may take the room,
     within Amendment A3's 2 GB per artifact, and may be offloaded to a GPU only
-    as far as the GPU's own dedicated memory goes."""
+    as far as the GPU's own dedicated memory goes. Its default context is the
+    most of 4K-8K whose KV cache the room holds beside that budget, the 4K floor
+    where it holds none (MODEL-007)."""
     t = thresholds or G.Thresholds()
     room_gb = t.ram_yellow * profile.baseline.ram_available_gb
     if profile.browser_mb:
@@ -219,15 +223,19 @@ def derive_policy(profile: Profile, thresholds: G.Thresholds | None = None) -> d
         vram = None
     else:
         vram = max((g.dedicated_gb for g in profile.gpus), default=0.0)
+    model_gb = min(MODEL_ARTIFACT_CAP_GB, room_gb)
     return {
         "room_gb": round(room_gb, 2),
         "workers": {"max": t.max_workers,
                     "basis": "FR-013's bound; a worker's memory is not measured yet"},
         "browsers": browsers,
-        "model": {"ram_budget_gb": round(min(MODEL_ARTIFACT_CAP_GB, room_gb), 2),
+        "model": {"ram_budget_gb": round(model_gb, 2),
                   "gpu_offload_gb": None if vram is None else round(min(MODEL_ARTIFACT_CAP_GB, vram), 2),
+                  "default_ctx": LMP.LocalModelPolicy().context_for_room(room_gb, model_gb),
                   "basis": "RAM: the room, within A3's 2 GB per artifact; GPU offload: up to the "
-                           "largest GPU's dedicated memory, None where the platform reports no GPUs"},
+                           "largest GPU's dedicated memory, None where the platform reports no GPUs; "
+                           "default_ctx: the most of 4K-8K whose KV cache the room holds beside the "
+                           "RAM budget, 4K where it holds none"},
     }
 
 

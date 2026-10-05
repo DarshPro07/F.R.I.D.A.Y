@@ -32,19 +32,21 @@ class Machine:
     """An 8 GB machine. Callable as the governor's sampler; the clock advances
     one second per reading so the governor's hysteresis can be exercised."""
 
-    def __init__(self) -> None:
-        self.os_gb = OS_IDLE_GB
+    def __init__(self, total_gb: float = TOTAL_GB, os_gb: float = OS_IDLE_GB) -> None:
+        self.total_gb = total_gb
+        self.os_gb = os_gb
         self.experts: dict[str, float] = {}
         self.at = 1000.0
         self.ooms = 0
         self.loads: list[str] = []
         self.unloads: list[str] = []
+        self.events: list[str] = []             # "+name" / "-name" in the order they happened
 
     def expert_gb(self) -> float:
         return sum(self.experts.values())
 
     def free_gb(self) -> float:
-        return TOTAL_GB - self.os_gb - self.expert_gb()
+        return self.total_gb - self.os_gb - self.expert_gb()
 
     def advance(self, seconds: float) -> None:
         self.at += seconds
@@ -52,9 +54,9 @@ class Machine:
     def __call__(self) -> G.Sample:
         self.at += 1.0
         free = self.free_gb()
-        return G.Sample(at=self.at, cpu_percent=10.0, ram_percent=100.0 * (1.0 - free / TOTAL_GB),
+        return G.Sample(at=self.at, cpu_percent=10.0, ram_percent=100.0 * (1.0 - free / self.total_gb),
                         ram_available_gb=free, disk_free_gb=100.0, browser_processes=0,
-                        friday_rss_mb=200.0, ram_total_gb=TOTAL_GB)
+                        friday_rss_mb=200.0, ram_total_gb=self.total_gb)
 
     def loader(self, name: str, gb: float):
         def load():
@@ -63,6 +65,7 @@ class Machine:
                 raise MemoryError(f"{name}: {gb} GB wanted, {self.free_gb():.2f} GB free")
             self.experts[name] = gb
             self.loads.append(name)
+            self.events.append(f"+{name}")
             return f"handle:{name}"
         return load
 
@@ -70,20 +73,31 @@ class Machine:
         def unload():
             del self.experts[name]
             self.unloads.append(name)
+            self.events.append(f"-{name}")
         return unload
 
 
-def build(*, cap: int = 3, trend: bool = False, names=tuple(SIZES)):
+def build(*, cap: int = 3, trend: bool = False, names=tuple(SIZES), total_gb: float = TOTAL_GB,
+          os_gb: float = OS_IDLE_GB, sizes: dict[str, float] | None = None,
+          kinds: dict[str, str] | None = None):
     """A machine, its governor, and a pool with the named experts registered.
     The trend is off for the scenarios that judge the level by headroom alone;
-    the random-use stress test keeps it on."""
-    m = Machine()
+    the random-use stress test keeps it on. The governor's baseline is the
+    machine's own idle headroom, so a 16 GB machine is judged by its own room.
+    An expert over the policy's artifact cap (the 3 and 4 GB ones) is registered
+    on an owner override, as the cap would otherwise refuse it."""
+    sizes = sizes or SIZES
+    m = Machine(total_gb, os_gb)
     extra = {} if trend else {"trend_min_samples": 10_000}
+    baseline = G.Baseline(ram_available_gb=total_gb - os_gb, cpu_percent=10.0,
+                          readings=12, provisional=False)
     gov = G.Governor(thresholds=G.Thresholds(max_resident_models=cap, **extra),
-                     sampler=m, sample_ttl_s=0.0, baseline=BASELINE)
+                     sampler=m, sample_ttl_s=0.0, baseline=baseline)
     pool = L.ExpertPool(gov)
     for n in names:
-        pool.register(n, SIZES[n], m.loader(n, SIZES[n]), m.unloader(n), kind="test")
+        pool.register(n, sizes[n], m.loader(n, sizes[n]), m.unloader(n),
+                      kind=(kinds or {}).get(n, "test"), owner_override=sizes[n] > pool.policy.artifact_cap_gb,
+                      override_reason="test fixture: a heavy expert")
     return m, gov, pool
 
 
@@ -272,6 +286,116 @@ def test_registration_is_validated():
             pool.register(*bad, lambda: None, lambda: None)
     with pytest.raises(ValueError):
         pool.register("x", 1.0, None, lambda: None)
+
+
+# -- the local model policy (MODEL-007) ---------------------------------------
+
+GENERAL_PACK = {"reranker": 0.4, "gen": 1.0, "vision": 2.0}
+GENERAL_KINDS = {"reranker": "embedding", "gen": "general", "vision": "vision"}
+
+
+def test_a_3_7_gb_artifact_is_refused_for_the_default_pack_and_accepted_only_on_owner_override():
+    m, gov, pool = build(names=(), total_gb=16.0, os_gb=4.0)
+    with pytest.raises(L.OnboardingRefused) as refused:
+        pool.register("big", 3.7, m.loader("big", 3.7), m.unloader("big"), kind="general")
+    assert "3.7 GB" in str(refused.value) and "owner override" in str(refused.value)
+    assert refused.value.verdict.accepted is False
+    assert pool.status()["registered"] == [] and pool.load("big").status == L.UNAVAILABLE
+
+    verdict = pool.register("big", 3.7, m.loader("big", 3.7), m.unloader("big"), kind="general",
+                            owner_override=True, override_reason="owner wants the 3.7 GB model")
+    assert verdict.accepted and verdict.override
+    assert "owner override" in verdict.reason and "owner wants the 3.7 GB model" in verdict.reason
+    status = pool.status()
+    assert status["registered"] == ["big"]
+    assert [(o["name"], o["size_gb"], o["cap_gb"]) for o in status["overrides"]] == [("big", 3.7, 2.0)]
+    assert "owner wants the 3.7 GB model" in status["overrides"][0]["reason"]
+    out = pool.load("big")                                   # the override shows on the outcome too
+    assert out.loaded and "owner wants the 3.7 GB model" in out.override
+    assert m.ooms == 0
+
+
+def test_the_artifact_cap_is_inclusive_and_a_size_that_is_not_a_number_is_refused():
+    m, _, pool = build(names=())
+    pool.register("edge", 2.0, m.loader("edge", 2.0), m.unloader("edge"))
+    assert pool.overrides() == []                           # within the cap: no override recorded
+    for size in (2.01, float("inf"), float("nan")):
+        with pytest.raises(L.OnboardingRefused):
+            pool.register("bad", size, m.loader("bad", 1.0), m.unloader("bad"))
+
+
+def _general_then_vision(total_gb: float, os_gb: float):
+    m, gov, pool = build(names=tuple(GENERAL_PACK), total_gb=total_gb, os_gb=os_gb,
+                         sizes=GENERAL_PACK, kinds=GENERAL_KINDS)
+    assert pool.load("reranker").loaded and pool.load("gen").loaded
+    return m, gov, pool, pool.load("vision")
+
+
+def test_a_vision_load_unloads_the_resident_general_model_first_when_memory_requires():
+    m, gov, pool, vision = _general_then_vision(8.0, 2.4)
+    assert vision.loaded and m.ooms == 0
+    # The general model is the more recently used, so plain LRU would have gone
+    # to the reranker first; the policy takes the general model's memory first.
+    assert vision.evicted == ("gen", "reranker")
+    assert m.events == ["+reranker", "+gen", "-gen", "-reranker", "+vision"]
+    assert names(pool) == ["vision"] and gov.active(G.MODEL) == 1          # leases released with the unloads
+
+
+def test_a_vision_load_leaves_the_general_model_alone_when_memory_does_not_require_it():
+    m, _, pool, vision = _general_then_vision(16.0, 4.0)
+    assert vision.loaded and vision.evicted == ()
+    assert names(pool) == ["reranker", "gen", "vision"]
+
+
+def test_residency_follows_the_actual_devices_memory_not_a_reference_profile():
+    """The same pool code, the same experts, two machines: only the sampler's
+    total and available RAM differ, and the load and evict decisions with them."""
+    small = _general_then_vision(8.0, 2.4)
+    large = _general_then_vision(16.0, 4.0)
+    assert small[3].evicted != large[3].evicted
+    assert (names(small[2]), names(large[2])) == (["vision"], ["reranker", "gen", "vision"])
+    assert small[0].ooms == large[0].ooms == 0
+
+
+def test_only_one_general_model_is_resident_a_second_swaps_the_first_out():
+    sizes = {"g1": 1.0, "g2": 1.5, "emb": 0.4}
+    m, gov, pool = build(names=tuple(sizes), total_gb=16.0, os_gb=4.0, sizes=sizes,
+                         kinds={"g1": "general", "g2": "general", "emb": "embedding"})
+    assert pool.load("emb").loaded and pool.load("g1").loaded
+    swap = pool.load("g2")                                   # plenty of room: the cap, not memory, decides
+    assert swap.loaded and swap.evicted == ("g1",)
+    assert names(pool) == ["emb", "g2"] and m.events[-2:] == ["-g1", "+g2"]
+    assert gov.active(G.MODEL) == 2
+
+
+def test_a_vision_expert_is_not_kept_resident_when_idle():
+    m, gov, pool = build(names=("vision",), sizes=GENERAL_PACK, kinds=GENERAL_KINDS,
+                         total_gb=16.0, os_gb=4.0)
+    assert pool.load("vision").loaded
+    used = pool.resident()[0]["last_used"]
+    idle = pool.policy.on_demand_idle_s
+    assert pool.reap_idle(now=used + idle - 1) == [] and names(pool) == ["vision"]
+    assert pool.reap_idle(now=used + idle) == ["vision"]
+    assert names(pool) == [] and m.experts == {} and gov.active(G.MODEL) == 0
+    # The governor's own reading reaps it too, at NORMAL, without the pool being asked.
+    assert pool.load("vision").loaded
+    pool._resident["vision"].last_used -= idle + 1
+    gov.pressure(fresh=True)                                 # the governor's reading calls reconcile
+    assert names(pool) == [] and m.experts == {} and gov.active(G.MODEL) == 0
+
+
+def test_a_general_model_is_not_reaped_for_being_idle():
+    m, _, pool = build(names=("gen",), sizes=GENERAL_PACK, kinds=GENERAL_KINDS, total_gb=16.0, os_gb=4.0)
+    assert pool.load("gen").loaded
+    assert pool.reap_idle(now=pool.resident()[0]["last_used"] + 10_000) == [] and names(pool) == ["gen"]
+
+
+def test_context_defaults_to_4k_and_is_held_between_4k_and_8k():
+    m, _, pool = build(names=(), total_gb=16.0, os_gb=4.0)
+    for ctx in (None, 6144, 32768, 512):
+        pool.register(f"e{ctx}", 1.0, m.loader(f"e{ctx}", 1.0), m.unloader(f"e{ctx}"), ctx=ctx)
+    got = {n: pool.load(n).ctx for n in ("eNone", "e6144", "e32768", "e512")}
+    assert got == {"eNone": 4096, "e6144": 6144, "e32768": 8192, "e512": 4096}
 
 
 # -- the stress test ---------------------------------------------------------

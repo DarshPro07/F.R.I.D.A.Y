@@ -68,6 +68,17 @@ def test_two_reference_machines_get_different_profiles_and_policies_from_the_sam
     assert "hostname" not in text and platform.node() not in text
 
 
+def test_the_default_local_context_comes_from_the_machines_own_room():
+    """MODEL-007: 4K-8K, with the context the room holds beside the model budget.
+    A's 1.47 GB holds none beside its budget, so it stays at the 4K floor; B's
+    2.88 GB holds 8K beside a 2 GB model."""
+    a = hp.build(REFERENCE_A, readings(total=15.35, used_percent=76.0), cause="test")
+    b = hp.build(REFERENCE_B, readings(total=16.0, used_percent=55.0), cause="test")
+    assert (a.policy["model"]["default_ctx"], b.policy["model"]["default_ctx"]) == (4096, 8192)
+    tight = hp.build(machine(total=8.0, gpus=None), readings(total=8.0, used_percent=70.0), cause="test")
+    assert tight.policy["model"]["default_ctx"] == 4096
+
+
 def test_browsers_are_as_many_as_the_room_holds_at_the_measured_cost():
     roomy = hp.build(REFERENCE_B, readings(total=16.0, used_percent=55.0), cause="test",
                      browser_mb=184.0)
