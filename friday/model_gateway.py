@@ -167,6 +167,10 @@ class ModelGatewayRequest:
     #: What the compiled context holds, section by section (WorkingSet.telemetry()),
     #: recorded with the call's row so a spike can be traced to its sections.
     context_telemetry: dict | None = None
+    #: Refuse any route that has no passing benchmark on record. Off by
+    #: default: most routes are unmeasured today, and a declaration is enough
+    #: to USE a route, though never to promote it (`route_benchmarks`).
+    require_measured: bool = False
 
     def input_tokens(self) -> int:
         return sum(approx_tokens(str(m.get("content", "")))
@@ -498,6 +502,9 @@ class RouteJudgement:
     model: str
     fit: bool
     reason: str
+    #: Backed by a benchmark whose every gate passed. A route kept on its
+    #: declaration alone is `fit` but never `promoted`.
+    promoted: bool = False
 
 
 @dataclass(frozen=True)
@@ -524,6 +531,11 @@ class RouteDecision:
         return [(j.tier, j.provider, j.model) for j in self.judgements if j.fit]
 
     @property
+    def promoted(self) -> list[tuple[str, str, str]]:
+        return [(j.tier, j.provider, j.model)
+                for j in self.judgements if j.fit and j.promoted]
+
+    @property
     def rejected(self) -> list[RouteJudgement]:
         return [j for j in self.judgements if not j.fit]
 
@@ -538,6 +550,7 @@ class RouteDecision:
             "preference": self.preference,
             "chosen": self.routes[0] if self.routes else None,
             "routes": self.routes,
+            "promoted": self.promoted,
             "rejected": [{"provider": j.provider, "model": j.model,
                           "reason": j.reason} for j in self.rejected],
         }
@@ -575,6 +588,35 @@ def capability_verdict(provider: str, model: str, *,
                        f"{caps.max_context}-token context")
     return True, "declared capable"
 
+
+def benchmark_verdict(provider: str, model: str, *,
+                      require_measured: bool = False) -> tuple[bool, bool, str]:
+    """What measured evidence says about a route, as (fit, promoted, reason).
+
+    `promoted` is True only for a route whose latest golden report passed
+    every gate; a vendor declaration (`capability_verdict`) cannot set it.
+    A route with no passing benchmark - unmeasured, measured below target, or
+    the store unreadable - stays usable unless the caller set
+    `require_measured`, because most routes have no benchmark yet and
+    refusing them would take the product offline to enforce an empty store.
+    The reason always says which of the cases it was.
+    """
+    from friday import route_benchmarks as RB
+
+    try:
+        measured = RB.store().get(provider, model)
+    except RB.BenchmarkStoreError as exc:
+        logger.warning("gateway: benchmark store unreadable: %s", exc)
+        return (not require_measured), False, "benchmark store unreadable; not promoted"
+    if measured is None:
+        if require_measured:
+            return False, False, "a declaration alone does not qualify; not benchmarked"
+        return True, False, "not benchmarked; kept on its declaration, not promoted"
+    where = f"{measured.cases} cases at {measured.commit or 'unknown commit'}"
+    if measured.passed:
+        return True, True, f"measured: every gate passed over {where}"
+    return ((not require_measured), False,
+            f"measured below target ({', '.join(measured.failed_gates)}) over {where}")
 
 
 class GatewayUnavailable(RuntimeError):
@@ -1115,8 +1157,16 @@ class ModelGateway:
                 provider, model,
                 required=tuple(request.required_capabilities),
                 input_tokens=request.input_tokens())
+            promoted = False
+            if fit:
+                # A declared-capable route is only fit to be considered; the
+                # measured evidence decides whether it is promoted.
+                fit, promoted, evidence = benchmark_verdict(
+                    provider, model, require_measured=request.require_measured)
+                reason = f"{reason}; {evidence}"
             judgements.append(RouteJudgement(tier=tier, provider=provider,
-                                             model=model, fit=fit, reason=reason))
+                                             model=model, fit=fit, reason=reason,
+                                             promoted=promoted))
         preference = ""
         if request.provider_allowlist:
             preference = "allowlist: " + ", ".join(request.provider_allowlist)

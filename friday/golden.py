@@ -709,6 +709,17 @@ def run(cases: list[Case], *, workdir: Path, dispatch_factory=None,
     return Report(results=results, provenance=provenance(), repetitions=repetitions)
 
 
+def record_route_benchmark(report: Report, route: str):
+    """File a finished run as the measured evidence for one model route
+    ("provider/model"), where `model_gateway` reads it when deciding whether
+    to promote that route."""
+    provider, _, model = route.partition("/")
+    if not provider or not model:
+        raise ValueError(f"route must be 'provider/model', got {route!r}")
+    from friday import route_benchmarks
+    return route_benchmarks.store().record_report(provider, model, report)
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
     parser = argparse.ArgumentParser(description="Run the Golden Objective suite.")
@@ -718,6 +729,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--id", default="")
     parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument("--workdir", default="")
+    parser.add_argument("--route", default="",
+                        help="provider/model this run measures; records the "
+                             "result as that route's benchmark evidence")
     args = parser.parse_args(argv)
     cases = load_all()
     if args.category:
@@ -741,6 +755,9 @@ def main(argv: list[str] | None = None) -> int:
     print("context:", json.dumps({k: v for k, v in summary["context"].items() if k != "by_scenario"}))
     print("gates:", summary["gates"])
     print("report:", path)
+    if args.route:
+        recorded = record_route_benchmark(report, args.route)
+        print("route benchmark:", args.route, "passed" if recorded.passed else "failed")
     return 0 if summary["all_gates_pass"] else 1
 
 
