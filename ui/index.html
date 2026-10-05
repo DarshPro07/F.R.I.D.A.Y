@@ -688,7 +688,14 @@ function onLockedResponse(){if(!LOCKED){lockNow(true);}}
 async function lockNow(silent){if(!silent)try{await fetch("/api/auth/lock",{method:"POST"});}catch(e){}
   stopListening();shutUp();if(tracker){tracker.stop();tracker=null;}clearInterval(window._presence);
   LIB&&LIB.cues.lock();setLocked(true);$("locks").textContent="Locked. Scanning for you.";$("enrolbtn").style.display="none";
-  try{await LIB.openCamera($("lockv"));await $("lockv").play();}catch(e){}
+  // The same doors boot takes. A lock from inside the room swallowed the camera error and
+  // scanned a camera that never opened, so with --password or a blocked camera there was
+  // no way back in short of a reload (Chrome test of FRIDAY.exe, 2026-10-05).
+  const lockState=await fetch("/api/auth/status").then(r=>r.json()).catch(()=>({}));
+  if(lockState.auth_mode==="pin")return pinPath({why:"You started me with --password.",noCamera:true});
+  let camErr=null;
+  try{await LIB.openCamera($("lockv"));await $("lockv").play();}catch(e){camErr=e;}
+  if(camErr)return cameraBlocked(camErr);
   if(!faceGate){faceGate=new LIB.FaceGate($("lockv"),$("lockc"),{onFace:async(desc,box)=>{lastDescriptor=desc;LIB.drawBoxes($("lockc"),$("lockv"),[{box,label:"face"}],{color:"#ffaa30"});if(verifying)return;verifying=true;
       try{const r=await fetch("/api/auth/verify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({descriptor:desc})}).then(x=>x.json());if(r.ok)await unlock(true);else $("locks").textContent="Face seen, not recognised.";}catch(e){}verifying=false;},
     onNoFace:()=>{LIB.drawBoxes($("lockc"),$("lockv"),[],{});}});await faceGate.start();}}

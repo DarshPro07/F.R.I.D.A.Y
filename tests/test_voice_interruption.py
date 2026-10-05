@@ -198,3 +198,16 @@ def test_mute_gate_is_attached_in_the_entrypoint():
     assert "agent._input_gate.attach(ctx.room)" in src
     from friday import reachability as R
     assert "VoiceInputGate" not in R.KNOWN
+
+
+
+def test_a_lock_from_inside_the_room_reaches_the_pin_form_the_way_boot_does():
+    # Chrome test of FRIDAY.exe, 2026-10-05: started with --password, LOCK showed
+    # "Locked. Scanning for you." and no PIN form until the page was reloaded.
+    from pathlib import Path
+    html = Path("ui/index.html").read_text(encoding="utf-8")
+    start = html.index("async function lockNow")
+    body = html[start:html.index("\nfunction startPresence", start)]
+    assert 'auth_mode==="pin")return pinPath(' in body
+    assert "catch(e){camErr=e;}" in body and "return cameraBlocked(camErr)" in body
+    assert "play();}catch(e){}" not in body, "the camera error is swallowed again"
