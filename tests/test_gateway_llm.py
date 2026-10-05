@@ -374,3 +374,29 @@ def test_the_cli_route_tells_its_model_it_has_no_tools_and_a_new_hand_off_wordin
     assert any("answered without tools" in s for s in system)
     for fine in ("I am not sending anything to Hermes.", "Nothing was sent to Hermes."):
         assert V._honest_about_hermes(fine, []) == fine, fine
+
+
+
+def test_the_tool_less_route_is_told_the_date(monkeypatch):
+    import datetime
+    V, _, sent = _ui_turn(monkeypatch)
+    V.reply("what is today's date?")
+    now_lines = [m["content"] for m in sent[0].context_package
+                 if m["role"] == "system" and m["content"].startswith("Now: ")]
+    assert now_lines and datetime.datetime.now().strftime("%A") in now_lines[0]
+
+
+def test_recall_strips_punctuation_and_finds_what_was_said_in_this_conversation(monkeypatch):
+    # Capability test 2026-10-06: "I don't have anything on papaya? yet." while the
+    # person had said the code word two turns earlier.
+    from friday import ui_server, voice_brain as V
+    monkeypatch.setattr(V, "_remember_turn", lambda role, text: None)
+    monkeypatch.setattr(V, "_recent_turns", lambda limit=None: [
+        ("user", "My test code word is PAPAYA-77. Please remember it."),
+        ("model", "Noted."), ("user", "What do you remember about PAPAYA?")])
+    asked = []
+    monkeypatch.setattr(ui_server, "memory_search",
+                        lambda q, limit=5: asked.append(q) or {"shared_brain": {}, "friday_local": []})
+    out = V.reply("What do you remember about PAPAYA?")
+    assert asked == ["papaya"]
+    assert out["action"] == "memory.search" and "PAPAYA-77" in out["reply"]

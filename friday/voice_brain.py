@@ -12,6 +12,7 @@ that the language brain is offline. It never claims to have done what it did not
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 import re
@@ -1191,7 +1192,8 @@ def _try_command(text):
     m = re.search(r"\b(what do you (?:know|remember) about|recall|"
                   r"search (?:your |the )?memory(?: for| about)?)\b\s*(.*)", low)
     if m:
-        q = (m.group(m.lastindex) or "").strip() or t
+        # "What do you remember about PAPAYA?" searched for "papaya?" (capability test, 2026-10-06).
+        q = (m.group(m.lastindex) or "").strip().rstrip("?.!,;: ").strip() or t
         from friday.ui_server import memory_search
         r = memory_search(q, limit=5)
         facts = [f["fact"] for f in (r.get("shared_brain", {}).get("facts") or [])][:3]
@@ -1200,6 +1202,13 @@ def _try_command(text):
         items = [i for i in (facts + loc) if i]
         if items:
             return {"reply": "Here's what I have: " + "; ".join(items[:3]),
+                    "action": "memory.search"}
+        # The stores came back empty (the shared brain may be down), but the person
+        # may have said it in this conversation - that is memory too.
+        said = [body for role, body in _recent_turns()
+                if role == "user" and q.lower() in body.lower() and body.strip() != t.strip()]
+        if said:
+            return {"reply": 'From this conversation: you said "%s"' % said[-1].strip()[:200],
                     "action": "memory.search"}
         return {"reply": "I don't have anything on %s yet." % q,
                 "action": "memory.search"}
@@ -1365,8 +1374,13 @@ def _cli_reply(text, history, approval_note=""):
     from friday.gateway_llm import TASK_CLASS, fit
 
     turns = _recent_turns()
+    # The clock, too: without a tool the model cannot look it up, and only some
+    # routes (the Claude CLI) add it themselves - GLM via openrouter answered
+    # "what is today's date" with "Let me check that for you." (2026-10-06).
+    now = datetime.datetime.now().astimezone()
     messages = [{"role": "system", "content": _persona()},
-                {"role": "system", "content": _NO_TOOLS_NOTE}]
+                {"role": "system", "content": _NO_TOOLS_NOTE},
+                {"role": "system", "content": "Now: " + now.strftime("%A %d %B %Y, %H:%M %Z")}]
     if turns:
         messages += [{"role": "user" if role == "user" else "assistant", "content": body}
                      for role, body in turns]

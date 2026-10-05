@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `ebba0dd283c9d83aa3888596d93f5901cb6043a278d603a760c522568046eaa5`
 - PRD size: 8204 lines, 295141 bytes
-- Repository HEAD: `50bffc74159dff10e36a3a26c6c1f88934cd5953`
-- Uncommitted paths at generation: 45
-- Generated: 2026-10-05T23:52:58+05:30
+- Repository HEAD: `82fdd335aa6395522c4de55ab2befeefb9582a84`
+- Uncommitted paths at generation: 44
+- Generated: 2026-10-06T00:23:13+05:30
 
 ## Status vocabulary
 
@@ -27,8 +27,8 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 80 |
-| PARTIAL | 69 |
+| MISSING | 79 |
+| PARTIAL | 70 |
 | VERIFIED | 36 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
@@ -154,7 +154,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 |---|---|---|---|---|---|---|---|
 | MODEL-001 | P0 | **VERIFIED** | Provider/model registry is replaceable and evidence-based. | Multi-provider adapter tests. | FR-MDL-001 | `friday/model_capabilities.py:1-52`, `friday/model_gateway.py:1-60` | tests/test_model_capabilities.py:39-41 asserts pytest.raises(CapabilityError, match='do not infer') for an undeclared model - proves the registry is evidence-based and fails closed. tests/test_model_gateway.py:130-142 asserts distinct route_kind per real provider id (openai-codex='subscription', anthropic='api', opencode-free='free_tier') across a multi-provider inventory - a direct 'multi-provider adapter' test. Re-run 2026-09-25 on 030795f with a dirty tree: every cited test passed (data/prd_v7_audit/rerun.xml). |
 | MODEL-002 | P0 | **VERIFIED** | Configured route is not healthy until semantic probe. | Empty output -> degraded/unhealthy. | FR-MDL-001 | `friday/provider_health.py:42,59`, `friday/provider_health.py:110-115`, `friday/provider_health.py:266` | tests/test_provider_health.py:196-204 (test_an_empty_answer_is_not_health) asserts v.state==PH.UNAVAILABLE and 'EMPTY_RESPONSE' in v.reason for the gemini shape (transport ok, no content) - an exact match for 'empty output -> degraded/unhealthy'. tests/test_provider_health.py:38-41 asserts UNPROBED with 'never observed' when no evidence row exists. Re-run 2026-09-25 on 030795f with a dirty tree: every cited test passed (data/prd_v7_audit/rerun.xml). |
-| MODEL-003 | P1 | **MISSING** | Learned router must beat simple baseline. | Versioned evaluation report. | - | `friday/execution_economics.py:156-178`, `scripts/golden_router.py:1-35` | DEFER or REBUILD: per PRD v7 section 28, a learned router is only built after a baseline exists; smallest next step is a versioned baseline-only evaluation report (scripts/, mirroring scripts/golden_router.py's harness style) before any learned component is built. |
+| MODEL-003 | P1 | **PARTIAL** | Learned router must beat simple baseline. | Versioned evaluation report. | - | `friday/execution_economics.py:156-178`, `scripts/golden_router.py:1-35` | GAPS: Only the second half is met (versioned evaluation report). No learned router exists, so MODEL-003 is PARTIAL, not DONE: nothing yet beats the baseline.; The baseline is already optimal on the 12-task holdout (headroom 0.0%; dev headroom 6.6%, 2 over-provisioned tasks), so no candidate can pass cost_below_baseline on it. A learned router needs fresh, harder labelled tasks first.; The baseline was built against the same suite (COG-002), so it is not blind to it; labels, the 1:3:5 price ladder and MINIMUM_CASES=10 are assumptions.; prd_ledger.py not edited: the kernel owns the PROGRESS_V7 entry (needs the commit hash). Row count is unchanged, so tests/test_prd_ledger.py needs no edit.; No MCP tool or runtime path consumes the report; it is a script, doc and test only. |
 
 ## PRD section 29
 
@@ -185,7 +185,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| FAIL-001 | P1 | **PARTIAL** | Root-cause failures become Failure Genome patterns. | Similar failure retrieves prior repair. | - | `friday/evaluation.py:128-199` | GAPS: No product-code producer yet: capture() is public API and only tests call it, so the genome stays empty until a call site (an MCP tool for Friday, or the Hermes handoff path) records a root-caused failure. Retrieval is wired; capture is not.; Matching is lexical (memory_stack._tokens overlap, Jaccard >= 0.35 + task_class/environment bonuses). A recurrence described in entirely different words will not match; embeddings would, and are not in the memory stack today.; applicability conditions are returned unevaluated (free prose), so the caller must check them. |
+| FAIL-001 | P1 | **PARTIAL** | Root-cause failures become Failure Genome patterns. | Similar failure retrieves prior repair. | - | `friday/evaluation.py:128-199` | GAPS: Capture is on-demand: Friday must call failure_capture; the Hermes handoff path does not auto-record a failure because Handoff carries no root_cause/repair fields. Closing it needs a Handoff schema change in the objective-engine service, an owner/design decision outside this requirement.; Matching is lexical (memory_stack._tokens Jaccard >= 0.35 plus task_class/environment bonuses); a recurrence described in entirely different words will not match. Embeddings are not in the memory stack today.; applicability conditions are returned unevaluated (free prose); the caller must check them.; The full four-chunk baseline suite (scripts/baseline_suite.py) was not re-run in this session; only the 495 tests above were. The integration gate is the full-suite check. |
 
 ## PRD section 37
 
