@@ -569,6 +569,9 @@ class Report:
     results: list[CaseResult]
     provenance: dict
     repetitions: int = 1
+    #: `context_lab.summarize` of the Context Lab run (EVAL-002), or empty when
+    #: the lab was not run for this report.
+    context: dict = field(default_factory=dict)
 
     def summary(self) -> dict:
         n = len(self.results)
@@ -606,7 +609,9 @@ class Report:
             "evidence_coverage": metrics["evidence_coverage"] >= TARGETS["evidence_coverage"],
             "minimum_cases": n >= MINIMUM_CASES,
         }
-        return {"metrics": metrics, "targets": TARGETS, "gates": gates,
+        if self.context:
+            gates["context_lab"] = self.context["failed"] == 0
+        return {"metrics": metrics, "context": dict(self.context), "targets": TARGETS, "gates": gates,
                 "all_gates_pass": all(gates.values()), "by_category": by_cat}
 
     def to_dict(self) -> dict:
@@ -728,9 +733,12 @@ def main(argv: list[str] | None = None) -> int:
               flush=True)
 
     report = run(cases, workdir=workdir, repetitions=args.repetitions, progress=progress)
+    from friday import context_lab
+    report.context = context_lab.summarize(context_lab.run())
     path = report.write(Path(args.out))
     summary = report.summary()
     print(json.dumps(summary["metrics"], indent=1))
+    print("context:", json.dumps({k: v for k, v in summary["context"].items() if k != "by_scenario"}))
     print("gates:", summary["gates"])
     print("report:", path)
     return 0 if summary["all_gates_pass"] else 1

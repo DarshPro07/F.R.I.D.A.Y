@@ -14,6 +14,11 @@ Replays a few hundred synthetic turns into a session context and shows that
               unique turn at a time: a context that is bounded by construction
               stays HEALTHY and nothing acts on it.
 
+It then runs the Context Lab (`friday.context_lab`, PRD v7 19.11, EVAL-002):
+every listed scenario against the full-history baseline, with the ones that have
+nothing to run against reported as unexercised. Their summary is the same dict
+the golden release report carries as `context`.
+
 It never reads or writes data/ada.sqlite3: the bounded run points ADA_DB at a
 temp file. Exit status is 0 only when every check passes. Evidence is written to
 `--out` (default data/golden_context.json).
@@ -36,6 +41,7 @@ if str(ROOT) not in sys.path:
 
 from friday import compaction  # noqa: E402
 from friday import context_health as H  # noqa: E402
+from friday import context_lab  # noqa: E402
 
 NOW = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
 FRESH = (NOW - timedelta(days=1)).isoformat()
@@ -273,17 +279,25 @@ def main(argv=None):
     script = build_script(args.turns)
     baseline, controlled, bounded = replay(script, False), replay(script, True), bounded_run()
     results = checks(baseline, controlled, bounded)
-    evidence = {"requirement": "CTX-004", "turns": args.turns, "budget_tokens": BUDGET,
+    lab = context_lab.run()
+    lab_summary = context_lab.summarize(lab)
+    evidence = {"requirement": "CTX-004", "also": "EVAL-002", "turns": args.turns, "budget_tokens": BUDGET,
                 "thresholds": H.thresholds(), "checks": results,
-                "baseline": baseline, "controlled": controlled, "bounded": bounded}
+                "baseline": baseline, "controlled": controlled, "bounded": bounded,
+                "context_lab": {"summary": lab_summary, "scenarios": lab}}
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(evidence, indent=1), encoding="utf-8")
     for r in results:
         sys.stdout.write("%s  %s  %s\n" % ("PASS" if r["ok"] else "FAIL", r["name"],
                                            json.dumps(r["detail"])))
+    for r in lab:
+        verdict = "SKIP" if not r["exercised"] else "PASS" if r["ok"] else "FAIL"
+        sys.stdout.write("%s  lab: %s  %s\n" % (verdict, r["scenario"], r.get("reason", "")))
+    sys.stdout.write("context lab: %d of %d scenarios exercised, %d failed\n" % (
+        lab_summary["exercised"], lab_summary["scenarios"], lab_summary["failed"]))
     sys.stdout.write("evidence: %s\n" % out)
-    return 0 if all(r["ok"] for r in results) else 1
+    return 0 if all(r["ok"] for r in results) and not lab_summary["failed"] else 1
 
 
 if __name__ == "__main__":

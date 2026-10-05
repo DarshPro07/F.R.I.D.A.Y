@@ -412,6 +412,8 @@ def test_the_long_run_benchmark_passes_and_writes_its_evidence(tmp_path):
     evidence = json.loads(out.read_text(encoding="utf-8"))
     assert [c["name"] for c in evidence["checks"] if not c["ok"]] == []
     assert len(evidence["checks"]) == 7 and len(evidence["controlled"]) == golden.TURNS
+    lab = evidence["context_lab"]["summary"]
+    assert lab["scenarios"] == 14 and lab["exercised"] > 0 and lab["failed"] == 0
 
 
 def test_a_working_set_carries_the_health_verdict_it_is_given():
