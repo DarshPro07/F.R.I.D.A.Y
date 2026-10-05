@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `ebba0dd283c9d83aa3888596d93f5901cb6043a278d603a760c522568046eaa5`
 - PRD size: 8204 lines, 295141 bytes
-- Repository HEAD: `a8f620031c837c41d22a220ae1741375b3b74d42`
-- Uncommitted paths at generation: 44
-- Generated: 2026-10-06T01:47:39+05:30
+- Repository HEAD: `832f7502f7a526498c544a94ef6a6b64f9a451fb`
+- Uncommitted paths at generation: 45
+- Generated: 2026-10-06T02:01:13+05:30
 
 ## Status vocabulary
 
@@ -27,8 +27,8 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 78 |
-| PARTIAL | 71 |
+| MISSING | 77 |
+| PARTIAL | 72 |
 | VERIFIED | 36 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
@@ -408,7 +408,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| MODEL-007 | P1 | **MISSING** | Default local model artifacts stay below 2 GB, at most one general local model is resident, vision loads on demand, local context defaults to 4K-8K, and context is minimised before model size is raised. | Onboarding refuses a 3.7 GB artifact for the default pack and accepts it only with an owner override; loading a vision model while a general model is resident unloads the general model first when memory requires; residency reads the actual device's memory. | - | `friday/privacy.py:52` | Build with MODEL-005: a local model policy (artifact cap, one resident general model, 4K-8K default context, owner override) enforced at onboarding and by the residency manager, which reads the device's memory rather than assuming the reference profile. |
+| MODEL-007 | P1 | **PARTIAL** | Default local model artifacts stay below 2 GB, at most one general local model is resident, vision loads on demand, local context defaults to 4K-8K, and context is minimised before model size is raised. | Onboarding refuses a 3.7 GB artifact for the default pack and accepts it only with an owner override; loading a vision model while a general model is resident unloads the general model first when memory requires; residency reads the actual device's memory. | - | `friday/privacy.py:52` | GAPS: ExpertPool has no live caller yet (local_experts is FUTURE in reachability); the owner override is a register() argument, not yet bound to confirmation.py; choose_model/fit_context are tested but not yet called by a loader; pool stores the clamped ctx on Expert/Outcome, the loader must read it; PRD ledger row MODEL-007 not edited here; the kernel's docs(ledger) step owns it; The new tests were written after the implementation; they depend on new symbols (OnboardingRefused, owner_override, local_model_policy) so they cannot pass on the old code, but a red run was not recorded first |
 | MODEL-008 | P2 | **MISSING** | The local escalation chain and each model's place in it are chosen from measured Model Arena results, with a verifier deciding escalation. | An arena report on the reference profile giving, per tier, the share of local tasks completed and verified and the escalation rate. | - | - | After MODEL-003 and MODEL-007, run the candidate local models through the arena on the reference profile and record the chain it supports. |
 | PROMPT-001 | P2 | **MISSING** | A model call's instructions are compiled from ranked layers with conflicts reported, duplicates removed and a prompt health measure acted on before the call. | A compile in which a skill contradicts the worker contract keeps the contract's rule and reports the conflict; a duplicated instruction appears once; the health measure falls when unused tool schemas are added. | - | `friday/memory_stack.py:301`, `agent_friday.py:285` | Extend the context engine (CTX-001, CTX-004): compile instructions from ranked layers, drop and report a lower layer that contradicts a higher one, remove duplicates, and score the result before the call. |
 | PROMPT-002 | P3 | **MISSING** | Published agent system prompts are a research corpus only: mined patterns become FRIDAY rules only after an A/B benchmark, and prompt text is never copied in. | A candidate rule with its benchmark result and adoption decision; the repository holds no copied vendor prompt text. | - | - | Through SCOUT-001: read the corpus's licence and terms first, pin it as REFERENCE_ONLY if they allow, then mine candidate rules and A/B test each before adopting it. |
