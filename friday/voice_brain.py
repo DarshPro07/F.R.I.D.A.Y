@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import uuid
 
 logger = logging.getLogger("friday.voice")
 
@@ -872,6 +873,11 @@ def _model():
     key = os.getenv("GOOGLE_API_KEY")
     if not key:
         return None
+    from friday import credentials
+    if credentials.classify_static("GOOGLE_API_KEY", key).state == credentials.PLACEHOLDER:
+        # The .env template value: every call would be refused, so there is no Gemini
+        # brain - reply() then tries the CLI route (FRIDAY.exe 2026-10-05).
+        return None
     try:
         from google import genai
     except ImportError:  # pragma: no cover
@@ -1322,6 +1328,58 @@ def mark_interrupted(message_id, heard):
         return False
 
 
+def _cli_reply(text, history, approval_note=""):
+    """A typed turn through the model gateway's signed-in CLI route (MODEL-012).
+
+    FRIDAY.exe 2026-10-05: with the template GOOGLE_API_KEY the voice agent answered
+    through Claude Code, but the control room's typed prompt went to Gemini and
+    failed. This is the same route, with the same persona, history and memory
+    context as the Gemini turn. The CLI route has no tools, so it answers and
+    does not act. Returns None when no CLI backend is enabled."""
+    from friday import cli_model_provider
+    if not cli_model_provider.discover_backends():
+        return None
+    from friday import model_gateway
+    # trims the oldest turns to the token budget (not model training)
+    from friday.gateway_llm import TASK_CLASS, fit
+
+    turns = _recent_turns()
+    messages = [{"role": "system", "content": _persona()}]
+    if turns:
+        messages += [{"role": "user" if role == "user" else "assistant", "content": body}
+                     for role, body in turns]
+    else:
+        messages += [{"role": "user" if h.get("role") == "user" else "assistant",
+                      "content": h.get("text", "")} for h in (history or [])[-6:]]
+    ctx = _memory_context(text)
+    user = text if not ctx else "%s\n\n(from your memory: %s)" % (text, ctx)
+    if approval_note:
+        user = "%s\n\n[%s]" % (user, approval_note)
+    messages.append({"role": "user", "content": user})
+    budget = model_gateway.budget_for(TASK_CLASS)
+    request = model_gateway.ModelGatewayRequest(
+        # One objective per turn, as the voice adapter does: a shared id would hit
+        # the objective token ceiling a few dozen turns in.
+        objective_id=f"ui-ask:{uuid.uuid4().hex[:12]}",
+        task_class=TASK_CLASS,
+        context_package=fit(messages, budget.max_input_tokens),
+        allow_failover=True, worker="ui-ask")
+    try:
+        result = model_gateway.gateway().infer(request)
+    except (model_gateway.BudgetExceeded, model_gateway.GrowthStopped) as exc:
+        return {"reply": "My language brain refused this turn: %s" % str(exc)[:140],
+                "degraded": True}
+    if result.status != "ok" or not result.response.strip():
+        detail = "; ".join(result.warnings)[:140] or result.status
+        return {"reply": "My language brain is offline: Gemini has no working key and "
+                         "the CLI route failed (%s)." % detail, "degraded": True}
+    answer = _honest_about_acting(result.response.strip(), [], 0)
+    message_id = _remember_turn("assistant", answer)
+    return {"reply": answer, "model": f"{result.provider}/{result.model}",
+            "message_id": message_id, "used_memory": bool(ctx), "used_capabilities": [],
+            "route": "cli", "cost_usd": result.cost_usd}
+
+
 def reply(text, history=None):
     text = (text or "").strip()
     if not text:
@@ -1390,6 +1448,10 @@ def reply(text, history=None):
 
     cfg = _model()
     if cfg is None:
+        via_cli = _cli_reply(text, history,
+                             approval_note if approval_verdict is not None else "")
+        if via_cli is not None:
+            return via_cli
         return {"reply": "My language brain is offline (no GOOGLE_API_KEY), but I "
                          "can open web pages, search the shared memory, and report "
                          "status.", "degraded": True}

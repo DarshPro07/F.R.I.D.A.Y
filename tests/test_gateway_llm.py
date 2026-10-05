@@ -267,3 +267,60 @@ async def test_a_turn_is_answered_by_the_cli_when_the_api_key_is_rejected(env, t
     provider, status, cost_usd, worker, route_kind = rows[0]
     assert (provider, route_kind, worker) == ("claude-cli", "cli", GL.WORKER)
     assert cost_usd > 0
+
+
+
+# -- the control room's typed prompt (voice_brain.reply) ---------------------------------
+
+
+def _ui_turn(monkeypatch, *, cli="claude", result=None):
+    from types import SimpleNamespace
+    from friday import voice_brain as V
+    monkeypatch.setenv("GOOGLE_API_KEY", "your-google-api-key")
+    monkeypatch.setenv("FRIDAY_CLI_MODEL_PROVIDERS", cli)
+    remembered, sent = [], []
+    monkeypatch.setattr(V, "_remember_turn", lambda role, text: remembered.append((role, text)) or 7)
+    monkeypatch.setattr(V, "_recent_turns", lambda limit=None: [("user", "earlier"), ("model", "noted")])
+    monkeypatch.setattr(V, "_memory_context", lambda text: "")
+    monkeypatch.setattr(V, "_try_command", lambda text: None)
+
+    class Gateway:
+        def infer(self, request):
+            sent.append(request)
+            return result or SimpleNamespace(status="ok", provider="claude-cli", model="sonnet",
+                                             response="Monday, sir.", warnings=[], cost_usd=0.003)
+
+    monkeypatch.setattr(mg, "gateway", lambda: Gateway())
+    return V, remembered, sent
+
+
+def test_a_typed_turn_with_a_template_gemini_key_answers_through_the_cli_route(monkeypatch):
+    # FRIDAY.exe 2026-10-05: the voice agent answered through Claude Code while the
+    # control room's typed prompt went to Gemini with the template key and failed.
+    V, remembered, sent = _ui_turn(monkeypatch)
+    assert V._model() is None
+    out = V.reply("what day is it?")
+    assert out["reply"] == "Monday, sir." and out["route"] == "cli"
+    assert out["model"] == "claude-cli/sonnet" and out["message_id"] == 7
+    request = sent[0]
+    assert request.allow_failover and request.task_class == GL.TASK_CLASS
+    roles = [m["role"] for m in request.context_package]
+    assert roles[0] == "system" and request.context_package[-1] == {"role": "user", "content": "what day is it?"}
+    assert {"role": "assistant", "content": "noted"} in request.context_package
+    assert remembered[-1] == ("assistant", "Monday, sir.")
+
+
+def test_with_no_cli_enabled_the_typed_turn_still_says_the_brain_is_offline(monkeypatch):
+    V, _, sent = _ui_turn(monkeypatch, cli="off")
+    out = V.reply("what day is it?")
+    assert out.get("degraded") and "offline" in out["reply"] and not sent
+
+
+def test_a_failed_cli_route_says_why_instead_of_pretending(monkeypatch):
+    from types import SimpleNamespace
+    failed = SimpleNamespace(status="failed", provider="", model="", response="",
+                             warnings=["claude-cli: signed out"], cost_usd=0.0)
+    V, remembered, _ = _ui_turn(monkeypatch, result=failed)
+    out = V.reply("what day is it?")
+    assert out.get("degraded") and "signed out" in out["reply"]
+    assert ("assistant", out["reply"]) not in remembered
