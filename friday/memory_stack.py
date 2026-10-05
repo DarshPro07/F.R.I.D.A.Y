@@ -300,6 +300,33 @@ def hermes_outcomes(task="", limit=3):
     return {"tier": "outcomes", "items": rows[:limit]}
 
 
+# ---------------------------------------------------------------------------
+# tier 8: failures -- the root-caused failures this task has already hit
+# ---------------------------------------------------------------------------
+
+def failures(task="", limit=2):
+    """Prior root-caused failures whose symptom matches this request (§36).
+
+    The retrieval half of `friday/failure_genome.py`. It lives here, as a
+    tier, because PRD §36 asks for retrieval "before repeating a known
+    failure pattern" -- and the only place that reliably runs before the
+    model plans anything is the bundle it is handed. A call site that has to
+    remember to ask would not ask on the run that mattered.
+
+    Capped hard at two: a bundle that spends its budget listing old failures
+    has made the task harder, not easier.
+    """
+    try:
+        from friday import failure_genome
+        rows = failure_genome.FailureGenome().matches(task, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger("friday.memory").warning(
+            "failures tier unavailable (%s): a known failure may be repeated", exc)
+        return {"tier": "failures", "items": [], "error": str(exc)[:120]}
+    return {"tier": "failures", "items": rows}
+
+
 def aggregate(task, budget_tokens=None, include_episodes=True, project_scope=""):
     """The task-scoped slice of every tier, within `budget_tokens`.
 
@@ -323,9 +350,10 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
     t5 = episodes(task) if include_episodes else {"items": []}
     t6 = contacts(task)
     t7 = hermes_outcomes(task)
+    t8 = failures(task)
     used, lines, injected = 0, [], {"preferences": 0, "specs": 0, "rules": 0,
                                     "relations": 0, "episodes": 0, "contacts": 0,
-                                    "outcomes": 0}
+                                    "outcomes": 0, "failures": 0}
     # Line index -> what that line is. A header is a line with no entry here.
     # `context_health` scores and shrinks the context from this, so it never
     # has to parse the prompt text back into tiers.
@@ -384,6 +412,21 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
         for d in t7["items"]:
             if not take("outcome", "- %s" % d["decision"][:300], "outcomes"):
                 break
+    if t8["items"]:
+        # Ahead of the derived tiers for the same reason as outcomes: this is
+        # the one section whose absence costs a repeat of work already paid
+        # for, and it is two lines at most. Retrieval before repetition
+        # (PRD §36) is only true if the lines survive the budget.
+        lines.append("FAILURES ALREADY ROOT-CAUSED (read before retrying):")
+        for f in t8["items"]:
+            detail = "- %s | cause: %s | repair: %s" % (
+                f["symptom"][:160], f["root_cause"][:160], f["repair"][:200])
+            if f["prevention"]:
+                detail += " | prevention: %s" % f["prevention"][:120]
+            if f["applicability"]:
+                detail += " | only when: %s" % "; ".join(f["applicability"])[:120]
+            if not take("failure", detail, "failures"):
+                break
     if t1["items"]:
         lines.append("YOUR PREFERENCES AND RULES:")
         for it in t1["items"]:
@@ -409,7 +452,8 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
                  "relations", kind=context_health.CONTRADICTION)
     result = {"task": task, "budget_tokens": budget, "tokens_used": used, "injected": injected,
               "tiers": {"preferences": t1, "specs": t2, "rules": t3, "relations": t4,
-                        "episodes": t5, "contacts": t6, "outcomes": t7},
+                        "episodes": t5, "contacts": t6, "outcomes": t7,
+                        "failures": t8},
               "layout": [dict(meta.get(i, {"tier": None}), text=text)
                          for i, text in enumerate(lines)],
               "prompt": "\n".join(lines)}

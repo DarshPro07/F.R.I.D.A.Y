@@ -173,11 +173,14 @@ def test_memory_stack_aggregates_four_tiers_under_budget(tmp_path, monkeypatch):
     Outcomes joined on 2026-09-03: what Hermes finished, written back by the
     bridge so the next bundle and the next turn both know (S2 in
     docs/plans/jarvis-agentic-team). See tests/test_hermes_memory_writeback.py.
+    Failures joined on 2026-10-05: PRD §36 wants a root-caused failure
+    retrieved *before* it is repeated, and the bundle is the only thing that
+    always runs before a model plans. See tests/test_failure_genome.py.
     """
     from friday import memory_stack as M
     a = M.aggregate("implement the database schema for project alpha", budget_tokens=600)
     assert set(a["tiers"]) == {"preferences", "specs", "rules", "relations",
-                               "episodes", "contacts", "outcomes"}
+                               "episodes", "contacts", "outcomes", "failures"}
     assert a["tokens_used"] <= a["budget_tokens"]
     assert isinstance(a["prompt"], str)
     o = M.overview()
