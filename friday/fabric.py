@@ -57,6 +57,10 @@ FAMILIES = (
     #: owner asked for an end-to-end product-trading system; the family is
     #: the user-facing name, the storefront behind it is a provider.
     "commerce",
+    #: The backends that act on a screen for a capability: Playwright's DOM,
+    #: the desktop's coordinates. One interface (`friday.computer_use`), and the
+    #: action-path router picks the backend by the path a step acts through.
+    "computer_use",
 )
 
 #: How the upstream's license constrains the integration, not the license name.
