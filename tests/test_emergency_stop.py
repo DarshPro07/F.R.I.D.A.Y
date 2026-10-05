@@ -276,6 +276,32 @@ def test_every_conversational_tool_refuses_while_latched():
     assert "STOPPED" in answer["error"]
 
 
+def test_a_text_tool_refuses_in_words_its_declared_type_can_carry():
+    # 2026-10-05: get_world_news (-> str) returned the refusal dict while STOP was
+    # latched, and FastMCP's output validation turned it into a tool error.
+    from friday import ownership
+
+    class FakeMCP:
+        def tool(self, *args, **kwargs):
+            return lambda fn: fn
+
+    guarded = ownership.guard(FakeMCP())
+
+    @guarded.tool()
+    def world_news() -> str:
+        return "headlines"
+
+    @guarded.tool()
+    async def world_news_async() -> str:
+        return "headlines"
+
+    S.emergency_stop("drill", actor="person")
+    answer = world_news()
+    assert isinstance(answer, str) and answer.startswith("not_permitted: STOPPED")
+    import asyncio
+    assert asyncio.run(world_news_async()).startswith("not_permitted: STOPPED")
+
+
 def test_the_text_brain_stops_without_asking_its_model(monkeypatch):
     from friday import voice_brain as V
 

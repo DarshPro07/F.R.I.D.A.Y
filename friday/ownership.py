@@ -233,6 +233,25 @@ def _stopped() -> dict | None:
     return stop.refusal()
 
 
+def _returns_text(function) -> bool:
+    """Whether a tool declares a plain-text result (`-> str`)."""
+    try:
+        declared = inspect.signature(function).return_annotation
+    except (TypeError, ValueError):
+        return False
+    return declared is str or declared == "str"
+
+
+def _as_declared(refusal: dict, text: bool):
+    """The refusal in the shape the tool declared.
+
+    FastMCP validates a tool's result against its return annotation, so the
+    refusal dict from a `-> str` tool (get_world_news while STOP was latched,
+    2026-10-05) reached the model as an output-validation error instead of the
+    refusal. A text tool says it in words."""
+    return f"{refusal['status']}: {refusal['error']}" if text else refusal
+
+
 def guard(mcp):
     """
     Wrap an MCP server so every tool it registers checks for a claim first.
@@ -254,11 +273,12 @@ def guard(mcp):
 
             def register(function):
                 capability_id = function.__name__
+                text = _returns_text(function)
                 if inspect.iscoroutinefunction(function):
                     async def guarded(*call_args, **call_kwargs):
                         stopped = _stopped()
                         if stopped:
-                            return stopped
+                            return _as_declared(stopped, text)
                         owner = claimed_by(
                             capability_id,
                             arguments=_bound_arguments(
@@ -270,7 +290,7 @@ def guard(mcp):
                     def guarded(*call_args, **call_kwargs):
                         stopped = _stopped()
                         if stopped:
-                            return stopped
+                            return _as_declared(stopped, text)
                         owner = claimed_by(
                             capability_id,
                             arguments=_bound_arguments(
