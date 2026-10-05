@@ -1,0 +1,141 @@
+{
+  "cost_model": {
+    "price": {
+      "deep": 5.0,
+      "economy": 1.0,
+      "standard": 3.0
+    },
+    "repair": "deep run on top of the wasted attempt",
+    "tokens_per_task": 20000
+  },
+  "policies": {
+    "adaptive": {
+      "cost_adjusted": 2140000.0,
+      "cost_first_pass": 1940000.0,
+      "efforts": {
+        "high": 11,
+        "low": 12,
+        "medium": 10
+      },
+      "floor_violations": [],
+      "ledger_value": 776.67,
+      "over_provisioned": [
+        "default-timeout",
+        "compare-stores"
+      ],
+      "policy": "adaptive",
+      "quality": 0.9394,
+      "tasks": 33,
+      "tiers": {
+        "deep": 11,
+        "economy": 12,
+        "standard": 10
+      },
+      "under_provisioned": [
+        "reconnect",
+        "stale-cache"
+      ]
+    },
+    "always_deep": {
+      "cost_adjusted": 3300000.0,
+      "cost_first_pass": 3300000.0,
+      "efforts": {
+        "high": 33
+      },
+      "floor_violations": [],
+      "ledger_value": 330.0,
+      "over_provisioned": [
+        "count-docs",
+        "locate-config",
+        "file-size",
+        "fix-typo",
+        "docstring",
+        "bump-version",
+        "rename-var",
+        "capital",
+        "tokyo-time",
+        "import-path",
+        "default-timeout",
+        "iso-parser",
+        "pagination",
+        "off-by-one",
+        "json-flag",
+        "dataclass-refactor",
+        "duration-helper",
+        "parallel-docs",
+        "log-audit",
+        "pr-review",
+        "compare-stores",
+        "reconnect",
+        "stale-cache"
+      ],
+      "policy": "always_deep",
+      "quality": 1.0,
+      "tasks": 33,
+      "tiers": {
+        "deep": 33
+      },
+      "under_provisioned": []
+    },
+    "always_economy": {
+      "cost_adjusted": 2860000.0,
+      "cost_first_pass": 660000.0,
+      "efforts": {
+        "low": 33
+      },
+      "floor_violations": [
+        "exactly-once",
+        "scheduler-crash",
+        "schema-migrate",
+        "rotate-creds",
+        "tighten-perms",
+        "prod-deploy",
+        "nonce-proof",
+        "encrypt-tokens",
+        "digest-race",
+        "auth-gate"
+      ],
+      "ledger_value": 550.0,
+      "over_provisioned": [],
+      "policy": "always_economy",
+      "quality": 0.3333,
+      "tasks": 33,
+      "tiers": {
+        "economy": 33
+      },
+      "under_provisioned": [
+        "iso-parser",
+        "pagination",
+        "off-by-one",
+        "json-flag",
+        "dataclass-refactor",
+        "duration-helper",
+        "parallel-docs",
+        "log-audit",
+        "pr-review",
+        "compare-stores",
+        "reconnect",
+        "stale-cache",
+        "exactly-once",
+        "scheduler-crash",
+        "schema-migrate",
+        "rotate-creds",
+        "tighten-perms",
+        "prod-deploy",
+        "nonce-proof",
+        "encrypt-tokens",
+        "digest-race",
+        "auth-gate"
+      ]
+    }
+  },
+  "quality_threshold": 0.9,
+  "suite_version": 1,
+  "verdict": {
+    "beats_always_deep": true,
+    "cheaper": true,
+    "floor_ok": true,
+    "quality_ok": true,
+    "savings_pct": 35.2
+  }
+}

@@ -23,6 +23,7 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -86,7 +87,13 @@ def classify_task(text: str, *, code_refs: int = 0,
     def hits(table):
         return tuple(s for s in table if s in lowered)
 
-    mech = hits(_MECHANICAL)
+    def whole_words(table):
+        return tuple(s for s in table
+                     if re.search(r"\b" + re.escape(s) + r"\b", lowered))
+
+    # Mechanical phrases are literal commands, not stems: "count" must not
+    # fire inside "counter" and send a code fix to the zero-model route.
+    mech = whole_words(_MECHANICAL)
     deep = hits(_DEEP_REASONING)
     high = hits(_HIGH_CONSEQUENCE)
     tiny = hits(_TINY_CHANGE)
@@ -158,7 +165,10 @@ def choose_route(econ: TaskEconomics) -> Route:
     if econ.kind == "mechanical":
         return Route(DETERMINISTIC, TIER_ECONOMY,
                      "mechanical work: software, zero model tokens")
-    if econ.kind == "question" and econ.consequence == "low":
+    # A question that carries reasoning-heavy signals (classify_task marks
+    # it integration/core) is not simple, whatever verb it lacks.
+    if (econ.kind == "question" and econ.consequence == "low"
+            and econ.blast_radius not in ("integration", "core")):
         return Route(FRIDAY_DIRECT, TIER_ECONOMY,
                      "simple question: Friday answers directly, no worker")
     if econ.kind == "multi_stream":
@@ -550,6 +560,16 @@ class RouteOutcomes:
                 "SELECT * FROM route_outcomes WHERE task_class = ?"
                 " ORDER BY created_at DESC LIMIT ?",
                 (task_class, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def by_run_prefix(self, prefix: str, limit: int = 1000) -> list[dict]:
+        """Records whose work_run_id starts with `prefix`, by id. A literal
+        match (no LIKE wildcards): evals namespace their runs this way."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM route_outcomes WHERE substr(work_run_id, 1, ?)"
+                " = ? ORDER BY work_run_id LIMIT ?",
+                (len(prefix), prefix, limit)).fetchall()
         return [dict(r) for r in rows]
 
     def execution_value(self, record: dict) -> float:

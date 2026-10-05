@@ -56,6 +56,26 @@ def test_architecture_reasoning_routes_deep():
     assert route.tier == ee.TIER_DEEP
 
 
+def test_a_word_containing_count_is_not_mechanical():
+    """'counter' is not the literal command 'count': a code fix must not
+    take the zero-model route."""
+    econ, route = classify_and_route('Fix the off-by-one error in the retry counter.')
+    assert econ.kind != 'mechanical'
+    assert route.level != ee.DETERMINISTIC
+
+
+def test_reasoning_heavy_question_is_not_answered_directly():
+    """No work verb makes a request a 'question', but its architecture /
+    proof signals still mark it integration scope - the router must honour
+    that instead of answering at the economy tier."""
+    for text in ('Design the architecture for exactly-once delivery of objective events.',
+                 'Prove the confirmation nonce cannot be replayed across actions.'):
+        econ, route = classify_and_route(text)
+        assert econ.kind == 'question' and econ.blast_radius == 'integration'
+        assert route.level == ee.HERMES_SINGLE
+        assert route.tier == ee.TIER_DEEP
+
+
 def test_multi_stream_routes_parallel():
     econ, route = classify_and_route('Run two independent workstreams in parallel: Worker A inspects delivery, Worker B inspects token economy.')
     assert econ.kind == 'multi_stream'
@@ -98,6 +118,15 @@ def test_outcomes_record_and_rework_economics(tmp_path):
     cheap = outcomes.execution_value(rows['hermes-cheap'])
     solid = outcomes.execution_value(rows['hermes-solid'])
     assert solid > cheap, '20k+rework must be worth less than 45k done right'
+
+
+def test_by_run_prefix_is_a_literal_namespace_match(tmp_path):
+    outcomes = ee.RouteOutcomes(tmp_path / 'p.sqlite3')
+    for run in ('eval-v1/b', 'eval-v1/a', 'eval-v2/a', 'evalXv1/a', 'other'):
+        outcomes.record(run, task_class='x', route_level='hermes_single', tier='economy', status='COMPLETE')
+    assert [r['work_run_id'] for r in outcomes.by_run_prefix('eval-v1/')] == ['eval-v1/a', 'eval-v1/b']
+    assert outcomes.by_run_prefix('eval%') == []
+    assert outcomes.by_run_prefix('eval-v1/', limit=1)[0]['work_run_id'] == 'eval-v1/a'
 
 
 def test_failed_runs_have_zero_value(tmp_path):
