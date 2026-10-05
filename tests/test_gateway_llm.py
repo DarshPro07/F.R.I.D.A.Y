@@ -358,3 +358,19 @@ def test_the_cli_route_cannot_claim_a_hand_off_to_hermes(monkeypatch):
     V, _, _ = _ui_turn(monkeypatch, result=claim)
     out = V.reply("run validation")
     assert out["reply"].startswith("I have not handed anything to Hermes")
+
+
+
+def test_the_cli_route_tells_its_model_it_has_no_tools_and_a_new_hand_off_wording_is_refused(monkeypatch):
+    # Chrome retest, 2026-10-05: "Sending the general sweep to Hermes again, sir." - no call ran.
+    from types import SimpleNamespace
+    said = SimpleNamespace(status="ok", provider="claude-cli", model="sonnet",
+                           response="Sending the general sweep to Hermes again, sir.",
+                           warnings=[], cost_usd=0.0)
+    V, _, sent = _ui_turn(monkeypatch, result=said)
+    out = V.reply("run validation")
+    assert out["reply"].startswith("I have not handed anything to Hermes")
+    system = [m["content"] for m in sent[0].context_package if m["role"] == "system"]
+    assert any("answered without tools" in s for s in system)
+    for fine in ("I am not sending anything to Hermes.", "Nothing was sent to Hermes."):
+        assert V._honest_about_hermes(fine, []) == fine, fine

@@ -927,7 +927,10 @@ _DELEGATION_CLAIM = re.compile(
     # Chrome test of FRIDAY.exe, 2026-10-05, said with no hermes call at all:
     # "It's going down to Hermes now, and I'll report what comes back".
     r"|(?:it|this|that)(?:'s| is) (?:going|on its way) (?:down |over |off )?to hermes"
-    r"|(?:i'?m |i am )?(?:sending|passing) (?:it|this|that) (?:down |over |off )?to hermes)\b", re.I)
+    # ...and the next day's wording, "Sending the general sweep to Hermes again".
+    # A negation ("not sending anything to Hermes") is not a claim.
+    r"|(?<!not )(?<!n't )(?:sending|passing|handing) (?:it|this|that|(?:the|your|a) [\w ,'-]{1,40}?)"
+    r" (?:down |over |off |back )?to hermes)\b", re.I)
 
 
 def _honest_about_hermes(answer: str, used) -> str:
@@ -1336,6 +1339,16 @@ def mark_interrupted(message_id, heard):
         return False
 
 
+#: The CLI route answers with no tools. The persona describes a Friday who delegates and
+#: acts, so without this the model narrated hand-offs that never happened ("It's going
+#: down to Hermes now", Chrome test of FRIDAY.exe, 2026-10-05).
+_NO_TOOLS_NOTE = (
+    "This turn is answered without tools. You cannot delegate to Hermes, open, run, read, "
+    "search or change anything, and nothing is sent anywhere because of what you say. Never "
+    "say you did, are doing or are sending something. Answer from what you know, and when "
+    "the request needs an action, say plainly that it needs a working tool route.")
+
+
 def _cli_reply(text, history, approval_note=""):
     """A typed turn through the model gateway's signed-in CLI route (MODEL-012).
 
@@ -1352,7 +1365,8 @@ def _cli_reply(text, history, approval_note=""):
     from friday.gateway_llm import TASK_CLASS, fit
 
     turns = _recent_turns()
-    messages = [{"role": "system", "content": _persona()}]
+    messages = [{"role": "system", "content": _persona()},
+                {"role": "system", "content": _NO_TOOLS_NOTE}]
     if turns:
         messages += [{"role": "user" if role == "user" else "assistant", "content": body}
                      for role, body in turns]
