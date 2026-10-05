@@ -3614,6 +3614,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Fixed the missed ask the benchmark found: already_answered pooled a decision's words with its rationale and silently swallowed a material question. The two are now matched separately. The benchmark's xfail is now a real test (red on the old matcher), plus two unit tests. (build run, commit 228e35229)",
         "next_action": "GAPS: The model's own materiality classification is still not measured: the fake model is told each label, so the rates describe what the gates do with a model that follows instructions. Measuring the real classifier needs a live model run, outside this worktree.; The 10% unnecessary-ask and 10% missed-ask ceilings are an assumption stated in the test docstring (owner call). The labelled set is small (8 objectives, 30 ambiguities).; already_answered is still a fuzzy bag-of-words match with a 0.4 overlap threshold. A single statement (a decision or a rationale) can still swallow a question by coincidence; this change removes only the cross-field pooling. A stricter rule is an owner design call.; Red-before was shown by running the two new tests against the old pooled matcher via a scratch pytest plugin in %TEMP% (both fail, 59 others pass), not by reverting the tree. The two scratch files in %TEMP% (old_matcher_plugin.py, run_red_check.py) are outside the worktree and could not be removed without approval.",
     }),
+    ('MODEL-004', {
+        "status": PARTIAL,
+        "current_implementation": 'Added friday/model_profiling.py: nonce-based probes (tools, structured output, vision, latency) profile an undeclared route and store the result; model_capabilities.get falls back to it, so the unmodified gateway routes on it. Declarations win; a profile never promotes. (build run, commit faab6e5d3)',
+        "next_action": "GAPS: No real Completer adapter over the model gateway yet, so only mock routes are profiled; model_profiling is classified FUTURE in reachability.DECLARED until one exists; Profiling is not auto-triggered on discovery of a new model; a caller must invoke profile_route; max_context and relative_cost are not measurable by a probe and are recorded as None / unknown; Gateway capability_verdict still says 'declared capable' for a profiled route (provenance is in notes and the store, gateway untouched)",
+    }),
 ]
 
 
