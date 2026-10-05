@@ -455,6 +455,31 @@ def test_an_unanswered_interview_is_a_setup_step_not_a_degradation(tmp_path, mon
     assert "0/16 answered" in detail and "setup step" in detail and "friday.onboarding next" in detail
 
 
+def test_an_onboarded_start_is_silent_and_never_opens_the_interview(tmp_path, monkeypatch):
+    from friday import onboarding
+
+    marker = onboarding.state_root_marker(tmp_path)
+    marker.parent.mkdir(parents=True)
+    marker.write_text('{"completed_at": 1.0}', encoding="utf-8")
+
+    def refuse():
+        raise AssertionError("an onboarded install opened the interview")
+
+    monkeypatch.setattr(onboarding, "Onboarding", refuse)
+    assert L.onboarding_at_startup(tmp_path) == []
+
+
+def test_a_first_start_that_cannot_load_the_interview_says_so(tmp_path, monkeypatch):
+    from friday import onboarding
+
+    def broken():
+        raise RuntimeError("store locked")
+
+    monkeypatch.setattr(onboarding, "Onboarding", broken)
+    (line,) = L.onboarding_at_startup(tmp_path)
+    assert "RuntimeError" in line and "store locked" in line and "friday.onboarding status" in line
+
+
 class _Ran:
     def __init__(self, returncode=0, stdout="", stderr=""):
         self.returncode, self.stdout, self.stderr = returncode, stdout, stderr

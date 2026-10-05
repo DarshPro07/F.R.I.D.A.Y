@@ -39,6 +39,7 @@ answered later in plain conversation.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -395,6 +396,62 @@ class Onboarding:
             return "Advise"
         return "Ask Before Acting"
 
+    # -- finishing setup ---------------------------------------------------
+
+    def finish(self, root: Path | str | None = None, *, level: str = "",
+               reason: str = "") -> dict:
+        """Close setup: compile policy, then record that setup happened.
+
+        Refused until the essentials are answered or declined, because a
+        marker written early would stop the launcher asking the questions
+        that make FRIDAY useful. Policy is compiled first, so a marker never
+        exists without the policy the user chose behind it.
+        """
+        remaining = self.pending(essential_only=True)
+        if remaining:
+            raise ValueError(
+                f"{len(remaining)} essential question(s) are still open, starting "
+                f"with {remaining[0]['field']!r}; answer or skip them first")
+        compiled = self.compile_policy(level=level, reason=reason)
+        profile = self.profile()
+        marker = state_root_marker(root)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        staged = marker.with_suffix(".json.tmp")
+        staged.write_text(json.dumps({
+            "completed_at": time.time(),
+            "workspace_id": self.workspace_id,
+            "answered": len(profile.as_dict()["answers"]),
+            "skipped": list(profile.skipped),
+            "autonomy_level": compiled["level"],
+        }, indent=1), encoding="utf-8")
+        staged.replace(marker)
+        return {"status": "onboarded", "marker": str(marker),
+                "level": compiled["level"], "workspace_id": self.workspace_id}
+
+    def first_run_notice(self, root: Path | str | None = None) -> list[str]:
+        """What a start with no marker should say, as plain lines.
+
+        Empty once setup is recorded. Otherwise it names the next essential
+        question and the command that answers it, because the launcher has no
+        conversation to hold yet and a first run that prints nothing leaves a
+        new user with a running server and no idea FRIDAY wants to meet them.
+        """
+        if is_onboarded(root):
+            return []
+        pending = self.pending(essential_only=True)
+        command = "FRIDAY.exe -m friday.onboarding"
+        if not pending:
+            return ["first run: the essential questions are answered; record "
+                    f"setup as complete with: {command} finish"]
+        first = pending[0]
+        return [
+            f"first run: FRIDAY does not know you yet - {len(pending)} short "
+            "question(s) make it useful",
+            f"  [{first['stage_title']}] {first['ask']}",
+            f"  answer with: {command} answer {first['field']} ...",
+            f"  when the essentials are done: {command} finish",
+        ]
+
     # -- what the profile implies ------------------------------------------
 
     def suggested_workers(self) -> list[dict]:
@@ -450,6 +507,20 @@ def state_root_marker(root: Path | str | None = None) -> Path:
         root = STATE_ROOT
     return Path(root) / "config" / "onboarded.json"
 
+
+def is_onboarded(root: Path | str | None = None) -> bool:
+    """Whether `Onboarding.finish` has run for this state root.
+
+    An unreadable marker counts as absent: the cost of asking again is one
+    question, the cost of trusting a half-written file is a user never asked.
+    """
+    try:
+        recorded = json.loads(state_root_marker(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(recorded, dict) and bool(recorded.get("completed_at"))
+
+
 # ---------------------------------------------------------------------------
 # The owner's console
 # ---------------------------------------------------------------------------
@@ -466,6 +537,7 @@ def state_root_marker(root: Path | str | None = None) -> Path:
 #     FRIDAY.exe -m friday.onboarding workspace --kind brand
 #     FRIDAY.exe -m friday.onboarding policy --level "Ask Before Acting"
 #     FRIDAY.exe -m friday.onboarding workers
+#     FRIDAY.exe -m friday.onboarding finish
 #
 # This is also what makes the module honestly reachable: argparse dispatch is
 # a production path the reachability walk cannot follow, which is why
@@ -500,6 +572,8 @@ def console(argv: list[str] | None = None) -> int:
     pol = sub.add_parser("policy", help="compile policy from the profile")
     pol.add_argument("--level", default="")
     sub.add_parser("workers", help="the specialists this profile justifies")
+    done = sub.add_parser("finish", help="compile policy and record setup as complete")
+    done.add_argument("--level", default="")
 
     args = parser.parse_args(argv)
     interview = Onboarding(workspace_id=args.workspace or None)
@@ -559,6 +633,15 @@ def console(argv: list[str] | None = None) -> int:
         changed = out["policy"].get("changed_domains") or []
         print(f"autonomy level: {out['level']}")
         print(f"changed: {', '.join(changed) if changed else 'nothing (already at that level)'}")
+        return 0
+
+    if args.command == "finish":
+        try:
+            out = interview.finish(level=args.level)
+        except ValueError as exc:
+            print(f"setup is not finished: {exc}")
+            return 1
+        print(f"setup complete; autonomy level: {out['level']}")
         return 0
 
     if args.command == "workers":

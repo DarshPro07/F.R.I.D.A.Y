@@ -428,6 +428,22 @@ def register_skills_at_startup() -> str:
     return f"skills: registered {len(added)} from disk ({', '.join(name for name, _, _ in added[:6])})"
 
 
+def onboarding_at_startup(home: Path) -> list[str]:
+    """The first-run interview prompt: the next essential question and how to
+    answer it, until setup is recorded as complete. Empty on any later start;
+    never raises. The marker is checked before the interview is constructed,
+    so an onboarded install does not open the database for this."""
+    try:
+        from friday.onboarding import Onboarding, is_onboarded
+
+        if is_onboarded(home):
+            return []
+        return Onboarding().first_run_notice(home)
+    except Exception as exc:                                # noqa: BLE001
+        return [f"onboarding: could not check the first-run interview ({type(exc).__name__}: "
+                f"{str(exc)[:120]}); run: FRIDAY.exe -m friday.onboarding status"]
+
+
 def console_will_close() -> bool:
     """
     Whether this process is the only one attached to its console - the
@@ -559,6 +575,8 @@ def run_all(*, with_ui: bool = True, with_agent: bool = True,
                  ensure_hermes_profile(shutil.which("hermes"), announce=_say)):
         if note:
             _say(note)
+    for note in onboarding_at_startup(home):
+        _say(note)
 
     jobs: list[tuple[str, subprocess.Popen]] = []
     try:
