@@ -3634,6 +3634,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Added friday/local_experts.py: an LRU expert pool that projects each load against the governor's own pressure levels, holds MODEL leases whose cleanup is the unload, trims at ELEVATED via a new Governor.add_observer seam. 8 GB stress test added. (build run, commit d901b233d)",
         "next_action": "GAPS: No live caller yet: Needle/embedding/vision loaders are the next wiring step (declared FUTURE in reachability.DECLARED, as model_profiling was); model_gateway local infer is unchanged because those models live in an external worker.; Thresholds.max_resident_models defaults to 1, so a live pool holds one expert until hardware_profile raises the cap; the pool honours whatever cap the governor has.; size_gb is RAM cost; GPU-resident experts are judged only by the governor's live GPU readings, not projected.; PRD_V7_LEDGER.md MODEL-005 row not edited; left to the kernel's ledger step.",
     }),
+    ('ONB-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Added the golden onboarding journey (fresh root, first-run prompt, essentials, finish+marker, restart persistence, task via objective executor, independent verify). Setup completion was never recorded and first run never asked; added finish(), is_onboarded(), first_run_notice(), launcher prompt. (build run, commit 3383f298f)',
+        "next_action": 'GAPS: The journey drives Onboarding and the launcher helper in-process; it does not spawn FRIDAY.exe.; The first useful task uses a test-supplied local_inventory capability on the ContinuousTaskExecutor, not a live Hermes or MCP tool.; Not shown by running the suite on the original tree: the new tests call finish/is_onboarded/first_run_notice/onboarding_at_startup, which did not exist before this change.',
+    }),
 ]
 
 
