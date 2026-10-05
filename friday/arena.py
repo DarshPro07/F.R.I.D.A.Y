@@ -43,6 +43,7 @@ class ArenaKind(str, enum.Enum):
     COMPRESSION = "compression"
     RESEARCH = "research"
     CAPABILITY_PATH = "capability_path"
+    NEURAL_ADAPTOR = "neural_adaptor"
 
 
 class ArenaError(RuntimeError):
