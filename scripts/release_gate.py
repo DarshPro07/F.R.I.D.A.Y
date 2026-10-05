@@ -307,7 +307,8 @@ def gate_budget(py: str, tmp: str) -> GateResult:
 def gate_persistence(py: str, tmp: str) -> GateResult:
     """§16 Persistence: objective recovery and DB crash tests pass."""
     cmd = [py, "-m", "pytest", "tests/test_store_durability.py",
-           "tests/test_chaos_restart.py", "tests/test_objective_restart.py",
+           "tests/test_chaos_restart.py", "tests/test_chaos_suite.py",
+           "tests/test_objective_restart.py",
            "tests/test_store_serialized.py", "-q", "-p", "no:cacheprovider",
            "--basetemp", tmp + "/per"]
     code, tail, secs = _run(cmd, timeout=1800)

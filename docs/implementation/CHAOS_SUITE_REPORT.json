@@ -1,0 +1,129 @@
+{
+  "faults": [
+    {
+      "fault": "browser_crash",
+      "result": "PASS",
+      "tests": [
+        {
+          "node_id": "tests/test_chaos_suite.py::test_browser_crash_mid_task_fails_truthfully",
+          "cases": 1,
+          "result": "PASS"
+        }
+      ]
+    },
+    {
+      "fault": "provider_outage",
+      "result": "PASS",
+      "tests": [
+        {
+          "node_id": "tests/test_provider_outage.py::test_an_outage_does_not_end_the_run",
+          "cases": 1,
+          "result": "PASS"
+        },
+        {
+          "node_id": "tests/test_provider_outage.py::test_the_task_succeeds_once_the_provider_comes_back",
+          "cases": 1,
+          "result": "PASS"
+        }
+      ]
+    },
+    {
+      "fault": "hermes_crash",
+      "result": "PASS",
+      "tests": [
+        {
+          "node_id": "tests/test_hermes_engine.py::test_hermes_executor_reports_unavailable_not_a_crash",
+          "cases": 1,
+          "result": "PASS"
+        }
+      ]
+    },
+    {
+      "fault": "invalid_model_response",
+      "result": "PASS",
+      "tests": [
+        {
+          "node_id": "tests/test_resilience.py::test_the_empty_completion_is_recognised",
+          "cases": 1,
+          "result": "PASS"
+        },
+        {
+          "node_id": "tests/test_resilience.py::test_the_exhausted_form_is_recognised_too",
+          "cases": 1,
+          "result": "PASS"
+        }
+      ]
+    },
+    {
+      "fault": "db_contention",
+      "result": "PASS",
+      "tests": [
+        {
+          "node_id": "tests/test_store_durability.py::test_kill_during_write_leaves_a_consistent_database",
+          "cases": 1,
+          "result": "PASS"
+        },
+        {
+          "node_id": "tests/test_store_durability.py::test_two_processes_write_concurrently_without_lock_errors",
+          "cases": 1,
+          "result": "PASS"
+        }
+      ]
+    },
+    {
+      "fault": "network_loss",
+      "result": "PASS",
+      "tests": [
+        {
+          "node_id": "tests/test_chaos_suite.py::test_network_loss_marks_the_task_degraded_and_recovers",
+          "cases": 4,
+          "result": "PASS"
+        },
+        {
+          "node_id": "tests/test_chaos_suite.py::test_network_loss_that_never_ends_fails_truthfully",
+          "cases": 1,
+          "result": "PASS"
+        }
+      ]
+    },
+    {
+      "fault": "malformed_tool_output",
+      "result": "PASS",
+      "tests": [
+        {
+          "node_id": "tests/test_chaos_suite.py::test_malformed_tool_output_is_a_failure_not_success",
+          "cases": 4,
+          "result": "PASS"
+        }
+      ]
+    },
+    {
+      "fault": "worker_death",
+      "result": "PASS",
+      "tests": [
+        {
+          "node_id": "tests/test_chaos_restart.py::test_control_plane_killed_mid_task_resumes_in_a_fresh_process",
+          "cases": 1,
+          "result": "PASS"
+        },
+        {
+          "node_id": "tests/test_chaos_suite.py::test_worker_death_with_two_runs_in_flight_resumes_both_exactly_once",
+          "cases": 1,
+          "result": "PASS"
+        }
+      ]
+    },
+    {
+      "fault": "reboot",
+      "result": "PASS",
+      "tests": [
+        {
+          "node_id": "tests/test_chaos_suite.py::test_cold_boot_sweeps_stale_leases_and_names_the_orphan",
+          "cases": 1,
+          "result": "PASS"
+        }
+      ]
+    }
+  ],
+  "pytest_exit": 0
+}

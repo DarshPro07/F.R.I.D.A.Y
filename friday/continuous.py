@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import re
+import socket
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable, Sequence
 
@@ -327,6 +328,12 @@ class FailureClassifier:
             return O.FailureKind.NOT_CONFIGURED
         if isinstance(exc, TimeoutError):
             return O.FailureKind.TRANSIENT
+        # A dropped link (refused, reset, aborted, broken pipe, DNS gone) is
+        # not a broken task: it used to land on STRUCTURAL, which is not
+        # retryable, so one network blip failed the task for good and skipped
+        # everything downstream of it. CONNECTIVITY is retried, within budget.
+        if isinstance(exc, (ConnectionError, socket.gaierror, socket.herror)):
+            return O.FailureKind.CONNECTIVITY
 
         # A model provider that could not answer is not a broken task.
         #
@@ -804,6 +811,18 @@ class ContinuousTaskExecutor:
                 return
             self._fail_task(run_id, task_id, kind,
                             f"{type(exc).__name__}: {exc}")
+            return
+
+        # The port's contract is a result envelope (CapabilityPort). None, a
+        # proxy's error page, a bare list or raw bytes prove nothing: stored
+        # as a "result" they read as a success or break the task row. Name
+        # the type and never echo the content - it is untrusted and may hold
+        # a secret.
+        if not isinstance(result, dict):
+            self._fail_task(
+                run_id, task_id, O.FailureKind.STRUCTURAL,
+                "malformed tool output: expected a result envelope, got "
+                f"{type(result).__name__}; the outcome of the call is unknown")
             return
 
         # A delegation that is still running is not a result. Park the task
