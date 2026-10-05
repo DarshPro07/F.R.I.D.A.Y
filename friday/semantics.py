@@ -141,6 +141,8 @@ _OPERATION_BY_SUFFIX = {
     'disks': LIST,
     'search': SEARCH,
     'find': SEARCH,
+    # The capability-side twin of the ('look', 'up') phrasal verb below.
+    'lookup': SEARCH,
     'channel': SEARCH,
     'open': OPEN,
     'launch': OPEN,

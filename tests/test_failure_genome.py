@@ -64,6 +64,79 @@ def test_a_repair_from_another_task_class_is_not_offered(tmp_path):
                       task_class="db-migration") is None
 
 
+class _Tools:
+    """Collects what `register(mcp)` decorates, so the MCP wrappers can be
+    called as plain functions."""
+
+    def __init__(self):
+        self.fns = {}
+
+    def tool(self):
+        def deco(fn):
+            self.fns[fn.__name__] = fn
+            return fn
+        return deco
+
+
+def _registered(monkeypatch, tmp_path):
+    from friday.tools import vnext_control
+    monkeypatch.setenv("ADA_DB", str(tmp_path / "genome.sqlite3"))
+    tools = _Tools()
+    vnext_control.register(tools)
+    return tools.fns
+
+
+def test_friday_can_record_a_root_caused_failure_and_it_comes_back(
+        monkeypatch, tmp_path):
+    """The producer. Retrieval was wired, capture had no caller, so the genome
+    stayed empty in production. The MCP tool is the call site: Friday records
+    a failure once it has the root cause, and the next request that looks like
+    it gets the repair in its memory bundle before a model plans."""
+    from friday import memory_stack
+    fns = _registered(monkeypatch, tmp_path)
+
+    out = fns["failure_capture"](
+        symptom="voice turn times out after the Hermes broker restarts",
+        root_cause="the session kept the dead broker's MCP handle",
+        repair="re-resolve the broker handle on reconnect",
+        task_class="voice-turn",
+        applicability=["the broker runs out of process"])
+    assert out["status"] == "captured"
+
+    looked_up = fns["failure_lookup"](
+        "the voice turn times out again after a broker restart",
+        task_class="voice-turn")
+    assert looked_up["status"] == "succeeded"
+    assert "re-resolve the broker handle" in looked_up["matches"][0]["repair"]
+    assert looked_up["matches"][0]["applicability"] == [
+        "the broker runs out of process"]
+
+    tier = memory_stack.failures("the voice turn times out after a broker restart")
+    assert [i["repair"] for i in tier["items"]] == [
+        "re-resolve the broker handle on reconnect"]
+
+
+def test_the_tool_refuses_a_failure_nobody_root_caused(monkeypatch, tmp_path):
+    fns = _registered(monkeypatch, tmp_path)
+    out = fns["failure_capture"](symptom="it broke again", root_cause="",
+                                 repair="")
+    assert out["status"] == "refused"
+    assert fns["failure_lookup"]("it broke again")["matches"] == []
+
+
+def test_a_secret_in_a_failure_is_never_stored(tmp_path):
+    """Retrieved records are placed in the model's context, so a token pasted
+    into a repair note would be handed to every later task that matches."""
+    g = genome(tmp_path)
+    out = g.capture(fg.FailureRecord(
+        symptom="gateway returns 401 on every call",
+        root_cause="the key was rotated",
+        repair="set the key to sk-" + "a1b2c3d4e5f6g7h8i9j0k1l2m3n4"))
+    assert out["status"] == "refused"
+    assert out["missing"] == []
+    assert g.listing() == []
+
+
 def test_a_symptom_with_no_root_cause_or_repair_is_refused(tmp_path):
     out = genome(tmp_path).capture(fg.FailureRecord(
         symptom="it broke again", root_cause="  ", repair=""))

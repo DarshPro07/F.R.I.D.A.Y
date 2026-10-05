@@ -85,6 +85,20 @@ def test_no_capability_gets_its_operation_by_falling_through():
         f"_OVERRIDES - do not leave it to the default.")
 
 
+def test_lookup_is_a_search_on_the_capability_side_too():
+    """
+    "look up" is already SEARCH on the request side (`_PHRASAL_VERBS`); the
+    capability side had no `lookup` verb, so `failure_lookup` defaulted to
+    READ and could not be reached by "look up what fixed this". The rule
+    carries it, not an override: the override table is capped.
+    """
+    assert S.for_capability("failure_lookup")[0] == S.SEARCH
+    assert not S.defaulted("failure_lookup")
+    assert "failure_lookup" not in S._OVERRIDES
+    assert S.compatible(S.for_request("look up what fixed this failure"),
+                        "failure_lookup")
+
+
 def test_the_override_table_stays_small():
     """
     Overrides are corrections to the rules. A long list of them means the

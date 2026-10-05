@@ -2239,6 +2239,20 @@ _ALL = (
         side_effect='read',
     ),
     Capability(
+        id='failure_capture',
+        intent_examples=('remember what fixed that failure', 'record the root cause and the repair'),
+        description='Record a root-caused failure and its repair so the same failure is met with the fix. Refused without symptom, root cause and repair, or if it carries a secret.',
+        execution_scope='agent_runtime',
+        side_effect='write',
+    ),
+    Capability(
+        id='failure_lookup',
+        intent_examples=('have we seen this failure before', 'what fixed this last time'),
+        description='Prior root-caused failures matching a symptom, each with the repair that worked and its applicability conditions.',
+        execution_scope='agent_runtime',
+        side_effect='read',
+    ),
+    Capability(
         id='connector_list',
         intent_examples=('which ai providers can you connect to', 'list the available model connectors'),
         negative_examples=('check my computer', 'list my files'),

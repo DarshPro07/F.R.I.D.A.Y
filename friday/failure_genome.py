@@ -26,6 +26,11 @@ Retrieval is wired as a memory tier (`friday.memory_stack.failures`), so the
 matching prior repair is in the bundle BEFORE a model plans the task. Nothing
 has to remember to ask -- which is the whole of "before repeating a known
 failure pattern".
+
+Capture is wired as the MCP tools `failure_capture` / `failure_lookup`
+(`friday/tools/vnext_control.py`): Friday records a failure once it has the
+root cause and the repair that worked. Without a producer the tier above
+would retrieve from an empty table.
 """
 
 from __future__ import annotations
@@ -162,6 +167,12 @@ class FailureGenome:
                             "cause and the repair that worked; without them "
                             "it is a bug report, not reusable knowledge",
                     "missing": missing}
+        blocked = _inadmissible(record)
+        if blocked:
+            return {"status": "refused", "missing": [],
+                    "note": f"not stored: {blocked}. Retrieved records are "
+                            "placed in the model's context, so a failure "
+                            "note may not carry secrets or sensitive data"}
         now = time.time()
         existing = self._same_failure(record)
         values = (record.symptom.strip(), record.environment,
@@ -253,6 +264,18 @@ class FailureGenome:
         rows = self._rows()
         return [dict(r, applicability=_loads(r["applicability"])) for r in rows
                 if not task_class or r["task_class"] == task_class]
+
+
+def _inadmissible(record: FailureRecord) -> str | None:
+    """Why this record may not be remembered, by the same guard the brain
+    ledger applies (NON_NEGOTIABLE 4: secrets never enter memory)."""
+    from friday.brain import _sensitive
+    text = "\n".join([record.symptom, record.environment, record.task_class,
+                      record.failed_approach, record.wrong_assumption,
+                      record.root_cause, record.repair, record.prevention,
+                      record.regression_test, record.skill_candidate,
+                      *record.applicability])
+    return _sensitive(text)
 
 
 def _loads(raw: str) -> list[str]:

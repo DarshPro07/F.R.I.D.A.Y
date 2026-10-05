@@ -396,6 +396,12 @@ CARDS: dict[str, Card] = {
                         "save that procedure as a skill", "", "skill_list"),
     "skill_list": _c("operations", "list skill candidates and validated skills by state", "what skills do you have, learned skills",
                      "list your skills", "", "skill_capture"),
+    "failure_capture": _c("operations", "record a root-caused failure and the repair that worked",
+                          "remember what fixed that, save the root cause", "record that fix so it is not repeated", "",
+                          "failure_lookup"),
+    "failure_lookup": _c("operations", "find a prior root-caused failure that matches this symptom and its repair",
+                         "have we seen this before, what fixed this last time", "has this broken before", "",
+                         "failure_capture"),
     # -- policy, spend, secrets, connectors ---------------------------------
     "contract_pending_questions": _c("operating_policy", "list first-run contract questions still unanswered",
                                      "onboarding questions, setup questions left", "what setup questions remain", "",

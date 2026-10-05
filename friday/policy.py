@@ -598,6 +598,8 @@ TOOL_CATEGORIES: dict[str, str] = {
     'operation_update': MEMORY_WRITE,
     'skill_capture': MEMORY_WRITE,
     'skill_list': READ_LOCAL_SAFE,
+    'failure_capture': MEMORY_WRITE,
+    'failure_lookup': READ_LOCAL_SAFE,
     'memory.record_utterance': MEMORY_WRITE,
     'memory.forget': DELETE,
     'profile.learn': MEMORY_WRITE,

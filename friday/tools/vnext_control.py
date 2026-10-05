@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 
+from friday import failure_genome as fg
 from friday import orgplane as op
 from friday import skill_ladder as sl
 from friday.first_run import FirstRunContract
@@ -189,5 +190,49 @@ def register(mcp):
         try:
             return {"status": "succeeded",
                     "skills": sl.SkillLadder().listing(state)}
+        except Exception as exc:                             # noqa: BLE001
+            return {"status": "failed", "error": str(exc)[:500]}
+
+    # -- failure genome ----------------------------------------------------
+
+    @mcp.tool()
+    def failure_capture(symptom: str, root_cause: str, repair: str,
+                        task_class: str = "", environment: str = "",
+                        failed_approach: str = "", wrong_assumption: str = "",
+                        prevention: str = "", regression_test: str = "",
+                        skill_candidate: str = "",
+                        applicability: list[str] | None = None) -> dict:
+        """
+        Record a failure you ROOT-CAUSED and repaired, so the same failure is
+        met with the fix instead of rediscovered. Needs the symptom, the root
+        cause and the repair that worked; a failure you could not explain is
+        refused. `task_class` is the kind of work (e.g. voice-turn,
+        db-migration) and keeps the repair from being offered elsewhere.
+        `applicability` lists the conditions under which the repair holds.
+        Never put secrets in any field.
+        """
+        try:
+            return fg.FailureGenome().capture(fg.FailureRecord(
+                symptom=symptom, root_cause=root_cause, repair=repair,
+                task_class=task_class, environment=environment,
+                failed_approach=failed_approach,
+                wrong_assumption=wrong_assumption, prevention=prevention,
+                regression_test=regression_test,
+                skill_candidate=skill_candidate,
+                applicability=list(applicability or [])))
+        except Exception as exc:                             # noqa: BLE001
+            return {"status": "failed", "error": str(exc)[:500]}
+
+    @mcp.tool()
+    def failure_lookup(symptom: str, task_class: str = "",
+                       environment: str = "") -> dict:
+        """Prior root-caused failures that look like this symptom, best
+        first, each with the repair that worked. Check its `applicability`
+        conditions hold before applying a repair."""
+        try:
+            return {"status": "succeeded",
+                    "matches": fg.FailureGenome().matches(
+                        symptom, task_class=task_class,
+                        environment=environment)}
         except Exception as exc:                             # noqa: BLE001
             return {"status": "failed", "error": str(exc)[:500]}
