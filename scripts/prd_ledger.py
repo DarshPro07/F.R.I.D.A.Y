@@ -3540,6 +3540,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Routing now consults a measured-benchmark store fed by golden.Report runs. A declaration alone keeps a route usable but never promotes it; only a report with every gate passed does. require_measured opts into refusal. (build run, commit 0029c7e92)',
         "next_action": "GAPS: The one failure is tests/test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop: @live, the provider answered 'failed' (auth/provider config), outside the gate marker set; not run on the unchanged tree, so pre-existing is inferred, not proven.; Assumed: latest report per route replaces earlier; no expiry; measured-below-target demotes (kept usable, unpromoted) unless require_measured. Nothing sets require_measured yet.; Benchmarks are per route, not per task class: Report carries no task class.",
     }),
+    ('EVAL-002', {
+        "status": PARTIAL,
+        "current_implementation": 'Context Lab now also measures superseding a resolved fact (real Store, in-memory) beside open contradictions. Release report already carries context metrics and a context_lab gate; 9 of 14 scenarios run, 5 stay unexercised with a reason. (build run, commit 01218d062)',
+        "next_action": 'GAPS: 5 of 14 scenarios unexercised (coverage 0.6429): semantic needles, multi-hop facts, aggregation, skill bloat, repository-scale code reasoning. Each needs a corpus or question set that does not exist; memory_graph reads the live database so it cannot be pointed at a fixture safely.; The packet cites a Report class at evaluation.py:550; evaluation.py has none. The release report is friday/golden.py Report, where the metrics live; evaluation.py is unchanged.',
+    }),
 ]
 
 
