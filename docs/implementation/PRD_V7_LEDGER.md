@@ -8,11 +8,11 @@ no next action, or (v7) a VERIFIED row naming no test or a citation that
 does not resolve on the tree.
 
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
-- PRD sha256: `e1b8540fdc17e53da06d507ea9faf563fd2a7ffdabfbd4016b04395a327e7142`
-- PRD size: 8182 lines, 291497 bytes
-- Repository HEAD: `95dc99a2a19d6edaf2fc487bb3ad8e66832b60de`
+- PRD sha256: `ebba0dd283c9d83aa3888596d93f5901cb6043a278d603a760c522568046eaa5`
+- PRD size: 8204 lines, 295141 bytes
+- Repository HEAD: `bd247f025dd4dd10537503b365fdf2f917027e36`
 - Uncommitted paths at generation: 43
-- Generated: 2026-10-05T15:26:16+05:30
+- Generated: 2026-10-05T15:28:39+05:30
 
 ## Status vocabulary
 
@@ -27,13 +27,13 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 80 |
+| MISSING | 88 |
 | PARTIAL | 61 |
 | VERIFIED | 36 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
 | PARKED_BY_OWNER | 1 |
-| **total** | **189** |
+| **total** | **197** |
 
 Unresolved P0: 21 (CORE-001, INTENT-001, TRAJ-001, CTX-001, CTX-002, CTX-003, MEM-002, MEM-003, SEC-005, RES-001, EVAL-001, ACT-001, MCP-001, CYBER-002, DUR-001, BCON-001, APPROVAL-001, JIT-001, RES-002, EXEC-SBX-001, MODEL-012)
 
@@ -527,6 +527,19 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
 | MODEL-012 | P0 | **PARTIAL** | FRIDAY can think through a signed-in coding-agent CLI (Claude Code, Codex, Antigravity) as a model-gateway provider when no API key works. | With no working API key, model.infer routes to the CLI provider: it is registered in the model registry, passes MODEL-002's semantic probe, and FRIDAY answers a text and a voice turn end to end through FRIDAY.exe; each call's cost is recorded; the CLI runs as pure completion with no tools, its output treated as model text, never as commands; an absent or signed-out CLI reports UNAVAILABLE and the route fails over or says so. | - | `friday/model_gateway.py`, `friday/model_capabilities.py` | GAPS: 3 failures in tests/test_voice_path.py (tts_produces_real_audio, tts_stt_round_trip, stt_needs_an_http_session_outside_a_job): real OpenAI TTS calls get 401 invalid_api_key on this host; they use build_tts/build_stt, untouched by this slice. Not run against the pre-change tree.; Slice 2: durable 401 route verdicts in the tier table (a rejected key is still retried every ~2 min) and per-call / daily CLI cost caps (owner cap $40 soft / $45 hard is not enforced on this route).; Slice 3: Codex and Antigravity backends - only where a no-tools mode is verified (Codex 0.121.0 here is too old; Antigravity has no headless completion command).; Slice 4: a live text and voice turn through FRIDAY.exe; voice also needs working LiveKit and TTS keys (.env holds placeholders). Nothing here was run against the real claude CLI or the exe.; build_resilient_llm treats 'CLI configured' as discover_backends() non-empty (no configured() exists): enabled, not installed or signed in. With no API key and no usable CLI the failure surfaces at turn time as APIConnectionError, not at startup.; With the CLI route the voice agent has no tools: GatewayLLM ignores them, so a fallback turn cannot act, only reply.; A cancelled stream (barge-in) cannot stop the in-flight CLI call in its thread; the call completes, is paid and recorded, and its text is discarded. FallbackAdapter recovery probes also issue a real CLI call after a GatewayLLM failure (one at a time).; implementer did not claim acceptance met |
+
+## PRD section 108
+
+| id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
+|---|---|---|---|---|---|---|---|
+| DEVICE-001 | P2 | **MISSING** | FRIDAY provides a provider-neutral interface for paired physical devices that expose sensors, events, displays, audio and actions. | One DeviceProvider interface with hermes-gadget-sdk as its first backend (HermesGadgetAdapter); FRIDAY runs with the backend absent (UNAVAILABLE, never a boot failure); a second provider (MQTT or Home Assistant) can be added without changing callers. | - | `friday/fabric.py`, `friday/policy.py` | Owner 2026-10-05 (docs/plans/build-harness/00-owner-directive-2026-10-05.md): HIGH_VALUE_WRAP_AND_ADAPT behind FRIDAY, never a visible Hermes product; not in active P0 work. Ranked P2 so it waits for the core burn-down (assumed; the owner may re-rank). Adolanium/hermes-gadget-sdk is a Capability Marketplace candidate (HIGH_VALUE_CANDIDATE): clone, read the licence and pin it only when DEVICE-001 starts. |
+| DEVICE-002 | P2 | **MISSING** | Devices may advertise capabilities dynamically, but they enter the Capability Registry and Policy Engine before any model can use them. | An advertised action (e.g. relay.set) appears to the model only as a registered capability (hardware.relay.set) with a policy category; a test proves an advertised action that was not registered cannot be called. | - | `friday/fabric.py`, `friday/policy.py` | Owner 2026-10-05 (docs/plans/build-harness/00-owner-directive-2026-10-05.md): HIGH_VALUE_WRAP_AND_ADAPT behind FRIDAY, never a visible Hermes product; not in active P0 work. Ranked P2 so it waits for the core burn-down (assumed; the owner may re-rank). Adolanium/hermes-gadget-sdk is a Capability Marketplace candidate (HIGH_VALUE_CANDIDATE): clone, read the licence and pin it only when DEVICE-001 starts. |
+| DEVICE-003 | P2 | **MISSING** | Every device has a persistent identity and an explicit pairing and trust lifecycle. | UNPAIRED -> pairing code -> owner approval -> PAIRED_UNVERIFIED -> capability inventory -> policy assignment -> ACTIVE, persisted; no device on the LAN is trusted without the owner's approval; wss:// is required off the trusted local network. | - | `friday/fabric.py`, `friday/policy.py` | Owner 2026-10-05 (docs/plans/build-harness/00-owner-directive-2026-10-05.md): HIGH_VALUE_WRAP_AND_ADAPT behind FRIDAY, never a visible Hermes product; not in active P0 work. Ranked P2 so it waits for the core burn-down (assumed; the owner may re-rank). Adolanium/hermes-gadget-sdk is a Capability Marketplace candidate (HIGH_VALUE_CANDIDATE): clone, read the licence and pin it only when DEVICE-001 starts. |
+| DEVICE-004 | P2 | **MISSING** | Physical-world actions receive risk classifications independent of the model or the device-provided description. | A device's own description cannot lower a risk class: led.set runs automatically, door.unlock needs confirmation, motor.start gets the stronger physical-hazard policy; negative controls prove each. | - | `friday/fabric.py`, `friday/policy.py` | Owner 2026-10-05 (docs/plans/build-harness/00-owner-directive-2026-10-05.md): HIGH_VALUE_WRAP_AND_ADAPT behind FRIDAY, never a visible Hermes product; not in active P0 work. Ranked P2 so it waits for the core burn-down (assumed; the owner may re-rank). Adolanium/hermes-gadget-sdk is a Capability Marketplace candidate (HIGH_VALUE_CANDIDATE): clone, read the licence and pin it only when DEVICE-001 starts. |
+| DEVICE-005 | P2 | **MISSING** | Lightweight edge devices act as microphone, speaker and display terminals while inference and canonical memory stay with FRIDAY Core. | A paired terminal (simulator first) records on a button, FRIDAY answers through its own brain and memory, and the reply plays on the device; several terminals share one FRIDAY, never independent assistants. | - | `friday/fabric.py`, `friday/policy.py` | Owner 2026-10-05 (docs/plans/build-harness/00-owner-directive-2026-10-05.md): HIGH_VALUE_WRAP_AND_ADAPT behind FRIDAY, never a visible Hermes product; not in active P0 work. Ranked P2 so it waits for the core burn-down (assumed; the owner may re-rank). Adolanium/hermes-gadget-sdk is a Capability Marketplace candidate (HIGH_VALUE_CANDIDATE): clone, read the licence and pin it only when DEVICE-001 starts. |
+| DEVICE-006 | P2 | **MISSING** | FRIDAY accepts state and event streams from approved devices and routes them into the Objective OS and proactive routines according to policy. | A sensor value and an event from an ACTIVE device reach a routine (e.g. tell me when someone enters the room); an unpaired device's events are dropped and logged. | - | `friday/fabric.py`, `friday/policy.py` | Owner 2026-10-05 (docs/plans/build-harness/00-owner-directive-2026-10-05.md): HIGH_VALUE_WRAP_AND_ADAPT behind FRIDAY, never a visible Hermes product; not in active P0 work. Ranked P2 so it waits for the core burn-down (assumed; the owner may re-rank). Adolanium/hermes-gadget-sdk is a Capability Marketplace candidate (HIGH_VALUE_CANDIDATE): clone, read the licence and pin it only when DEVICE-001 starts. |
+| DEVICE-007 | P2 | **MISSING** | Device firmware and runtime updates are integrity-checked, testable and rollback-capable. | An update verifies its hash or signature, goes to one test device, passes a health probe, then rolls out; a failed probe rolls back to the prior release. | - | `friday/fabric.py`, `friday/policy.py` | Owner 2026-10-05 (docs/plans/build-harness/00-owner-directive-2026-10-05.md): HIGH_VALUE_WRAP_AND_ADAPT behind FRIDAY, never a visible Hermes product; not in active P0 work. Ranked P2 so it waits for the core burn-down (assumed; the owner may re-rank). Adolanium/hermes-gadget-sdk is a Capability Marketplace candidate (HIGH_VALUE_CANDIDATE): clone, read the licence and pin it only when DEVICE-001 starts. |
+| DEVICE-008 | P2 | **MISSING** | A new device integration proves its core behaviour in a simulator or emulator before physical promotion when one exists. | The hermes-gadget-sdk desktop simulator pairs, runs actions, sensors, events, voice and reconnect in a test before any physical hardware is used. | - | `friday/fabric.py`, `friday/policy.py` | Owner 2026-10-05 (docs/plans/build-harness/00-owner-directive-2026-10-05.md): HIGH_VALUE_WRAP_AND_ADAPT behind FRIDAY, never a visible Hermes product; not in active P0 work. Ranked P2 so it waits for the core burn-down (assumed; the owner may re-rank). Adolanium/hermes-gadget-sdk is a Capability Marketplace candidate (HIGH_VALUE_CANDIDATE): clone, read the licence and pin it only when DEVICE-001 starts. |
 
 ## Owner direction recorded against a requirement
 

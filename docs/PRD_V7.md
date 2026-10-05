@@ -1904,6 +1904,28 @@ working set, progressive disclosure and context health (CTX-001, CTX-002, CTX-00
 |---|---|---|---|
 | MODEL-012 | P0 | FRIDAY can think through a signed-in coding-agent CLI (Claude Code, Codex, Antigravity) as a model-gateway provider when no API key works. | With no working API key, model.infer routes to the CLI provider, which passes the semantic probe; FRIDAY.exe answers a text and a voice turn end to end; each call's cost recorded; the CLI runs with no tools and its output is model text, never commands; an absent CLI reports UNAVAILABLE. |
 
+## 108. Amendment A14 (2026-10-05): the Device Fabric
+
+> **Transcription note (added 2026-10-05).** From the owner's directive recorded verbatim in
+> `docs/plans/build-harness/00-owner-directive-2026-10-05.md`: Adolanium/hermes-gadget-sdk (ESP32-S3, Raspberry Pi, desktop simulator, pairing,
+> JSON-Schema device actions, sensors, events, OTA with rollback) is adopted as the first backend of a
+> provider-neutral Device Fabric, wrapped behind FRIDAY and never a visible Hermes product. Device
+> actions reach a model only through the Capability Registry and the PolicyEngine. The owner asked that
+> it not interrupt active P0 work, so the rows are ranked P2 (assumed; the owner may re-rank). The
+> repository is a Capability Marketplace candidate (HIGH_VALUE_CANDIDATE); it is cloned, its licence
+> read and its commit pinned only when DEVICE-001 starts.
+
+| ID | Pri | Requirement | Acceptance evidence |
+|---|---|---|---|
+| DEVICE-001 | P2 | FRIDAY provides a provider-neutral interface for paired physical devices that expose sensors, events, displays, audio and actions. | One DeviceProvider interface with hermes-gadget-sdk as its first backend (HermesGadgetAdapter); FRIDAY runs with the backend absent (UNAVAILABLE, never a boot failure); a second provider (MQTT or Home Assistant) can be added without changing callers. |
+| DEVICE-002 | P2 | Devices may advertise capabilities dynamically, but they enter the Capability Registry and Policy Engine before any model can use them. | An advertised action (e.g. relay.set) appears to the model only as a registered capability (hardware.relay.set) with a policy category; a test proves an advertised action that was not registered cannot be called. |
+| DEVICE-003 | P2 | Every device has a persistent identity and an explicit pairing and trust lifecycle. | UNPAIRED -> pairing code -> owner approval -> PAIRED_UNVERIFIED -> capability inventory -> policy assignment -> ACTIVE, persisted; no device on the LAN is trusted without the owner's approval; wss:// is required off the trusted local network. |
+| DEVICE-004 | P2 | Physical-world actions receive risk classifications independent of the model or the device-provided description. | A device's own description cannot lower a risk class: led.set runs automatically, door.unlock needs confirmation, motor.start gets the stronger physical-hazard policy; negative controls prove each. |
+| DEVICE-005 | P2 | Lightweight edge devices act as microphone, speaker and display terminals while inference and canonical memory stay with FRIDAY Core. | A paired terminal (simulator first) records on a button, FRIDAY answers through its own brain and memory, and the reply plays on the device; several terminals share one FRIDAY, never independent assistants. |
+| DEVICE-006 | P2 | FRIDAY accepts state and event streams from approved devices and routes them into the Objective OS and proactive routines according to policy. | A sensor value and an event from an ACTIVE device reach a routine (e.g. tell me when someone enters the room); an unpaired device's events are dropped and logged. |
+| DEVICE-007 | P2 | Device firmware and runtime updates are integrity-checked, testable and rollback-capable. | An update verifies its hash or signature, goes to one test device, passes a health probe, then rolls out; a failed probe rolls back to the prior release. |
+| DEVICE-008 | P2 | A new device integration proves its core behaviour in a simulator or emulator before physical promotion when one exists. | The hermes-gadget-sdk desktop simulator pairs, runs actions, sensors, events, voice and reconnect in a test before any physical hardware is used. |
+
 ## Appendix C. Implementation controller, updated 2026-09-26 (owner's text, verbatim)
 
 ```text
