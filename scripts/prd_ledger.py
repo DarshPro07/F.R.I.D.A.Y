@@ -3575,6 +3575,35 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Attempt 4 fixes the integration failure of attempt 3. The MCP tools failure_capture/failure_lookup (the product-code producer for the Failure Genome) were correct, but failure_lookup had no operation rule: 'lookup' was not a verb in semantics._OPERATION_BY_SUFFIX, so it silently defaulted to READ and tests/test_semantics.py::test_no_capability_gets_its_operation_by_falling_through failed. Fixed at the root with the rule 'lookup': SEARCH (the capability-side twin of the existing ('look','up'): SEARCH phrasal verb), not an override, because _OVERRIDES is already at its cap of 25. New test test_lookup_is_a_search_on_the_capability_side_too fails without the rule and passes with it; the existing guard also fails without it (names ['failure_lookup']) and passes with it. Re-verified the earlier work by reading it: the tests call the real MCP wrappers and assert the recurrence through memory_stack.failures; capture refuses secret-shaped content. (build run, commit 5833ffba8)",
         "next_action": 'GAPS: Capture is on-demand: Friday must call failure_capture; the Hermes handoff path does not auto-record a failure because Handoff carries no root_cause/repair fields. Closing it needs a Handoff schema change in the objective-engine service, an owner/design decision outside this requirement.; Matching is lexical (memory_stack._tokens Jaccard >= 0.35 plus task_class/environment bonuses); a recurrence described in entirely different words will not match. Embeddings are not in the memory stack today.; applicability conditions are returned unevaluated (free prose); the caller must check them.; The full four-chunk baseline suite (scripts/baseline_suite.py) was not re-run in this session; only the 495 tests above were. The integration gate is the full-suite check.',
     }),
+    ('MODEL-012', {
+        "status": PARTIAL,
+        "next_action": (
+            "RULING 2026-10-06 (owner: 'test all capabilities from end to end'; capability test of FRIDAY.exe in "
+            '--bypass-login mode): SLICE NOW, before opencode/codex - tool calls through the model gateway. Witho'
+            "ut a working GOOGLE_API_KEY the control room's typed brain (friday/voice_brain.py _cli_reply) has NO"
+            ' tools: it answers and recalls but cannot act, and models narrate actions they never took (live: GLM'
+            "-5.2 via openrouter said 'Writing it to my workspace now, sir - PAPAYA-77 stored.' with no tool call"
+            '). STATICALLY_CONFIRMED: Hermes is now 3729602 and agent.auxiliary_client.call_llm(..., tools: list '
+            '= None, route_info, latency_info, reasoning_config) accepts tools; friday/hermes_model_gateway_worke'
+            "r.py _accepted() passes optional kwargs only when call_llm takes them (9f5517a), so add 'tools' ther"
+            'e and return message.tool_calls (name, JSON arguments, id) from the response; the Gemini turn in voi'
+            'ce_brain.reply already runs one generic function, use_capability(family, operation, arguments) (_cap'
+            'ability_tool), executes it with _run_capability(fam, op, args), loops at most _MAX_TOOL_ROUNDS, and '
+            'gates the answer with _honest_about_hermes(answer, used) and _honest_about_acting(answer, acted, cal'
+            'ls_made). DESIGN (decided): ModelGatewayRequest gains tools (OpenAI function schemas) and ModelGatew'
+            'ayResult gains tool_calls; a request with tools prefers routes that can carry them (Hermes/API route'
+            "s) and the signed-in CLI routes stay tool-less fallbacks (claude -p runs --tools ''), keeping _NO_TO"
+            'OLS_NOTE when a tool-less route answers; _cli_reply becomes the gateway turn: same use_capability sc'
+            'hema in OpenAI form, tool results appended as role tool messages, the same round cap and both honest'
+            'y gates fed with what actually ran. Tests: the fake worker (tests/fake_model_gateway_worker.py) answ'
+            'ers one tool call then a final text; voice_brain runs _run_capability once and the reply reflects it'
+            '; a claim with no call is still refused; a CLI-only route still answers without tools. One live test'
+            ', marked live, through the real Hermes. The unintegrated slice-2 work (durable 401 verdicts, CLI cos'
+            't caps) from the BLOCKED 2026-10-05 run is saved in data/build_runs/MODEL-012.slice2-unintegrated.pa'
+            'tch with its evidence in data/build_runs/MODEL-012.slice2-evidence.json - read it, keep what still f'
+            'its, do not apply it blindly.'
+        ),
+    }),
 ]
 
 
