@@ -106,6 +106,22 @@ def test_an_undeclared_route_is_profiled_and_then_routed_by_the_unmodified_gatew
     assert (BACKEND, MODEL) not in MC.CAPABILITIES      # the registry's source was never edited
 
 
+def test_the_gateway_says_a_profiled_route_was_measured_not_declared(clock):
+    """Developer Mode reads the verdict reason to tell what a routing choice
+    rests on; "declared capable" for a route nobody declared would hide that."""
+    _profile(MockRoute(clock), clock)
+    fit, reason = MG.capability_verdict(BACKEND, MODEL, required=("tools",))
+    assert fit
+    assert reason == "profiled capable (measured, not declared)"
+
+
+def test_a_profiled_route_that_failed_a_probe_is_refused_as_profiled_not_declared(clock):
+    _profile(MockRoute(clock, tools="refuse"), clock)
+    fit, reason = MG.capability_verdict(BACKEND, MODEL, required=("tools",))
+    assert not fit
+    assert reason == "profiled without tools"
+
+
 def test_capabilities_come_from_what_the_route_did_not_from_its_name(clock):
     route = MockRoute(clock, tools="refuse", vision="blind", structured="prose")
     profile = MP.profile_route(BACKEND, "mock-vision-tools-pro", route, clock=clock)

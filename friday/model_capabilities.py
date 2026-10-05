@@ -206,6 +206,12 @@ def record_profile(cap: ModelCapabilities, evidence, *, profiled_at: str) -> Pro
     return record
 
 
+def is_declared(backend: str, model_id: str) -> bool:
+    """True when the capabilities `get` returns for this route were declared by
+    the owner; False when they came from a stored profile."""
+    return (backend, model_id) in CAPABILITIES
+
+
 def get(backend: str, model_id: str) -> ModelCapabilities:
     key = (backend, model_id)
     if key in CAPABILITIES:

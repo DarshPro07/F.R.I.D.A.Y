@@ -580,12 +580,17 @@ def capability_verdict(provider: str, model: str, *,
         caps = MC.get(provider, model)
     except Exception:
         return True, "no declared capabilities for this route; not filtered"
+    # A stored profile (friday/model_profiling.py) is routed on like a
+    # declaration, but the reason must not claim the owner declared it.
+    source = "declared" if MC.is_declared(provider, model) else "profiled"
     for name in required:
         if not getattr(caps, CAPABILITY_FIELDS[name]):
-            return False, f"declared without {name}"
+            return False, f"{source} without {name}"
     if input_tokens and caps.max_context and input_tokens > caps.max_context:
-        return False, (f"{input_tokens} input tokens exceed the declared "
+        return False, (f"{input_tokens} input tokens exceed the {source} "
                        f"{caps.max_context}-token context")
+    if source == "profiled":
+        return True, "profiled capable (measured, not declared)"
     return True, "declared capable"
 
 
