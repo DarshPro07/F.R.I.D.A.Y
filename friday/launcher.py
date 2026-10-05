@@ -1237,11 +1237,36 @@ def enable_diagnostics() -> None:
     _say(f"diagnostics on: {sys.executable} frozen={frozen()} argv={sys.argv[1:]}")
 
 
+def use_installed_browsers(is_frozen: bool | None = None) -> str:
+    """Point a frozen FRIDAY's Playwright at the browsers in the user's standard folder.
+
+    Frozen, Playwright looks only for browsers bundled inside the package (it does
+    `env.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")`). The build bundles none, so
+    every browser capability failed BROWSER_BINARY_MISSING although `playwright
+    install` had put chromium in %LOCALAPPDATA%\\ms-playwright (Chrome test of
+    FRIDAY.exe, 2026-10-05). That folder is Playwright's own default when not frozen.
+    An explicit PLAYWRIGHT_BROWSERS_PATH is left alone. Returns the path it set, or ""."""
+    if not (frozen() if is_frozen is None else is_frozen):
+        return ""
+    if os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        return ""
+    base = os.environ.get("LOCALAPPDATA", "")
+    installed = Path(base) / "ms-playwright" if base else None
+    if installed is None or not installed.is_dir():
+        return ""
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(installed)
+    return str(installed)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
     if debug_mode():
         enable_diagnostics()
+
+    # Before any role starts: every FRIDAY process is a child of this one and
+    # inherits the setting, and Playwright reads it when it starts its driver.
+    use_installed_browsers()
 
     if frozen():
         served = maybe_run_as_python(argv)

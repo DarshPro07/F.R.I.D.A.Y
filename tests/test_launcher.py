@@ -646,3 +646,27 @@ def test_an_unknown_role_is_refused(capsys, monkeypatch, tmp_path):
 def test_exclusive_modes_cannot_be_combined():
     with pytest.raises(SystemExit):
         L.build_parser().parse_args(["--stop", "--doctor"])
+
+
+
+def test_a_frozen_friday_uses_the_browsers_playwright_installed_for_the_user(tmp_path, monkeypatch):
+    # Chrome test of FRIDAY.exe, 2026-10-05: "browser open - unavailable",
+    # BROWSER_BINARY_MISSING, while chromium-1217 sat in %LOCALAPPDATA%\\ms-playwright.
+    (tmp_path / "ms-playwright" / "chromium-1217").mkdir(parents=True)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    assert L.use_installed_browsers(is_frozen=False) == ""          # a source run is Playwright's own default
+    assert "PLAYWRIGHT_BROWSERS_PATH" not in os.environ
+    assert L.use_installed_browsers(is_frozen=True) == str(tmp_path / "ms-playwright")
+    assert os.environ["PLAYWRIGHT_BROWSERS_PATH"] == str(tmp_path / "ms-playwright")
+
+
+def test_an_explicit_browsers_path_or_a_missing_folder_is_left_alone(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))                # no ms-playwright here
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    assert L.use_installed_browsers(is_frozen=True) == ""
+    assert "PLAYWRIGHT_BROWSERS_PATH" not in os.environ
+    (tmp_path / "ms-playwright").mkdir()
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "D:/my-browsers")
+    assert L.use_installed_browsers(is_frozen=True) == ""
+    assert os.environ["PLAYWRIGHT_BROWSERS_PATH"] == "D:/my-browsers"
