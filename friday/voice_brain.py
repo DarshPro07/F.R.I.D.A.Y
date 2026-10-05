@@ -900,10 +900,14 @@ def _extract_url(s):
 
 def _memory_context(text):
     """The four-tier context for this request (preferences, vault specs, rules,
-    relations) under the memory budget -- friday/memory_stack. '' on failure."""
+    relations) under the memory budget -- friday/memory_stack, acted on by its
+    health verdict (friday/context_health: prune, or summarize with every rule,
+    preference and open contradiction kept). '' on failure."""
     try:
-        from friday import memory_stack
-        return memory_stack.aggregate(text, budget_tokens=900)["prompt"]
+        from friday import context_health, memory_stack
+        agg, _verdict = context_health.remediate(
+            memory_stack.aggregate(text, budget_tokens=900))
+        return agg["prompt"]
     except Exception:  # noqa: BLE001
         return ""
 

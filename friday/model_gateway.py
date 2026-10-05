@@ -1595,15 +1595,21 @@ class WorkingSet:
     #: How many critical fact lines the package carries (CTX-003); every one
     #: the caller named, or the compile raised.
     facts_kept: int = 0
+    #: The context-health verdict of the memory the caller supplied (CTX-004,
+    #: `friday.context_health.assess`), or empty when it supplied none.
+    health: dict = field(default_factory=dict)
 
     @property
     def total_tokens(self) -> int:
         return sum(self.sections.values())
 
     def telemetry(self) -> dict:
-        return {"sections": dict(self.sections), "dropped": list(self.dropped),
-                "total_tokens": self.total_tokens, "budget_tokens": self.budget_tokens,
-                "facts_kept": self.facts_kept}
+        out = {"sections": dict(self.sections), "dropped": list(self.dropped),
+               "total_tokens": self.total_tokens, "budget_tokens": self.budget_tokens,
+               "facts_kept": self.facts_kept}
+        if self.health:
+            out["health"] = dict(self.health)
+        return out
 
 
 _QUOTE_MARK = re.compile(r"(?m)^> ")
@@ -1613,7 +1619,7 @@ def compile_working_set(*, system: str = "", user: str, pinned=(), state=(),
                         facts=None, facts_bind: bool = True,
                         memory: str = "", code_refs=(), tools=(),
                         history: list[tuple[str, str]] = (), max_history_turns: int = 6,
-                        budget_tokens: int = 0) -> WorkingSet:
+                        budget_tokens: int = 0, health=None) -> WorkingSet:
     """
     The minimal working set for one model call (§19.2), within `budget_tokens`
     when one is given.
@@ -1700,7 +1706,8 @@ def compile_working_set(*, system: str = "", user: str, pinned=(), state=(),
     return WorkingSet(messages=messages, sections=kept,
                       priorities={name: SECTION_PRIORITY[name] for name in sizes},
                       dropped=tuple(dropped), budget_tokens=budget_tokens,
-                      facts_kept=len(facts.lines()) if facts is not None else 0)
+                      facts_kept=len(facts.lines()) if facts is not None else 0,
+                      health=dict(health or {}))
 
 
 @dataclass(frozen=True)

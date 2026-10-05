@@ -31,6 +31,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from friday import context_health
+
 ROOT = Path(__file__).resolve().parent.parent
 BUDGET_TOKENS = int(os.getenv("FRIDAY_MEMORY_BUDGET", "2000"))
 _STOP = {"the", "and", "for", "with", "that", "this", "from", "into", "your",
@@ -324,12 +326,17 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
     used, lines, injected = 0, [], {"preferences": 0, "specs": 0, "rules": 0,
                                     "relations": 0, "episodes": 0, "contacts": 0,
                                     "outcomes": 0}
+    # Line index -> what that line is. A header is a line with no entry here.
+    # `context_health` scores and shrinks the context from this, so it never
+    # has to parse the prompt text back into tiers.
+    meta = {}
 
-    def take(section, text, key):
+    def take(section, text, key, ts=None, kind=""):
         nonlocal used
         cost = _approx_tokens(text)
         if used + cost > budget:
             return False
+        meta[len(lines)] = {"tier": key, "ts": ts, "kind": kind}
         lines.append(text)
         used += cost
         injected[key] += 1
@@ -361,12 +368,12 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
             cost = _approx_tokens(line)
             if spent + cost > room:
                 break
-            kept.append(line)
+            kept.append((line, m.get("created_at")))
             spent += cost
         if kept:
             lines.append("WHAT WAS SAID BEFORE (most recent last):")
-            for line in reversed(kept):
-                if not take("episode", line, "episodes"):
+            for line, ts in reversed(kept):
+                if not take("episode", line, "episodes", ts=ts):
                     break
     if t7["items"]:
         # High priority, same reasoning as contacts/episodes above: this is
@@ -398,11 +405,16 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
             if not take("rel", "- %s -%s-> %s" % (e["from"], e["kind"], e["to"]), "relations"):
                 break
         for c in t4["conflicts"]:
-            take("rel", "- OPEN CONTRADICTION on %s: '%s' vs '%s'" % (c["subject"], c["existing"], c["proposed"]), "relations")
-    return {"task": task, "budget_tokens": budget, "tokens_used": used, "injected": injected,
-            "tiers": {"preferences": t1, "specs": t2, "rules": t3, "relations": t4,
-                      "episodes": t5, "contacts": t6, "outcomes": t7},
-            "prompt": "\n".join(lines)}
+            take("rel", "- OPEN CONTRADICTION on %s: '%s' vs '%s'" % (c["subject"], c["existing"], c["proposed"]),
+                 "relations", kind=context_health.CONTRADICTION)
+    result = {"task": task, "budget_tokens": budget, "tokens_used": used, "injected": injected,
+              "tiers": {"preferences": t1, "specs": t2, "rules": t3, "relations": t4,
+                        "episodes": t5, "contacts": t6, "outcomes": t7},
+              "layout": [dict(meta.get(i, {"tier": None}), text=text)
+                         for i, text in enumerate(lines)],
+              "prompt": "\n".join(lines)}
+    result["health"] = context_health.assess(result)
+    return result
 
 
 def overview():
