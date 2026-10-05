@@ -170,28 +170,21 @@ def camera_held_by_friday():
 
 def pin_allowed():
     """
-    (allowed, reason). A PIN proves knowledge; a face proves presence. So the
-    PIN opens the door only when no face could have been checked at all.
-
-    The subtle case, and the one that matters: Friday's own window holds the
-    camera, so the OS reports "a browser is using the camera" -- which would
-    look like grounds for a PIN while face recognition is in fact working
-    perfectly one window over. A page that has the camera says so with a
-    heartbeat, and that veto outranks everything except --password.
+    (allowed, reason). Owner ruling 2026-10-05: the PIN is a door of its own
+    beside the face - "create a symbol for login or typing pin too so that a
+    person could login through the pin" - not only the fallback for a busy
+    camera, as it was until then. What keeps it a door and not a hole: a PIN
+    can be set only on a fresh install, in --password mode, or from an
+    unlocked session (ui_server.api_pin_set); wrong PINs are locked out
+    (verify_pin); every attempt is logged.
     """
     if AUTH_MODE == "pin":
         return True, "started with --password"
+    if not has_pin():
+        return False, "no PIN is set"
     if camera_held_by_friday():
-        return False, "a Friday window has the camera -- your face is the way in, there"
-    try:
-        from friday import camera
-        cam = camera.status()
-    except Exception:  # noqa: BLE001
-        return True, "cannot see the camera state"
-    if cam["yield_to"] or cam["busy"]:
-        return True, cam["why"] or "the camera is in use"
-    return False, "the camera is free -- your face is the way in"
-
+        return True, "PIN (a Friday window is also reading your face)"
+    return True, "PIN"
 
 def verify_pin(pin):
     allowed, reason = pin_allowed()

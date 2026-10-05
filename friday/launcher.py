@@ -1214,7 +1214,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-agent", action="store_true", help="do not start the voice worker")
     parser.add_argument("--no-browser", action="store_true", help="serve the control room without opening a window")
     parser.add_argument("--password", action="store_true", help="control room gate by PIN instead of face")
-    parser.add_argument("--bypass-face", action="store_true", help="face recognition off for this run")
+    parser.add_argument("--bypass-face", "--bypass-login", dest="bypass_face", action="store_true",
+                        help="no login for this run (face and PIN gate off) - for testing; the room shows a "
+                             "LOGIN BYPASSED banner and the access log records it")
     return parser
 
 

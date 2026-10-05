@@ -812,14 +812,19 @@ async def api_camera(request):
 
 
 async def api_pin_set(request):
-    """Open only when no PIN exists yet; after that it takes an unlocked session."""
+    """Set or change the PIN. While locked, only the first PIN on a fresh install
+    (no owner enrolled) or in --password mode: an enrolled owner's room let anyone
+    at the screen set a first PIN and then walk in through it (found 2026-10-05).
+    Otherwise it takes an unlocked session."""
     try:
         data = await request.json()
     except Exception:  # noqa: BLE001
         data = {}
-    if access.has_pin() and not access.session_ok(_client_token(request)):
+    first_allowed = not access.has_pin() and (not access.enrolled() or access.AUTH_MODE == "pin")
+    if not first_allowed and not access.session_ok(_client_token(request)):
         access.log({"kind": "pin_set_refused"})
-        return JSONResponse({"ok": False, "error": "unlock first to change the PIN"}, status_code=423)
+        return JSONResponse({"ok": False, "error": "unlock with your face first to set or change the PIN"},
+                            status_code=423)
     return JSONResponse(await run_in_threadpool(access.set_pin, data.get("pin")))
 
 

@@ -517,6 +517,7 @@ async function startGate(){
   boot("WAKING","reading the gate");
   const s=await fetch("/api/auth/status").then(r=>r.json()).catch(()=>({locked:true,enrolled:false,gate:true}));
   AUTH=s;ENROLLED=!!s.enrolled;
+  if(!s.gate)bypassBanner();
   if(!s.gate||!s.locked){$("boot").classList.add("gone");await unlock(false);return;}
   setLocked(true);
   // Both start together. The camera is instant; the worker has shaders to
@@ -553,6 +554,7 @@ async function startGate(){
   window._hasCam=true;holdBeat(true);
   $("locks").textContent=ENROLLED?"Scanning for you."
     :"No owner is enrolled yet. Look at the camera and press Enrol, or add photos.";
+  pinDoor();
   $("boot").classList.add("gone");
   faceGate=new LIB.FaceGate($("lockv"),$("lockc"),{onStage:()=>{},
     onFace:async(desc,box)=>{lastDescriptor=desc;LIB.drawBoxes($("lockc"),$("lockv"),[{box,label:"face"}],{color:"#ffaa30"});
@@ -585,7 +587,11 @@ async function cameraBlocked(err){
   return pinPath({why,holders:cam.holders,canAsk:!meeting&&!stream});
 }
 
-/* The PIN is the fallback, never the shortcut: the server refuses it whenever the camera is free. */
+/* Owner ruling 2026-10-05: a visible PIN door beside the face, not only the fallback. */
+function pinDoor(){$("lockask").innerHTML='<button type="button" id="pindoor" title="Log in with your PIN" onclick="pinPath({why:\'Type your PIN.\',byChoice:true})">&#9000; Use PIN</button>';}
+/* --bypass-login: say it on every screen, so a test mode is never mistaken for a locked room. */
+function bypassBanner(){if($("bypassbanner"))return;document.body.insertAdjacentHTML("afterbegin",'<div id="bypassbanner" style="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:9999;background:#7a1f00;color:#ffd9b0;font:12px monospace;padding:3px 12px;border-radius:0 0 6px 6px">LOGIN BYPASSED - started with --bypass-login; anyone at this screen has the room</div>');}
+/* The PIN form: the fallback when no face can be read, or the door the person chose. */
 async function pinPath(opt){
   opt=opt||{};
   if(faceGate){faceGate.stop();faceGate=null;}
@@ -600,6 +606,7 @@ async function pinPath(opt){
     return;
   }
   if(opt.canAsk)$("lockask").innerHTML='<button onclick="askForCamera()">Ask for the camera</button>';
+  if(opt.byChoice)$("lockask").innerHTML='<button type="button" onclick="location.reload()">Use my face</button>';
   const box=$("pinbox");box.classList.add("on");
   if(!st.pin_set){$("pinlabel").textContent="Set a PIN — I will ask for it whenever the camera is busy";
     $("pingo").textContent="Set PIN";$("pin").placeholder="4+ characters";$("pinnote").textContent="";}
@@ -608,7 +615,7 @@ async function pinPath(opt){
   // if the camera frees up while you are standing here, go back to the face -- it is the stronger door
   clearInterval(window._camPoll);window._camPoll=setInterval(async()=>{
     if(!LOCKED)return clearInterval(window._camPoll);
-    if(opt.noCamera||opt.otherTab)return;
+    if(opt.noCamera||opt.otherTab||opt.byChoice)return;   // a chosen PIN door is not a wait for the camera
     try{const c=await fetch("/api/camera").then(r=>r.json());
       if(!c.busy&&!c.yield_to){clearInterval(window._camPoll);location.reload();}}catch(e){}},5000);
 }
@@ -697,6 +704,7 @@ async function lockNow(silent){if(!silent)try{await fetch("/api/auth/lock",{meth
   let camErr=null;
   try{await LIB.openCamera($("lockv"));await $("lockv").play();}catch(e){camErr=e;}
   if(camErr)return cameraBlocked(camErr);
+  pinDoor();
   if(!faceGate){faceGate=new LIB.FaceGate($("lockv"),$("lockc"),{onFace:async(desc,box)=>{lastDescriptor=desc;LIB.drawBoxes($("lockc"),$("lockv"),[{box,label:"face"}],{color:"#ffaa30"});if(verifying)return;verifying=true;
       try{const r=await fetch("/api/auth/verify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({descriptor:desc})}).then(x=>x.json());if(r.ok)await unlock(true);else $("locks").textContent="Face seen, not recognised.";}catch(e){}verifying=false;},
     onNoFace:()=>{LIB.drawBoxes($("lockc"),$("lockv"),[],{});}});await faceGate.start();}}

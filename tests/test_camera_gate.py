@@ -1,8 +1,8 @@
-"""The camera is the first door; the PIN is the fallback, never the shortcut.
+"""The camera and the PIN are both doors (owner ruling 2026-10-05).
 
-These tests pin the policy the owner asked for: a PIN proves knowledge, a face
-proves presence, so knowledge alone only opens the door when no face could
-have been read at all.
+Until 2026-10-05 the PIN opened only when no face could be read. The owner then
+asked for a PIN door beside the face. What keeps it safe is pinned here: only
+the owner can set a PIN, wrong PINs are locked out, and every attempt is logged.
 """
 from __future__ import annotations
 
@@ -38,36 +38,33 @@ def busy_camera(monkeypatch, kind="meeting", label="Zoom"):
         "why": "%s is using the camera." % label})
 
 
-def test_pin_is_refused_while_the_camera_is_free(gate, monkeypatch):
+def test_the_pin_is_a_door_of_its_own_while_the_camera_is_free(gate, monkeypatch):
     free_camera(monkeypatch)
+    assert access.pin_allowed() == (False, "no PIN is set")
     access.set_pin(PIN)
-    allowed, why = access.pin_allowed()
-    assert allowed is False and "face" in why
-    out = access.verify_pin(PIN)                       # the RIGHT pin, still refused
-    assert out["ok"] is False and out["refused"] is True
-    assert not access.session_ok(out.get("token"))
+    assert access.pin_allowed()[0] is True
+    assert access.verify_pin("wrong-one")["ok"] is False
+    out = access.verify_pin(PIN)
+    assert out["ok"] is True and access.session_ok(out["token"])
 
 
 def test_pin_opens_the_door_when_a_meeting_holds_the_camera(gate, monkeypatch):
     busy_camera(monkeypatch, "meeting", "Zoom")
     access.set_pin(PIN)
     allowed, why = access.pin_allowed()
-    assert allowed is True and "Zoom" in why
+    assert allowed is True          # a door of its own since 2026-10-05; the meeting is not the reason
     assert access.verify_pin("wrong-one")["ok"] is False
     out = access.verify_pin(PIN)
     assert out["ok"] is True and access.session_ok(out["token"])
 
 
-def test_a_friday_window_with_the_camera_vetoes_the_pin(gate, monkeypatch):
-    """The subtle one: Friday's own window makes the OS report 'a browser has the
-    camera', which must NOT become grounds for a PIN -- a face is being read."""
+def test_a_friday_window_reading_a_face_does_not_close_the_pin_door(gate, monkeypatch):
     busy_camera(monkeypatch, "browser", "Chrome")
     access.set_pin(PIN)
-    assert access.pin_allowed()[0] is True             # without the heartbeat, a browser is just a holder
     access.note_camera_hold()
     allowed, why = access.pin_allowed()
-    assert allowed is False and "Friday window" in why
-    assert access.verify_pin(PIN)["ok"] is False
+    assert allowed is True and "Friday window" in why
+    assert access.verify_pin(PIN)["ok"] is True
 
 
 def test_password_mode_always_allows_the_pin(gate, monkeypatch):
@@ -110,3 +107,28 @@ def test_camera_endpoint_answers_while_locked(gate, monkeypatch):
         assert c.get("/api/camera").status_code == 200         # but the lock screen can explain itself
         assert c.post("/api/camera/hold").status_code == 200
         assert access.camera_held_by_friday() is True
+
+
+
+def test_an_enrolled_owners_room_does_not_take_a_first_pin_from_the_lock_screen(gate, monkeypatch):
+    # Found 2026-10-05: with a face enrolled and no PIN yet, anyone at the screen could
+    # POST a first PIN while locked and then walk in through it.
+    pytest.importorskip("httpx")
+    from starlette.testclient import TestClient
+    free_camera(monkeypatch)
+    monkeypatch.setattr(access, "enrolled", lambda: True)
+    with TestClient(u.create_app()) as c:
+        r = c.post("/api/auth/pin/set", json={"pin": PIN})
+        assert r.status_code == 423 and not access.has_pin()
+    monkeypatch.setattr(access, "enrolled", lambda: False)        # a fresh install claims its PIN
+    with TestClient(u.create_app()) as c:
+        assert c.post("/api/auth/pin/set", json={"pin": PIN}).json()["ok"] is True
+
+
+def test_password_mode_takes_a_first_pin_even_with_a_face_enrolled(gate, monkeypatch):
+    pytest.importorskip("httpx")
+    from starlette.testclient import TestClient
+    monkeypatch.setattr(access, "enrolled", lambda: True)
+    monkeypatch.setattr(access, "AUTH_MODE", "pin")
+    with TestClient(u.create_app()) as c:
+        assert c.post("/api/auth/pin/set", json={"pin": PIN}).json()["ok"] is True

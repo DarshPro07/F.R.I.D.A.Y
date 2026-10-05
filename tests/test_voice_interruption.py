@@ -225,3 +225,15 @@ def test_the_pin_path_keeps_the_enrol_controls_the_lock_relies_on():
     act = html[html.index('id="lockact"'):]
     act = act[:act.index("</div>")]
     assert 'id="lockask"' in act and 'id="enrolbtn"' in act and 'id="photos"' in act
+
+
+
+def test_the_face_screen_shows_a_pin_door_and_bypass_says_so_on_screen():
+    # Owner 2026-10-05: "when there is face recognition there create a symbol for login
+    # or typing pin too", and a --bypass-login test mode.
+    from pathlib import Path
+    html = Path("ui/index.html").read_text(encoding="utf-8")
+    assert "function pinDoor()" in html and "&#9000; Use PIN" in html and "byChoice:true" in html
+    assert html.count("pinDoor();") >= 2                       # boot's face path and the in-room lock
+    assert "opt.noCamera||opt.otherTab||opt.byChoice" in html   # a chosen PIN door is not reloaded away
+    assert 'if(!s.gate)bypassBanner();' in html and "LOGIN BYPASSED" in html

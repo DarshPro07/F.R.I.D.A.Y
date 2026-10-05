@@ -102,12 +102,14 @@ def main():
         i = sys.argv.index("--log")
         if i + 1 < len(sys.argv):
             _log_to_file(sys.argv[i + 1])
-    if "--bypass-face" in sys.argv or "--no-face" in sys.argv:
+    if any(flag in sys.argv for flag in ("--bypass-face", "--bypass-login", "--no-face")):
         # Face recognition off for THIS run only. It is a launch flag, not an
         # in-app command, on purpose: the gate stands before any chat, so the
         # only thing that may lift it is someone at this machine's terminal.
         os.environ["FRIDAY_FACE_GATE"] = "0"
-        print("Face recognition bypassed for this run.", flush=True)
+        from friday import access   # after the variable: the gate reads it at import
+        access.log({"kind": "gate_bypassed", "by": "launch flag"})
+        print("Login bypassed for this run.", flush=True)
     if "--password" in sys.argv:
         # The owner has said the camera is not Friday's tonight: PIN only, no face, no capture.
         os.environ["FRIDAY_AUTH_MODE"] = "pin"

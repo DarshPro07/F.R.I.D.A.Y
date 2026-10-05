@@ -670,3 +670,9 @@ def test_an_explicit_browsers_path_or_a_missing_folder_is_left_alone(tmp_path, m
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "D:/my-browsers")
     assert L.use_installed_browsers(is_frozen=True) == ""
     assert os.environ["PLAYWRIGHT_BROWSERS_PATH"] == "D:/my-browsers"
+
+
+
+def test_bypass_login_is_the_bypass_face_switch_by_the_name_the_owner_asked_for():
+    for flag in ("--bypass-login", "--bypass-face"):
+        assert L.build_parser().parse_args([flag]).bypass_face is True, flag
