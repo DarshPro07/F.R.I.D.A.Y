@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday import compaction, config, contracts
+from friday import arena, compaction, config, contracts
 from friday import compression as C
 
 RULE = "MUST: never touch data/ada.sqlite3 and never push to main"
@@ -284,3 +284,130 @@ def test_the_shared_coordinator_recovers_through_the_module_function(monkeypatch
     monkeypatch.setenv("FRIDAY_ARTIFACT_VAULT", str(tmp_path / "shared"))
     _, record = C.default().transform(NOISE, C.DROP, hint=C.DROP_AFTER_EXTRACTION)
     assert C.recover(record.recovery) == NOISE.encode()
+
+
+# --- the compression arena (EVAL-004) -------------------------------------
+# A registered backend is usable by name, but only a passing arena report makes
+# it the default; a vendor note, a flag or a name alone never does.
+
+PROVENANCE = {"commit": "abc1234", "date": "2026-10-05T00:00:00+00:00"}
+LATE_RULE = NOISE + "\n" + RULE + "\n" + NOISE
+CORPUS = [(NOISE, None)] * 6 + [(LATE_RULE, FACTS)] * 6
+
+
+def _rules_only(text):
+    return "\n".join(line for line in text.splitlines() if "MUST" in line) or text[:40]
+
+
+def _rules_and_more(text):
+    return "\n".join(line for line in text.splitlines() if "MUST" in line) or text[:200]
+
+
+@pytest.fixture()
+def arena_store(tmp_path):
+    return arena.ArenaStore(tmp_path / "arena.json")
+
+
+@pytest.fixture()
+def contest(vault):
+    """One backend that drops the rule, one that changes nothing, two that keep it."""
+    return C.CompressionCoordinator(vault, {
+        "head": lambda t: t[:40], "same": lambda t: t,
+        "rules-only": _rules_only, "rules-and-more": _rules_and_more})
+
+
+def _run(contest, arena_store, **kw):
+    return arena_store.record(contest.compare_backends(CORPUS, provenance=PROVENANCE, **kw))
+
+
+def _summarize_by_default(contest):
+    return contest.transform(NOISE, C.SUMMARIZE, backend="", hint=C.SUMMARIZABLE)
+
+
+def test_backends_are_compared_on_fact_retention_and_size(contest):
+    report = contest.compare_backends(CORPUS, provenance=PROVENANCE)
+    assert report.kind is arena.ArenaKind.COMPRESSION and report.winner == "rules-only"
+    assert report.result("head").failed_gates == ("facts_retained",)
+    assert report.result("same").failed_gates == ("shrinks",)
+    assert report.result("rules-and-more").passed
+    assert report.result("rules-only").cases == len(CORPUS)
+    assert report.result("rules-only").score > report.result("rules-and-more").score
+
+
+def test_too_few_cases_cannot_pass_however_well_a_backend_did(contest):
+    report = contest.compare_backends(CORPUS[:2], names=["rules-only"], provenance=PROVENANCE)
+    assert report.result("rules-only").failed_gates == ("minimum_cases",)
+    assert report.winner == ""
+
+
+def test_comparing_a_backend_that_is_not_registered_is_refused(contest):
+    with pytest.raises(contracts.ContractError):
+        contest.compare_backends(CORPUS, names=["rules-only", "ghost"])
+
+
+def test_a_backend_that_returns_something_other_than_text_fails_its_own_arena(vault):
+    odd = C.CompressionCoordinator(vault, {"odd": lambda t: 7, "rules-only": _rules_only})
+    report = odd.compare_backends(CORPUS, provenance=PROVENANCE)
+    assert report.result("odd").failed_gates == ("scored",) and report.winner == "rules-only"
+
+
+def test_a_backend_with_no_report_is_usable_by_name_but_never_the_default(contest, arena_store):
+    out, record = contest.transform(NOISE, C.SUMMARIZE, backend="head", hint=C.SUMMARIZABLE)
+    assert out == NOISE[:40] and record.backend == "head"
+    with pytest.raises(arena.PromotionRefused):
+        contest.promote_backend("head", "", store=arena_store)
+    assert contest.default_backend() == ""
+    out, record = _summarize_by_default(contest)
+    assert out == NOISE and record.action == C.PASS_RAW and "no SUMMARIZE backend" in record.refusal
+
+
+def test_a_backend_that_failed_its_arena_is_not_promoted(contest, arena_store):
+    report = _run(contest, arena_store)
+    with pytest.raises(arena.PromotionRefused, match="facts_retained"):
+        contest.promote_backend("head", report.report_id, store=arena_store)
+    assert contest.default_backend() == ""
+
+
+def test_a_passing_backend_that_was_not_the_winner_is_not_the_default(contest, arena_store):
+    report = _run(contest, arena_store)
+    with pytest.raises(arena.PromotionRefused, match="winner"):
+        contest.promote_backend("rules-and-more", report.report_id, store=arena_store)
+    assert contest.default_backend() == ""
+
+
+def test_a_backend_that_is_not_registered_cannot_be_promoted(contest, arena_store):
+    report = _run(contest, arena_store)
+    with pytest.raises(contracts.ContractError):
+        contest.promote_backend("ghost", report.report_id, store=arena_store)
+
+
+def test_the_winner_with_a_passing_report_becomes_the_default(contest, arena_store):
+    report = _run(contest, arena_store)
+    promotion = contest.promote_backend("rules-only", report.report_id, store=arena_store)
+    assert promotion.report_id == report.report_id and contest.default_backend() == "rules-only"
+    out, record = _summarize_by_default(contest)
+    assert out == NOISE[:40] and record.backend == "rules-only" and record.action == C.SUMMARIZE
+
+
+def test_a_named_backend_still_overrides_the_default(contest, arena_store):
+    contest.promote_backend("rules-only", _run(contest, arena_store).report_id, store=arena_store)
+    _, record = contest.transform(NOISE, C.SUMMARIZE, backend="rules-and-more",
+                                  hint=C.SUMMARIZABLE)
+    assert record.backend == "rules-and-more"
+
+
+def test_a_later_failing_report_demotes_the_default(contest, arena_store):
+    contest.promote_backend("rules-only", _run(contest, arena_store).report_id, store=arena_store)
+    arena_store.record(arena.compare(
+        arena.ArenaKind.COMPRESSION, ["rules-only"],
+        lambda cid: arena.Score(gates={"facts_retained": False}, cases=12),
+        provenance={**PROVENANCE, "date": "2026-10-06T00:00:00+00:00"}))
+    assert contest.default_backend() == ""
+    out, record = _summarize_by_default(contest)
+    assert out == NOISE and record.action == C.PASS_RAW
+
+
+def test_an_unreadable_arena_store_demotes_the_default_instead_of_trusting_it(contest, arena_store):
+    contest.promote_backend("rules-only", _run(contest, arena_store).report_id, store=arena_store)
+    arena_store.path.write_text("{not json", encoding="utf-8")
+    assert contest.default_backend() == ""

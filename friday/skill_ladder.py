@@ -5,7 +5,8 @@ explicitly refused to adjudicate skill creation):
 
     lesson -> project memory          (default for one-off facts)
     lesson -> skill CANDIDATE         (when promotion criteria match)
-    candidate -> validated skill      (after replay/eval, versioned)
+    candidate -> validated skill      (after replay/eval, versioned; the
+                                       eval is a passing arena report)
 
 Promotion criteria (R8): repeated procedure, expensive rediscovery,
 safety-critical sequence, project-specific durable operational
@@ -27,6 +28,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+from friday import arena
+
 _TABLE = """
 CREATE TABLE IF NOT EXISTS skill_candidates (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,6 +49,12 @@ CREATE TABLE IF NOT EXISTS skill_candidates (
 
 CRITERIA = ("repeated_procedure", "expensive_rediscovery",
             "safety_critical", "project_operational_knowledge")
+
+
+def arena_id(name: str, version: int) -> str:
+    """The skill arena's candidate id: one version of one skill, so a report
+    for v1 cannot validate v2."""
+    return f"{name}@v{version}"
 
 
 class SkillLadder:
@@ -90,20 +99,42 @@ class SkillLadder:
         return {"status": "captured", "name": name, "version": version,
                 "criteria": matched}
 
-    def validate(self, name: str, *, passed: bool,
-                 validation: str) -> dict:
+    def validate(self, name: str, *, passed: bool, validation: str,
+                 arena_report: str = "",
+                 arena_store: arena.ArenaStore | None = None) -> dict:
         """Candidates become skills only through a validation run -
         'run succeeded -> mutate skill' is exactly the anti-pattern
-        this state machine forbids."""
-        state = "VALIDATED" if passed else "REJECTED"
+        this state machine forbids. A run counts only as an arena report
+        (EVAL-004): VALIDATED needs `arena_report`, the id of a stored skill
+        arena report in which this exact version passed every gate. Without
+        one, or with one that does not hold, the candidate is refused and
+        stays a CANDIDATE; `validation` is a note, not evidence. Rejecting
+        needs no proof."""
         with self._connect() as db:
-            n = db.execute(
+            row = db.execute(
+                "SELECT version, state FROM skill_candidates WHERE name = ?"
+                " ORDER BY version DESC LIMIT 1", (name,)).fetchone()
+        if row is None:
+            return {"status": "absent", "state": ""}
+        version = row["version"]
+        if passed:
+            try:
+                promotion = arena.promote(
+                    arena.ArenaKind.SKILL, arena_id(name, version),
+                    report_id=arena_report, store=arena_store)
+            except arena.PromotionRefused as exc:
+                return {"status": "refused", "state": row["state"],
+                        "note": str(exc)}
+            state = "VALIDATED"
+            validation = f"arena {promotion.report_id}: {validation}"
+        else:
+            state = "REJECTED"
+        with self._connect() as db:
+            db.execute(
                 "UPDATE skill_candidates SET state = ?, validation = ?,"
-                " updated_at = ? WHERE name = ? AND version ="
-                " (SELECT MAX(version) FROM skill_candidates WHERE"
-                " name = ?)",
-                (state, validation, time.time(), name, name)).rowcount
-        return {"status": "succeeded" if n else "absent", "state": state}
+                " updated_at = ? WHERE name = ? AND version = ?",
+                (state, validation, time.time(), name, version))
+        return {"status": "succeeded", "state": state}
 
     def deprecate(self, name: str, reason: str) -> dict:
         with self._connect() as db:

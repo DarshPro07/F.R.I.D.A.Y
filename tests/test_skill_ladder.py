@@ -1,9 +1,18 @@
 """Skill ladder + recovery packet - anti-pollution and resume-from-files."""
+from friday import arena
 from friday import skill_ladder as sl
 
 
 def make(tmp_path):
     return sl.SkillLadder(tmp_path / 'skills.sqlite3')
+
+
+def measured(tmp_path, name, *, version=1, ok=True):
+    """An arena report in which skill `name` at `version` was replayed."""
+    store = arena.ArenaStore(tmp_path / 'arena.json')
+    score = arena.Score(gates={'success_rate': ok, 'minimum_cases': True}, cases=12, score=1.0 if ok else 0.4)
+    report = arena.build_report(arena.ArenaKind.SKILL, {sl.arena_id(name, version): score}, provenance={'commit': 'abc1234', 'date': '2026-10-05'})
+    return store, store.record(report).report_id
 
 
 def test_capture_without_criteria_is_refused(tmp_path):
@@ -20,9 +29,52 @@ def test_candidate_to_validated_skill(tmp_path):
     ladder = make(tmp_path)
     out = ladder.capture('resolve-launch-and-bridge', '1. probe socket 2. launch Resolve 3. attach bridge', criteria=['expensive_rediscovery', 'repeated_procedure'], evidence='rediscovered 3x across sessions, ~20 min each time')
     assert out['status'] == 'captured' and out['version'] == 1
-    ladder.validate('resolve-launch-and-bridge', passed=True, validation='replayed against live Resolve: attach ok')
+    store, report_id = measured(tmp_path, 'resolve-launch-and-bridge')
+    out = ladder.validate('resolve-launch-and-bridge', passed=True, validation='replayed against live Resolve: attach ok', arena_report=report_id, arena_store=store)
+    assert out == {'status': 'succeeded', 'state': 'VALIDATED'}
     current = ladder.current('resolve-launch-and-bridge')
     assert current['state'] == 'VALIDATED'
+    assert report_id in current['validation']
+
+
+def test_validate_without_an_arena_report_does_not_reach_validated(tmp_path):
+    ladder = make(tmp_path)
+    ladder.capture('proc', 'steps', criteria=['repeated_procedure'], evidence='e')
+    out = ladder.validate('proc', passed=True, validation='I ran it and it looked fine')
+    assert out['status'] == 'refused' and out['state'] == 'CANDIDATE'
+    assert ladder.current('proc')['state'] == 'CANDIDATE'
+
+
+def test_a_free_text_report_id_does_not_reach_validated(tmp_path):
+    ladder = make(tmp_path)
+    ladder.capture('proc', 'steps', criteria=['repeated_procedure'], evidence='e')
+    store, _ = measured(tmp_path, 'proc')
+    out = ladder.validate('proc', passed=True, validation='ok', arena_report='validated by hand', arena_store=store)
+    assert out['status'] == 'refused'
+    assert ladder.current('proc')['state'] == 'CANDIDATE'
+
+
+def test_a_claim_of_success_does_not_override_a_failing_report(tmp_path):
+    ladder = make(tmp_path)
+    ladder.capture('proc', 'steps', criteria=['repeated_procedure'], evidence='e')
+    store, report_id = measured(tmp_path, 'proc', ok=False)
+    out = ladder.validate('proc', passed=True, validation='ok', arena_report=report_id, arena_store=store)
+    assert out['status'] == 'refused' and 'success_rate' in out['note']
+    assert ladder.current('proc')['state'] == 'CANDIDATE'
+
+
+def test_a_report_for_an_older_version_does_not_validate_the_new_one(tmp_path):
+    ladder = make(tmp_path)
+    ladder.capture('proc', 'v1', criteria=['repeated_procedure'], evidence='e')
+    store, report_id = measured(tmp_path, 'proc', version=1)
+    ladder.capture('proc', 'v2', criteria=['repeated_procedure'], evidence='e2')
+    out = ladder.validate('proc', passed=True, validation='ok', arena_report=report_id, arena_store=store)
+    assert out['status'] == 'refused'
+    assert ladder.current('proc')['state'] == 'CANDIDATE'
+
+
+def test_validating_a_skill_that_was_never_captured_is_absent(tmp_path):
+    assert make(tmp_path).validate('ghost', passed=True, validation='ok')['status'] == 'absent'
 
 
 def test_failed_validation_rejects_not_mutates(tmp_path):

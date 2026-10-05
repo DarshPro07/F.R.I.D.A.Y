@@ -38,7 +38,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
-from friday import compaction, config, contracts
+from friday import arena, compaction, config, contracts
 
 log = logging.getLogger(__name__)
 
@@ -248,11 +248,81 @@ class CompressionCoordinator:
                  backends: dict[str, Backend] | None = None):
         self.vault = vault or ArtifactVault()
         self._backends: dict[str, Backend] = dict(backends or {})
+        self._promoted: tuple[arena.Promotion, arena.ArenaStore | None] | None = None
 
     def register(self, name: str, backend: Backend) -> None:
         if not (name or "").strip() or not callable(backend):
             raise contracts.ContractError("a backend has a name and is callable")
         self._backends[name] = backend
+
+    def compare_backends(self, corpus: Sequence[tuple[str, compaction.CriticalFactSet | None]], *,
+                         names: Sequence[str] | None = None, minimum_cases: int = 10,
+                         provenance: dict | None = None) -> arena.ArenaReport:
+        """Measure registered backends against each other on `corpus`, a list of
+        (payload, critical facts or None) cases (EVAL-004). A backend passes when
+        it ran enough cases, kept every critical fact its input carried, and made
+        the payloads shorter on average; the winner is the one that shortened them
+        most. Recording the report (`arena.default_store().record`) and promoting
+        the winner (`promote_backend`) are separate steps for the caller."""
+        picked = list(names) if names is not None else sorted(self._backends)
+        unknown = [n for n in picked if n not in self._backends]
+        if unknown:
+            raise contracts.ContractError(
+                "no backend named %s is registered" % ", ".join(map(repr, unknown)))
+        cases = list(corpus)
+
+        def scorer(name: str) -> arena.Score:
+            backend, retained, cut = self._backends[name], 0, 0.0
+            for payload, facts in cases:
+                out = backend(payload)
+                if not isinstance(out, str):
+                    raise TypeError("backend %r returned %s, not text" % (name, type(out).__name__))
+                try:
+                    if facts is not None:
+                        compaction.validate(out, _held(payload, facts))
+                    retained += 1
+                except compaction.LossyCompaction:
+                    pass
+                cut += max(0.0, 1 - len(out) / len(payload)) if payload else 0.0
+            mean_cut = cut / len(cases) if cases else 0.0
+            return arena.Score(
+                gates={"minimum_cases": len(cases) >= minimum_cases,
+                       "facts_retained": retained == len(cases),
+                       "shrinks": mean_cut > 0},
+                cases=len(cases), score=mean_cut,
+                metrics={"mean_reduction": mean_cut,
+                         "retained_rate": retained / len(cases) if cases else 0.0})
+        return arena.compare(arena.ArenaKind.COMPRESSION, picked, scorer, provenance=provenance)
+
+    def promote_backend(self, name: str, report_id: str, *,
+                        store: arena.ArenaStore | None = None) -> arena.Promotion:
+        """Make `name` the default summarizer, on the strength of arena report
+        `report_id` and nothing else: it must be the winner of that report, which
+        must still be its latest. Raises `arena.PromotionRefused` otherwise. A
+        backend that is registered but not promoted stays usable by name."""
+        if name not in self._backends:
+            raise contracts.ContractError("no backend named %r is registered" % (name,))
+        promotion = arena.promote(arena.ArenaKind.COMPRESSION, name, report_id=report_id,
+                                  store=store, exclusive=True)
+        self._promoted = (promotion, store)
+        return promotion
+
+    def default_backend(self) -> str:
+        """The promoted backend's name, or "" when there is none. The promotion is
+        checked against the store on every call, so a later report that fails it,
+        or a store that cannot be read, demotes the backend (and it stays demoted
+        until `promote_backend` is called again with a report that holds)."""
+        if self._promoted is None:
+            return ""
+        promotion, store = self._promoted
+        try:
+            arena.promote(promotion.kind, promotion.candidate_id,
+                          report_id=promotion.report_id, store=store, exclusive=True)
+        except arena.PromotionRefused as exc:
+            log.warning("compression default %s demoted: %s", promotion.candidate_id, exc)
+            self._promoted = None
+            return ""
+        return promotion.candidate_id
 
     def transform(self, payload: str, action: str, *, backend: str = "",
                   facts: compaction.CriticalFactSet | None = None,
@@ -277,6 +347,8 @@ class CompressionCoordinator:
             return payload, self._record(cls, PASS_RAW, action, backend, payload, payload,
                                          parent=parent)
         origin = parent.origin_sha256 if parent is not None and parent.recovery else source
+        if action == SUMMARIZE and not backend:
+            backend = self.default_backend()
         out, reason = self._apply(action, backend, payload, origin)
         if reason is None and facts is not None:
             try:

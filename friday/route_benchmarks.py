@@ -13,6 +13,11 @@ Only a report whose every gate passed does. Pass and fail are read from the
 report's own `summary()["gates"]`, which `golden.TARGETS` and
 `golden.MINIMUM_CASES` already define; thresholds are not restated here.
 
+Since EVAL-004 this is the `model_route` adapter of `friday/arena.py`, the one
+owner of that logic: a golden report becomes a single-candidate `ArenaReport`
+filed under the key `provider/model`, so the same store, report ids and
+latest-replaces rule serve every arena kind. The public API is unchanged.
+
 Assumptions (revisit if wrong): the latest report for a route replaces the
 earlier one, so a regression demotes a route and a fix can restore it; a
 report does not expire; a route that measured below target is demoted (kept
@@ -22,11 +27,11 @@ needs proof sets `ModelGatewayRequest.require_measured` and gets a refusal.
 """
 from __future__ import annotations
 
-import json
 import os
-import threading
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
+
+from friday import arena
 
 
 class BenchmarkStoreError(RuntimeError):
@@ -35,7 +40,8 @@ class BenchmarkStoreError(RuntimeError):
 
 @dataclass(frozen=True)
 class Measurement:
-    """What the latest benchmark run said about one route."""
+    """What the latest benchmark run said about one route. `report_id` names the
+    arena report it was read from."""
 
     provider: str
     model: str
@@ -45,31 +51,17 @@ class Measurement:
     success_rate: float
     commit: str
     measured_at: str
-
-    def to_dict(self) -> dict:
-        row = asdict(self)
-        row["failed_gates"] = list(self.failed_gates)
-        return row
-
-    @classmethod
-    def from_dict(cls, row: dict) -> "Measurement":
-        return cls(provider=str(row["provider"]), model=str(row["model"]),
-                   passed=bool(row["passed"]),
-                   failed_gates=tuple(row["failed_gates"]),
-                   cases=int(row["cases"]),
-                   success_rate=float(row["success_rate"]),
-                   commit=str(row["commit"]),
-                   measured_at=str(row["measured_at"]))
+    report_id: str = ""
 
 
 def _key(provider: str, model: str) -> str:
     return f"{provider}/{model}"
 
 
-def measurement_from_report(provider: str, model: str, report) -> Measurement:
-    """Reduce a `golden.Report` (or its `to_dict()`) to a Measurement.
+def _route_report(provider: str, model: str, report) -> arena.ArenaReport:
+    """Reduce a `golden.Report` (or its `to_dict()`) to a one-route arena report.
 
-    `passed` is derived from the gate table, not read from the report's
+    Pass is derived from the gate table, not read from the report's
     `all_gates_pass` flag, so a report whose flag and gates disagree cannot
     promote a route; an empty gate table is refused outright because "no
     gates failed" over zero gates proves nothing.
@@ -84,15 +76,21 @@ def measurement_from_report(provider: str, model: str, report) -> Measurement:
         provenance = payload.get("provenance") or {}
     except (KeyError, TypeError) as exc:
         raise ValueError(f"not a golden report: missing {exc}") from exc
-    if not gates:
-        raise ValueError("a golden report with no gates cannot promote a route")
-    failed = tuple(sorted(name for name, ok in gates.items() if not ok))
+    success_rate = float(metrics.get("success_rate", 0.0))
+    score = arena.Score(gates={name: bool(ok) for name, ok in gates.items()},
+                        cases=int(metrics.get("cases", 0)), score=success_rate,
+                        metrics={"success_rate": success_rate})
+    return arena.build_report(arena.ArenaKind.MODEL_ROUTE, {_key(provider, model): score},
+                              provenance=provenance)
+
+
+def _measurement(provider: str, model: str, report: arena.ArenaReport) -> Measurement:
+    result = report.result(_key(provider, model))
     return Measurement(
-        provider=provider, model=model, passed=not failed, failed_gates=failed,
-        cases=int(metrics.get("cases", 0)),
-        success_rate=float(metrics.get("success_rate", 0.0)),
-        commit=str(provenance.get("commit", "")),
-        measured_at=str(provenance.get("date", "")))
+        provider=provider, model=model, passed=result.passed,
+        failed_gates=result.failed_gates, cases=result.cases,
+        success_rate=result.metrics.get("success_rate", 0.0),
+        commit=report.commit, measured_at=report.date, report_id=report.report_id)
 
 
 class BenchmarkStore:
@@ -105,43 +103,22 @@ class BenchmarkStore:
 
     def __init__(self, path: Path | str | None = None):
         self.path = Path(path) if path else None
-        self._lock = threading.Lock()
-        self._rows: dict[str, Measurement] = {}
-
-    def _load(self) -> dict[str, Measurement]:
-        if self.path is None:
-            return self._rows
-        try:
-            raw = self.path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return {}
-        except OSError as exc:
-            raise BenchmarkStoreError(f"cannot read {self.path}: {exc}") from exc
-        try:
-            return {k: Measurement.from_dict(v) for k, v in json.loads(raw).items()}
-        except (ValueError, KeyError, TypeError, AttributeError) as exc:
-            raise BenchmarkStoreError(f"{self.path} is not benchmark evidence: {exc!r}") from exc
+        self._arena = arena.ArenaStore(self.path)
 
     def get(self, provider: str, model: str) -> Measurement | None:
-        with self._lock:
-            return self._load().get(_key(provider, model))
-
-    def record(self, measurement: Measurement) -> Measurement:
-        with self._lock:
-            rows = dict(self._load())
-            rows[_key(measurement.provider, measurement.model)] = measurement
-            if self.path is None:
-                self._rows = rows
-                return measurement
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_name(self.path.name + ".tmp")
-            tmp.write_text(json.dumps({k: m.to_dict() for k, m in rows.items()},
-                                      indent=1), encoding="utf-8")
-            os.replace(tmp, self.path)
-            return measurement
+        try:
+            report = self._arena.latest(arena.ArenaKind.MODEL_ROUTE, _key(provider, model))
+        except arena.ArenaStoreError as exc:
+            raise BenchmarkStoreError(str(exc)) from exc
+        return None if report is None else _measurement(provider, model, report)
 
     def record_report(self, provider: str, model: str, report) -> Measurement:
-        return self.record(measurement_from_report(provider, model, report))
+        filed = _route_report(provider, model, report)
+        try:
+            self._arena.record(filed)
+        except arena.ArenaStoreError as exc:
+            raise BenchmarkStoreError(str(exc)) from exc
+        return _measurement(provider, model, filed)
 
 
 _STORE: BenchmarkStore | None = None
@@ -149,10 +126,7 @@ _STORE: BenchmarkStore | None = None
 
 def default_path() -> Path:
     override = os.getenv("FRIDAY_ROUTE_BENCHMARKS")
-    if override:
-        return Path(override)
-    from friday.config import DATA_DIR
-    return DATA_DIR / "route_benchmarks.json"
+    return Path(override) if override else arena.default_path()
 
 
 def store() -> BenchmarkStore:
