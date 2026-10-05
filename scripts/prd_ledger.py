@@ -3639,6 +3639,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added the golden onboarding journey (fresh root, first-run prompt, essentials, finish+marker, restart persistence, task via objective executor, independent verify). Setup completion was never recorded and first run never asked; added finish(), is_onboarded(), first_run_notice(), launcher prompt. (build run, commit 3383f298f)',
         "next_action": 'GAPS: The journey drives Onboarding and the launcher helper in-process; it does not spawn FRIDAY.exe.; The first useful task uses a test-supplied local_inventory capability on the ContinuousTaskExecutor, not a live Hermes or MCP tool.; Not shown by running the suite on the original tree: the new tests call finish/is_onboarded/first_run_notice/onboarding_at_startup, which did not exist before this change.',
     }),
+    ('MODEL-007', {
+        "status": PARTIAL,
+        "current_implementation": 'New local_model_policy (2 GB cap + owner override, 1 resident general, 4K-8K ctx, ctx-before-model-size). ExpertPool refuses over-cap at register, swaps general, evicts general first for vision, reaps idle vision. derive_policy gains default_ctx from measured room. (build run, commit 8fbf62e71)',
+        "next_action": "GAPS: ExpertPool has no live caller yet (local_experts is FUTURE in reachability); the owner override is a register() argument, not yet bound to confirmation.py; choose_model/fit_context are tested but not yet called by a loader; pool stores the clamped ctx on Expert/Outcome, the loader must read it; PRD ledger row MODEL-007 not edited here; the kernel's docs(ledger) step owns it; The new tests were written after the implementation; they depend on new symbols (OnboardingRefused, owner_override, local_model_policy) so they cannot pass on the old code, but a red run was not recorded first",
+    }),
 ]
 
 
