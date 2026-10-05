@@ -3619,6 +3619,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added friday/model_profiling.py: nonce-based probes (tools, structured output, vision, latency) profile an undeclared route and store the result; model_capabilities.get falls back to it, so the unmodified gateway routes on it. Declarations win; a profile never promotes. (build run, commit faab6e5d3)',
         "next_action": "GAPS: No real Completer adapter over the model gateway yet, so only mock routes are profiled; model_profiling is classified FUTURE in reachability.DECLARED until one exists; Profiling is not auto-triggered on discovery of a new model; a caller must invoke profile_route; max_context and relative_cost are not measurable by a probe and are recorded as None / unknown; Gateway capability_verdict still says 'declared capable' for a profiled route (provenance is in notes and the store, gateway untouched)",
     }),
+    ('MODEL-004', {
+        "status": PARTIAL,
+        "current_implementation": "Gateway capability_verdict now says 'profiled' (not 'declared') for a route known only from a stored profile, via MC.is_declared. Acceptance (mock route profiled, no core rewrite) was already met and still passes. (build run, commit 242c9dd49)",
+        "next_action": "GAPS: No real Completer adapter over the model gateway yet, so only mock routes are profiled; model_profiling stays FUTURE in reachability.DECLARED until one exists; Profiling is not auto-triggered on discovery of a new model; a caller must invoke profile_route; max_context and relative_cost are not measurable by a probe and are recorded as None / unknown; A corrupt profile store makes capability_verdict fail open with the reason 'no declared capabilities' (the broad except around MC.get); pre-existing, not changed here",
+    }),
 ]
 
 
