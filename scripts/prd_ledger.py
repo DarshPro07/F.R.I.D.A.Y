@@ -3525,6 +3525,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added friday/epistemic.py (PRD s35 LedgerClaim). product.Claim and research_cache.Artifact convert via to_ledger(); promotion.Decision gains claims (ids) set by decide(claims=...). (build run, commit 2161c1dd3)',
         "next_action": "GAPS: No persistent ledger store: claim ids are content-derived (claim + scope), so a Decision link resolves by recomputation, not lookup.; Linking claims does not change a decision's verdict; whether a contradicted claim should block promotion is an open policy question.; product.Claim.confidence is never set yet: verify() reads sources but does not judge, so it stays 0.0 (never assessed).; Status mapping is an assumption: sources -> sourced, PREFERENCE -> observed, otherwise speculative.",
     }),
+    ('CUA-001', {
+        "status": PARTIAL,
+        "current_implementation": 'One computer_use.Backend interface; Playwright (DOM) and the native desktop (coordinates) register as fabric providers; route() picks one by action path and reports a missing backend UNAVAILABLE without touching the other. Cua Driver spike and REFERENCE-A not done. (build run, commit 2ec529fd0)',
+        "next_action": 'GAPS: Cua Driver spike not done: the lock has no standalone cua-driver entry (only a nested third_party/cua-driver/LICENSE.md, MIT, inside OpenMausBot), so there is no SHA to pin; owner must request and pin it, then add a third adapter answering coordinates.probe; REFERENCE-A measurement not run; it needs the live machine; no isolated-computer backend yet; the interface and the computer_use family are ready for one; computer_use.route() is not yet consumed by capability_router or planner, so action-path ordering does not yet account for backend availability; Playwright is a pip dependency pinned by version range (playwright>=1.59,<1.60), not a commit in the lock, so it is registered BUILTIN rather than ADAPTER; backends expose a read-only probe only; browser and desktop actions stay in the policy-gated browser_* and desktop_* tools',
+    }),
 ]
 
 
