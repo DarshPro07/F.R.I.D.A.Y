@@ -11,6 +11,9 @@ Behaviour is scripted through env vars:
         finish_reason - `length` only while max_output_tokens is below
         FAKE_GW_EMPTY_BELOW (default 300), the way a thinking model spends a
         small output budget on reasoning; `stop` is empty every time
+    FAKE_GW_REFUSE_PROVIDERS="anthropic,openai-codex"
+        infer on these providers answers ok with a provider safety refusal as
+        its text, the way a provider's own safeguard stops a request (MODEL-006)
     FAKE_GW_HANG=1        never answer infer (watchdog tests)
     FAKE_GW_DIE=1         exit abruptly on the first infer (crash tests)
     FAKE_GW_ECHO=1        response is the last user message reversed
@@ -50,6 +53,8 @@ def main():
     for item in filter(None, os.getenv("FAKE_GW_EMPTY_PROVIDERS", "").split(",")):
         prov, _, finish = item.partition(":")
         empties[prov.strip()] = finish.strip() or "stop"
+    refusing = {p.strip() for p in os.getenv("FAKE_GW_REFUSE_PROVIDERS", "").split(",")
+                if p.strip()}
     empty_below = int(os.getenv("FAKE_GW_EMPTY_BELOW", "300"))
     hang = os.getenv("FAKE_GW_HANG") == "1"
     die = os.getenv("FAKE_GW_DIE") == "1"
@@ -84,6 +89,8 @@ def main():
             msgs = params.get("messages") or []
             last = str(msgs[-1].get("content", "")) if msgs else ""
             text = last[::-1] if echo else "PONG"
+            if provider in refusing:
+                text = "I cannot assist with that request. It violates our usage policy."
             prompt_tokens = sum((len(str(m.get("content", "")) ) + 3) // 4 for m in msgs)
             finish = "stop"
             reasoning_tokens = 0

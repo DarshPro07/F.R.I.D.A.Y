@@ -33,12 +33,18 @@ from pathlib import Path
 
 # Not friday.providers: that imports the LiveKit plugins, which may only register on
 # the main thread, and the gateway reads this module while routing a worker thread's turn.
+from friday import domain_gate
 from friday.llm_roles import LLM_ROLE_MODELS
 
 LATENCY = ("very_low", "low", "medium", "high")
 # "unknown" is for a profiled route: a price is a business fact, not something a probe can measure.
 COST = ("very_low", "low", "medium", "high", "unknown")
 HEALTH = ("ok", "degraded", "unknown", "unavailable")
+#: unknown | compatible (declared to serve Friday's restricted domains without
+#: intervening) | intervenes (known to refuse some of them). Recorded for the
+#: inspector; routing acts on `restricted_domains` and the ledger, not on this.
+SAFEGUARD = ("unknown", "compatible", "intervenes")
+DOMAINS = (domain_gate.CBRNE, domain_gate.CYBER)
 
 
 @dataclass(frozen=True)
@@ -55,8 +61,19 @@ class ModelCapabilities:
     relative_cost: str
     health: str = "unknown"
     notes: str = ""
+    #: Task domains (friday.domain_gate names) this route is declared unsuitable
+    #: for: a request in one is never sent here (MODEL-006). Declared, not learned;
+    #: a refusal the provider actually gave is the ledger's job, not this field's.
+    restricted_domains: tuple[str, ...] = ()
+    #: How the provider's own safeguard behaves toward Friday's task domains.
+    safeguard: str = "unknown"
 
     def __post_init__(self) -> None:
+        if self.safeguard not in SAFEGUARD:
+            raise ValueError(f"{self.model_id}: bad safeguard")
+        unknown = [d for d in self.restricted_domains if d not in DOMAINS]
+        if unknown:
+            raise ValueError(f"{self.model_id}: unknown restricted_domains {unknown!r}")
         if self.relative_latency not in LATENCY:
             raise ValueError(f"{self.model_id}: bad relative_latency")
         if self.relative_cost not in COST:

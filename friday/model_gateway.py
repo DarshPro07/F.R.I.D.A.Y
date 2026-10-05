@@ -51,10 +51,12 @@ import subprocess
 import threading
 import time
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 from friday import cli_model_provider
 from friday import data_class
+from friday import domain_gate
 from friday import privacy
 from friday import provider_health
 
@@ -200,6 +202,11 @@ class ModelGatewayResult:
     data_class: str = ""                     # FR-PRV-001 classification used to route
     redactions: int = 0                      # spans stripped before this reached a backend
     cost_usd: float = 0.0                    # what the transport reported; 0 = it reports none
+    #: Where routing ended up (MODEL-006): ALLOW the first route, FALLBACK a later or
+    #: safeguard-excluded-around one, LOCAL_ONLY only local routes were left, ASK_USER
+    #: no route may serve it until scope is stated, BLOCKED no compatible route. "" is a
+    #: plain transport failure, which is not a routing decision.
+    dispatch: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -505,6 +512,9 @@ class RouteJudgement:
     #: Backed by a benchmark whose every gate passed. A route kept on its
     #: declaration alone is `fit` but never `promoted`.
     promoted: bool = False
+    #: Rejected on safeguard grounds: declared restricted for the request's
+    #: domain, or a provider safeguard already refused that domain here.
+    safeguard: bool = False
 
 
 @dataclass(frozen=True)
@@ -525,6 +535,8 @@ class RouteDecision:
     latency_budget_ms: int
     preference: str
     judgements: tuple[RouteJudgement, ...] = ()
+    #: The task domain the request was classified into ("" = general).
+    domain: str = ""
 
     @property
     def routes(self) -> list[tuple[str, str, str]]:
@@ -548,11 +560,13 @@ class RouteDecision:
             "input_tokens": self.input_tokens,
             "latency_budget_ms": self.latency_budget_ms,
             "preference": self.preference,
+            "domain": self.domain,
             "chosen": self.routes[0] if self.routes else None,
             "routes": self.routes,
             "promoted": self.promoted,
             "rejected": [{"provider": j.provider, "model": j.model,
-                          "reason": j.reason} for j in self.rejected],
+                          "reason": j.reason, "safeguard": j.safeguard}
+                         for j in self.rejected],
         }
 
 
@@ -592,6 +606,53 @@ def capability_verdict(provider: str, model: str, *,
     if source == "profiled":
         return True, "profiled capable (measured, not declared)"
     return True, "declared capable"
+
+
+DISPATCH_ALLOW = "ALLOW"
+DISPATCH_FALLBACK = "FALLBACK"
+DISPATCH_LOCAL_ONLY = "LOCAL_ONLY"
+DISPATCH_ASK_USER = "ASK_USER"
+DISPATCH_BLOCKED = "BLOCKED"
+
+
+def safeguard_key(provider: str, model: str) -> str:
+    """The ledger's name for a gateway route. Prefixed so a gateway refusal is never
+    counted against a coding-agent executor route that happens to share a model."""
+    return domain_gate.route_name("gateway", provider, model)
+
+
+@lru_cache(maxsize=32)
+def _classify(text: str, semantic) -> domain_gate.DomainVerdict:
+    # `semantic` is only a cache key: set_semantic_classifier changes the answer, and
+    # an injected classifier may be a model call that one request must not pay for twice.
+    return domain_gate.classify_text(text)
+
+
+def request_domain(request: ModelGatewayRequest) -> domain_gate.DomainVerdict:
+    """The task domain of a request, classified from the same text its data class is."""
+    return _classify(_joined_text(request.context_package), domain_gate._semantic)
+
+
+def domain_verdict(provider: str, model: str, domain: str) -> tuple[bool, str]:
+    """Whether a route may serve a request in `domain` (MODEL-006).
+
+    Returns (fit, reason). A route is out for a domain when its declaration says so,
+    or when the ledger holds a provider-safeguard refusal for (route, domain): the
+    declaration is what the owner knows up front, the ledger is what the provider
+    actually did, and the second never ages out on its own.
+    """
+    from friday import model_capabilities as MC
+
+    try:
+        declared = MC.get(provider, model).restricted_domains
+    except Exception:
+        declared = ()
+    if domain in declared:
+        return False, f"declared restricted for {domain}"
+    if domain_gate.route_excluded(safeguard_key(provider, model), domain):
+        return False, (f"provider safeguard already refused {domain} on this route; "
+                       "excluded until the safeguard ledger is cleared")
+    return True, f"no {domain} restriction on this route"
 
 
 def benchmark_verdict(provider: str, model: str, *,
@@ -1159,6 +1220,7 @@ class ModelGateway:
             # fitness pass, and asking for it again is the one place that
             # needs to bypass the pass.
             routes = self._raw_candidates(request)
+        domain = request_domain(request).domain
         judgements = []
         for tier, provider, model in routes:
             fit, reason = capability_verdict(
@@ -1166,6 +1228,13 @@ class ModelGateway:
                 required=tuple(request.required_capabilities),
                 input_tokens=request.input_tokens())
             promoted = False
+            safeguarded = False
+            if fit and domain:
+                # Only a classified domain reaches the ledger: a general request
+                # costs no extra query, and no route is ever out for "general".
+                fit, why = domain_verdict(provider, model, domain)
+                safeguarded = not fit
+                reason = f"{reason}; {why}"
             if fit:
                 # A declared-capable route is only fit to be considered; the
                 # measured evidence decides whether it is promoted.
@@ -1174,7 +1243,7 @@ class ModelGateway:
                 reason = f"{reason}; {evidence}"
             judgements.append(RouteJudgement(tier=tier, provider=provider,
                                              model=model, fit=fit, reason=reason,
-                                             promoted=promoted))
+                                             promoted=promoted, safeguard=safeguarded))
         preference = ""
         if request.provider_allowlist:
             preference = "allowlist: " + ", ".join(request.provider_allowlist)
@@ -1186,7 +1255,7 @@ class ModelGateway:
                          or budget_for(request.task_class).default_tier,
             privacy_policy=request.privacy_policy,
             required_capabilities=tuple(request.required_capabilities),
-            input_tokens=request.input_tokens(),
+            input_tokens=request.input_tokens(), domain=domain,
             latency_budget_ms=request.latency_budget_ms,
             preference=preference,
             judgements=tuple(judgements))
@@ -1293,7 +1362,19 @@ class ModelGateway:
         content_class = data_class.classify(_joined_text(request.context_package))
         current_mode = privacy.mode()
 
+        verdict_domain = request_domain(request)
         routes = self.candidates(request)
+        # Routes this domain's safeguard record took out of the list. Asked only for a
+        # classified domain: a general request never reads the ledger.
+        barred = [j for j in self.route_decision(request).rejected
+                  if j.safeguard] if verdict_domain.domain else []
+        if not routes and barred:
+            blocked = self._blocked(verdict_domain, [], input_tokens, content_class)
+            self._record(request, status="refused", input_tokens=input_tokens,
+                         error=f"every route is excluded for {verdict_domain.domain}",
+                         fingerprint=fingerprint,
+                         entitlement_state=blocked.entitlement_state)
+            return blocked
         if not routes:
             self._record(request, status="failed", error="no eligible route",
                          input_tokens=input_tokens, fingerprint=fingerprint,
@@ -1316,6 +1397,7 @@ class ModelGateway:
         attempts: list[dict] = []
         last_error = ""
         last_state = ""
+        safeguarded = False
         for index, (tier, provider, model) in enumerate(routes):
             verdict = data_class.decision(content_class, backend=provider, mode=current_mode)
             if verdict.verdict == "REFUSE":
@@ -1429,6 +1511,16 @@ class ModelGateway:
                                      fingerprint=fingerprint, entitlement_state=code)
                         self._mark_unhealthy(provider, model, code)
                         continue
+                if verdict_domain.domain and domain_gate.is_provider_refusal(text):
+                    # The provider's own safeguard answered instead of the model. The
+                    # answer is never returned as the reply, and the route is recorded
+                    # against this domain so the next request does not repeat it.
+                    last_error = self._safeguard_refused(
+                        request, verdict_domain, tier, provider, model, attempts,
+                        index=index, elapsed=elapsed, input_tokens=input_tokens,
+                        fingerprint=fingerprint)
+                    last_state, safeguarded = "SAFEGUARD_REFUSED", True
+                    continue
                 result = ModelGatewayResult(
                     status="ok", provider=res.get("provider") or provider,
                     model=res.get("model") or model, response=text,
@@ -1461,10 +1553,20 @@ class ModelGateway:
                     reasoning_tokens=result.reasoning_tokens, failover_count=index,
                     fingerprint=fingerprint, entitlement_state="OK", route_kind=kind,
                     cost_usd=result.cost_usd)
+                result.dispatch = self._dispatch_for(routes, index, barred)
                 return result
             err = reply.get("error") or {}
             code = str(err.get("code") or "PROVIDER_ERROR")
             message = str(err.get("message") or "")[:500]
+            if verdict_domain.domain and domain_gate.is_provider_refusal(message):
+                # A refusal reported as an error is the same safeguard intervention,
+                # and not a sick route: it must not cool the route for other domains.
+                last_error = self._safeguard_refused(
+                    request, verdict_domain, tier, provider, model, attempts,
+                    index=index, elapsed=elapsed, input_tokens=input_tokens,
+                    fingerprint=fingerprint)
+                last_state, safeguarded = "SAFEGUARD_REFUSED", True
+                continue
             attempts.append({"tier": tier, "provider": provider, "model": model,
                              "status": "failed", "code": code, "error": message,
                              "latency_ms": elapsed})
@@ -1476,6 +1578,10 @@ class ModelGateway:
             self._mark_unhealthy(provider, model, code)
             if code in _NO_FAILOVER:
                 break
+        if safeguarded:
+            # A safeguard refusal is the durable fact; a quota failure alongside it is
+            # transient and stays visible in `attempts`.
+            return self._blocked(verdict_domain, attempts, input_tokens, content_class)
         return ModelGatewayResult(
             status="failed", entitlement_state=last_state or "PROVIDER_ERROR",
             warnings=[last_error] if last_error else [], attempts=attempts,
@@ -1483,6 +1589,48 @@ class ModelGateway:
             data_class=content_class)
 
     # -- helpers ------------------------------------------------------------
+
+    def _safeguard_refused(self, request: ModelGatewayRequest,
+                           verdict: domain_gate.DomainVerdict, tier: str, provider: str,
+                           model: str, attempts: list[dict], *, index: int, elapsed: int,
+                           input_tokens: int, fingerprint: str) -> str:
+        """Record a provider-safeguard refusal against (route, domain) and return the
+        message. The model's own words are not stored: only that, and where, it refused."""
+        message = f"provider safeguard refused a {verdict.domain} request on {provider}:{model}"
+        attempts.append({"tier": tier, "provider": provider, "model": model,
+                         "status": "refused", "code": "SAFEGUARD_REFUSED",
+                         "error": message, "latency_ms": elapsed})
+        self._record(request, status="refused", provider=provider, model=model, tier=tier,
+                     error=f"SAFEGUARD_REFUSED: {message}", latency_ms=elapsed,
+                     input_tokens=input_tokens, failover_count=index,
+                     fingerprint=fingerprint, entitlement_state="SAFEGUARD_REFUSED")
+        domain_gate.record_provider_refusal(
+            safeguard_key(provider, model), detail=message, domain=verdict.domain)
+        return message
+
+    def _blocked(self, verdict: domain_gate.DomainVerdict, attempts: list[dict],
+                 input_tokens: int, content_class: str) -> ModelGatewayResult:
+        """No route may serve this request. With the scope unstated the way forward is
+        to ask the user for it (ASK_USER); otherwise nothing compatible is left (BLOCKED)."""
+        ask = verdict.route == "ask_scope"
+        why = (f"{verdict.domain} request with no stated scope: ask for target ownership "
+               "and scope before any route is tried again" if ask else
+               f"no route is compatible with a {verdict.domain} request")
+        return ModelGatewayResult(
+            status="refused", entitlement_state="NEEDS_SCOPE" if ask else "SAFEGUARD_BLOCKED",
+            warnings=[why], attempts=attempts, input_tokens=input_tokens,
+            failover_count=max(0, len(attempts) - 1), data_class=content_class,
+            dispatch=DISPATCH_ASK_USER if ask else DISPATCH_BLOCKED)
+
+    def _dispatch_for(self, routes: list[tuple[str, str, str]], index: int,
+                      barred: list[RouteJudgement]) -> str:
+        """How a served request got there. `barred` are the routes a safeguard record
+        took out of the list before the call: the request went around them."""
+        if barred and all(self.route_kind(p) == "local" for _, p, _ in routes):
+            return DISPATCH_LOCAL_ONLY
+        if barred or index > 0:
+            return DISPATCH_FALLBACK
+        return DISPATCH_ALLOW
 
     def _mark_unhealthy(self, provider: str, model: str, code: str) -> None:
         self._unhealthy[(provider, model)] = time.time() + ROUTE_UNHEALTHY_S

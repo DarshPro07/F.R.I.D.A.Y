@@ -227,12 +227,22 @@ class SafeguardLedger:
                 " VALUES (?,?,?,?,?,?)",
                 (time.time(), route, kind, domain, packet, detail[:500]))
 
-    def count(self, route: str, kind: str | None = None) -> int:
+    def count(self, route: str, kind: str | None = None, *,
+              domain: str | None = None) -> int:
+        """Events on a route, optionally of one kind and/or one domain.
+
+        `domain=None` does not filter; `domain=""` means events recorded with no
+        domain. The (route, domain) form is the seam the model gateway reads to
+        keep a route out of a task domain it has already refused (MODEL-006).
+        """
         sql = "SELECT COUNT(*) FROM safeguard_events WHERE route=?"
         args: list = [route]
         if kind:
             sql += " AND kind=?"
             args.append(kind)
+        if domain is not None:
+            sql += " AND domain=?"
+            args.append(domain)
         with self._lock, self._connect() as db:
             return db.execute(sql, args).fetchone()[0]
 
@@ -317,13 +327,17 @@ def check(bundle, route: str, *, led: SafeguardLedger | None = None) -> GateDeci
 
 
 def record_provider_refusal(route: str, bundle=None, *, detail: str = "",
-                            led: SafeguardLedger | None = None) -> GateDecision:
+                            led: SafeguardLedger | None = None,
+                            domain: str = "") -> GateDecision:
     """
     Count a provider safety failure against a route. Returns what to do next:
     allowed (retry once more) while under the bound, else switch_route.
+
+    `domain` names the task domain the refused request was in; with it the event
+    also excludes the route for that domain (see `route_excluded`).
     """
     led = led or ledger()
-    led.record(route, "provider_refusal",
+    led.record(route, "provider_refusal", domain=domain,
                packet=_digest(bundle) if bundle is not None else "", detail=detail)
     failures = led.count(route, "provider_refusal")
     if failures >= MAX_SAFEGUARD_FAILURES:
@@ -332,6 +346,18 @@ def record_provider_refusal(route: str, bundle=None, *, detail: str = "",
             f"{failures} provider safety refusals on {route}; retry bound reached",
             "switch_route")
     return ALLOW
+
+
+def route_excluded(route: str, domain: str, *, led: SafeguardLedger | None = None) -> bool:
+    """Whether a provider's safeguard has already refused this domain on this route.
+
+    One recorded refusal is enough: the same route is not offered the same kind
+    of request again, however long ago, until the ledger is cleared. A request
+    with no domain (`""`) is never excluded.
+    """
+    if not domain:
+        return False
+    return (led or ledger()).count(route, "provider_refusal", domain=domain) > 0
 
 
 def route_name(*parts: str) -> str:
