@@ -153,25 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: de359b9 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-05T14:33:12+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 85, "PARKED_BY_OWNER": 1, "PARTIAL": 64, "VERIFIED": 36}
+- HEAD: 123301e on prd-v7/slice-7-adaptive-hardware, updated 2026-10-05T16:33:01+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 83, "PARKED_BY_OWNER": 1, "PARTIAL": 66, "VERIFIED": 36}
 - Unresolved P0: 21
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (160): CTX-007=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), TRAJ-001 (partial x2), MCP-001 (NOT_RED), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (partial x2), CLI-001 (partial x2), ASSUME-001 (failed x2), BBOX-001 (partial x2), CAP-003 (integration refused), BRAIN-001 (cascade exhausted), BROW-003 (partial x2), CAP-004 (integration refused), CAP-FORGE-003 (TEST_TIMEOUT), APPROVAL-001 (stale worktree), BG-001 (partial x2), PKG-001 (partial x2), CAP-FORGE-002 (integration refused), CAPB-001 (TEST_TIMEOUT), CHAOS-001 (partial x2), CODE-001 (blocked), COG-003 (cascade exhausted), COG-002 (partial x2), COG-005 (partial x2), COG-006 (cascade exhausted), CTX-004 (integration refused)
-- Open escalations: 105
-  - - docs_commit: ex.lock': File exists.
-
-Another git process seems to be running in this repository, e.g.
-an editor o
-  - CHAOS-001 partial: integrated twice without closing its gaps
-  - CODE-001 blocked: Owner decision needed: a live run budget. Defaults (5 tasks x 2 arms x 3 repeats = 30 runs) need at 
-  - SEC-005 resolved: controller unpark: owner ruling 2026-10-05b: scoped delegations get their own gateway without Hermes
+- Last wave (166): EVAL-004=SCOUT_DONE
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), TRAJ-001 (partial x2), MCP-001 (NOT_RED), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (partial x2), CLI-001 (partial x2), ASSUME-001 (failed x2), BBOX-001 (partial x2), CAP-003 (integration refused), BRAIN-001 (cascade exhausted), BROW-003 (partial x2), CAP-004 (integration refused), CAP-FORGE-003 (TEST_TIMEOUT), APPROVAL-001 (stale worktree), BG-001 (partial x2), PKG-001 (partial x2), CAP-FORGE-002 (integration refused), CAPB-001 (TEST_TIMEOUT), CHAOS-001 (partial x2), CODE-001 (blocked), COG-003 (cascade exhausted), COG-002 (partial x2), COG-005 (partial x2), COG-006 (cascade exhausted), CTX-004 (integration refused), MODEL-012 (stale worktree), SEC-005 (stale worktree), CTX-005 (NOT_RED), CTX-007 (integration refused)
+- Open escalations: 109
   - MODEL-012 resolved: controller unpark: owner ruling 2026-10-05b: slice 3, opencode free models and the signed-in Codex C
   - COG-003 cascade: 3 repairs spent
   - COG-002 partial: integrated twice without closing its gaps
   - COG-005 partial: integrated twice without closing its gaps
   - COG-006 cascade: 3 repairs spent
   - CTX-004 integration: refusing CTX-004: run has no commit
-- Next ready: MODEL-012, SEC-005
+  - MODEL-012 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\model-012 already exists
+  - SEC-005 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\sec-005 already exists
+  - CTX-005 integration: {"requirement": "CTX-005", "result": "NOT_RED", "red_green": {"result": "NOT_RED", "tests": ["tests/
+  - CTX-007 integration: refusing CTX-007: run has no commit
+- Next ready: EVAL-004, EVAL-005
 <!-- build-program:end -->

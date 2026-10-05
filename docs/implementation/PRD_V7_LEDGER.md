@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `ebba0dd283c9d83aa3888596d93f5901cb6043a278d603a760c522568046eaa5`
 - PRD size: 8204 lines, 295141 bytes
-- Repository HEAD: `90ca55167c8334560270dca687e11f87183e4015`
-- Uncommitted paths at generation: 44
-- Generated: 2026-10-05T21:30:20+05:30
+- Repository HEAD: `123301efe753eb6233996c4919f4cdc3ad4788b0`
+- Uncommitted paths at generation: 45
+- Generated: 2026-10-05T22:03:04+05:30
 
 ## Status vocabulary
 
@@ -27,8 +27,8 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 83 |
-| PARTIAL | 66 |
+| MISSING | 82 |
+| PARTIAL | 67 |
 | VERIFIED | 36 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
@@ -101,7 +101,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 | CTX-004 | P1 | **PARTIAL** | Context health drives trim/fold/reset. | Long-run benchmark. | - | `friday/fabric.py:97`, `friday/memory_stack.py:389-396` | GAPS: fold and handoff are advisory: no temporary-branch (19.6) or session-restart seam exists, so the prompt is summarized in place and a handoff verdict carries the packet; failed_attempt_density, struggle_score, retrieval_confidence stay unmeasured (named in UNMEASURED, never given a number); CTX-004 row in scripts/prd_v7_table.py and PRD_V7_LEDGER.md not changed: regenerating writes data/, which this run may not touch; kernel should set MISSING -> PARTIAL; benchmark evidence defaults to data/golden_context.json; this run wrote .build/golden_context.json instead; the one failure, tests/test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop, is the live Hermes gateway reporting no configured provider; unrelated to this change, not re-run on a clean tree |
 | CTX-005 | P1 | **PARTIAL** | Large tool outputs offload to artifacts. | Subsequent prompt excludes raw payload. | - | `friday/toolsets/research.py:540-552`, `friday/toolsets/research.py:566`, `friday/toolsets/files.py:57-68` | GAPS: 1 test skipped in the run (537 passed, 1 skipped); not examined whether it is related to this change.; A large file whose name matches the fsjail denylist has its artifact write refused and falls back inline at the max_chars cap, with inline_reason saying why (the old behaviour).; A file at or under max_chars (default MAX_READ_CHARS 40000) still returns inline, as planned; only larger files offload.; No live end-to-end run was done; verification is by tests against a tmp ARTIFACTS_DIR. |
 | CTX-006 | P1 | **VERIFIED** | Semantic cache respects scope/freshness/equivalence. | Stale/cross-workspace negative tests. | FR-PRV-002 | `friday/research_cache.py:117`, `friday/research_cache.py:152`, `friday/research_cache.py:373` | Confirmed by direct read, all 4 cited tests exist and assert as claimed. test_lookup_does_not_cross_workspaces (test_research_cache.py:147) is an explicit negative control: it first asserts a raw, unfiltered sqlite read shows rows for both workspaces (`assert {row[0] for row in rows} == {"brand-a","brand-b"}`, line 169) -- proving the guard isn't trivially satisfied by an empty table -- then asserts `RC.lookup(question) is None` in workspace B (line 173, message 'workspace B's lookup returned workspace A's artifact'). Scope: the research cache is the only semantic cache in the tree. Re-run 2026-09-25 on 030795f with a dirty tree: every cited test passed (data/prd_v7_audit/rerun.xml). |
-| EVAL-002 | P1 | **MISSING** | Context Lab maintained. | Release report includes context metrics. | - | `friday/evaluation.py:128-199` | REBUILD: add scripts/golden_context.py exercising the 19.11 scenario list against CTX-001..006 once those exist, and add context metrics to the release report evaluation.py already produces (Report class, evaluation.py:550). |
+| EVAL-002 | P1 | **PARTIAL** | Context Lab maintained. | Release report includes context metrics. | - | `friday/evaluation.py:128-199` | GAPS: 5 of 14 scenarios are reported as unexercised with a reason (coverage 0.6429): semantic needles, multi-hop facts, aggregation, skill bloat, repository-scale code reasoning. Each needs a corpus or question set that does not exist yet.; contradiction/supersession measures open contradictions surviving remediation; superseding a resolved fact is not measured.; The packet cites a Report class at evaluation.py:550; evaluation.py has none. The release report is friday/golden.py Report, so that is where the metrics went; evaluation.py is unchanged. |
 
 ## PRD section 20
 
@@ -146,7 +146,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
 | MODEL-004 | P1 | **PARTIAL** | Open-set model onboarding. | New mock route profiled without core rewrite. | FR-MDL-002 | `friday/model_capabilities.py:1-52`, `tests/test_route_fitness.py:22-50` | EXTEND: once a Model Arena/profiling harness exists (see MODEL-003's next_action), wire it to auto-populate friday/model_capabilities.py entries for a newly discovered model instead of requiring a hand-written declaration. |
-| EVAL-003 | P1 | **PARTIAL** | Model Arena profiles candidates. | Vendor claim alone cannot promote route. | - | `friday/model_gateway.py`, `tests/test_route_fitness.py:173` | EXTEND friday/model_gateway.py's RouteJudgement to consult a measured-benchmark store built from golden.py Bench/Report runs, rather than only declared capabilities. |
+| EVAL-003 | P1 | **PARTIAL** | Model Arena profiles candidates. | Vendor claim alone cannot promote route. | - | `friday/model_gateway.py`, `tests/test_route_fitness.py:173` | GAPS: The one failure is tests/test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop: @live, the provider answered 'failed' (auth/provider config), outside the gate marker set; not run on the unchanged tree, so pre-existing is inferred, not proven.; Assumed: latest report per route replaces earlier; no expiry; measured-below-target demotes (kept usable, unpromoted) unless require_measured. Nothing sets require_measured yet.; Benchmarks are per route, not per task class: Report carries no task class. |
 
 ## PRD section 28
 
@@ -179,7 +179,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| EPI-001 | P1 | **PARTIAL** | Important claims have evidence/confidence/freshness. | Engineering decision links to ledger. | - | `friday/product.py:130`, `friday/research_cache.py:188`, `friday/research_cache.py:203` | EXTEND: unify product.Claim and research_cache.Artifact's overlapping evidence/confidence/freshness fields into the PRD section 35 epistemic-ledger schema, and add a field on promotion.Decision linking an engineering decision to the claim record(s) it relied on. |
+| EPI-001 | P1 | **PARTIAL** | Important claims have evidence/confidence/freshness. | Engineering decision links to ledger. | - | `friday/product.py:130`, `friday/research_cache.py:188`, `friday/research_cache.py:203` | GAPS: No persistent ledger store: claim ids are content-derived (claim + scope), so a Decision link resolves by recomputation, not lookup.; Linking claims does not change a decision's verdict; whether a contradicted claim should block promotion is an open policy question.; product.Claim.confidence is never set yet: verify() reads sources but does not judge, so it stays 0.0 (never assessed).; Status mapping is an assumption: sources -> sourced, PREFERENCE -> observed, otherwise speculative. |
 
 ## PRD section 36
 
@@ -435,7 +435,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| CUA-001 | P1 | **PARTIAL** | A provider-neutral computer-use fabric serves structured browser, desktop, visual and isolated-computer backends. | One interface serves the Playwright browser backend and at least one desktop backend, each registered through the capability fabric and chosen by the action-path router; a missing backend reports UNAVAILABLE without breaking the others. | - | `friday/action_path.py:25`, `friday/toolsets/desktop.py:541`, `friday/browser_readiness.py:52` | Owner decides when (A6 is ranked behind the P0s). Then: a computer-use backend interface under the action-path router, the Playwright path behind it, and a desktop backend spike (Cua Driver, pinned and licence-checked through the fabric) measured on REFERENCE-A. |
+| CUA-001 | P1 | **PARTIAL** | A provider-neutral computer-use fabric serves structured browser, desktop, visual and isolated-computer backends. | One interface serves the Playwright browser backend and at least one desktop backend, each registered through the capability fabric and chosen by the action-path router; a missing backend reports UNAVAILABLE without breaking the others. | - | `friday/action_path.py:25`, `friday/toolsets/desktop.py:541`, `friday/browser_readiness.py:52` | GAPS: Cua Driver spike not done: the lock has no standalone cua-driver entry (only a nested third_party/cua-driver/LICENSE.md, MIT, inside OpenMausBot), so there is no SHA to pin; owner must request and pin it, then add a third adapter answering coordinates.probe; REFERENCE-A measurement not run; it needs the live machine; no isolated-computer backend yet; the interface and the computer_use family are ready for one; computer_use.route() is not yet consumed by capability_router or planner, so action-path ordering does not yet account for backend availability; Playwright is a pip dependency pinned by version range (playwright>=1.59,<1.60), not a commit in the lock, so it is registered BUILTIN rather than ADAPTER; backends expose a read-only probe only; browser and desktop actions stay in the policy-gated browser_* and desktop_* tools |
 | CUA-002 | P1 | **MISSING** | Desktop tasks run without moving the physical pointer, stealing focus or interrupting the foreground, where the OS and application allow. | On a Windows reference machine a desktop task on a background window completes with the physical pointer, the foreground window and focus unchanged, measured before and after; where the target cannot be driven in the background, that is said before acting. | - | `friday/platform/windows.py:590`, `friday/toolsets/desktop.py:541` | After CUA-001: a background desktop backend and a before/after measurement of pointer, foreground window and focus. |
 | CUA-003 | P1 | **MISSING** | Each background computer-use worker has an explicit allowed window and application set. | A session acts only on its listed windows and applications; an action on any other is refused and recorded. | - | - | Add the window and application set to the session manifest and refuse, and record, an action outside it. |
 | CUA-004 | P1 | **MISSING** | A computer-use action is not a success because the backend said so. | An action counts as done only when an independent read of the application's state afterwards shows the intended change; a backend reporting success with no change is recorded as a failure. | - | - | Build on ACT-001: a post-state verifier per computer-use action, and a failure record when the backend reports success without the change. |
