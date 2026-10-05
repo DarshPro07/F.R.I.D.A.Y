@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: a4e9dff on prd-v7/slice-7-adaptive-hardware, updated 2026-10-05T17:14:58+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 82, "PARKED_BY_OWNER": 1, "PARTIAL": 67, "VERIFIED": 36}
+- HEAD: 61d4160 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-05T17:54:19+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 81, "PARKED_BY_OWNER": 1, "PARTIAL": 68, "VERIFIED": 36}
 - Unresolved P0: 21
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (170): EPI-001=NO_TEST
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), TRAJ-001 (partial x2), MCP-001 (NOT_RED), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (partial x2), CLI-001 (partial x2), ASSUME-001 (failed x2), BBOX-001 (partial x2), CAP-003 (integration refused), BRAIN-001 (cascade exhausted), BROW-003 (partial x2), CAP-004 (integration refused), CAP-FORGE-003 (TEST_TIMEOUT), APPROVAL-001 (stale worktree), BG-001 (partial x2), PKG-001 (partial x2), CAP-FORGE-002 (integration refused), CAPB-001 (TEST_TIMEOUT), CHAOS-001 (partial x2), CODE-001 (blocked), COG-003 (cascade exhausted), COG-002 (partial x2), COG-005 (partial x2), COG-006 (cascade exhausted), CTX-004 (integration refused), MODEL-012 (stale worktree), SEC-005 (stale worktree), CTX-005 (NOT_RED), CTX-007 (integration refused), EVAL-002 (partial x2), CUA-001 (partial x2)
-- Open escalations: 111
-  - COG-002 partial: integrated twice without closing its gaps
-  - COG-005 partial: integrated twice without closing its gaps
-  - COG-006 cascade: 3 repairs spent
-  - CTX-004 integration: refusing CTX-004: run has no commit
+- Last wave (176): FAIL-001=SCOUT_DONE, EXP-001=SCOUT_DONE
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), TRAJ-001 (partial x2), MCP-001 (NOT_RED), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (partial x2), CLI-001 (partial x2), ASSUME-001 (failed x2), BBOX-001 (partial x2), CAP-003 (integration refused), BRAIN-001 (cascade exhausted), BROW-003 (partial x2), CAP-004 (integration refused), CAP-FORGE-003 (TEST_TIMEOUT), APPROVAL-001 (stale worktree), BG-001 (partial x2), PKG-001 (partial x2), CAP-FORGE-002 (integration refused), CAPB-001 (TEST_TIMEOUT), CHAOS-001 (partial x2), CODE-001 (blocked), COG-003 (cascade exhausted), COG-002 (partial x2), COG-005 (partial x2), COG-006 (cascade exhausted), CTX-004 (integration refused), MODEL-012 (stale worktree), SEC-005 (stale worktree), CTX-005 (NOT_RED), CTX-007 (integration refused), EVAL-002 (partial x2), CUA-001 (partial x2), EPI-001 (partial x2), EVAL-003 (integration refused), EVAL-004 (blocked), EVAL-005 (CONFLICT)
+- Open escalations: 115
   - MODEL-012 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\model-012 already exists
   - SEC-005 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\sec-005 already exists
   - CTX-005 integration: {"requirement": "CTX-005", "result": "NOT_RED", "red_green": {"result": "NOT_RED", "tests": ["tests/
   - CTX-007 integration: refusing CTX-007: run has no commit
   - EVAL-002 partial: integrated twice without closing its gaps
   - CUA-001 partial: integrated twice without closing its gaps
-- Next ready: EPI-001, EVAL-003
+  - EPI-001 partial: integrated twice without closing its gaps
+  - EVAL-003 integration: refusing EVAL-003: run has no commit
+  - EVAL-004 blocked: Owner decision: for capability path, router-mode promotion (gate fed only by the sealed-holdout run)
+  - EVAL-005 integration: {"requirement": "EVAL-005", "result": "CONFLICT", "red_green": {"result": "OK", "tests": ["tests/tes
+- Next ready: EXP-001, FAIL-001
 <!-- build-program:end -->

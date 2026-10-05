@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `ebba0dd283c9d83aa3888596d93f5901cb6043a278d603a760c522568046eaa5`
 - PRD size: 8204 lines, 295141 bytes
-- Repository HEAD: `54250caef5beef011b5305974dc7434665d35a87`
-- Uncommitted paths at generation: 43
-- Generated: 2026-10-05T22:51:39+05:30
+- Repository HEAD: `61d41605c42f344e4ffc6b4d9274b2b9773f95b8`
+- Uncommitted paths at generation: 45
+- Generated: 2026-10-05T23:24:25+05:30
 
 ## Status vocabulary
 
@@ -179,7 +179,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| EPI-001 | P1 | **PARTIAL** | Important claims have evidence/confidence/freshness. | Engineering decision links to ledger. | - | `friday/product.py:130`, `friday/research_cache.py:188`, `friday/research_cache.py:203` | GAPS: No persistent ledger store: claim ids are content-derived (claim + scope), so a Decision link resolves by recomputation, not lookup.; Linking claims does not change a decision's verdict; whether a contradicted claim should block promotion is an open policy question.; product.Claim.confidence is never set yet: verify() reads sources but does not judge, so it stays 0.0 (never assessed).; Status mapping is an assumption: sources -> sourced, PREFERENCE -> observed, otherwise speculative. |
+| EPI-001 | P1 | **PARTIAL** | Important claims have evidence/confidence/freshness. | Engineering decision links to ledger. | - | `friday/product.py:130`, `friday/research_cache.py:188`, `friday/research_cache.py:203` | GAPS: No persistent ledger store: claim ids are content-derived (claim + scope), so a Decision link resolves by recomputation, not lookup (scoped follow-up, not this slice).; Linking claims does not change a decision's verdict; whether a contradicted claim should block promotion is an open policy question for the product owner.; product.Claim.confidence stays 0.0 from verify(): judging a page's support for a claim is a language task, not a keyword heuristic; deliberate, not an oversight.; Status mapping (sources -> sourced, PREFERENCE -> observed, else speculative) is a documented assumption in the plan, not a gap. |
 
 ## PRD section 36
 
