@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `ebba0dd283c9d83aa3888596d93f5901cb6043a278d603a760c522568046eaa5`
 - PRD size: 8204 lines, 295141 bytes
-- Repository HEAD: `87a7f3dfc3e151228d43495e66f6befad9448b6c`
-- Uncommitted paths at generation: 44
-- Generated: 2026-10-05T16:44:22+05:30
+- Repository HEAD: `bf4995d87d2892bcc776a068c88c2a24d14271a2`
+- Uncommitted paths at generation: 45
+- Generated: 2026-10-05T17:02:43+05:30
 
 ## Status vocabulary
 
@@ -27,8 +27,8 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 87 |
-| PARTIAL | 62 |
+| MISSING | 86 |
+| PARTIAL | 63 |
 | VERIFIED | 36 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
@@ -114,7 +114,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| COG-002 | P1 | **PARTIAL** | Reasoning effort adapts to difficulty/consequence. | Beats always-deep cost at quality threshold. | FR-MDL-006 | `friday/execution_economics.py:156-178,304-306`, `friday/task_class.py:132-176` | EXTEND scripts/ with a golden-eval harness (pattern after scripts/golden_router.py) running a fixed task suite through the adaptive policy vs. an always-deep baseline, recording quality/cost, versioned in docs/ or data/; wire into execution_economics.RouteOutcomes for durable tracking. |
+| COG-002 | P1 | **PARTIAL** | Reasoning effort adapts to difficulty/consequence. | Beats always-deep cost at quality threshold. | FR-MDL-006 | `friday/execution_economics.py:156-178,304-306`, `friday/task_class.py:132-176` | GAPS: QUALITY_THRESHOLD=0.90 and the 1:3:5 price ladder are assumptions; the PRD names a threshold but never sets it; Quality oracle is human labels (min_tier), not measured model output; costs are modelled price-weighted tokens, not live usage; Two labelled misses remain (reconnect, stale-cache): classify_task treats requests with no listed work verb ('make', 'stop') as questions and routes them to economy; A mechanical phrase still beats a code-change verb (e.g. 'fix the word count display' routes deterministic); not measured by the suite, not fixed |
 
 ## PRD section 22
 
@@ -519,7 +519,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| COG-005 | P1 | **MISSING** | FRIDAY provides a low-overhead loop for simple bounded objectives that do not justify Objective OS planning or multi-agent orchestration. | A task the complexity classifier marks SIMPLE runs as one action, observe, update, repeat - each action a strict schema (intent, capability, arguments, expected postcondition, confidence) executed by deterministic code through the ExecutionEnvelope and policy engine, never a raw subprocess - within bounds (max 8 steps, 6,000 tokens, $0.10, one repeat of the same action); a simple task finishes in a few actions; a task found to be complex escalates to the Objective OS instead of growing in place. | - | `friday/planner.py`, `friday/objectives.py` | Ranked P1 behind the P0 burn-down (A12, owner 2026-10-04b: docs/plans/build-harness/00-owner-directive-2026-10-04b.md). Pattern from MiniAGI, not its runtime. |
+| COG-005 | P1 | **PARTIAL** | FRIDAY provides a low-overhead loop for simple bounded objectives that do not justify Objective OS planning or multi-agent orchestration. | A task the complexity classifier marks SIMPLE runs as one action, observe, update, repeat - each action a strict schema (intent, capability, arguments, expected postcondition, confidence) executed by deterministic code through the ExecutionEnvelope and policy engine, never a raw subprocess - within bounds (max 8 steps, 6,000 tokens, $0.10, one repeat of the same action); a simple task finishes in a few actions; a task found to be complex escalates to the Objective OS instead of growing in place. | - | `friday/planner.py`, `friday/objectives.py` | GAPS: No live caller: the voice turn does not yet route a SIMPLE class to run_simple; declared FUTURE in friday/reachability.py DECLARED.; The $0.10 bound is metered from the proposer-reported Proposal.cost_usd, not the kernel spend lease, which was not located; owner to confirm.; Escalation hands the original request to objective_start after any actions already ran; Step records are returned but not passed to the planner, so a side-effecting step could be planned again.; objectives.py and planner.py unchanged: the existing objectives.start entry (which calls the planner and compile_objective) is the escalation seam, so the planned objectives.py hook was not needed.; Ran in .venv-build, not .venv-verify (absent on this machine). Regression: test_task_class.py and test_objective_budget.py passed (76 passed with test_reachability and test_simple_loop). |
 | COG-006 | P1 | **MISSING** | FRIDAY detects stagnation - repeated actions, reasoning without action, an objective that does not advance, poor progress per token - and invokes corrective reasoning only then. | A progress score (state changed, tool executed, artifact produced, test improved, requirement moved) is kept per run; when tokens pass a threshold with no real progress, or the same action or failure repeats, the run is marked STALL_DETECTED and a critic or strategy reset runs once; on a healthy run the critic is never called; both the product agent and the build harness use it. | - | `friday/trajectory.py` | Ranked P1 behind the P0 burn-down (A12, owner 2026-10-04b: docs/plans/build-harness/00-owner-directive-2026-10-04b.md). Pattern from MiniAGI, not its runtime. |
 
 ## PRD section 107
