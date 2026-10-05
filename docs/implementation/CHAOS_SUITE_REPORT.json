@@ -43,6 +43,11 @@
       "result": "PASS",
       "tests": [
         {
+          "node_id": "tests/test_chaos_suite.py::test_an_invalid_model_answer_leaves_the_deterministic_plan_not_a_crash",
+          "cases": 9,
+          "result": "PASS"
+        },
+        {
           "node_id": "tests/test_resilience.py::test_the_empty_completion_is_recognised",
           "cases": 1,
           "result": "PASS"

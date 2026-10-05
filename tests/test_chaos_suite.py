@@ -15,9 +15,11 @@ names its reason. Never a success that did not happen.
     worker death             the process holding the leases dies
     reboot                   everything is gone but the database
 
-`FAULT_MAP` is the table. Four faults were already injected by earlier
-suites and are named here rather than re-written; five are injected in this
-file on the real Store and the real ContinuousTaskExecutor. A fault with no
+`FAULT_MAP` is the table. Three faults were already injected by earlier
+suites and are named here rather than re-written; six are injected in this
+file: five on the real Store and the real ContinuousTaskExecutor, and an
+invalid model answer at the planner, where it meets the durable engine.
+(invalid_model_response and worker_death also keep the earlier tests.) A fault with no
 mapping, or a mapping that points at a test that does not exist, fails the
 suite. `scripts/chaos_report.py` runs exactly this table and writes the
 per-fault report that is CHAOS-001's acceptance evidence.
@@ -63,6 +65,7 @@ FAULT_MAP = {
         "tests/test_hermes_engine.py::test_hermes_executor_reports_unavailable_not_a_crash",
     ),
     "invalid_model_response": (
+        "tests/test_chaos_suite.py::test_an_invalid_model_answer_leaves_the_deterministic_plan_not_a_crash",
         "tests/test_resilience.py::test_the_empty_completion_is_recognised",
         "tests/test_resilience.py::test_the_exhausted_form_is_recognised_too",
     ),
@@ -530,3 +533,63 @@ async def test_cold_boot_sweeps_stale_leases_and_names_the_orphan(tmp_path):
     assert after.objective_run(asked_the_boss)["status"] == O.RUN_WAITING_PERMISSION
     assert "watchdog.orphaned" not in event_names(after, owned_elsewhere)
     assert "watchdog.orphaned" not in event_names(after, asked_the_boss)
+
+
+# ---------------------------------------------------------------------------
+# Invalid model response: the planner is where a model's answer meets the
+# durable engine, so the fault is injected there.
+# ---------------------------------------------------------------------------
+
+# Long enough, and vague enough, that the deterministic reading hands the
+# request to the model (planner_model.needs_model) and the model's answer
+# is what gets read.
+VAGUE_REQUEST = ("I would like you to think about whether the whole arrangement "
+                 "of my afternoon could be improved somehow today")
+
+INVALID_MODEL_ANSWERS = [
+    ("empty-text", ""),
+    ("not-json", "Sorry, I cannot help with that."),
+    ("json-array", "[]"),
+    ("json-null", "null"),
+    ("json-string", '"all done"'),
+    ("goal-is-not-an-object", '{"goals": [1, 2]}'),
+    ("goals-is-not-a-list", '{"goals": "open paint"}'),
+    ("constraints-is-not-a-list", '{"constraints": 5}'),
+    ("provider-error", RuntimeError("no response generated")),
+]
+
+
+class _ScriptedGemini:
+    """Stands in for the genai client: one scripted answer per call."""
+
+    def __init__(self, answer) -> None:
+        self.models = self
+        self._answer = answer
+
+    def generate_content(self, **_kwargs):
+        if isinstance(self._answer, BaseException):
+            raise self._answer
+        return type("Answer", (), {"text": self._answer})()
+
+
+@pytest.mark.parametrize("name, answer", INVALID_MODEL_ANSWERS,
+                         ids=[n for n, _ in INVALID_MODEL_ANSWERS])
+def test_an_invalid_model_answer_leaves_the_deterministic_plan_not_a_crash(
+        monkeypatch, name, answer):
+    from friday import planner as P
+    from friday import planner_model as PM
+
+    monkeypatch.setattr(PM, "_RECENT", {})
+    monkeypatch.setattr(PM, "_model", lambda: (_ScriptedGemini(answer), "fake-model"))
+    deterministic = P.resolve(P.interpret(VAGUE_REQUEST))
+    assert PM.needs_model(VAGUE_REQUEST, P.interpret(VAGUE_REQUEST)), \
+        "the request no longer reaches the model, so this probes nothing"
+
+    plan = PM.plan_objective(VAGUE_REQUEST)
+
+    # The end state is the plan the deterministic pass already made - same
+    # goals, same unresolved remainder - with nothing the model "said" in it.
+    assert [g.intent for g in plan.goals] == [g.intent for g in deterministic.goals]
+    assert list(plan.unresolved) == list(deterministic.unresolved)
+    # And the unusable answer was not kept to fail again on the next read.
+    assert PM._RECENT == {}

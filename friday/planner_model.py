@@ -249,19 +249,25 @@ def interpret(text: str, *, context: str = "") -> P.Plan | None:
                 system_instruction="Return only the JSON the schema describes.",
             ),
         )
-        raw = json.loads(answer.text or "{}")
+        # No text is no answer, not an answer of "{}": an empty completion
+        # (Gemini's STOP with no content) is usually gone on the next ask,
+        # and reading it as an empty plan would memoise it.
+        raw = json.loads(answer.text)
+        plan = _as_plan(raw)
     except Exception as exc:                                # noqa: BLE001
-        # A planning model that is down is not a reason to plan badly. The
-        # caller keeps the deterministic reading; it does not fall back to
-        # the clause splitter, which is the thing this replaced.
+        # A planning model that is down, or that answered with something
+        # that is not the shape it was asked for, is not a reason to plan
+        # badly. The caller keeps the deterministic reading; it does not fall
+        # back to the clause splitter, which is the thing this replaced.
         logger.info("planner.model failed=%s", type(exc).__name__)
         return None
 
+    # Memoised only once it has been read as a plan: an unusable answer kept
+    # here would fail again on every re-read of the same request.
     if len(_RECENT) >= _RECENT_LIMIT:
         _RECENT.pop(next(iter(_RECENT)))
     _RECENT[memo] = raw
 
-    plan = _as_plan(raw)
     logger.info("planner.model model=%s goals=%d constraints=%d questions=%d",
                 name, len(plan.goals), len(plan.constraints),
                 len(raw.get("questions") or []))
@@ -275,7 +281,12 @@ def _as_plan(raw: dict) -> P.Plan:
     Schema-constrained output is well-formed, and well-formed is not correct:
     an enum can hold a value that exists and is wrong for this goal, and a
     string field can hold a capability name the model was told not to give.
+
+    Raises ValueError when the answer is not the shape the schema describes
+    (valid JSON is not a valid answer: `[]`, `null` and `{"goals": [1]}` all
+    parse). The caller treats that as a model that gave no usable answer.
     """
+    _require_shape(raw)
     plan = P.Plan()
     previous: P.Goal | None = None
 
@@ -310,6 +321,18 @@ def _as_plan(raw: dict) -> P.Plan:
         into.extend(str(item).strip() for item in (raw.get(field) or [])
                     if str(item).strip())
     return plan
+
+def _require_shape(raw) -> None:
+    if not isinstance(raw, dict):
+        raise ValueError(f"model answer is {type(raw).__name__}, not an object")
+    for field in ("goals", "constraints", "reporting", "safety"):
+        value = raw.get(field)
+        if value is not None and not isinstance(value, list):
+            raise ValueError(f"model answer: {field} is {type(value).__name__}, not a list")
+    for item in raw.get("goals") or []:
+        if not isinstance(item, dict):
+            raise ValueError(f"model answer: a goal is {type(item).__name__}, not an object")
+
 
 #: A capability id, which the model was told not to produce and may anyway.
 _LOOKS_LIKE_A_TOOL = re.compile(r"^[a-z][a-z0-9]*_[a-z0-9_]+$")
