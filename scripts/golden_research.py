@@ -126,7 +126,7 @@ async def modes() -> list[bool]:
           f"corpus={output.get('corpus_chars')} chars")
     for source in sources:
         print(f"    rel={source['relevance']:>4}  "
-              f"{len(source['markdown']):>6} chars  {source['url'][:64]}")
+              f"{source['chars']:>6} chars  {source['url'][:64]}")
     print(f"  dropped for budget : {output.get('dropped_for_budget')}")
     print(f"  unreadable         : {output.get('unreadable')}")
 

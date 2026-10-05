@@ -48,6 +48,7 @@ import httpx
 
 from friday import contracts as c
 from friday.policy import PolicyEngine, default_engine
+from friday.toolsets import artifacts
 from friday.toolsets.system import APPROVAL_PREFIX
 from friday.toolsets.web import USER_AGENT, BrowserSession, _gate, web_search
 
@@ -453,6 +454,18 @@ def _grounding(response) -> tuple[list[dict], list[str]]:
 # ---------------------------------------------------------------------------
 
 
+def _offloaded(body: str, url: str) -> dict:
+    """The `markdown` keys for one source: a preview and a path when the body
+    is large, the body itself when it is small.
+
+    Ranking, deduplication and the corpus budget all run on the full text
+    before this point, and `research_cache` saves the full text after it, so
+    offloading changes only what the next prompt has to carry.
+    """
+    return artifacts.offload(body or "", label=url or "source",
+                             suffix=".md").fields("markdown")
+
+
 async def web_crawl(
     run: c.Run, urls: str, *, max_chars: int = DEFAULT_SOURCE_CHARS,
     render: bool = True, engine: PolicyEngine = default_engine,
@@ -479,7 +492,9 @@ async def web_crawl(
 
     output = _scoped({
         "requested": len(wanted), "read": len(good), "failed": len(failed),
-        "engine": crawl_engine(), "pages": good,
+        "engine": crawl_engine(),
+        "pages": [{**p, **_offloaded(p.get("markdown"), p.get("url", ""))}
+                  for p in good],
         "unreadable": [{"url": p.get("url"), "error": p.get("error")} for p in failed],
     })
 
@@ -544,7 +559,8 @@ async def web_deep_research(
                 "engine": crawl_engine(),
                 "corpus_chars": sum(len(f) for f in cached.facts),
                 "sources": [
-                    {"url": s.url, "title": s.title, "markdown": fact}
+                    {"url": s.url, "title": s.title, "chars": len(fact),
+                     **_offloaded(fact, s.url)}
                     for s, fact in zip(cached.sources, cached.facts)
                 ],
                 "dropped_for_budget": [], "unreadable": [],
@@ -584,8 +600,9 @@ async def web_deep_research(
         "corpus_chars": sum(len(p.get("markdown") or "") for p in kept),
         "sources": [
             {"url": p["url"], "title": p.get("title", ""),
-             "markdown": p.get("markdown", ""),
-             "relevance": relevance(p, question)}
+             "chars": len(p.get("markdown") or ""),
+             "relevance": relevance(p, question),
+             **_offloaded(p.get("markdown"), p["url"])}
             for p in kept
         ],
         "dropped_for_budget": dropped,

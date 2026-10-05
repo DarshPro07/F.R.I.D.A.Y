@@ -38,6 +38,7 @@ from friday.fsjail import FileJail, JailError, is_reparse_point
 
 from friday.policy import PolicyEngine, default_engine
 
+from friday.toolsets import artifacts
 from friday.toolsets.system import APPROVAL_PREFIX
 
 EXECUTION_SCOPE = "local_machine"
@@ -226,11 +227,21 @@ def files_read(
                             "try_instead": specialist.id if specialist else ""}),
         ))
 
+    # A file under the inline cap is answered with its text, as before. One
+    # over it used to spend 40,000 characters of the next prompt on a payload
+    # the model reads once; now the whole file goes to an artifact and the
+    # result points at it, so nothing is truncated away any more. When there
+    # is nowhere to put it the old cap still applies, and `truncated` says so.
+    body = artifacts.offload(text, label=target.name, suffix=target.suffix,
+                             threshold_chars=max_chars, base=ARTIFACTS_DIR)
+    inline = body.text if body.offloaded else text[:max_chars]
     return run.record(c.succeeded(
         started,
-        output=_scoped({"path": str(target), "text": text[:max_chars],
+        output=_scoped({"path": str(target),
                         "chars": len(text), "lines": text.count("\n") + 1,
-                        "truncated": len(text) > max_chars, "bytes": len(raw)}),
+                        "truncated": len(inline) < len(text) and not body.offloaded,
+                        "bytes": len(raw),
+                        **{**body.fields("text"), "text": inline}}),
         verification=c.Verification(
             method="file_read",
             evidence=f"{target.name}: {len(raw)} bytes read, sha256:{_digest(raw)}",

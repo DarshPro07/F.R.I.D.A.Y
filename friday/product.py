@@ -339,11 +339,15 @@ _PER_SOURCE = 2500
 
 def _readable(output: dict) -> str:
     """The pages, as something a model can actually reason over."""
+    from friday.toolsets import artifacts
+
     parts = []
     for item in (output.get("sources") or [])[:4]:
         if not isinstance(item, dict):
             continue
-        body = (item.get("markdown") or "").strip()
+        # An offloaded source carries a preview; the claim is judged on the
+        # page, so the page is read back from the artifact store.
+        body = artifacts.recall(item, "markdown", limit=_PER_SOURCE).strip()
         if not body:
             continue
         parts.append(f"--- {item.get('title') or item.get('url')}\n"
