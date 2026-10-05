@@ -160,6 +160,39 @@ def test_a_genuinely_new_question_is_not_suppressed(store):
         decided)
 
 
+def test_an_answer_and_its_motive_do_not_combine_to_swallow_a_new_question(store):
+    """
+    The decision says "run", its rationale says "pipeline"; the new question
+    needs both of them to clear the overlap bar and neither statement has both.
+    Pooled, the two fields settled a question nobody had answered.
+    """
+    store.record_decision(project="halo",
+                          decision="Where should the tool run? - on the laptop",
+                          rationale="decides how it reaches the pipeline",
+                          source="the boss")
+
+    decided = R.recorded("halo", db=store)
+    assert not R.already_answered(
+        R.Question("Which CI system does the pipeline run on?",
+                   why="changes the build"), decided)
+
+
+def test_an_answer_recorded_during_a_run_is_found_by_its_question(store):
+    """
+    The development-run broker stores only the answer as the decision and the
+    question it answered in the rationale, so the rationale alone must still
+    settle a repeat of that question.
+    """
+    store.record_decision(
+        project="halo", decision="Postgres", source="the user answered a "
+        "development question",
+        rationale="asked during a development run: Which database should we use?")
+
+    decided = R.recorded("halo", db=store)
+    assert R.already_answered(
+        R.Question("What database are we using?", why="matters"), decided)
+
+
 def test_an_answer_becomes_a_decision_that_survives(store):
     asking = R.Question("Which engine should we use?",
                         why="changes everything downstream")

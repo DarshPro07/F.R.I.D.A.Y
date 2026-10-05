@@ -266,22 +266,30 @@ def already_answered(question: Question, decisions: list[dict]) -> bool:
     "which engine are you using?" and "what engine should we use" are the same
     question and asking the second one after the first was answered is how an
     assistant stops feeling like it was listening.
+
+    The decision and its rationale are two statements, and each is matched on
+    its own. Pooling their words let an answer and its motive combine to clear
+    the threshold when neither did alone: "Where should the tool run?" (why:
+    "decides how it reaches the pipeline") swallowed the unrelated "Which CI
+    system does the pipeline run on?" on "run" from one and "pipeline" from the
+    other, and a question swallowed that way is never asked at all. The
+    rationale is still consulted by itself, because an answer recorded during a
+    development run holds only the answer in `decision` and the question it
+    answered in `rationale`.
     """
     wanted = set(_key(question.question).split())
     if not wanted:
         return False
     for row in decisions:
-        said = set(_key(f"{row.get('decision', '')} "
-                        f"{row.get('rationale', '')}").split())
-        if not said:
-            continue
-        overlap = wanted & said
-        # A proportion rather than a count, because the count punishes exactly
-        # the questions most likely to have been asked before: "which engine?"
-        # carries one distinctive word, and requiring two of it means the
-        # shortest, commonest questions are the ones that get asked twice.
-        if len(overlap) / len(wanted) >= _ENOUGH_OVERLAP:
-            return True
+        for statement in (row.get("decision"), row.get("rationale")):
+            said = set(_key(statement or "").split())
+            # A proportion rather than a count, because the count punishes
+            # exactly the questions most likely to have been asked before:
+            # "which engine?" carries one distinctive word, and requiring two
+            # of it means the shortest, commonest questions are the ones that
+            # get asked twice.
+            if said and len(wanted & said) / len(wanted) >= _ENOUGH_OVERLAP:
+                return True
     return False
 
 #: How much of a question's substance has to appear in a decision before it
