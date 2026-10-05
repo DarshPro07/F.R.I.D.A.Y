@@ -348,3 +348,13 @@ def test_the_gateway_routes_on_a_worker_thread_without_loading_livekit_plugins()
         "sys.exit(1 if errors or plugins else 0)\n")
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stdout + done.stderr[-800:]
+
+
+
+def test_the_cli_route_cannot_claim_a_hand_off_to_hermes(monkeypatch):
+    from types import SimpleNamespace
+    claim = SimpleNamespace(status="ok", provider="claude-cli", model="sonnet",
+                            response="It's going down to Hermes now, sir.", warnings=[], cost_usd=0.0)
+    V, _, _ = _ui_turn(monkeypatch, result=claim)
+    out = V.reply("run validation")
+    assert out["reply"].startswith("I have not handed anything to Hermes")

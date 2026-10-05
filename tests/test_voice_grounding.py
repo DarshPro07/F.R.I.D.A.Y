@@ -106,3 +106,17 @@ def test_a_delegation_claim_without_the_tool_is_replaced():
     plain = "The weather is fine, sir."
     assert vb._honest_about_hermes(plain, []) == plain
     assert vb._honest_about_hermes(out, []) == out          # the correction itself is not a claim
+
+
+
+def test_the_hand_off_sentence_said_in_the_chrome_test_is_refused_and_a_negative_is_not():
+    # FRIDAY.exe 2026-10-05: no hermes call ran, the objective panel said
+    # "Nothing running", and the reply said the job was on its way to Hermes.
+    said = ("Taking that as a general sweep, sir. It's going down to Hermes now, "
+            "and I'll report what comes back rather than guess at it.")
+    assert vb._honest_about_hermes(said, []).startswith("I have not handed anything to Hermes")
+    for claim in ("I'm sending it to Hermes.", "This is on its way to Hermes.",
+                  "That's going over to Hermes."):
+        assert vb._honest_about_hermes(claim, []) != claim, claim
+    negative = "Nothing is going to Hermes until you say so, sir."
+    assert vb._honest_about_hermes(negative, []) == negative

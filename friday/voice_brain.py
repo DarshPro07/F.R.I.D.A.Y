@@ -923,7 +923,11 @@ _FINISHED_Q = re.compile(
 _DELEGATION_CLAIM = re.compile(
     r"\b(?:hermes has it|i'?ve (?:asked|handed|told|given) (?:it to )?hermes"
     r"|handed (?:this|that|it) (?:over )?to hermes|hermes is (?:now )?(?:on it|working on)"
-    r"|delegated (?:it|this|that)?\s*to hermes)\b", re.I)
+    r"|delegated (?:it|this|that)?\s*to hermes"
+    # Chrome test of FRIDAY.exe, 2026-10-05, said with no hermes call at all:
+    # "It's going down to Hermes now, and I'll report what comes back".
+    r"|(?:it|this|that)(?:'s| is) (?:going|on its way) (?:down |over |off )?to hermes"
+    r"|(?:i'?m |i am )?(?:sending|passing) (?:it|this|that) (?:down |over |off )?to hermes)\b", re.I)
 
 
 def _honest_about_hermes(answer: str, used) -> str:
@@ -1377,7 +1381,9 @@ def _cli_reply(text, history, approval_note=""):
         detail = "; ".join(result.warnings)[:140] or result.status
         return {"reply": "My language brain is offline: Gemini has no working key and "
                          "the CLI route failed (%s)." % detail, "degraded": True}
-    answer = _honest_about_acting(result.response.strip(), [], 0)
+    # Both gates the Gemini turn has: nothing ran here, so a hand-off to Hermes
+    # or a completed action is a claim the turn cannot back.
+    answer = _honest_about_acting(_honest_about_hermes(result.response.strip(), []), [], 0)
     message_id = _remember_turn("assistant", answer)
     return {"reply": answer, "model": f"{result.provider}/{result.model}",
             "message_id": message_id, "used_memory": bool(ctx), "used_capabilities": [],
