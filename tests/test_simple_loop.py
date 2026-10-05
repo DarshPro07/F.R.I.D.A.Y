@@ -350,3 +350,46 @@ def test_a_failed_status_never_satisfies_a_postcondition():
                 escalations)
     assert result.outcome != SL.DONE
     assert not any(step.met for step in result.steps)
+
+
+# --- escalating after an action already ran ------------------------------------------
+
+def _escalate_after(capability, status=c.SUCCEEDED):
+    """One unmet action on `capability`, then the proposer calls the task complex."""
+    dispatch, escalations = Dispatch(status=status), Escalations()
+    proposer = Proposer(
+        SL.Proposal(action=action(capability=capability,
+                                  postcondition={"status": c.SUCCEEDED,
+                                                 "output_contains": "never said"})),
+        SL.Proposal(complex_because="it needs a plan"))
+    return go(SIMPLE_REQUEST, dispatch, proposer, escalations), dispatch, escalations
+
+
+def test_escalation_is_held_when_a_step_that_cannot_be_repeated_already_ran():
+    # The planner reads only the request, so handing it over now would plan the
+    # reminder a second time.
+    result, dispatch, escalations = _escalate_after("reminders_create")
+    assert len(dispatch.calls) == 1
+    assert result.outcome == SL.BLOCKED
+    assert "reminders_create" in result.reason and "step 1" in result.reason
+    assert escalations.requests == []
+    assert [step.status for step in result.steps] == [c.SUCCEEDED]
+
+
+@pytest.mark.parametrize("capability", ["system_get_info", "audio_session_volume"])
+def test_escalation_still_hands_over_after_steps_that_are_safe_to_repeat(capability):
+    result, dispatch, escalations = _escalate_after(capability)
+    assert len(dispatch.calls) == 1 and result.outcome == SL.ESCALATED
+    assert escalations.requests == [SIMPLE_REQUEST]
+
+
+def test_escalation_still_hands_over_when_the_step_that_ran_did_nothing():
+    for status in (c.FAILED, c.NOT_CARRIED_OUT):
+        result, dispatch, escalations = _escalate_after("reminders_create", status=status)
+        assert result.outcome == SL.ESCALATED, status
+        assert escalations.requests == [SIMPLE_REQUEST]
+
+
+def test_escalation_is_held_for_a_step_the_registry_cannot_vouch_for():
+    result, _, escalations = _escalate_after("not_in_the_registry")
+    assert result.outcome == SL.BLOCKED and escalations.requests == []

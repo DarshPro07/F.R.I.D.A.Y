@@ -21,7 +21,9 @@ The shape is fixed so that nothing in it is a model's to decide:
   action at most `1 + MAX_REPEATS` times.
 * A task found to be complex is handed to the Objective OS, whole, and the
   loop ends. It never adds steps in place: the first plan that outgrows the
-  bounds is exactly the case the planner exists for.
+  bounds is exactly the case the planner exists for. The planner sees only the
+  request, so if an action that cannot safely be repeated has already run, the
+  request is not handed over: the loop stops BLOCKED and a person decides.
 
 What a step costs is what the proposer reports (`Proposal.tokens` and
 `Proposal.cost_usd`; for a model call, the gateway's `cost_usd` telemetry).
@@ -39,6 +41,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
 
+from friday import capabilities as K
 from friday import contracts as c
 from friday import objectives as O
 from friday import task_class as TC
@@ -276,6 +279,24 @@ async def _settled(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
+#: An action that ended in one of these changed nothing, so it cannot be done twice.
+_NO_EFFECT = (c.FAILED, c.CANCELLED, c.NOT_PERMITTED, c.UNSUPPORTED,
+              c.NOT_CARRIED_OUT, c.NOT_CONFIGURED)
+
+
+def _may_repeat_an_effect(step: Step) -> bool:
+    """
+    True when running this step's capability again could do the thing twice.
+
+    Read-only and idempotent capabilities are safe to run again; a capability
+    the registry does not declare is not known to be, so it counts as unsafe.
+    """
+    if step.status in _NO_EFFECT:
+        return False
+    declared = K.by_id(step.action.capability)
+    return declared is None or not (declared.read_only or declared.idempotent)
+
+
 def escalate_to_objective_os(run: c.Run, request: str) -> dict:
     """
     Hand the original request to the Objective OS as a normal objective: it is
@@ -301,8 +322,9 @@ async def run_simple(request: str, dispatch: Callable[..., Any],
     `propose(state)` returns a `Proposal`. The loop ends in exactly one of:
     DONE (the postcondition held), BLOCKED (a gate - policy, envelope, the
     emergency stop - refused an action; asking again would only repeat the
-    question the gate already answered) or ESCALATED (the request is handed to
-    the Objective OS and nothing more runs here).
+    question the gate already answered; or the request needs the Objective OS
+    but an action that cannot safely be repeated has already run) or ESCALATED
+    (the request is handed to the Objective OS and nothing more runs here).
     """
     text = (request or "").strip()
     run = run or c.Run.create(text[:200])
@@ -312,6 +334,17 @@ async def run_simple(request: str, dispatch: Callable[..., Any],
     seen: dict[str, int] = {}
 
     async def hand_over(reason: str) -> LoopResult:
+        # The Objective OS plans from the request alone, so it cannot be told
+        # what already ran. If that could be done again, a person decides.
+        done = next((step for step in state.steps if _may_repeat_an_effect(step)), None)
+        if done is not None:
+            return LoopResult(
+                BLOCKED,
+                f"SIDE EFFECT: step {done.index} ({done.action.capability}) "
+                "already ran and cannot safely be repeated, and the Objective "
+                f"OS would plan the whole request again; not handed over "
+                f"({reason})",
+                state.steps, state.tokens, state.cost_usd, run.run_id)
         answer = await _settled(escalate(run, text))
         return LoopResult(ESCALATED, reason, state.steps, state.tokens,
                           state.cost_usd, run.run_id, escalation=answer)
