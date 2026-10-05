@@ -72,6 +72,28 @@ def _guarded_connect(database, *args, **kwargs):
     return _REAL_CONNECT(database, *args, **kwargs)
 
 
+#: TEST-ISOLATION-001 for Hermes: the owner's `friday` profile (its config,
+#: routing tiers and toolsets) is live state too, and tests read it through
+#: profile_home - so the suite's verdict changed the day FRIDAY.exe first
+#: created that profile (2026-10-05). A path that does not exist reads as "no
+#: profile here", the state the suite was written against.
+_NO_HERMES_PROFILE = os.path.join(_SESSION_HOME, "no-hermes-profile")
+
+
+@pytest.fixture(autouse=True)
+def _hermes_profile_is_off_limits(request, monkeypatch):
+    """A @live test means the real install; every other test sees none."""
+    if not request.node.get_closest_marker("live"):
+        monkeypatch.setenv("FRIDAY_HERMES_PROFILE_HOME", _NO_HERMES_PROFILE)
+    # Both are read once per process: drop what an earlier test cached under
+    # another profile. Before the test, so a test's own stand-ins are undone.
+    economics = sys.modules.get("friday.execution_economics")
+    if economics is not None:
+        economics._tier_table.cache_clear()
+        economics.known_models.cache_clear()
+    yield
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _live_stores_are_off_limits():
     """TEST-ISOLATION-001, enforced in the test process: opening a SQLite

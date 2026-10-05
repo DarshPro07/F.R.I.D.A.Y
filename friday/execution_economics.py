@@ -191,6 +191,13 @@ DEFAULT_TIERS = {
     TIER_DEEP: "",            # the profile default (claude-opus-5 here)
 }
 
+#: Whose model ids DEFAULT_TIERS are. On a profile whose main provider is
+#: another one they are not its models: a fresh `friday` profile cloned from an
+#: openai-codex default asked openai-codex for claude-haiku on every fast call
+#: (FRIDAY.exe live test, 2026-10-05). There a tier the profile does not set
+#: itself means the profile default.
+DEFAULT_TIERS_PROVIDER = "anthropic"
+
 
 @functools.lru_cache(maxsize=1)
 def known_models() -> frozenset:
@@ -229,7 +236,8 @@ def known_models() -> frozenset:
 def _tier_table() -> dict:
     """
     tier -> concrete model. The friday profile's `routing.tiers` block wins
-    where it names a tier; DEFAULT_TIERS fills the rest. "" means the
+    where it names a tier; DEFAULT_TIERS fills the rest when the profile's
+    main provider is DEFAULT_TIERS_PROVIDER, "" otherwise. "" means the
     profile default model. The router never invents a model name: only this
     table or "" can appear, and a name the provider cache does not list is
     dropped to "" with a log line - a typo in config must degrade to the
@@ -238,6 +246,8 @@ def _tier_table() -> dict:
     from friday.hermes_bridge import ENV_PROFILE, ENV_PROFILE_HOME, \
         profile_home
     table = dict(DEFAULT_TIERS)
+    configured: dict = {}
+    main_provider = ""
     home = os.environ.get(ENV_PROFILE_HOME) or profile_home(
         os.environ.get(ENV_PROFILE, "friday"))
     if home:
@@ -246,9 +256,13 @@ def _tier_table() -> dict:
             config = yaml.safe_load(
                 (Path(home) / "config.yaml").read_text(encoding="utf-8"))
             tiers = ((config or {}).get("routing") or {}).get("tiers") or {}
-            table.update({str(k): str(v) for k, v in tiers.items() if v})
+            configured = {str(k): str(v) for k, v in tiers.items() if v}
+            main_provider = str(((config or {}).get("model") or {}).get("provider") or "")
         except Exception:                                    # noqa: BLE001
             pass
+    if main_provider and main_provider != DEFAULT_TIERS_PROVIDER:
+        table = {tier: "" for tier in table}
+    table.update(configured)
     known = known_models()
     if known:
         for tier, model in list(table.items()):

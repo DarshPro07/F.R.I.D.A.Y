@@ -42,3 +42,38 @@ def test_the_cache_reader_understands_both_shapes(tmp_path, monkeypatch):
         assert ee.known_models() == {"m1", "m2", "m3"}
     finally:
         ee.known_models.cache_clear()
+
+
+def _profile(tmp_path, monkeypatch, config: str):
+    (tmp_path / "config.yaml").write_text(config, encoding="utf-8")
+    monkeypatch.setenv("FRIDAY_HERMES_PROFILE_HOME", str(tmp_path))
+    monkeypatch.setattr(ee, "known_models", lambda: frozenset())
+    ee._tier_table.cache_clear()
+
+
+def test_anthropic_defaults_are_not_offered_to_another_main_provider(tmp_path, monkeypatch):
+    # FRIDAY.exe 2026-10-05: a fresh friday profile with main provider openai-codex
+    # was asked for claude-haiku-4-5 on every fast call.
+    _profile(tmp_path, monkeypatch, "model:\n  provider: openai-codex\n  default: gpt-5.5\n")
+    try:
+        assert ee._tier_table() == {ee.TIER_ECONOMY: "", ee.TIER_STANDARD: "", ee.TIER_DEEP: ""}
+    finally:
+        ee._tier_table.cache_clear()
+
+
+def test_a_profiles_own_tiers_still_win_on_any_provider(tmp_path, monkeypatch):
+    _profile(tmp_path, monkeypatch, "model:\n  provider: openai-codex\n"
+                                    "routing:\n  tiers:\n    economy: gpt-5.5-mini\n")
+    try:
+        assert ee._tier_table()[ee.TIER_ECONOMY] == "gpt-5.5-mini"
+        assert ee._tier_table()[ee.TIER_STANDARD] == ""
+    finally:
+        ee._tier_table.cache_clear()
+
+
+def test_an_anthropic_profile_keeps_the_defaults(tmp_path, monkeypatch):
+    _profile(tmp_path, monkeypatch, "model:\n  provider: anthropic\n  default: claude-opus-5\n")
+    try:
+        assert ee._tier_table() == dict(ee.DEFAULT_TIERS)
+    finally:
+        ee._tier_table.cache_clear()
