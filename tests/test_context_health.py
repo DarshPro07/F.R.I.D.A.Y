@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from friday import compaction
+from friday import compression
 from friday import context_health as H
 
 NOW = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
@@ -242,7 +243,7 @@ def test_an_action_that_would_lose_a_critical_fact_is_refused(monkeypatch):
     layout = critical_layout() + duplicated(18, 5)
     before = agg(layout)
 
-    def lossy(layout, now=None, budget=0):
+    def lossy(layout, now=None, budget=0, ledger=None):
         return [e for e in layout if e.get("tier") != "rules"]          # drops the rule
 
     monkeypatch.setattr(H, "prune", lossy)
@@ -283,6 +284,74 @@ def test_a_healthy_context_is_returned_untouched():
     before = agg(critical_layout(contradiction=False) + unique(8))
     after, verdict = H.remediate(before, NOW)
     assert after is before and verdict["applied"] == H.NONE
+
+
+# --- provenance (CTX-007) --------------------------------------------------
+
+@pytest.fixture()
+def vault_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("FRIDAY_ARTIFACT_VAULT", str(tmp_path / "vault"))
+    return tmp_path / "vault"
+
+
+def stale_layout():
+    return (critical_layout() + [head("WHAT WAS SAID BEFORE (most recent last):")]
+            + [line("- he: hello", "episodes", FRESH)] * 4
+            + [line("- he: old news %d" % i, "episodes", OLD) for i in range(3)]
+            + [line("DUMP " * 300, "outcomes")])
+
+
+def test_remediate_records_every_line_it_lets_go_of_and_each_one_recovers(vault_dir):
+    after, verdict = H.remediate(agg(stale_layout()), NOW)
+    records = verdict["transformations"]
+    assert {r["action"] for r in records} == {compression.DROP}
+    assert {r["payload_class"] for r in records} == {compression.DROP_AFTER_EXTRACTION}
+    recovered = {compression.recover(r["recovery"]).decode() for r in records}
+    assert recovered == {"- he: old news %d" % i for i in range(3)} | {"DUMP " * 300}
+    for r in records:
+        assert compression.recover(r["transformed_sha256"]) == compression.recover(r["recovery"])
+        assert r["source_sha256"] == r["origin_sha256"] and r["parent_sha256"] == ""
+    assert not any(t in after["prompt"] for t in recovered)
+
+
+def test_a_critical_line_is_never_transformed_even_when_something_else_quotes_it(vault_dir):
+    quoting = line("- he: you said " + RULE, "episodes", OLD)
+    layout = stale_layout() + [quoting]
+    after, verdict = H.remediate(agg(layout), NOW)
+    recovered = {compression.recover(r["recovery"]).decode() for r in verdict["transformations"]}
+    assert not recovered & {PREF, RULE, CONTRA, quoting["text"]}
+    assert quoting["text"] in after["prompt"], "a line that carries a critical fact stays"
+    for fact in (PREF, RULE, CONTRA):
+        assert fact in after["prompt"]
+
+
+def test_summarize_records_each_clip_and_each_cap_with_the_original_recoverable(vault_dir):
+    long_lines = [line("- [doc%d] %s" % (i, "detail " * 60), "specs") for i in range(10)]
+    ledger: list = []
+    out = H.summarize(critical_layout() + [head("RELEVANT SPECS:")] + long_lines, NOW,
+                      ledger=ledger)
+    by_action = {a: [r for r in ledger if r.action == a]
+                 for a in (compression.SUMMARIZE, compression.DROP)}
+    assert len(by_action[compression.SUMMARIZE]) == H.SUMMARY_SECTION_LINES
+    assert len(by_action[compression.DROP]) == 10 - H.SUMMARY_SECTION_LINES
+    assert {r.backend for r in by_action[compression.SUMMARIZE]} == {H.CLIP}
+    originals = {e["text"] for e in long_lines}
+    assert {compression.recover(r.recovery).decode() for r in ledger} == originals
+    clipped = [e["text"] for e in out if e.get("tier") == "specs"]
+    assert {r.transformed_sha256 for r in by_action[compression.SUMMARIZE]} == {
+        compression.sha256(t) for t in clipped}
+
+
+def test_a_line_whose_original_cannot_be_kept_is_not_dropped(monkeypatch, tmp_path):
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file where the vault directory should be")
+    monkeypatch.setenv("FRIDAY_ARTIFACT_VAULT", str(blocked))
+    ledger: list = []
+    texts = [e["text"] for e in H.prune(stale_layout(), NOW, ledger=ledger)]
+    assert ledger and all(r.refusal and r.action == compression.PASS_RAW for r in ledger)
+    assert all("vault refused" in r.refusal for r in ledger)
+    assert "- he: old news 0" in texts and ("DUMP " * 300) in texts
+    assert RULE in texts
 
 
 # --- wiring ---------------------------------------------------------------

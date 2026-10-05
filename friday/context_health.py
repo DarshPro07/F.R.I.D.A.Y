@@ -39,7 +39,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
-from friday import compaction
+from friday import compaction, compression
 
 log = logging.getLogger("friday.context_health")
 
@@ -80,6 +80,8 @@ MIN_ENTRIES = 6
 #: Summarize clips a non-critical line to this and keeps this many per section.
 SUMMARY_LINE_CHARS = 96
 SUMMARY_SECTION_LINES = 4
+#: The name `summarize`'s line clipper is registered under with the coordinator.
+CLIP = "clip"
 #: One non-critical section holding this share of the tokens is folded, not summarized.
 FOLD_SHARE = 0.5
 #: Pruning a context that is over its budget trims it to this share of it.
@@ -261,7 +263,26 @@ def _tidy(layout: list) -> list:
     return out
 
 
-def _fit(layout: list, target: int) -> list:
+def _shorten(text: str, action: str, facts, ledger: list | None, backend: str = "") -> str | None:
+    """Run `action` on one line through the compression coordinator. Returns
+    the text that replaces it, or None when the coordinator refused and the
+    line must stay as it is: its original is in the vault, or it does not go."""
+    try:
+        out, record = compression.default().transform(
+            text, action, backend=backend, facts=facts,
+            hint=compression.DROP_AFTER_EXTRACTION if action == compression.DROP
+            else compression.SUMMARIZABLE)
+    except compaction.LossyCompaction:
+        log.info("context health: a line that carries a critical fact stays as it is")
+        return None
+    if record.refusal:
+        log.warning("context health: %s refused (%s)", action, record.refusal)
+    if ledger is not None and (record.refusal or record.action != compression.PASS_RAW):
+        ledger.append(record)
+    return None if record.refusal else out
+
+
+def _fit(layout: list, target: int, facts=None, ledger: list | None = None) -> list:
     """Drop non-critical lines until the context is within `target` tokens: the
     oldest turns first, then the tail of the other sections - the lines
     `memory_stack.aggregate` would have stopped at the budget before taking."""
@@ -274,16 +295,23 @@ def _fit(layout: list, target: int) -> list:
     for i in order:
         if total <= target:
             break
+        if _shorten(out[i]["text"], compression.DROP, facts, ledger) is None:
+            continue
         total -= _tokens(out[i]["text"])
         gone.add(i)
     return [e for i, e in enumerate(out) if i not in gone]
 
 
-def prune(layout, now: datetime | None = None, budget: int = 0) -> list:
+def prune(layout, now: datetime | None = None, budget: int = 0,
+          ledger: list | None = None) -> list:
     """Duplicates, stale lines and raw dumps out; critical lines stay. A context
     over `budget` is then trimmed to FIT_TARGET of it, so the next few turns
-    have room instead of tripping the verdict again at once."""
+    have room instead of tripping the verdict again at once. Each line let go
+    of goes through the compression coordinator, which keeps its original in
+    the vault; the records are appended to `ledger`. An exact repeat of a line
+    that stays loses nothing and is not a transformation."""
     now, seen, out = _now(now), set(), []
+    facts = critical_facts(layout)
     for e in layout:
         if not e.get("tier"):
             out.append(e)
@@ -291,12 +319,14 @@ def prune(layout, now: datetime | None = None, budget: int = 0) -> list:
         key = _norm(e["text"])
         if key in seen:
             continue
-        if not _critical(e) and (_is_stale(e, now) or _is_raw(e)):
+        if (not _critical(e) and (_is_stale(e, now) or _is_raw(e))
+                and _shorten(e["text"], compression.DROP, facts, ledger) is not None):
             continue
         seen.add(key)
         out.append(e)
     if budget and sum(_tokens(e["text"]) for e in _entries(out)) > budget:
-        out = _fit(out, int(budget * _env_number("FRIDAY_CTX_FIT_TARGET", FIT_TARGET, float)))
+        out = _fit(out, int(budget * _env_number("FRIDAY_CTX_FIT_TARGET", FIT_TARGET, float)),
+                   facts, ledger)
     return _tidy(out)
 
 
@@ -305,12 +335,21 @@ def _clip(text: str, limit: int) -> str:
     return flat if len(flat) <= limit else flat[:limit - 1].rstrip() + "…"
 
 
-def summarize(layout, now: datetime | None = None, budget: int = 0) -> list:
+def _clip_line(text: str) -> str:
+    return _clip(text, _env_number("FRIDAY_CTX_SUMMARY_LINE_CHARS", SUMMARY_LINE_CHARS, int))
+
+
+compression.register_backend(CLIP, _clip_line)
+
+
+def summarize(layout, now: datetime | None = None, budget: int = 0,
+              ledger: list | None = None) -> list:
     """Prune, then clip each non-critical line and cap each section. The
-    newest lines survive in the time-ordered tier, the best-ranked elsewhere."""
-    pruned = prune(layout, now, budget)
+    newest lines survive in the time-ordered tier, the best-ranked elsewhere.
+    Clipping and capping go through the compression coordinator like pruning."""
+    pruned = prune(layout, now, budget, ledger)
+    facts = critical_facts(layout)
     cap = _env_number("FRIDAY_CTX_SUMMARY_SECTION_LINES", SUMMARY_SECTION_LINES, int)
-    clip = _env_number("FRIDAY_CTX_SUMMARY_LINE_CHARS", SUMMARY_LINE_CHARS, int)
     by_tier: dict = {}
     for i, e in enumerate(pruned):
         if e.get("tier") and not _critical(e):
@@ -323,7 +362,10 @@ def summarize(layout, now: datetime | None = None, budget: int = 0) -> list:
         if not e.get("tier") or _critical(e):
             out.append(e)
         elif i in keep:
-            out.append(dict(e, text=_clip(e["text"], clip)))
+            clipped = _shorten(e["text"], compression.SUMMARIZE, facts, ledger, CLIP)
+            out.append(e if clipped is None else dict(e, text=clipped))
+        elif _shorten(e["text"], compression.DROP, facts, ledger) is None:
+            out.append(e)
     return _tidy(out)
 
 
@@ -344,7 +386,9 @@ def remediate(agg: dict, now: datetime | None = None) -> tuple[dict, dict]:
     if action == NONE:
         return agg, dict(verdict, applied=NONE)
     budget = agg.get("budget_tokens") or 0
-    shrunk = prune(layout, now, budget) if action == PRUNE else summarize(layout, now, budget)
+    ledger: list = []
+    shrunk = (prune(layout, now, budget, ledger) if action == PRUNE
+              else summarize(layout, now, budget, ledger))
     facts = critical_facts(layout)
     try:
         compaction.validate(_packet(shrunk), facts)
@@ -356,7 +400,8 @@ def remediate(agg: dict, now: datetime | None = None) -> tuple[dict, dict]:
                  tokens_used=sum(_tokens(e["text"]) for e in _entries(shrunk)))
     left = assess(after, now)
     out = dict(verdict, applied=action if action == PRUNE else SUMMARIZE,
-               after=left["state"], after_action=left["action"])
+               after=left["state"], after_action=left["action"],
+               transformations=[t.to_dict() for t in ledger])
     if action == HANDOFF:
         packet = _packet([e for e in _entries(layout) if _critical(e)])
         compaction.validate(packet, facts)

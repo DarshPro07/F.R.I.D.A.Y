@@ -1598,6 +1598,10 @@ class WorkingSet:
     #: The context-health verdict of the memory the caller supplied (CTX-004,
     #: `friday.context_health.assess`), or empty when it supplied none.
     health: dict = field(default_factory=dict)
+    #: One compression record per dropped section (CTX-007,
+    #: `friday.compression.Transformation.to_dict` plus the section's name);
+    #: each `recovery` pointer gets the section's exact text back.
+    transformations: tuple = ()
 
     @property
     def total_tokens(self) -> int:
@@ -1609,10 +1613,28 @@ class WorkingSet:
                "facts_kept": self.facts_kept}
         if self.health:
             out["health"] = dict(self.health)
+        if self.transformations:
+            out["transformations"] = [dict(t) for t in self.transformations]
         return out
 
 
 _QUOTE_MARK = re.compile(r"(?m)^> ")
+
+
+def _let_go(text: str, facts) -> dict | None:
+    """Drop one offered section through the compression coordinator, which
+    stores it in the vault first. Returns the record, or None when the
+    coordinator refused (the section carries a critical fact, or the vault
+    could not keep it) and the section stays."""
+    from friday import compaction, compression
+
+    try:
+        _, record = compression.default().transform(
+            text, compression.DROP, facts=facts, hint=compression.DROP_AFTER_EXTRACTION)
+    except compaction.LossyCompaction:
+        logger.info("context compile: a section that carries a critical fact stays")
+        return None
+    return None if record.refusal else record.to_dict()
 
 
 def compile_working_set(*, system: str = "", user: str, pinned=(), state=(),
@@ -1671,6 +1693,7 @@ def compile_working_set(*, system: str = "", user: str, pinned=(), state=(),
     sizes = {name: _tokens(text) for name, text in offered.items()}
     kept = dict(sizes)
     dropped: list[str] = []
+    moves: list[dict] = []
     if budget_tokens:
         floor = sum(n for name, n in sizes.items() if SECTION_PRIORITY[name] == P0)
         if floor > budget_tokens:
@@ -1681,9 +1704,18 @@ def compile_working_set(*, system: str = "", user: str, pinned=(), state=(),
             for name in reversed(list(kept)):
                 if sum(kept.values()) <= budget_tokens:
                     break
-                if SECTION_PRIORITY[name] == level:
-                    del kept[name]
-                    dropped.append(name)
+                if SECTION_PRIORITY[name] != level:
+                    continue
+                record = _let_go(offered[name], facts)
+                if record is None:
+                    continue
+                del kept[name]
+                dropped.append(name)
+                moves.append(dict(record, section=name))
+        if sum(kept.values()) > budget_tokens:
+            raise ContextOverBudget(
+                f"the sections that could be let go are gone or were refused, and "
+                f"{sum(kept.values())} tokens remain for a budget of {budget_tokens}")
 
     messages: list[dict] = []
     if "system" in kept:
@@ -1707,7 +1739,7 @@ def compile_working_set(*, system: str = "", user: str, pinned=(), state=(),
                       priorities={name: SECTION_PRIORITY[name] for name in sizes},
                       dropped=tuple(dropped), budget_tokens=budget_tokens,
                       facts_kept=len(facts.lines()) if facts is not None else 0,
-                      health=dict(health or {}))
+                      health=dict(health or {}), transformations=tuple(moves))
 
 
 @dataclass(frozen=True)

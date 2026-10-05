@@ -16,6 +16,7 @@ import pytest
 
 from friday import capabilities
 from friday import compaction as K
+from friday import compression
 from friday import contracts as c
 from friday import development
 from friday import model_gateway as mg
@@ -75,6 +76,29 @@ def test_a_critical_fact_a_literal_and_an_active_blocker_survive_a_tight_budget(
     assert K.missing(text, facts) == []
     assert tight.facts_kept == len(facts.lines())
     assert "recorded" in tight.sections and "recorded" not in tight.dropped
+
+
+def test_every_dropped_section_has_a_record_and_comes_back_exactly(tmp_path, monkeypatch):
+    monkeypatch.setenv("FRIDAY_ARTIFACT_VAULT", str(tmp_path / "vault"))
+    store, run_id = _objective(tmp_path)
+    facts = K.for_objective(store, run_id)
+    floor = mg.compile_working_set(user="tidy the drafts", facts=facts).total_tokens
+    crowd = dict(state=("a long note " * 40,), memory="the boss likes tables " * 30,
+                 code_refs=("src/report.py " * 30,), history=[("user", "earlier turn " * 30)])
+    roomy = mg.compile_working_set(user="tidy the drafts", facts=facts, **crowd)
+    tight = mg.compile_working_set(user="tidy the drafts", facts=facts, budget_tokens=floor, **crowd)
+    assert roomy.transformations == () and "transformations" not in roomy.telemetry()
+    moves = {t["section"]: t for t in tight.transformations}
+    assert set(moves) == set(tight.dropped) == {"state", "memory", "code", "history"}
+    assert tight.telemetry()["transformations"] == [dict(t) for t in tight.transformations]
+    said = {"state": "a long note", "memory": "the boss likes tables",
+            "code": "src/report.py", "history": "earlier turn"}
+    for name, record in moves.items():
+        assert record["action"] == compression.DROP and record["refusal"] == ""
+        original = compression.recover(record["recovery"])
+        assert compression.sha256(original) == record["source_sha256"]
+        assert said[name] in original.decode() and said[name] not in _content(tight)
+    assert K.missing(_content(tight), facts) == []
 
 
 def test_a_package_that_cannot_fit_the_facts_fails_rather_than_dropping_them(tmp_path):
