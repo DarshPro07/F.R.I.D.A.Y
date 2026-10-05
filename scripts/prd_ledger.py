@@ -3485,6 +3485,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             'ig, closed stdin, timeout, sign-in check); one live test each, marked live.'
         ),
     }),
+    ('COG-002', {
+        "status": PARTIAL,
+        "current_implementation": 'Golden eval (33 labelled tasks): adaptive effort is 35.2% cheaper than always-deep at 0.94 first-pass quality (threshold 0.90, deep floor intact). It found and fixed two routing defects; results go through RouteOutcomes and a frozen baseline. (build run, commit 762a435e8)',
+        "next_action": "GAPS: QUALITY_THRESHOLD=0.90 and the 1:3:5 price ladder are assumptions; the PRD names a threshold but never sets it; Quality oracle is human labels (min_tier), not measured model output; costs are modelled price-weighted tokens, not live usage; Two labelled misses remain (reconnect, stale-cache): classify_task treats requests with no listed work verb ('make', 'stop') as questions and routes them to economy; A mechanical phrase still beats a code-change verb (e.g. 'fix the word count display' routes deterministic); not measured by the suite, not fixed",
+    }),
 ]
 
 
