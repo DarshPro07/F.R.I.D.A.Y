@@ -3535,6 +3535,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added friday/context_lab.py: 9 of 14 PRD 19.11 scenarios run against a full-history baseline. golden.Report.summary() and the golden release report now carry context metrics and a context_lab gate; scripts/golden_context.py runs the lab too. (build run, commit bb3c7ad99)',
         "next_action": 'GAPS: 5 of 14 scenarios are reported as unexercised with a reason (coverage 0.6429): semantic needles, multi-hop facts, aggregation, skill bloat, repository-scale code reasoning. Each needs a corpus or question set that does not exist yet.; contradiction/supersession measures open contradictions surviving remediation; superseding a resolved fact is not measured.; The packet cites a Report class at evaluation.py:550; evaluation.py has none. The release report is friday/golden.py Report, so that is where the metrics went; evaluation.py is unchanged.',
     }),
+    ('EVAL-003', {
+        "status": PARTIAL,
+        "current_implementation": 'Routing now consults a measured-benchmark store fed by golden.Report runs. A declaration alone keeps a route usable but never promotes it; only a report with every gate passed does. require_measured opts into refusal. (build run, commit 0029c7e92)',
+        "next_action": "GAPS: The one failure is tests/test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop: @live, the provider answered 'failed' (auth/provider config), outside the gate marker set; not run on the unchanged tree, so pre-existing is inferred, not proven.; Assumed: latest report per route replaces earlier; no expiry; measured-below-target demotes (kept usable, unpromoted) unless require_measured. Nothing sets require_measured yet.; Benchmarks are per route, not per task class: Report carries no task class.",
+    }),
 ]
 
 
