@@ -1,0 +1,180 @@
+{
+  "cost_model": {
+    "price": {
+      "deep": 5.0,
+      "economy": 1.0,
+      "standard": 3.0
+    },
+    "repair": "deep run on top of the wasted attempt",
+    "tokens_per_task": 20000
+  },
+  "effort_suite_version": 1,
+  "gates": [
+    "minimum_cases",
+    "covers_every_tier",
+    "quality_not_below_baseline",
+    "cost_below_baseline",
+    "no_deep_task_below_deep"
+  ],
+  "learned_router": "none built",
+  "minimum_cases": 10,
+  "provenance": {
+    "commit": "a680c0c",
+    "date": "2026-10-05T18:28:25+00:00"
+  },
+  "split_rule": "sha256(task id) % 3 == 0 -> holdout",
+  "splits": {
+    "development": {
+      "baseline_detail": {
+        "floor_violations": [],
+        "over_provisioned": [
+          "default-timeout",
+          "compare-stores"
+        ],
+        "under_provisioned": []
+      },
+      "headroom": {
+        "baseline_cost": 1220000.0,
+        "headroom_pct": 6.6,
+        "oracle_cost": 1140000.0
+      },
+      "results": [
+        {
+          "candidate_id": "baseline",
+          "cases": 21,
+          "failed_gates": [
+            "cost_below_baseline"
+          ],
+          "metrics": {
+            "cost_adjusted": 1220000.0,
+            "floor_violations": 0.0,
+            "over_provisioned": 2.0,
+            "quality": 1.0,
+            "savings_vs_baseline": 0.0,
+            "under_provisioned": 0.0
+          },
+          "passed": false,
+          "score": 0.0
+        },
+        {
+          "candidate_id": "always_deep",
+          "cases": 21,
+          "failed_gates": [
+            "cost_below_baseline"
+          ],
+          "metrics": {
+            "cost_adjusted": 2100000.0,
+            "floor_violations": 0.0,
+            "over_provisioned": 15.0,
+            "quality": 1.0,
+            "savings_vs_baseline": -0.7213,
+            "under_provisioned": 0.0
+          },
+          "passed": false,
+          "score": -0.721311475409836
+        },
+        {
+          "candidate_id": "always_economy",
+          "cases": 21,
+          "failed_gates": [
+            "cost_below_baseline",
+            "no_deep_task_below_deep",
+            "quality_not_below_baseline"
+          ],
+          "metrics": {
+            "cost_adjusted": 1620000.0,
+            "floor_violations": 6.0,
+            "over_provisioned": 0.0,
+            "quality": 0.4286,
+            "savings_vs_baseline": -0.3279,
+            "under_provisioned": 12.0
+          },
+          "passed": false,
+          "score": -0.3278688524590163
+        }
+      ],
+      "tasks": 21,
+      "tiers": {
+        "deep": 6,
+        "economy": 9,
+        "standard": 6
+      },
+      "winner": ""
+    },
+    "holdout": {
+      "baseline_detail": {
+        "floor_violations": [],
+        "over_provisioned": [],
+        "under_provisioned": []
+      },
+      "headroom": {
+        "baseline_cost": 800000.0,
+        "headroom_pct": 0.0,
+        "oracle_cost": 800000.0
+      },
+      "results": [
+        {
+          "candidate_id": "baseline",
+          "cases": 12,
+          "failed_gates": [
+            "cost_below_baseline"
+          ],
+          "metrics": {
+            "cost_adjusted": 800000.0,
+            "floor_violations": 0.0,
+            "over_provisioned": 0.0,
+            "quality": 1.0,
+            "savings_vs_baseline": 0.0,
+            "under_provisioned": 0.0
+          },
+          "passed": false,
+          "score": 0.0
+        },
+        {
+          "candidate_id": "always_deep",
+          "cases": 12,
+          "failed_gates": [
+            "cost_below_baseline"
+          ],
+          "metrics": {
+            "cost_adjusted": 1200000.0,
+            "floor_violations": 0.0,
+            "over_provisioned": 8.0,
+            "quality": 1.0,
+            "savings_vs_baseline": -0.5,
+            "under_provisioned": 0.0
+          },
+          "passed": false,
+          "score": -0.5
+        },
+        {
+          "candidate_id": "always_economy",
+          "cases": 12,
+          "failed_gates": [
+            "cost_below_baseline",
+            "no_deep_task_below_deep",
+            "quality_not_below_baseline"
+          ],
+          "metrics": {
+            "cost_adjusted": 1240000.0,
+            "floor_violations": 4.0,
+            "over_provisioned": 0.0,
+            "quality": 0.1667,
+            "savings_vs_baseline": -0.55,
+            "under_provisioned": 10.0
+          },
+          "passed": false,
+          "score": -0.55
+        }
+      ],
+      "tasks": 12,
+      "tiers": {
+        "deep": 4,
+        "economy": 2,
+        "standard": 6
+      },
+      "winner": ""
+    }
+  },
+  "suite_version": 1
+}
