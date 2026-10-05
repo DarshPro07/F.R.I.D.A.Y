@@ -75,6 +75,25 @@ def test_a_compiler_that_drops_the_facts_fails_the_lab(monkeypatch):
     assert L.summarize([broken])["failed"] == 1
 
 
+def test_superseding_a_resolved_fact_is_measured_not_only_open_contradictions(results):
+    row = next(r for r in results if r["scenario"] == "contradiction/supersession")
+    detail = row["detail"]
+    assert detail["resolved_facts"] == len(L.RESOLVED) > 1
+    # the baseline repeats the old value beside the new one; the store shows the newest only
+    assert detail["resolved_current_only"] == {"baseline": 0.0, "managed": 1.0}
+    assert detail["resolved_lineage_kept"] == len(L.RESOLVED)
+    assert detail["open_contradictions_held"] == 1.0
+    assert row["managed"]["held"] > row["baseline"]["held"]
+
+
+def test_a_store_that_stops_superseding_fails_the_lab(monkeypatch):
+    real = L.Store.remember
+    monkeypatch.setattr(L.Store, "remember", lambda self, *a, **kw: real(self, *a, **{**kw, "supersede": False}))
+    broken = L.contradiction_supersession()
+    assert broken["ok"] is False
+    assert broken["detail"]["resolved_current_only"]["managed"] < 1.0
+
+
 def test_a_run_uses_a_throwaway_vault_and_puts_the_environment_back(monkeypatch):
     monkeypatch.setenv("FRIDAY_ARTIFACT_VAULT", "sentinel")
     seen = []

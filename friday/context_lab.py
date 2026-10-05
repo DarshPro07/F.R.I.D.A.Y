@@ -7,7 +7,8 @@ contained) that did. The baseline is the full history, newest kept when the
 window is full. The managed strategy is the real code, never a stand-in:
 `model_gateway.compile_working_set` with a `compaction.CriticalFactSet`
 (CTX-003), `compaction.validate`, the `compression` vault (CTX-007) and
-`context_health` assess/remediate (CTX-004).
+`context_health` assess/remediate (CTX-004), and `store.Store` supersession on an
+in-memory database.
 
 A scenario with no mechanism to run it against is reported as unexercised with
 the reason, never as passed: `coverage` in the summary is exercised / listed.
@@ -25,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from friday import compaction, compression
 from friday import context_health as H
 from friday import model_gateway as G
+from friday.store import Store
 
 #: PRD v7 19.11, verbatim and in order. tests/test_context_lab.py compares it with the PRD.
 SCENARIOS = (
@@ -277,6 +279,31 @@ def noise_scaling():
                    "and never loses a rule or preference", scales=rows)
 
 
+#: (subject, value before, value after): a resolved fact, told once and then told again differently.
+RESOLVED = (
+    ("release window", "RELEASE-WINDOW=Tue-02:00", "RELEASE-WINDOW=Wed-04:30"),
+    ("demo day", "DEMO-DAY=Mon-10:00", "DEMO-DAY=Thu-15:00"),
+    ("invoice owner", "INVOICE-OWNER=asha", "INVOICE-OWNER=ravi"),
+    ("backup target", "BACKUP-TARGET=nas-1", "BACKUP-TARGET=nas-2"),
+)
+
+
+def _superseded_facts():
+    """Resolved facts through the real store: it keeps the old row, marked superseded, and shows the new one."""
+    store = Store(":memory:")
+    told, shown, lineage = [], [], 0
+    for subject, old, new in RESOLVED:
+        store.remember(subject, old, kind="FACT", source="user")
+        current = store.remember(subject, new, kind="FACT", source="user")
+        told += ["%s is %s" % (subject, old), "%s is now %s" % (subject, new)]
+        shown += [r["value"] for r in store.recall(subject)]
+        prior = (store.memory_provenance(current) or {}).get("supersedes") or {}
+        lineage += prior.get("value") == old
+    base, mine = full_history(told), "\n".join(shown)
+    clean = lambda text: sum(new in text and old not in text for _, old, new in RESOLVED) / len(RESOLVED)  # noqa: E731
+    return base, mine, clean(base), clean(mine), lineage
+
+
 def contradiction_supersession():
     name = "contradiction/supersession"
     open_ = [_entry("- OPEN CONTRADICTION on setting-%d: 'a' vs 'b'" % i, "relations", kind=H.CONTRADICTION)
@@ -289,12 +316,19 @@ def contradiction_supersession():
     text = "\n".join(e["text"] for e in after_layout)
     held = needles_held(text, needles)
     still_open = "contradiction_score" in after["awaiting_person"]
-    return _result(name, {"tokens": _agg(layout)["tokens_used"], "held": 1.0},
-                   {"tokens": _agg(after_layout)["tokens_used"], "held": held},
-                   held == 1.0 and still_open and _agg(after_layout)["tokens_used"] < _agg(layout)["tokens_used"],
-                   "open contradictions must stay in view and still be put to the person while the noise "
-                   "around them is removed. Superseding a resolved fact is not measured here",
-                   applied=outcome["applied"], contradiction_score=after["metrics"]["contradiction_score"])
+    told, shown, told_clean, shown_clean, lineage = _superseded_facts()
+    tokens_before, tokens_after = _agg(layout)["tokens_used"], _agg(after_layout)["tokens_used"]
+    return _result(name, {"tokens": tokens_before + tokens(told), "held": round((1.0 + told_clean) / 2, 4)},
+                   {"tokens": tokens_after + tokens(shown), "held": round((held + shown_clean) / 2, 4)},
+                   held == 1.0 and still_open and tokens_after < tokens_before
+                   and shown_clean == 1.0 and told_clean < 1.0 and lineage == len(RESOLVED),
+                   "open contradictions stay in view and still go to the person while the noise around "
+                   "them is removed; a resolved fact shows only its newest value, with the old row kept "
+                   "and traceable. The baseline repeats the old value beside the new one",
+                   applied=outcome["applied"], contradiction_score=after["metrics"]["contradiction_score"],
+                   open_contradictions_held=held, resolved_facts=len(RESOLVED),
+                   resolved_current_only={"baseline": told_clean, "managed": shown_clean},
+                   resolved_lineage_kept=lineage)
 
 
 def long_trajectories(turns=240):
