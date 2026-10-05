@@ -220,6 +220,10 @@ class Decision:
     changed: tuple[str, ...] = ()
     #: Each check that ran, in order, with its outcome. The audit trail.
     checks: list[dict] = field(default_factory=list)
+    #: Ids of the epistemic-ledger claims (`friday.epistemic.LedgerClaim.id`)
+    #: this decision relied on, so "why was this allowed" leads back to what
+    #: was believed and on what evidence. Set whether or not it was allowed.
+    claims: tuple[str, ...] = ()
 
     def note(self, name: str, ok: bool, detail: str = "") -> "Decision":
         self.checks.append({"check": name, "ok": ok, "detail": detail})
@@ -235,7 +239,7 @@ class Decision:
     def as_dict(self) -> dict:
         return {"allowed": self.allowed, "reason": self.reason,
                 "detail": self.detail, "changed": list(self.changed),
-                "checks": self.checks}
+                "checks": self.checks, "claims": list(self.claims)}
 
 
 def touches_forbidden(changed) -> list[str]:
@@ -296,7 +300,7 @@ def secrets_in(workspace: str | Path, changed, *,
 def decide(workspace: str | Path, changed, *, attempt=None,
            allowed_paths: tuple[str, ...] = (), base_commit: str = "",
            approved: bool = False, review=None,
-           consequential: bool | None = None) -> Decision:
+           consequential: bool | None = None, claims=()) -> Decision:
     """
     The gate. Default no.
 
@@ -309,9 +313,17 @@ def decide(workspace: str | Path, changed, *, attempt=None,
     than `CONSEQUENTIAL_FILES` files, or `consequential=True` - is refused
     without one, and refused outright when the review is DISPUTED. A
     review by the implementer itself does not count.
+
+    `claims` are the `friday.epistemic.LedgerClaim`s (or their ids) the
+    decision rests on. They are recorded on the decision, refused or not, and
+    do not change the verdict: whether a contradicted claim should block a
+    change is a policy this gate has not been given.
     """
     changed = tuple(changed or ())
-    decision = Decision(allowed=True, changed=changed)
+    claim_ids = tuple(getattr(c, "id", c) for c in claims or ())
+    if not all(isinstance(i, str) and i for i in claim_ids):
+        raise TypeError("claims must be LedgerClaims or non-empty claim ids")
+    decision = Decision(allowed=True, changed=changed, claims=claim_ids)
 
     if not changed:
         return decision.note("changes", False).refuse(

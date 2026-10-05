@@ -96,6 +96,45 @@ async def test_reading_sources_does_not_by_itself_settle_a_claim(monkeypatch):
 
     assert checked.verdict == P.UNCERTAIN
     assert checked.sources == ("https://example.com",)
+    # EPI-001: what was read carries how fast it goes stale, and when it was read.
+    assert checked.freshness in ("volatile", "weekly", "stable", "reference")
+    assert checked.checked_at
+
+
+def test_a_checked_claim_becomes_a_sourced_ledger_record():
+    claim = P.Claim(
+        claim="Godot is the best choice", verdict=P.UNCERTAIN,
+        evidence="2 source(s) read", sources=("https://a.example",),
+        findings="A says Godot is free and open source.",
+        freshness="weekly", checked_at="2026-01-10T00:00:00+00:00")
+
+    record = claim.to_ledger(scope="drone-game")
+
+    assert record.status == "sourced"
+    assert record.sources == ("https://a.example",)
+    assert record.evidence == "A says Godot is free and open source."
+    assert record.freshness == "weekly"
+    assert record.as_of == "2026-01-10T00:00:00+00:00"
+    assert record.expires_at == "2026-01-17T00:00:00+00:00"
+    assert record.scope == "drone-game"
+
+
+def test_a_preference_is_observed_and_an_unchecked_claim_is_speculative():
+    preference = P.Claim(claim="I want it simple", verdict=P.PREFERENCE)
+    unchecked = P.Claim(claim="Godot is the best choice")
+
+    assert preference.to_ledger().status == "observed"
+    assert unchecked.to_ledger().status == "speculative"
+    assert unchecked.to_ledger().expires_at == ""
+
+
+def test_a_contradicted_claim_records_what_contradicted_it():
+    claim = P.Claim(claim="X is free", verdict=P.CONTRADICTED,
+                    evidence="the pricing page lists a paid tier",
+                    sources=("https://a.example",))
+
+    assert claim.to_ledger().contradictions == (
+        "the pricing page lists a paid tier",)
 
 
 def test_the_challenge_instruction_refuses_to_soften():

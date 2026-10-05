@@ -175,6 +175,11 @@ def question_key(question: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def expiry(freshness: str, since: datetime) -> datetime:
+    """When something gathered at `since` stops being good enough."""
+    return since + timedelta(days=FRESHNESS[freshness])
+
+
 @dataclass
 class Source:
     """One page an artifact's facts came from. Attribution, not content."""
@@ -243,9 +248,43 @@ class Artifact:
             confidence=float(confidence),
             freshness=cls_name,
             fetched_at=when,
-            expires_at=when + timedelta(days=FRESHNESS[cls_name]),
+            expires_at=expiry(cls_name, when),
             invalidation_triggers=list(invalidation_triggers or ()),
         )
+
+    def to_ledger(self) -> list:
+        """
+        This research as epistemic-ledger records (PRD section 35), one per
+        fact - a fact is the claim, the artifact is why it is believed.
+
+        Every record shares the artifact's sources, confidence, freshness and
+        scope. Invalidation triggers become the assumptions the facts hold
+        under; an invalidated artifact carries its reason as a contradiction.
+        An artifact that names no source URLs is `speculative`, not `sourced`.
+        """
+        from friday import epistemic
+
+        urls = tuple(s.url for s in self.sources if s.url)
+        evidence = f"answers: {self.question}"
+        if self.synthesis:
+            evidence += f" - {self.synthesis}"
+        claims = [f for f in self.facts if str(f).strip()]
+        if not claims and self.synthesis.strip():
+            claims = [self.synthesis]
+        return [
+            epistemic.LedgerClaim(
+                claim=claim,
+                status=epistemic.SOURCED if urls else epistemic.SPECULATIVE,
+                sources=urls, evidence=evidence, confidence=self.confidence,
+                freshness=self.freshness, as_of=_iso(self.fetched_at),
+                expires_at=_iso(self.expires_at),
+                assumptions=tuple(f"holds unless: {t}"
+                                  for t in self.invalidation_triggers),
+                contradictions=((self.invalidated_reason or "invalidated",)
+                                if self.invalidated_at else ()),
+                scope=self.workspace_id)
+            for claim in claims
+        ]
 
 
 # ---------------------------------------------------------------------------

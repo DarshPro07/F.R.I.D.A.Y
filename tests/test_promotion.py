@@ -8,6 +8,7 @@ import sys
 import pytest
 from friday import evaluation as E
 from friday import promotion as P
+from friday.epistemic import LedgerClaim
 
 
 @pytest.fixture
@@ -181,6 +182,34 @@ def test_the_decision_serialises_for_a_report(workspace):
     as_dict = decision.as_dict()
     assert as_dict["allowed"] is True
     assert as_dict["changed"] == ["src/app.py"]
+    assert as_dict["claims"] == []
+
+
+def test_a_decision_links_the_ledger_claims_it_relied_on(workspace):
+    relied_on = LedgerClaim(claim="the vendor API is stable", status="inferred")
+
+    decision = P.decide(workspace, ["src/app.py"], attempt=_passed(),
+                        approved=True, claims=[relied_on, "clm_0123456789ab"])
+
+    assert decision.allowed
+    assert decision.claims == (relied_on.id, "clm_0123456789ab")
+    assert decision.as_dict()["claims"] == [relied_on.id, "clm_0123456789ab"]
+
+
+def test_a_refused_decision_still_links_its_claims(workspace):
+    relied_on = LedgerClaim(claim="the vendor API is stable", status="inferred")
+
+    decision = P.decide(workspace, ["src/app.py"], attempt=_failed(),
+                        approved=True, claims=[relied_on])
+
+    assert not decision.allowed
+    assert decision.claims == (relied_on.id,)
+
+
+def test_a_claim_link_that_is_not_an_id_is_rejected(workspace):
+    with pytest.raises(TypeError):
+        P.decide(workspace, ["src/app.py"], attempt=_passed(), approved=True,
+                 claims=[{"claim": "not an id"}])
 
 
 def test_a_passing_verifier_passes(workspace):

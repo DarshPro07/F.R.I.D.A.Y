@@ -275,3 +275,60 @@ def test_create_refuses_an_unknown_freshness_class():
     with pytest.raises(ValueError):
         RC.Artifact.create("a question", sources=[{"url": "https://a.example"}],
                            facts=[], freshness="daily")
+
+
+# ---------------------------------------------------------------------------
+# to_ledger() (EPI-001: the PRD section 35 epistemic-ledger record)
+# ---------------------------------------------------------------------------
+
+
+def test_an_artifact_becomes_one_ledger_claim_per_fact():
+    base = datetime(2026, 1, 10, tzinfo=timezone.utc)
+    artifact = make("which parser is fastest", freshness=RC.WEEKLY,
+                    fetched_at=base, facts=["parser A wins", "parser B is slow"],
+                    sources=[{"url": "https://a.example/x"},
+                             {"url": "https://b.example/y"}],
+                    synthesis="A beats B", confidence=0.8,
+                    invalidation_triggers=["a new parser release"],
+                    workspace_id="ws-1")
+
+    first, second = artifact.to_ledger()
+
+    assert [first.claim, second.claim] == ["parser A wins", "parser B is slow"]
+    assert first.status == "sourced"
+    assert first.sources == ("https://a.example/x", "https://b.example/y")
+    assert first.confidence == 0.8
+    assert first.freshness == RC.WEEKLY
+    assert first.as_of == base.isoformat()
+    assert first.expires_at == (base + timedelta(days=7)).isoformat()
+    assert first.assumptions == ("holds unless: a new parser release",)
+    assert first.scope == "ws-1"
+    assert "which parser is fastest" in first.evidence and "A beats B" in first.evidence
+    assert first.id != second.id
+
+
+def test_an_invalidated_artifact_carries_its_reason_as_a_contradiction():
+    question = "what is the best local LLM for tool calling"
+    RC.save(make(question, freshness=RC.STABLE))
+    RC.invalidate(RC.question_key(question), "a new model release")
+    [found] = RC.stale()
+
+    [claim] = found.to_ledger()
+
+    assert claim.contradictions == ("a new model release",)
+
+
+def test_an_artifact_with_no_source_urls_is_speculative_not_sourced():
+    artifact = make(sources=[{"url": ""}])
+
+    [claim] = artifact.to_ledger()
+
+    assert claim.status == "speculative" and claim.sources == ()
+
+
+def test_an_artifact_with_only_a_synthesis_still_yields_its_conclusion():
+    artifact = RC.Artifact.create(
+        "a question", sources=[{"url": "https://a.example"}], facts=[],
+        synthesis="the conclusion")
+
+    assert [c.claim for c in artifact.to_ledger()] == ["the conclusion"]

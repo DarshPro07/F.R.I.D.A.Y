@@ -138,10 +138,52 @@ class Claim:
     #: What the sources actually said, readable enough for a model to
     #: judge the claim against - the evidence, not a count of it.
     findings: str = ""
+    #: 0.0-1.0; 0.0 is "never assessed". Reading about a claim does not judge
+    #: it (see `verify`), so nothing here sets it yet - the ledger field
+    #: exists so a judgement has somewhere to go.
+    confidence: float = 0.0
+    #: The research_cache freshness class and when the sources were read, so
+    #: the ledger can say when this stops being good enough. "" is unknown.
+    freshness: str = ""
+    checked_at: str = ""
 
     @property
     def settled(self) -> bool:
         return self.verdict in (VERIFIED, CONTRADICTED, PREFERENCE)
+
+    def to_ledger(self, scope: str = ""):
+        """
+        This claim as an epistemic-ledger record (PRD section 35).
+
+        Status follows what stands behind it: read sources make it `sourced`;
+        a preference is `observed` (the boss said it, nothing external to
+        check); anything else is `speculative`. A `CONTRADICTED` verdict
+        records its evidence as the contradiction.
+        """
+        from friday import epistemic
+
+        if self.sources:
+            status = epistemic.SOURCED
+        elif self.verdict == PREFERENCE:
+            status = epistemic.OBSERVED
+        else:
+            status = epistemic.SPECULATIVE
+        expires_at = ""
+        if self.freshness and self.checked_at:
+            from datetime import datetime
+            from friday import research_cache
+            expires_at = research_cache.expiry(
+                self.freshness, datetime.fromisoformat(self.checked_at)
+            ).isoformat()
+        contradicted = self.verdict == CONTRADICTED
+        return epistemic.LedgerClaim(
+            claim=self.claim, status=status, sources=self.sources,
+            evidence=self.findings or self.evidence,
+            confidence=self.confidence, freshness=self.freshness,
+            as_of=self.checked_at, expires_at=expires_at,
+            contradictions=((self.evidence or "contradicted",)
+                            if contradicted else ()),
+            scope=scope)
 
 #: Hedges. "I think X is best" is an opinion inviting a check; "use X" is an
 #: instruction. Both name a technology and they want opposite treatment.
@@ -323,12 +365,16 @@ async def verify(claim: Claim, about: str = '') -> Claim:
         # findings travel with the claim, for the model that raised it to
         # weigh in the same turn.
         partial = "" if result.may_claim_completion else " (partial)"
+        from datetime import datetime, timezone
+        from friday import research_cache
         # The findings are the point: a source count says the pages exist,
         # the findings say what they claim, and only the second lets the
         # boss's assertion be answered rather than merely flagged.
         return Claim(claim=claim.claim, verdict=UNCERTAIN,
                      evidence=f"{len(sources)} source(s) read{partial}",
-                     sources=sources, findings=_readable(output))
+                     sources=sources, findings=_readable(output),
+                     freshness=research_cache.classify_freshness(question),
+                     checked_at=datetime.now(timezone.utc).isoformat())
     except Exception:                                        # noqa: BLE001
         logger.exception("could not verify a claim; leaving it uncertain")
         return Claim(claim=claim.claim, verdict=UNCERTAIN,
