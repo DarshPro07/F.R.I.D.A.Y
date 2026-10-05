@@ -3510,6 +3510,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'friday/context_health.py scores PRD 19.5 metrics and maps HEALTHY/NOISY/DEGRADED/ROTTING to prune/summarize/fold/handoff, guarded by CriticalFactSet. Wired into aggregate(), WorkingSet.telemetry and _memory_context. golden_context.py long-run benchmark passes 7/7. (build run, commit 34afaa104)',
         "next_action": 'GAPS: fold and handoff are advisory: no temporary-branch (19.6) or session-restart seam exists, so the prompt is summarized in place and a handoff verdict carries the packet; failed_attempt_density, struggle_score, retrieval_confidence stay unmeasured (named in UNMEASURED, never given a number); CTX-004 row in scripts/prd_v7_table.py and PRD_V7_LEDGER.md not changed: regenerating writes data/, which this run may not touch; kernel should set MISSING -> PARTIAL; benchmark evidence defaults to data/golden_context.json; this run wrote .build/golden_context.json instead; the one failure, tests/test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop, is the live Hermes gateway reporting no configured provider; unrelated to this change, not re-run on a clean tree',
     }),
+    ('CTX-005', {
+        "status": PARTIAL,
+        "current_implementation": 'Large tool payloads (web_deep_research and web_crawl sources, files_read text over the cap) are written to ARTIFACTS_DIR via one helper, artifacts.offload; results carry preview, digest and artifact_path. base=None now means no store (stays inline). (build run, commit 66defbf01)',
+        "next_action": 'GAPS: 1 test skipped in the run (537 passed, 1 skipped); not examined whether it is related to this change.; A large file whose name matches the fsjail denylist has its artifact write refused and falls back inline at the max_chars cap, with inline_reason saying why (the old behaviour).; A file at or under max_chars (default MAX_READ_CHARS 40000) still returns inline, as planned; only larger files offload.; No live end-to-end run was done; verification is by tests against a tmp ARTIFACTS_DIR.',
+    }),
 ]
 
 
