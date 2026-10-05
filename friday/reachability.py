@@ -185,6 +185,12 @@ DECLARED = {
                                "CAP-FORGE-002 classification only; the sandboxed "
                                "analysis (CAP-FORGE-003) and the integration "
                                "decision (CAP-FORGE-004/014) are its callers"),
+    "friday/model_profiling": (FUTURE,
+                               "MODEL-004: the open-set route profiler, built and "
+                               "tested against mock routes; its caller is a real "
+                               "Completer adapter over the model gateway, the next "
+                               "wiring step. Its output is already read live: "
+                               "model_capabilities.get falls back to stored profiles"),
     "friday/onboarding": (PRODUCTION,
                           "the owner's interview console: friday.onboarding "
                           "subcommands are dispatched by argparse "
