@@ -1,0 +1,30 @@
+{
+  "_note": "Candidate models per job kind, the first the default. Owner 2026-10-05: 'use different models like opus 5.5 for this, opus 5 for this, sonnet 5.5, opus 4.8 ... remember the benchmark of each model'. build_kernel.pick_model tries each candidate until it has BENCH_MIN samples, then picks the lowest cost per success; `python scripts/build_kernel.py bench` prints the measurements. Every id answered a probe on 2026-10-05. The verifier is not here: the judge stays fixed.",
+  "SHIP": [
+    "claude-sonnet-5-5",
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-sonnet-5"
+  ],
+  "REPAIR": [
+    "claude-sonnet-5-5",
+    "claude-sonnet-5",
+    "claude-opus-4-8",
+    "claude-opus-5"
+  ],
+  "SCOUT": [
+    "claude-sonnet-5-5",
+    "claude-haiku-4-5-20251001",
+    "claude-sonnet-5"
+  ],
+  "ADVISOR": [
+    "claude-opus-5-5",
+    "claude-opus-5",
+    "claude-fable-5-1"
+  ],
+  "ESCALATE": [
+    "claude-opus-5-5",
+    "claude-opus-5",
+    "claude-opus-4-8"
+  ]
+}

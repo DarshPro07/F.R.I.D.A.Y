@@ -62,6 +62,21 @@ INVOCATIONS_FILE = "invocations.jsonl"
 KINDS = ("SHIP", "SCOUT", "RESUME", "REPAIR", "ESCALATE", "ADVISOR")
 JOBS_DIR = "jobs"
 JOB_STATES = ("QUEUED", "STARTED", "WAITING_RESOURCES", "COMPLETE", "FAILED")
+#: Candidate models per job kind (owner 2026-10-05), and how the choice learns from this
+#: build's own outcomes: model_bench measures, pick_model chooses.
+ROSTER_FILE = ROOT / "docs" / "plans" / "build-harness" / "model_roster.json"
+DEFAULT_MODEL = {"SHIP": "sonnet", "REPAIR": "sonnet", "SCOUT": "sonnet", "RESUME": "sonnet",
+                 "ADVISOR": "opus", "ESCALATE": "opus"}
+#: Outcomes before a model's record is trusted over the roster's order.
+BENCH_MIN = 3
+#: One launch of a kind in this many gives the least-sampled candidate its turn.
+EXPLORE_EVERY = 4
+#: A model must keep this share of the best success rate to win on cost.
+RATE_FLOOR = 0.6
+#: The wave result that counts as success for a job of each kind. An advisor's job is the
+#: requirement's next integration, so it is judged on a later wave (model_bench).
+WIN = {"SHIP": {"INTEGRATED"}, "RESUME": {"INTEGRATED"}, "REPAIR": {"INTEGRATED"},
+       "ESCALATE": {"INTEGRATED"}, "SCOUT": {"SCOUT_DONE"}, "ADVISOR": {"INTEGRATED"}}
 ROLE_OF_KIND = {"SHIP": "IMPLEMENTER", "RESUME": "IMPLEMENTER", "SCOUT": "SCOUT",
                 "REPAIR": "REPAIR", "ESCALATE": "ESCALATE", "ADVISOR": "ADVISOR"}
 #: A resumed session whose context grew past this multiple of its predecessor's
@@ -1136,7 +1151,7 @@ def _start(cmd: list[str], wt: Path) -> subprocess.Popen:
                                 stdin=subprocess.DEVNULL, env=worker_env(wt), **kw)
 
 
-def launch(row: dict, *, worktrees: Path | None = None, model: str = "sonnet",
+def launch(row: dict, *, worktrees: Path | None = None, model: str | None = None,
            max_turns: int | None = None, max_budget: float | None = None,
            dry_run: bool = False, mode: str = "SHIP", klass: str | None = None,
            runs_dir: Path = RUNS_DIR, capsule: str = "", repo: Path = ROOT):
@@ -1152,6 +1167,7 @@ def launch(row: dict, *, worktrees: Path | None = None, model: str = "sonnet",
     klass = "SCOUT" if scout else (klass or budget_class(row, findings))
     turns, budget, wall = BUDGETS[klass]
     turns, budget = max_turns or turns, max_budget or budget
+    model = model or pick_model("SCOUT" if scout else "SHIP", runs_dir=runs_dir)
     cmd = worker_command(model, turns, budget, tools=SCOUT_TOOLS if scout else ALLOWED_TOOLS)
     if dry_run:
         return {"worktree": str(wt), "mode": mode, "class": klass,
@@ -1480,8 +1496,9 @@ def repair(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
     turns, budget, wall = BUDGETS[klass]
     attempt = max(attempts_made(req, runs_dir), 1) + 1
     # Repairs and advised implementers are normal coding work (owner v12 section 8):
-    # never inherit the strong model of the job before them (an Opus advisor).
-    model = model or "sonnet"
+    # never inherit the strong model of the job before them (an Opus advisor); the
+    # REPAIR roster chooses (owner 2026-10-05).
+    model = model or pick_model("REPAIR", runs_dir=runs_dir)
     decision, reasons = agent_utility(
         {"id": req}, {"attempt": attempt, "localized": localized(integration),
                       "retry_context_growth": _last_growth(req, runs_dir)})
@@ -1521,12 +1538,13 @@ def _relaunch(req: str, wt: Path, cmd: list[str], meta: dict, run_rec: dict, *, 
     return run
 
 
-def escalate(req: str, *, model: str = "opus", capsule_extra: str = "",
+def escalate(req: str, *, model: str | None = None, capsule_extra: str = "",
              worktrees: Path | None = None, runs_dir: Path = RUNS_DIR, repo: Path = ROOT,
              row: dict | None = None) -> Running:
     """A fresh session on a stronger model, with the P0 budget, in the
     requirement's existing worktree (or a new one from HEAD when it has none).
     Its prompt is the Failure Capsule plus any packet text the owner adds."""
+    model = model or pick_model("ESCALATE", runs_dir=runs_dir)
     name = req.lower()
     wt = (worktrees or _worktrees_root()) / name
     run_rec = _read_json(runs_dir / f"{req}.json")
@@ -1570,11 +1588,12 @@ ADVISOR_PROMPT = ("You are the advisor for a requirement that failed repeatedly.
                   "tests that prove it. A fresh implementer will receive only that message.\n\n")
 
 
-def advise(req: str, *, model: str = "opus", worktrees: Path | None = None,
+def advise(req: str, *, model: str | None = None, worktrees: Path | None = None,
            runs_dir: Path = RUNS_DIR, repo: Path = ROOT) -> Running:
     """A strong-model, read-only job that diagnoses a repeatedly failing
     requirement in its worktree. Its final message is saved as the advice
     packet (finalize); the next repair is a fresh implementer on that packet."""
+    model = model or pick_model("ADVISOR", runs_dir=runs_dir)
     wt = (worktrees or _worktrees_root()) / req.lower()
     if not wt.is_dir():
         raise KernelError(f"{req} has no worktree at {wt}")
@@ -1765,6 +1784,97 @@ def _scout_outcome(run: Running, runs_dir: Path, final: str = "") -> dict:
 
 
 # ------------------------------------------------------ invocation ledger
+
+def roster(path: Path | None = None) -> dict[str, list[str]]:
+    """Job kind -> candidate model ids, the default first; {} when the file is absent."""
+    try:
+        data = json.loads((path or ROSTER_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {k: [str(m) for m in v] for k, v in data.items()
+            if not k.startswith("_") and isinstance(v, list) and v}
+
+
+def _wave_no(wave_id: str) -> int | None:
+    tail = str(wave_id or "").rsplit("-w", 1)
+    return int(tail[1]) if len(tail) == 2 and tail[1].isdigit() else None
+
+
+def model_bench(runs_dir: Path = RUNS_DIR, state_file: Path | None = None) -> dict:
+    """kind -> model -> {n, wins, cost, turns, wall}, measured from this build's own runs.
+
+    Each invocation in the ledger is joined with its requirement's result in the wave it
+    ran in (build_state.json beside the runs directory); an ADVISOR is judged by the
+    requirement's next result after its wave. Calls whose wave has no result yet are left out."""
+    state_file = state_file or Path(runs_dir).parent / "build_state.json"
+    try:
+        waves = json.loads(Path(state_file).read_text(encoding="utf-8")).get("waves") or []
+    except (OSError, ValueError):
+        waves = []
+    results: dict[str, list[tuple[int, str]]] = {}
+    for w in waves:
+        for req, res in (w.get("results") or {}).items():
+            results.setdefault(req, []).append((int(w.get("n") or 0), str(res)))
+    out: dict = {}
+    for e in ledger_entries(runs_dir):
+        kind, n = e.get("kind") or "", _wave_no(e.get("wave_id"))
+        history = results.get(e.get("req") or "", [])
+        if kind not in WIN or n is None:
+            continue
+        if kind == "ADVISOR":
+            later = [r for m, r in history if m > n and r not in ("ADVISED", "SCOUT_DONE")]
+            result = later[0] if later else None
+        else:
+            result = next((r for m, r in history if m == n), None)
+        if result is None:
+            continue
+        row = out.setdefault(kind, {}).setdefault(e.get("model") or "?", {
+            "n": 0, "wins": 0, "cost": 0.0, "turns": 0, "wall": 0.0})
+        row["n"] += 1
+        row["wins"] += int(result in WIN[kind])
+        row["cost"] = round(row["cost"] + float(e.get("cost_usd") or 0.0), 4)
+        row["turns"] += int(e.get("turns") or 0)
+        row["wall"] = round(row["wall"] + float(e.get("wall_seconds") or 0.0), 1)
+    return out
+
+
+def pick_model(kind: str, *, runs_dir: Path = RUNS_DIR, state_file: Path | None = None,
+               roster_file: Path | None = None) -> str:
+    """The model for the next job of `kind`.
+
+    Every EXPLORE_EVERY-th job of a kind goes to the candidate with the fewest outcomes
+    while one has fewer than BENCH_MIN. Otherwise the cheapest per success among the
+    candidates with BENCH_MIN outcomes whose success rate is at least RATE_FLOOR of the
+    best; with no such record, the roster's default."""
+    cands = roster(roster_file).get(kind) or []
+    if not cands:
+        return DEFAULT_MODEL.get(kind, "sonnet")
+    bench = model_bench(runs_dir, state_file).get(kind, {})
+    seen = {m: bench.get(m, {}).get("n", 0) for m in cands}
+    tries = sum(row["n"] for row in bench.values())
+    least = min(cands, key=lambda m: (seen[m], cands.index(m)))
+    if seen[least] < BENCH_MIN and tries % EXPLORE_EVERY == EXPLORE_EVERY - 1:
+        return least
+    rated = {m: bench[m]["wins"] / bench[m]["n"] for m in cands
+             if seen[m] >= BENCH_MIN and bench[m]["wins"] > 0}
+    if not rated:
+        return cands[0]
+    best = max(rated.values())
+    able = [m for m, rate in rated.items() if rate >= RATE_FLOOR * best]
+    return min(able, key=lambda m: (bench[m]["cost"] / bench[m]["wins"], cands.index(m)))
+
+
+def bench_table(runs_dir: Path = RUNS_DIR) -> list[str]:
+    lines = [f"{'kind':9s} {'model':28s} {'n':>3s} {'wins':>4s} {'rate':>5s} "
+             f"{'$/call':>7s} {'$/win':>7s} {'turns':>5s}"]
+    for kind, models in sorted(model_bench(runs_dir).items()):
+        for model, r in sorted(models.items(), key=lambda kv: -kv[1]["n"]):
+            per_win = f"{r['cost'] / r['wins']:7.2f}" if r["wins"] else "      -"
+            lines.append(f"{kind:9s} {model:28s} {r['n']:3d} {r['wins']:4d} "
+                         f"{r['wins'] / r['n']:5.0%} {r['cost'] / r['n']:7.2f} {per_win} "
+                         f"{r['turns'] / r['n']:5.1f}")
+    return lines
+
 
 def ledger_entries(runs_dir: Path = RUNS_DIR) -> list[dict]:
     """Every ledger line, oldest first; unreadable lines are skipped."""
@@ -2167,11 +2277,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("concurrency")
     sub.add_parser("qualify")
     sub.add_parser("roi")
+    sub.add_parser("bench")
     sub.add_parser("resume").add_argument("req")
     sub.add_parser("repair").add_argument("req")
     es = sub.add_parser("escalate")
     es.add_argument("req")
-    es.add_argument("--model", default="opus")
+    es.add_argument("--model", default=None)
     es.add_argument("--packet", default=None, help="file of extra packet text for the prompt")
     sub.add_parser("status")
     w = sub.add_parser("waves")
@@ -2199,6 +2310,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "roi":
             print("\n".join(roi_table()))
+            return 0
+        if args.cmd == "bench":
+            print("\n".join(bench_table()))
             return 0
         if args.cmd == "qualify":
             from friday import hardware_profile as HP

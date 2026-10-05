@@ -347,13 +347,13 @@ def test_concurrency_cli_prints_the_count_and_the_reason(monkeypatch, capsys):
 
 def test_launch_dry_run_has_no_side_effects(tmp_path):
     wt_root = tmp_path / "wts"
-    plan = K.launch(row("REQ-1"), worktrees=wt_root, dry_run=True)
+    plan = K.launch(row("REQ-1"), worktrees=wt_root, dry_run=True, runs_dir=tmp_path / "runs")
     assert not wt_root.exists()
     assert Path(plan["packet"]) == wt_root / "req-1" / ".build" / "packet.md"
     cmd = plan["command"]
     assert "stream-json" in cmd and "acceptEdits" in cmd
     assert "bypassPermissions" not in cmd
-    assert cmd[cmd.index("--model") + 1] == "sonnet"
+    assert cmd[cmd.index("--model") + 1] == K.roster()["SHIP"][0]
 
 
 def test_launch_refuses_existing_worktree(tmp_path):
@@ -874,7 +874,7 @@ def test_launch_writes_run_json_and_flags_the_capsule(monkeypatch, repo, tmp_pat
     meta = json.loads((run.wt / ".build" / "run.json").read_text())
     assert {k: meta[k] for k in ("req", "mode", "klass", "base_sha", "branch", "model")} == {
         "req": "R-1", "mode": "SHIP", "klass": run.klass, "base_sha": run.base_sha,
-        "branch": "build/r-1", "model": "sonnet"}
+        "branch": "build/r-1", "model": K.roster()["SHIP"][0]}
     assert isinstance(meta["started"], float) and run.capsule is True
     assert K.finalize(run, "TIMEOUT", tmp_path / "runs")["capsule"] is True
 
@@ -1190,7 +1190,7 @@ def test_escalate_is_a_fresh_stronger_session_with_the_p0_budget(monkeypatch, re
     run = K.escalate("R-1", capsule_extra="OWNER NOTE", worktrees=tmp_path / "wts",
                      runs_dir=runs, repo=repo)
     cmd = cmds[0]
-    assert "--resume" not in cmd and cmd[cmd.index("--model") + 1] == "opus"
+    assert "--resume" not in cmd and cmd[cmd.index("--model") + 1] == K.roster()["ESCALATE"][0]
     assert cmd[cmd.index("--max-turns") + 1] == "40" and cmd[cmd.index("--max-budget-usd") + 1] == "6.0"
     prompt = cmd[cmd.index("-p") + 1]
     assert "# Failure capsule: R-1" in prompt and prompt.endswith("OWNER NOTE")
@@ -1512,7 +1512,7 @@ def test_repair_escalate_and_advise_each_write_their_own_job(monkeypatch, repo, 
         fn("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
     got = {j["role"]: j for j in K.jobs(runs)}
     assert set(got) == {"REPAIR", "ESCALATE", "ADVISOR"}
-    assert got["ESCALATE"]["model"] == "opus" and got["REPAIR"]["state"] == "STARTED"
+    assert got["ESCALATE"]["model"] == K.roster()["ESCALATE"][0] and got["REPAIR"]["state"] == "STARTED"
     assert "no edits" in got["ADVISOR"]["reason"]
 
 
@@ -1532,7 +1532,7 @@ def test_an_advised_implementer_is_fresh_on_the_normal_model_with_the_packet(mon
     monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
     K.repair("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo, advice="THE DIAGNOSIS")
     cmd = cmds[0]
-    assert "--resume" not in cmd and "THE DIAGNOSIS" in cmd and cmd[cmd.index("--model") + 1] == "sonnet"
+    assert "--resume" not in cmd and "THE DIAGNOSIS" in cmd and cmd[cmd.index("--model") + 1] == K.roster()["REPAIR"][0]
 
 
 def test_the_advisor_is_read_only_and_its_final_message_is_the_packet(monkeypatch, repo, tmp_path):
@@ -1543,7 +1543,7 @@ def test_the_advisor_is_read_only_and_its_final_message_is_the_packet(monkeypatc
     run = K.advise("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
     cmd = cmds[0]
     tools = cmd[cmd.index("--allowedTools") + 1]
-    assert cmd[cmd.index("--model") + 1] == "opus" and run.kind == "ADVISOR"
+    assert cmd[cmd.index("--model") + 1] == K.roster()["ADVISOR"][0] and run.kind == "ADVISOR"
     assert tools == K.SCOUT_TOOLS and not {"Edit", "Write"} & set(tools.split(","))
     run.proc, run.stream_offset = _Proc(0), 0  # _stream rewrites the log, so nothing precedes it
     _stream(wt, {"type": "system", "session_id": "S2"},
@@ -1648,7 +1648,8 @@ def test_a_repair_never_inherits_the_strong_model_of_the_job_before_it(monkeypat
     cmds = []
     monkeypatch.setattr(K, "_start", lambda cmd, w: cmds.append(cmd) or _Proc(None))
     run = K.repair("R-1", worktrees=tmp_path / "wts", runs_dir=runs, repo=repo)
-    assert cmds[0][cmds[0].index("--model") + 1] == "sonnet" and run.model == "sonnet"
+    normal = K.roster()["REPAIR"][0]
+    assert normal != "opus" and cmds[0][cmds[0].index("--model") + 1] == normal and run.model == normal
     # A fresh relaunch is a new invocation: its one continuation is still unused.
     assert run.continued is False
 
@@ -1831,3 +1832,78 @@ def test_a_one_day_budget_override_applies_only_to_its_day(tmp_path):
     assert K.spend_reserve("a1", "launch", "R", "SHIP", 7.5, runs)[0]  # over 40, under 65
     (runs / K.DAY_BUDGET_FILE).write_text(json.dumps({"2020-01-01": {"soft": 65.0, "hard": 70.0}}))
     assert K.day_limits(runs) == (K.DAY_SOFT_USD, K.DAY_HARD_USD)
+
+
+
+# -- model roster and benchmark (owner 2026-10-05) -----------------------------------------
+
+
+def _bench_world(tmp_path, calls, waves):
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    with open(runs / K.INVOCATIONS_FILE, "w", encoding="utf-8") as fh:
+        for i, (kind, model, req, wave, cost) in enumerate(calls):
+            fh.write(json.dumps({"attempt_id": f"a{i}", "req": req, "kind": kind, "model": model,
+                                 "wave_id": f"run-w{wave}", "cost_usd": cost, "turns": 10,
+                                 "wall_seconds": 60.0, "at": "2026-10-05T10:00:00+00:00"}) + "\n")
+    (tmp_path / "build_state.json").write_text(json.dumps({"waves": [
+        {"n": n, "results": res} for n, res in waves]}), encoding="utf-8")
+    roster = tmp_path / "roster.json"
+    roster.write_text(json.dumps({"SHIP": ["m-default", "m-cheap", "m-new"],
+                                  "ADVISOR": ["a-default"]}), encoding="utf-8")
+    return runs, roster
+
+
+def test_the_benchmark_joins_each_call_with_its_waves_result(tmp_path):
+    runs, _ = _bench_world(tmp_path, [
+        ("SHIP", "m-default", "R1", 1, 2.0), ("SHIP", "m-default", "R2", 2, 2.0),
+        ("ADVISOR", "a-default", "R2", 3, 1.5), ("REPAIR", "m-default", "R2", 4, 1.0),
+        ("SHIP", "m-cheap", "R9", 9, 0.5)],                      # no result yet: left out
+        [(1, {"R1": "INTEGRATED"}), (2, {"R2": "FAILED"}), (3, {"R2": "ADVISED"}),
+         (4, {"R2": "INTEGRATED"})])
+    bench = K.model_bench(runs)
+    assert bench["SHIP"] == {"m-default": {"n": 2, "wins": 1, "cost": 4.0, "turns": 20, "wall": 120.0}}
+    assert bench["ADVISOR"]["a-default"]["wins"] == 1      # judged by the next result, wave 4
+    assert bench["REPAIR"]["m-default"]["wins"] == 1
+
+
+def test_pick_model_explores_then_keeps_the_cheapest_per_success(tmp_path):
+    def ship(model, req, wave, cost):
+        return ("SHIP", model, req, wave, cost)
+    # Three outcomes so far: the next (the fourth) job is the exploration turn.
+    runs, roster = _bench_world(tmp_path, [ship("m-default", f"R{i}", i, 2.0) for i in range(3)],
+                                [(i, {f"R{i}": "INTEGRATED"}) for i in range(3)])
+    assert K.pick_model("SHIP", runs_dir=runs, roster_file=roster) == "m-cheap"
+    # m-cheap has three wins at a quarter of the cost: it wins on cost per success.
+    calls = [ship("m-default", f"R{i}", i, 2.0) for i in range(3)] + \
+            [ship("m-cheap", f"C{i}", 10 + i, 0.5) for i in range(3)] + \
+            [ship("m-new", f"N{i}", 20 + i, 0.1) for i in range(2)]
+    waves = [(i, {f"R{i}": "INTEGRATED"}) for i in range(3)] + \
+            [(10 + i, {f"C{i}": "INTEGRATED"}) for i in range(3)] + \
+            [(20 + i, {f"N{i}": "FAILED"}) for i in range(2)]
+    tmp2 = tmp_path / "b"
+    tmp2.mkdir()
+    runs, roster = _bench_world(tmp2, calls, waves)
+    assert K.pick_model("SHIP", runs_dir=runs, roster_file=roster) == "m-cheap"
+
+
+def test_a_cheap_model_that_mostly_fails_does_not_win_on_cost(tmp_path):
+    calls = [("SHIP", "m-default", f"R{i}", i, 2.0) for i in range(4)] + \
+            [("SHIP", "m-cheap", f"C{i}", 10 + i, 0.2) for i in range(4)]
+    waves = [(i, {f"R{i}": "INTEGRATED"}) for i in range(4)] + \
+            [(10 + i, {f"C{i}": "INTEGRATED" if i == 0 else "FAILED"}) for i in range(4)]
+    runs, roster = _bench_world(tmp_path, calls, waves)
+    # 25% against 100%: below RATE_FLOOR of the best, so its $0.80 a win does not count.
+    assert K.pick_model("SHIP", runs_dir=runs, roster_file=roster) == "m-default"
+
+
+def test_no_record_and_no_roster_keep_the_defaults(tmp_path):
+    runs, roster = _bench_world(tmp_path, [], [])
+    assert K.pick_model("ADVISOR", runs_dir=runs, roster_file=roster) == "a-default"
+    assert K.pick_model("SCOUT", runs_dir=runs, roster_file=tmp_path / "absent.json") == "sonnet"
+
+
+def test_the_real_roster_names_every_job_kind_and_no_verifier():
+    real = K.roster()
+    assert {"SHIP", "REPAIR", "SCOUT", "ADVISOR", "ESCALATE"} <= set(real)
+    assert "VERIFIER" not in real
