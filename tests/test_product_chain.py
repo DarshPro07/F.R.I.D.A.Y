@@ -147,3 +147,13 @@ def test_until_done_waits_out_a_dirty_tree(monkeypatch, tmp_path):
     # 2026-10-04: a controller edit left the checkout dirty for a few minutes and the loop ended.
     cmds, sleeps = _until_done(monkeypatch, tmp_path, ["dirty tree"] + ["no ready work"] * 4)
     assert sleeps[0] == PC.RETRY_AFTER_S and len(cmds) == 5
+
+
+
+def test_until_done_rechecks_the_top_priority_after_every_real_run(monkeypatch, tmp_path):
+    # 2026-10-06: MODEL-012 (P0) was unparked while the chain worked through P1, and
+    # waited behind the whole P1 queue because only a new day re-checked from the top.
+    cmds, _ = _until_done(monkeypatch, tmp_path, [
+        "no ready work", "max waves", "max waves", "no ready work", "no ready work",
+        "no ready work", "no ready work"])
+    assert [c[c.index("--priority") + 1] for c in cmds] == ["P0", "P1", "P0", "P0", "P1", "P2", "P3"]

@@ -165,6 +165,13 @@ def main(argv: list[str] | None = None) -> int:
         reason = next((ln.split("stopped: ", 1)[1].strip() for ln in r.stdout.splitlines()
                        if ln.startswith("stopped: ")), f"exit {r.returncode}")
         log(f"program stopped: {reason} (exit {r.returncode}) {r.stderr.strip()[-300:]}")
+        if a.until_done and reason != "no ready work":
+            # Re-check from the top after every real run, not only at a new day: an owner
+            # ruling or a controller unpark may have made higher-priority work ready since
+            # (2026-10-06: MODEL-012, P0, unparked at 00:30, waited behind the whole P1
+            # queue). A top priority with nothing ready answers "no ready work" at once
+            # and the chain steps down again.
+            priority = a.priority
         if a.until_done:
             if reason == "no ready work":
                 if priority == PRIORITIES[-1]:

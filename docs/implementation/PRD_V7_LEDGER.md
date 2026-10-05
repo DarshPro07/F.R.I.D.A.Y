@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `ebba0dd283c9d83aa3888596d93f5901cb6043a278d603a760c522568046eaa5`
 - PRD size: 8204 lines, 295141 bytes
-- Repository HEAD: `cecfd100dea3b3134480a6e2c5f094a0df801ef5`
-- Uncommitted paths at generation: 45
-- Generated: 2026-10-06T00:45:07+05:30
+- Repository HEAD: `a8f620031c837c41d22a220ae1741375b3b74d42`
+- Uncommitted paths at generation: 44
+- Generated: 2026-10-06T01:47:39+05:30
 
 ## Status vocabulary
 
@@ -27,8 +27,8 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 79 |
-| PARTIAL | 70 |
+| MISSING | 78 |
+| PARTIAL | 71 |
 | VERIFIED | 36 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
@@ -145,7 +145,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| MODEL-004 | P1 | **PARTIAL** | Open-set model onboarding. | New mock route profiled without core rewrite. | FR-MDL-002 | `friday/model_capabilities.py:1-52`, `tests/test_route_fitness.py:22-50` | GAPS: No real Completer adapter over the model gateway yet, so only mock routes are profiled; model_profiling is classified FUTURE in reachability.DECLARED until one exists; Profiling is not auto-triggered on discovery of a new model; a caller must invoke profile_route; max_context and relative_cost are not measurable by a probe and are recorded as None / unknown; Gateway capability_verdict still says 'declared capable' for a profiled route (provenance is in notes and the store, gateway untouched) |
+| MODEL-004 | P1 | **PARTIAL** | Open-set model onboarding. | New mock route profiled without core rewrite. | FR-MDL-002 | `friday/model_capabilities.py:1-52`, `tests/test_route_fitness.py:22-50` | GAPS: No real Completer adapter over the model gateway yet, so only mock routes are profiled; model_profiling stays FUTURE in reachability.DECLARED until one exists; Profiling is not auto-triggered on discovery of a new model; a caller must invoke profile_route; max_context and relative_cost are not measurable by a probe and are recorded as None / unknown; A corrupt profile store makes capability_verdict fail open with the reason 'no declared capabilities' (the broad except around MC.get); pre-existing, not changed here |
 | EVAL-003 | P1 | **PARTIAL** | Model Arena profiles candidates. | Vendor claim alone cannot promote route. | - | `friday/model_gateway.py`, `tests/test_route_fitness.py:173` | GAPS: The one failure is tests/test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop: @live, the provider answered 'failed' (auth/provider config), outside the gate marker set; not run on the unchanged tree, so pre-existing is inferred, not proven.; Assumed: latest report per route replaces earlier; no expiry; measured-below-target demotes (kept usable, unpromoted) unless require_measured. Nothing sets require_measured yet.; Benchmarks are per route, not per task class: Report carries no task class. |
 
 ## PRD section 28
@@ -160,7 +160,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| MODEL-005 | P1 | **MISSING** | Hardware-aware local model residency. | 8 GB stress test. | - | `friday/governor.py:59-374` | MISSING core: BUILD friday/local_experts.py that queries governor.Sample's RAM headroom before loading a local model (Needle/embedding/vision), unloads the least-recently-used one under ELEVATED/HIGH pressure, and add a stress test simulating an 8 GB ceiling per governor.py's existing Thresholds-injection pattern used in tests/test_governor.py. |
+| MODEL-005 | P1 | **PARTIAL** | Hardware-aware local model residency. | 8 GB stress test. | - | `friday/governor.py:59-374` | GAPS: No live caller yet: Needle/embedding/vision loaders are the next wiring step (declared FUTURE in reachability.DECLARED, as model_profiling was); model_gateway local infer is unchanged because those models live in an external worker.; Thresholds.max_resident_models defaults to 1, so a live pool holds one expert until hardware_profile raises the cap; the pool honours whatever cap the governor has.; size_gb is RAM cost; GPU-resident experts are judged only by the governor's live GPU readings, not projected.; PRD_V7_LEDGER.md MODEL-005 row not edited; left to the kernel's ledger step. |
 
 ## PRD section 31
 
@@ -322,7 +322,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| ONB-001 | P1 | **PARTIAL** | Progressive onboarding. | New user completes setup + useful task. | FR-ONB-004, PRD-GATE-003 | `friday/onboarding.py:154-236`, `tests/test_onboarding.py:110-120`, `tests/test_onboarding.py:123-130` | Add a golden journey: fresh state root, first run launches the interview, essential stages answered, first useful task executes with evidence; assert profile and policy persisted and the task verified. |
+| ONB-001 | P1 | **PARTIAL** | Progressive onboarding. | New user completes setup + useful task. | FR-ONB-004, PRD-GATE-003 | `friday/onboarding.py:154-236`, `tests/test_onboarding.py:110-120`, `tests/test_onboarding.py:123-130` | GAPS: The journey drives Onboarding and the launcher helper in-process; it does not spawn FRIDAY.exe.; The first useful task uses a test-supplied local_inventory capability on the ContinuousTaskExecutor, not a live Hermes or MCP tool.; Not shown by running the suite on the original tree: the new tests call finish/is_onboarded/first_run_notice/onboarding_at_startup, which did not exist before this change. |
 
 ## PRD section 71
 
@@ -348,7 +348,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
 | DOMAIN-001 | P0 | **VERIFIED** | Work is classified by provider-safeguard domain before delegation; restricted domains run as separate bounded programs and the general build carries only their boundaries. | A general-engineering work packet carries no restricted-domain operational detail; a restricted packet goes to its own program or is marked BLOCKED_EXTERNAL, never retried on the same route. | - | `friday/domain_gate.py` | Owner ruling 2026-10-02 implemented (cbrne with cbrn alias, cyber_sensitive with a separate intent/authority classification; phrases are signals, deterministic policy decides). The owner's six positive and negative controls plus a no-scope case pass on the integrated tree (17 passed, re-run by the controller with an isolated state root). Build runs f43a83c and 5203837: RED/GREEN at base, affected tests green, fresh verifier PASS both times. |
-| MODEL-006 | P1 | **PARTIAL** | Model registry records policy/safeguard compatibility and known task restrictions; dispatch ends ALLOW/FALLBACK/LOCAL_ONLY/ASK_USER/BLOCKED and never retries an incompatible route. | A recorded safeguard intervention changes the next route instead of repeating it. | - | `friday/model_gateway.py:482-512`, `friday/model_gateway.py:745-772`, `friday/model_gateway.py:892-969` | EXTEND the route registry with per-route domain restrictions and a safeguard-event outcome that excludes the route for that domain; test that a second attempt takes the fallback or BLOCKED. |
+| MODEL-006 | P1 | **PARTIAL** | Model registry records policy/safeguard compatibility and known task restrictions; dispatch ends ALLOW/FALLBACK/LOCAL_ONLY/ASK_USER/BLOCKED and never retries an incompatible route. | A recorded safeguard intervention changes the next route instead of repeating it. | - | `friday/model_gateway.py:482-512`, `friday/model_gateway.py:745-772`, `friday/model_gateway.py:892-969` | GAPS: Refusal detection applies only to requests classified into a restricted domain (domain_gate phrase lists, still an owner-pending ASSUMPTION); a refusal on a general-domain request is returned as before.; An exclusion is permanent per (route, domain) until the safeguard ledger is cleared; there is no expiry or clear command yet.; The 'safeguard' registry field is recorded for the inspector only; routing acts on restricted_domains and the ledger.; No real route in model_capabilities._ALL declares restricted_domains yet; no owner-sourced fact to declare.; Read budget (8 files / 400 lines) was exceeded before the first edit, to see infer's reply handling and the fake worker. |
 | CTX-007 | P1 | **PARTIAL** | Context payload classes and one Compression Coordinator with transformation provenance; LOSSLESS_REQUIRED never lossy, failures fail closed. | Lossless literals pass raw; stacked transformations lose no critical fact; every transformed artifact is recoverable by hash. | - | - | GAPS: CTX-007 ledger row not flipped: scripts/prd_ledger.py regeneration writes data/, which this run may not touch; kernel should set MISSING -> PARTIAL (caveman and semantic summarization are CTX-008+).; Wider impacted run (model_gateway, gateway_llm, invariants, envelope_hermes, objective_budget, governor_reduction, reachability, prd_ledger): 211 passed, 1 skipped, 1 failed: test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop, the live Hermes gateway reporting no configured provider; same failure CTX-004 recorded, not caused by this change.; Assumed (PRD text not in repo): RECOVERABLE_LOSSY_ALLOWED permits FOLD only, SUMMARIZABLE permits SUMMARIZE and FOLD, DROP_AFTER_EXTRACTION permits all four. Revisit if PRD 16 differs.; compile_working_set records section drops as DROP only; no FOLD stub is placed in the prompt. A section that carries a critical fact line, or whose original the vault cannot keep, now stays and raises ContextOverBudget if the budget then cannot be met.; A DROP or FOLD returns a marker naming the original (callers discard it for a drop); a transformed hash shared by two originals (two summaries identical) makes recover(hash) raise and requires the recovery pointer.; Exact repeats of a retained line in context_health.prune are still dropped without a transformation record, since nothing is lost.; No live caller registers a SUMMARIZE backend beyond context_health's clip; CTX-008 Caveman plugs into compression.register_backend.; Vault defaults to data/compression_vault under config.DATA_DIR (FRIDAY_ARTIFACT_VAULT overrides); no retention or pruning policy yet.; Ran in .venv-build, not .venv-verify (absent on this machine). |
 | CTX-008 | P2 | **MISSING** | Caveman only as a compression backend behind the coordinator, after per-subcomponent licence review, benchmarked OFF/OUTPUT_ONLY/ENGINE/FULL. | Licence review recorded before any embedding; benchmark report. | - | - | After CTX-007: pin the upstream, review each subcomponent's licence, add a fabric adapter reporting UNAVAILABLE when absent, then benchmark the four modes. |
 | S1-001 | P1 | **MISSING** | One System One Gateway (choose/score/yes_no/rank/classify/confidence) with pluggable backends; LOCAL_ONLY never reaches a hosted backend. | Gateway contract tests with a mock backend; a LOCAL_ONLY forced route never calls the hosted backend. | - | - | Build the gateway contract with a deterministic mock backend first; route hosted backends through the model gateway's data-class seam so LOCAL_ONLY is refused there. |
