@@ -73,6 +73,41 @@ def tree_dirty(repo: Path, runner=sh) -> bool:
     return bool(git_out(repo, "status", "--porcelain", "--untracked-files=no", runner=runner))
 
 
+def own_renders(status: str) -> list[str]:
+    """The paths in `git status --porcelain` output when every one is a doc under
+    DOCS_DIR modified in place - what finish() renders and commits - else []."""
+    paths = []
+    for line in status.splitlines():
+        # split, not slice: git_out strips the output, so the first line has lost
+        # the leading blank of its " M" code
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            return []
+        code, path = parts[0], parts[1].strip().replace(chr(92), "/")
+        if code != "M" or not path.startswith(DOCS_DIR + "/"):
+            return []
+        paths.append(path)
+    return paths
+
+
+def recover_own_renders(repo: Path, runner, out) -> bool:
+    """Commit the renders an earlier run's finish() could not, then say if the tree is clean.
+
+    2026-10-05: a stale .git/index.lock failed finish()'s docs commit, which left
+    only the program's own renders modified; every later run stopped on "dirty
+    tree" and the chain retried for hours. Anything else dirty still stops the run."""
+    paths = own_renders(git_out(repo, "status", "--porcelain", "--untracked-files=no", runner=runner))
+    if not paths:
+        return False
+    for cmd in (["git", "add", "-u", "--", DOCS_DIR],
+                ["git", *IDENTITY, "commit", "-m",
+                 "docs(state): commit the renders an earlier run could not"]):
+        if runner(cmd, repo).returncode != 0:
+            return False
+    out(f"recovered: committed {len(paths)} rendered doc(s) an earlier run left: {', '.join(paths)}")
+    return not tree_dirty(repo, runner)
+
+
 def atomic_write(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -584,7 +619,12 @@ def run_program(*, max_waves: int = 5, max_usd: float = 10.0, cap: int = build_k
 def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority, dry_run, repo,
                 state_file, state_doc, worktrees, k, bi, runner, out, runs_dir=None, checkout_turn=None) -> dict:
     if tree_dirty(repo, runner):
-        return {"stop_reason": "dirty tree", "waves": []}
+        if dry_run:
+            return {"stop_reason": "dirty tree", "waves": []}
+        with (checkout_turn or merge_queue_turn)(f"program:{os.getpid()}"):
+            recovered = recover_own_renders(repo, runner, out)
+        if not recovered:
+            return {"stop_reason": "dirty tree", "waves": []}
     worktrees = worktrees or k._worktrees_root()
     state = load_state(state_file)
     if not dry_run:

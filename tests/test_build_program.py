@@ -278,6 +278,48 @@ def test_dirty_tree_stops_and_touches_nothing(env):
     assert not k.launches and not env.state.exists() and not env.doc.exists()
 
 
+class CleansOnCommit(FakeGit):
+    """A git whose tree is clean once something is committed."""
+
+    def __call__(self, cmd, cwd, timeout=60):
+        res = super().__call__(cmd, cwd, timeout)
+        if "commit" in cmd:
+            self.dirty = ""
+        return res
+
+
+def test_only_the_programs_own_renders_dirty_are_committed_and_the_run_goes_on(env):
+    # 2026-10-05: a stale .git/index.lock failed finish()'s docs commit; the renders it
+    # left made every later run stop on "dirty tree" for hours.
+    env.git = CleansOnCommit(dirty=" M docs/implementation/PRD_CURRENT_STATE.md\n"
+                                   " M docs/implementation/PRD_V7_LEDGER.md")
+    res, _ = go(env, FakeKernel(ids=()))
+    assert res["stop_reason"] == "no ready work"
+    first = env.git.commits()[0]
+    assert "commit the renders an earlier run could not" in " ".join(first)
+    assert ["git", "add", "-u", "--", "docs/implementation"] in env.git.cmds
+
+
+@pytest.mark.parametrize("dirty", [
+    " M friday/x.py",
+    " M docs/implementation/PRD_V7_LEDGER.md\n M scripts/build_kernel.py",
+    "A  docs/implementation/NEW.md",
+    " M docs/PRD_V7.md",
+])
+def test_anything_else_dirty_still_stops_and_commits_nothing(env, dirty):
+    env.git = CleansOnCommit(dirty=dirty)
+    k = FakeKernel()
+    res, _ = go(env, k)
+    assert res["stop_reason"] == "dirty tree"
+    assert not env.git.commits() and not k.launches
+
+
+def test_a_dry_run_never_commits_the_renders(env):
+    env.git = CleansOnCommit(dirty=" M docs/implementation/PRD_V7_LEDGER.md")
+    res, _ = go(env, FakeKernel(), dry_run=True)
+    assert res["stop_reason"] == "dirty tree" and not env.git.commits()
+
+
 # ------------------------------------------------------------------ stop reasons
 
 def test_no_ready_work_stop(env):
