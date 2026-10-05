@@ -491,7 +491,7 @@ class Router:
         # What this request shape taught us last time. Read once per search,
         # not once per candidate: the module caches, but a dict lookup in the
         # loop below is still cheaper than trusting that.
-        from friday import routing_memory
+        from friday import computer_use, routing_memory
         learned = routing_memory.prior(lowered)
         # The same content filter the phrase scorer uses, and for the same
         # reason twice over. Two-letter tokens were admitted and matched as
@@ -592,11 +592,13 @@ class Router:
         # offered, a tie goes to the more direct action path (PRD v7 §48),
         # so the order says which to try first without changing what is found.
         # A path that has kept failing for this request shape goes last among
-        # its ties (measured, from the recorded routing and execution outcomes).
+        # its ties (measured, from the recorded routing and execution outcomes),
+        # and so does one whose computer-use backend is not up.
         measured = action_path.combine(routing_memory.reliability(lowered),
                                        routing_memory.execution_reliability())
+        down = computer_use.unavailable_paths(name for _, name in scored[:limit])
         shown = sorted(scored[:limit],
-                       key=lambda pair: (-pair[0], action_path.order_key(pair[1], measured), pair[1]))
+                       key=lambda pair: (-pair[0], action_path.order_key(pair[1], measured, down), pair[1]))
         return [self.describe_tool(name) for _, name in shown]
 
     def invocable(self, name: str):

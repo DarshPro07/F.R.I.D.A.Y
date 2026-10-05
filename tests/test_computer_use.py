@@ -188,3 +188,66 @@ def test_the_desktop_probe_reads_the_screen_and_sends_no_input(screen, monkeypat
 def test_a_backend_refuses_an_operation_it_does_not_have(screen):
     with pytest.raises(fabric.FabricError):
         native_desktop.call("coordinates.click", {"native": screen})
+
+
+# --- ordering accounts for backend availability ------------------------------
+
+
+def test_a_path_with_no_backend_up_is_named_and_the_other_is_not(
+        playwright_absent, screen):
+    down = computer_use.unavailable_paths(["browser_click", "desktop_step", "web_fetch"])
+    assert down == frozenset({action_path.DOM})
+
+
+def test_a_request_that_needs_no_computer_use_activates_no_backend():
+    assert computer_use.unavailable_paths(["web_fetch", "memory_search"]) == frozenset()
+    assert {fabric.state(p.id) for p in fabric.by_family(computer_use.FAMILY)} == {
+        fabric.REGISTERED}
+
+
+def test_a_path_whose_backend_is_down_sorts_behind_the_others():
+    down = frozenset({action_path.DOM})
+    assert action_path.rank(["browser_click", "desktop_step"]) == [
+        "browser_click", "desktop_step"]
+    assert action_path.rank(["browser_click", "desktop_step"], down=down) == [
+        "desktop_step", "browser_click"]
+    assert action_path.order_key("browser_click", down=down) > action_path.order_key(
+        "desktop_step", down=down)
+
+
+def test_the_planner_takes_the_desktop_when_the_browser_backend_is_missing(
+        monkeypatch, playwright_absent, screen):
+    from friday import planner as P
+    from friday import routing_memory
+
+    monkeypatch.setattr(P, "candidates",
+                        lambda operation, target, limit=8: ["browser_zqxopen", "desktop_zqxopen"])
+    monkeypatch.setattr(P, "_fit", lambda intent, cid: 1)
+    monkeypatch.setattr(routing_memory, "execution_reliability", lambda: {})
+    goal = P.Goal("g1", "open the zqx thing", "OPEN", "WEB_PAGE")
+    assert P.resolve(P.Plan(goals=[goal])).goals[0].capability == "desktop_zqxopen"
+
+
+def test_the_planner_keeps_the_browser_first_while_its_backend_is_up(
+        monkeypatch, playwright_present, screen):
+    from friday import planner as P
+    from friday import routing_memory
+
+    monkeypatch.setattr(P, "candidates",
+                        lambda operation, target, limit=8: ["desktop_zqxopen", "browser_zqxopen"])
+    monkeypatch.setattr(P, "_fit", lambda intent, cid: 1)
+    monkeypatch.setattr(routing_memory, "execution_reliability", lambda: {})
+    goal = P.Goal("g1", "open the zqx thing", "OPEN", "WEB_PAGE")
+    assert P.resolve(P.Plan(goals=[goal])).goals[0].capability == "browser_zqxopen"
+
+
+def test_the_router_offers_the_desktop_first_among_ties_when_the_browser_is_missing(
+        playwright_absent, screen):
+    from friday import capability_router as R
+
+    router = R.Router()
+    router.load([types.SimpleNamespace(info=types.SimpleNamespace(
+        name=name, raw_schema={"description": "zqxwidget", "parameters": {}}))
+        for name in ("browser_zqxwidget", "desktop_zqxwidget")])
+    offered = [m["capability"] for m in router.search("zqxwidget", limit=2)]
+    assert offered == ["desktop_zqxwidget", "browser_zqxwidget"]

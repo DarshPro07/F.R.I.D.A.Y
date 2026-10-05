@@ -90,10 +90,32 @@ class Route:
         return self.state in (fabric.READY, fabric.DEGRADED)
 
 
+def unavailable_paths(capability_ids, *,
+                      authorized: frozenset[str] | None = None) -> frozenset[str]:
+    """The computer-use paths that `capability_ids` act through and that have
+    no backend up, for `action_path.order_key`: a step whose backend is down
+    is tried after the ones whose backend answers. A path no capability here
+    acts through is not asked about, so a request that needs no computer use
+    activates no backend."""
+    wanted = {action_path.path_of(cid) for cid in capability_ids} & set(PATHS)
+    return frozenset(path for path in sorted(wanted)
+                     if not _serve(path, "", authorized).usable)
+
+
 def route(capability_id: str, *,
           authorized: frozenset[str] | None = None) -> Route | None:
     """The backend that serves `capability_id`, or None when the capability
     does not act through a computer-use path (a connector, a structured tool).
+    """
+    path = action_path.path_of(capability_id)
+    if path not in PATHS:
+        return None
+    return _serve(path, capability_id, authorized)
+
+
+def _serve(path: str, capability_id: str,
+           authorized: frozenset[str] | None) -> Route:
+    """The route for one computer-use `path`.
 
     Candidates come in the fabric's order (cheapest, least risky first); each
     is activated in turn, so a backend that is missing costs one failed
@@ -102,9 +124,6 @@ def route(capability_id: str, *,
     is not usable. When none is up the route is UNAVAILABLE and says why for
     every backend that was tried.
     """
-    path = action_path.path_of(capability_id)
-    if path not in PATHS:
-        return None
     usable = (fabric.READY, fabric.DEGRADED)
     down: list[tuple[str, str, str]] = []
     for provider in fabric.candidates(FAMILY, probe_operation(path),

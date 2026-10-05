@@ -677,12 +677,15 @@ def resolve(plan: Plan) -> Plan:
         # only among these. Text similarity ranks; it does not select, and
         # it never sees a capability the shape ruled out.
         # Equal fits go to the more direct action path (PRD v7 §48), and a
-        # path that keeps failing when run goes behind the others.
+        # path that keeps failing when run, or whose computer-use backend is
+        # not up, goes behind the others.
         from friday import action_path
+        from friday import computer_use
         from friday import routing_memory
         measured = routing_memory.execution_reliability()
+        down = computer_use.unavailable_paths(found)
         ranked = sorted(found, key=lambda cid: (-_fit(goal.intent, cid),
-                                                action_path.order_key(cid, measured)))
+                                                action_path.order_key(cid, measured, down)))
         goal.capability = ranked[0]
         goal.confidence = 0.8
         goal.why = f"best of {len(found)} capabilities of that shape"

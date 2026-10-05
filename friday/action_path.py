@@ -66,16 +66,20 @@ def combine(*tallies: dict) -> dict:
     return out
 
 
-def rank(candidates, *, reliability: dict | None = None) -> list[str]:
+def rank(candidates, *, reliability: dict | None = None,
+         down: frozenset[str] = frozenset()) -> list[str]:
     """`candidates` for one step, most direct path first. `reliability`
-    maps a capability to (successes, attempts) for this kind of step."""
+    maps a capability to (successes, attempts) for this kind of step; `down`
+    is the paths with no backend up (`computer_use.unavailable_paths`)."""
     measured = reliability or {}
-    return sorted(candidates, key=lambda cap: (_failing(cap, measured),
-                                               ORDER.index(path_of(cap))))
+    return sorted(candidates, key=lambda cap: order_key(cap, measured, down))
 
 
-def order_key(capability_id: str, reliability: dict | None = None) -> tuple[bool, int]:
+def order_key(capability_id: str, reliability: dict | None = None,
+              down: frozenset[str] = frozenset()) -> tuple[bool, int]:
     """Where a capability's path stands in §48's order, for tie-breaking: a
-    path that keeps failing for this kind of step sorts behind the rest."""
-    return (_failing(capability_id, reliability or {}),
-            ORDER.index(path_of(capability_id)))
+    path that keeps failing for this kind of step, or whose backend is not up,
+    sorts behind the rest."""
+    path = path_of(capability_id)
+    return (_failing(capability_id, reliability or {}) or path in down,
+            ORDER.index(path))
