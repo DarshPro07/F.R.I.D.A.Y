@@ -9,7 +9,8 @@ FRIDAY.exe as a user would. Journeys:
 
     EXE-00  preconditions: the exe exists, :8000 and :8770 are free
     EXE-01  --version answers with the stamped commit
-    EXE-02  --doctor bootstraps the database and does not FAIL
+    EXE-02  --doctor bootstraps the database and its artifact checks do not FAIL
+            (a fresh profile has no keys yet; those rows are shown, not judged)
     EXE-03  --role server answers SSE on :8000
     EXE-05  --role ui serves /health and / on :8770
     EXE-08  sys.executable shim: -c, -m and a bundled .py path
@@ -201,7 +202,7 @@ def main() -> int:
     fixtures_before = (internal / "data" / "corpus").is_dir()
 
     # EXE-02 -----------------------------------------------------------------
-    doctor = run(exe, "--doctor", timeout=300)
+    doctor = run(exe, "--doctor", "--doctor-scope", "artifact", timeout=300)
     db_line = next((line.strip() for line in doctor.stdout.splitlines() if " database " in line), "")
     tables = 0
     if "tables)" in db_line:

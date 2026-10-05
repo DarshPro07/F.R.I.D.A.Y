@@ -170,6 +170,31 @@ def test_no_api_key_with_the_cli_enabled_builds_the_gateway_llm(monkeypatch):
     assert isinstance(providers.build_resilient_llm("google", "NORMAL"), GL.GatewayLLM)
 
 
+def test_a_template_api_key_with_the_cli_enabled_builds_the_gateway_llm(monkeypatch):
+    # FRIDAY.exe 2026-10-05: .env still held the template GOOGLE_API_KEY, so the
+    # Gemini model was built and refused on every voice turn before the CLI answered.
+    monkeypatch.setenv("GOOGLE_API_KEY", "your-google-api-key")
+    monkeypatch.setenv("FRIDAY_CLI_MODEL_PROVIDERS", "claude")
+    assert isinstance(providers.build_resilient_llm("google", "NORMAL"), GL.GatewayLLM)
+
+
+def test_a_template_api_key_without_the_cli_keeps_the_api_model(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "your-google-api-key")
+    monkeypatch.setenv("FRIDAY_CLI_MODEL_PROVIDERS", "off")
+    monkeypatch.setenv("ADA_LLM_FALLBACK", "off")
+    assert not isinstance(providers.build_resilient_llm("google", "NORMAL"), GL.GatewayLLM)
+
+
+def test_unusable_credentials_names_template_and_absent_keys_only(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "your-google-api-key")
+    assert providers.unusable_credentials("llm", "google") == ("GOOGLE_API_KEY",)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    assert providers.unusable_credentials("llm", "google") == ("GOOGLE_API_KEY",)
+    # an unexpected format is the provider's to refuse, not ours to guess
+    monkeypatch.setenv("GOOGLE_API_KEY", "AQ." + "Ab3dE5gH7jK9mN1pQ3rS5tU7vW9yZ1aB")
+    assert providers.unusable_credentials("llm", "google") == ()
+
+
 def test_no_api_key_and_no_cli_is_still_a_startup_error(monkeypatch):
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.setenv("FRIDAY_CLI_MODEL_PROVIDERS", "off")

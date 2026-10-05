@@ -417,6 +417,34 @@ def test_an_unset_llm_key_degrades_the_voice_row_and_an_accepted_one_does_not(mo
     assert state != L.FAIL
 
 
+def test_a_template_llm_key_with_a_signed_in_cli_brain_degrades_and_names_it(tmp_path, monkeypatch):
+    # FRIDAY.exe 2026-10-05: the voice row FAILed on the template GOOGLE_API_KEY while
+    # the agent was answering through the signed-in Claude CLI.
+    monkeypatch.setenv("LLM_BACKEND", "google")
+    monkeypatch.setattr(L, "cli_brain", lambda: "claude-cli")
+    state, detail = _voice_row(
+        tmp_path, monkeypatch, {"GOOGLE_API_KEY": _template_env()["GOOGLE_API_KEY"]}, **_accepting())
+    assert state == L.DEGRADED
+    assert "GOOGLE_API_KEY" in detail and "answering through claude-cli (no tool calls)" in detail
+
+
+def test_cli_brain_needs_a_signed_in_backend(monkeypatch):
+    from friday import cli_model_provider as C
+
+    class Out(C.ClaudeCodeBackend):
+        def entry(self):
+            return self._row(False, "signed out")
+
+    class In(C.ClaudeCodeBackend):
+        def entry(self):
+            return self._row(True, "signed in")
+
+    monkeypatch.setattr(C, "discover_backends", lambda env=None: (Out(),))
+    assert L.cli_brain() is None
+    monkeypatch.setattr(C, "discover_backends", lambda env=None: (Out(), In()))
+    assert L.cli_brain() == "claude-cli"
+
+
 def test_an_unanswered_interview_is_a_setup_step_not_a_degradation(tmp_path, monkeypatch):
     from friday import onboarding
 

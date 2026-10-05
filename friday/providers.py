@@ -30,7 +30,7 @@ from typing import get_args
 
 import logging
 
-from friday import cli_model_provider
+from friday import cli_model_provider, credentials
 
 # Import for the registration side effect as much as for the names. See above.
 from livekit.agents import inference
@@ -156,14 +156,31 @@ def resolve_llm_model(backend: str, role: str) -> str:
     return model
 
 
-def missing_credentials(kind: str, provider: str) -> tuple[str, ...]:
-    """Env vars this provider needs that are absent or blank. Never returns values."""
+def _needed(kind: str, provider: str) -> tuple[str, ...]:
     table = {"stt": STT_CREDENTIALS, "tts": TTS_CREDENTIALS, "llm": LLM_CREDENTIALS}[kind]
     if provider not in table:
         raise ProviderError(
             f"unknown {kind} provider {provider!r}; known: {sorted(table)}"
         )
-    return tuple(name for name in table[provider] if not os.getenv(name, "").strip())
+    return table[provider]
+
+
+def missing_credentials(kind: str, provider: str) -> tuple[str, ...]:
+    """Env vars this provider needs that are absent or blank. Never returns values."""
+    return tuple(name for name in _needed(kind, provider) if not os.getenv(name, "").strip())
+
+
+#: Static verdicts that mean the key cannot work whatever the provider says. A
+#: key in an unexpected format is not here: formats change, so that one is left
+#: to the provider to refuse.
+_CANNOT_WORK = (credentials.MISSING, credentials.PLACEHOLDER)
+
+
+def unusable_credentials(kind: str, provider: str) -> tuple[str, ...]:
+    """Env vars this provider needs that are absent, blank, or still the .env
+    template value - decided without a call to the provider. Never returns values."""
+    return tuple(name for name in _needed(kind, provider)
+                 if credentials.classify_static(name, os.getenv(name)).state in _CANNOT_WORK)
 
 
 def _require_credentials(kind: str, provider: str) -> None:
@@ -270,17 +287,16 @@ def build_resilient_llm(backend: str = DEFAULT_LLM_BACKEND, role: str = DEFAULT_
     from friday.gateway_llm import GatewayLLM  # lazy: it imports the gateway
 
     cli_enabled = bool(cli_model_provider.discover_backends())
-    try:
-        primary = build_llm(backend, role)
-    except ProviderError:
-        # A missing key is the one failure the gateway can cover. A bad role
-        # or backend is a configuration error and still stops startup.
-        if not cli_enabled or not missing_credentials("llm", backend):
-            raise
+    # A missing or template key is the one failure the gateway can cover; with
+    # a template key the API model would be built and then refused on every
+    # turn (FRIDAY.exe, 2026-10-05). A bad role or backend is a configuration
+    # error and still stops startup.
+    if cli_enabled and unusable_credentials("llm", backend):
         resolve_llm_model(backend, role)
-        logger.warning("llm backend %r has no credentials; answering through the "
+        logger.warning("llm backend %r has no usable credentials; answering through the "
                        "model gateway's CLI route", backend)
         return GatewayLLM()
+    primary = build_llm(backend, role)
 
     models = [primary]
     secondary_role = fallback_role(role)

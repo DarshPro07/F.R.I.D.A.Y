@@ -1044,6 +1044,18 @@ def onboarding_check(home: Path) -> tuple[str, str, str]:
                 f"the interview failed to load: {type(exc).__name__}: {str(exc)[:120]}")
 
 
+def cli_brain() -> str | None:
+    """The signed-in coding-agent CLI the voice agent answers through when its
+    API model cannot (providers.build_resilient_llm), or None. Reads the
+    sign-in state locally; makes no model call."""
+    from friday import cli_model_provider
+
+    for backend in cli_model_provider.discover_backends():
+        if backend.entry().get("authenticated"):
+            return backend.id
+    return None
+
+
 def voice_check(verdicts: dict | None = None) -> tuple[str, str, str]:
     """Speech in and out: provider selection and its credentials (names
     only), and whether a microphone is visible to the audio stack.
@@ -1052,7 +1064,9 @@ def voice_check(verdicts: dict | None = None) -> tuple[str, str, str]:
     variable name. A key is set is not a key that works: a stage whose own key
     is a template, the wrong format, or refused by its provider cannot run, so
     that is a FAIL naming the variable and the provider's reason. A stage whose
-    key is simply unset is DEGRADED, as before."""
+    key is simply unset is DEGRADED, as before. The llm stage is the exception:
+    with a signed-in CLI brain the agent still answers, without tool calls, so
+    an unusable llm key is DEGRADED and the row names the brain."""
     parts, degraded, failed = [], False, False
     verdicts = verdicts or {}
     try:
@@ -1069,16 +1083,21 @@ def voice_check(verdicts: dict | None = None) -> tuple[str, str, str]:
                        (credentials.PLACEHOLDER, credentials.REJECTED)]
             shown = f"{label} {provider}" if label != "llm" else \
                 f"llm {block.get('backend', '?')}/{block.get('model', '?')}"
+            brain = ""
+            if label == "llm" and (refused or not (block.get("error") or block.get("configured"))):
+                brain = cli_brain() or ""
+            via = f"; answering through {brain} (no tool calls)" if brain else ""
             if refused:
-                parts.append(f"{shown}: {'; '.join(refused)}")
-                failed = True
+                parts.append(f"{shown}: {'; '.join(refused)}{via}")
+                degraded = degraded or bool(brain)
+                failed = failed or not brain
             elif block.get("error"):
                 parts.append(f"{shown}: {block['error'][:60]}")
                 degraded = True
             elif block.get("configured"):
                 parts.append(f"{shown} configured" if label != "llm" else shown)
             else:
-                parts.append(f"{shown} missing {', '.join(block.get('missing', []))}")
+                parts.append(f"{shown} missing {', '.join(block.get('missing', []))}{via}")
                 degraded = True
     except Exception as exc:                                # noqa: BLE001
         parts.append(f"provider report failed: {type(exc).__name__}")
