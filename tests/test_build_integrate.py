@@ -641,8 +641,10 @@ def test_gate_run_chunks_the_tests_and_aggregates(monkeypatch, tmp_path):
     codes = iter([0, 5, 1, 0])
 
     def fake_run(cmd, **kw):
-        seen.append(cmd[cmd.index("--") + 3:])
+        seen.append(cmd[cmd.index("--") + 1 + len(bi.GATE):])
         assert kw["timeout"] == bi.TEST_S
+        # A hung test fails by name under the per-test limit; the chunk limit is only a backstop.
+        assert f"--timeout={bi.GATE_TEST_S}" in cmd and bi.TEST_S > bi.GATE_TEST_S
         return _Done(next(codes))
 
     monkeypatch.setattr(bi.subprocess, "run", fake_run)

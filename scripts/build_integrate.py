@@ -50,12 +50,16 @@ VERIFIER_TOOLS = ",".join(("Read", "Glob", "Grep", "Bash(git diff:*)",
 PATCH_CAP = 40 * 1024
 #: The project's deterministic gate (AGENTS.md): live tests need the network or
 #: a running service, slow ones wall-clock time - neither proves a change.
-GATE = ("-m", "not live and not slow")
+#: A hung test fails on its own, by name, after GATE_TEST_S (pytest-timeout); TEST_S is only the
+#: chunk's backstop. One fixed chunk limit could not tell a hang from a heavy chunk: MODEL-012's
+#: chunk 1 (the harness's own git-and-subprocess tests) took 28 min with nothing hung (2026-10-05).
+GATE_TEST_S = 300
+GATE = ("-m", "not live and not slow", f"--timeout={GATE_TEST_S}")
 _FAILED = re.compile(r"^(?:FAILED|ERROR) (\S+)")
 VERIFIER_FLOOR_USD = build_kernel.VERIFIER_FLOOR_USD
 VERIFIER_TURNS = build_kernel.VERIFIER_TURNS
 GIT_S = 120
-TEST_S = 900
+TEST_S = 3600
 GATE_CHUNK = 40
 WIDE_IMPACT_FILES = 60  # an affected set larger than this is its own, chunked job
 QUEUE_FILE = "merge_queue.jsonl"
