@@ -329,6 +329,7 @@ button.quiet:hover{color:var(--ink);border-color:transparent;background:transpar
         <div class="loadwrap" id="loadwrap"><div class="loadbar"></div></div>
         <div class="l" id="lockl"></div>
         <div class="a" id="lockact">
+          <span id="lockask"></span>
           <button id="enrolbtn" style="display:none" onclick="enrolLive()">This is me: enrol my face</button>
           <label><button type="button" onclick="document.getElementById('photos').click()">Add photos of me</button><input type="file" id="photos" accept="image/*" multiple onchange="enrolPhotos(this.files)"></label>
         </div>
@@ -592,13 +593,13 @@ async function pinPath(opt){
   $("lockh").textContent=opt.otherTab?"Already open":"Locked";
   $("lockv").parentElement.classList.add("off");
   $("locks").innerHTML=(opt.why||"The camera is not available.");
-  $("lockact").innerHTML="";
+  $("lockask").innerHTML="";
   if(opt.otherTab){
-    $("lockact").innerHTML='<button onclick="takeOver()">Use this window instead</button>';
+    $("lockask").innerHTML='<button onclick="takeOver()">Use this window instead</button>';
     $("pinbox").classList.remove("on");            // your face is being read next door; no PIN here
     return;
   }
-  if(opt.canAsk)$("lockact").innerHTML='<button onclick="askForCamera()">Ask for the camera</button>';
+  if(opt.canAsk)$("lockask").innerHTML='<button onclick="askForCamera()">Ask for the camera</button>';
   const box=$("pinbox");box.classList.add("on");
   if(!st.pin_set){$("pinlabel").textContent="Set a PIN — I will ask for it whenever the camera is busy";
     $("pingo").textContent="Set PIN";$("pin").placeholder="4+ characters";$("pinnote").textContent="";}

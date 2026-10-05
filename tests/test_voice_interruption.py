@@ -211,3 +211,17 @@ def test_a_lock_from_inside_the_room_reaches_the_pin_form_the_way_boot_does():
     assert 'auth_mode==="pin")return pinPath(' in body
     assert "catch(e){camErr=e;}" in body and "return cameraBlocked(camErr)" in body
     assert "play();}catch(e){}" not in body, "the camera error is swallowed again"
+
+
+
+def test_the_pin_path_keeps_the_enrol_controls_the_lock_relies_on():
+    # Chrome test of FRIDAY.exe, 2026-10-05: pinPath cleared #lockact, deleting #enrolbtn
+    # and the photo input; lockNow then threw "Cannot read properties of null (reading
+    # 'style')" before reaching the camera or the PIN form.
+    import re
+    from pathlib import Path
+    html = Path("ui/index.html").read_text(encoding="utf-8")
+    assert not re.search(r'\$\("lockact"\)\.innerHTML\s*=', html), "something still wipes #lockact"
+    act = html[html.index('id="lockact"'):]
+    act = act[:act.index("</div>")]
+    assert 'id="lockask"' in act and 'id="enrolbtn"' in act and 'id="photos"' in act
