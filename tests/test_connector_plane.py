@@ -141,3 +141,60 @@ def test_status_never_contains_secret_material(control, monkeypatch):
     assert 'wincred:' in dashboard
     assert 'api_key": "sk' not in dashboard
     assert 'value' not in dashboard.lower() or 'sk-' not in dashboard
+
+
+# -- FRIDAY.exe 2026-10-05: an absent Hermes API, and Hermes found on this machine -----------
+
+
+def test_an_absent_hermes_api_is_unavailable_not_a_raw_socket_error(monkeypatch):
+    import socket
+    with socket.socket() as s:                      # a port nothing listens on
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    monkeypatch.setenv("HERMES_API_BASE", f"http://127.0.0.1:{port}")
+    with pytest.raises(P.HermesApiUnavailable, match=f"127.0.0.1:{port}"):
+        P._api("/api/model/options", timeout=3)
+
+
+def test_every_connector_tool_answers_unavailable_when_hermes_is_down(monkeypatch):
+    from friday.tools import connector_control as CC
+
+    class Down:
+        def __getattr__(self, name):
+            def fail(*a, **k):
+                raise P.HermesApiUnavailable("Hermes' API server is not answering at http://x")
+            return fail
+
+    class Capture:
+        def __init__(self):
+            self.tools = {}
+
+        def tool(self):
+            def keep(fn):
+                self.tools[fn.__name__] = fn
+                return fn
+            return keep
+
+    cap = Capture()
+    CC.register(cap)
+    CC.configure(Down())
+    try:
+        out = cap.tools["connector_list"]()
+        assert out["status"] == "unavailable" and "Start the Hermes gateway" in out["say"]
+        assert cap.tools["connector_status"]()["status"] == "unavailable"
+        assert cap.tools["connector_describe"]("anthropic")["status"] == "unavailable"
+    finally:
+        CC.configure(None)
+
+
+def test_the_api_key_and_config_come_from_the_profile_on_this_machine(tmp_path, monkeypatch):
+    # They were D:\\hermes\\profiles\\friday\\... - another machine's layout.
+    (tmp_path / ".env").write_text("OTHER=1\nAPI_SERVER_KEY=local-gateway-key\n", encoding="utf-8")
+    monkeypatch.delenv("API_SERVER_KEY", raising=False)
+    monkeypatch.delenv("HERMES_PROFILE_ENV", raising=False)
+    monkeypatch.delenv("HERMES_PROFILE_CONFIG", raising=False)
+    monkeypatch.setenv("FRIDAY_HERMES_PROFILE_HOME", str(tmp_path))
+    assert P._api_key() == "local-gateway-key"
+    assert P._profile_file("HERMES_PROFILE_CONFIG", "config.yaml") == tmp_path / "config.yaml"
+    monkeypatch.setenv("FRIDAY_HERMES_PROFILE_HOME", str(tmp_path / "absent"))
+    assert P._api_key() == "" and P._profile_file("HERMES_PROFILE_CONFIG", "config.yaml") is None

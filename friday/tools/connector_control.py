@@ -7,6 +7,7 @@ appear in any return - the plane only ever handles opaque refs.
 
 from __future__ import annotations
 
+import functools
 import logging
 import threading
 
@@ -33,6 +34,19 @@ def configure(new_plane) -> None:
         _plane = new_plane
 
 
+def _degrades(tool):
+    """An absent Hermes API is an answer, not a tool error (NON_NEGOTIABLE 15)."""
+    @functools.wraps(tool)
+    def wrapper(*args, **kwargs):
+        from friday.connectors.plane import HermesApiUnavailable
+        try:
+            return tool(*args, **kwargs)
+        except HermesApiUnavailable as exc:
+            return {"status": "unavailable",
+                    "say": f"{exc}. Start the Hermes gateway and ask again."}
+    return wrapper
+
+
 def _spoken(step) -> dict:
     return {"status": step.action, "say": step.say, **step.detail}
 
@@ -40,6 +54,7 @@ def _spoken(step) -> dict:
 def register(mcp):
 
     @mcp.tool()
+    @_degrades
     def connector_list() -> dict:
         """
         Every AI provider/connector Hermes can currently reach: name, auth
@@ -68,6 +83,7 @@ def register(mcp):
         }
 
     @mcp.tool()
+    @_degrades
     def connector_describe(connector: str) -> dict:
         """
         Everything known about one connector: registry metadata, auth
@@ -77,6 +93,7 @@ def register(mcp):
         return plane().describe_connector(connector)
 
     @mcp.tool()
+    @_degrades
     def connector_connect(connector: str, model: str = "") -> dict:
         """
         Connect a provider so Hermes can use it. Chooses the flow from the
@@ -90,6 +107,7 @@ def register(mcp):
         return _spoken(plane().begin_connection(connector, model=model))
 
     @mcp.tool()
+    @_degrades
     def connector_verify(connector: str, model: str = "") -> dict:
         """
         Re-check one connector against the live Hermes registry: is it
@@ -118,6 +136,7 @@ def register(mcp):
         return spoken
 
     @mcp.tool()
+    @_degrades
     def connector_status() -> dict:
         """
         The connector dashboard: every stored connection with status,
@@ -127,6 +146,7 @@ def register(mcp):
         return plane().status()
 
     @mcp.tool()
+    @_degrades
     def connector_smoke(connector: str, model: str = "") -> dict:
         """
         The READY gate: run one REAL inference through the production
@@ -138,6 +158,7 @@ def register(mcp):
         return _spoken(plane().smoke_test(connector, model=model))
 
     @mcp.tool()
+    @_degrades
     def connector_repair(connector: str) -> dict:
         """
         Automatic connector repair after a provider failure: inspects the

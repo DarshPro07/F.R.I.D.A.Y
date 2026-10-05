@@ -38,7 +38,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,6 +53,48 @@ def _api_base() -> str:
     return os.environ.get("HERMES_API_BASE", "http://127.0.0.1:8642")
 
 
+class HermesApiUnavailable(RuntimeError):
+    """The gateway's API server did not answer: Hermes is absent or not started.
+
+    NON_NEGOTIABLE 15: an absent upstream reports UNAVAILABLE. connector_list
+    surfaced the raw WinError 10061 as a tool error (FRIDAY.exe, 2026-10-05)."""
+
+
+def _profile_home() -> Path | None:
+    """The Hermes profile FRIDAY uses, found the way the bridge finds it.
+
+    These paths were D:\\hermes\\... - the layout of the machine Friday was first
+    built on - so on any other install the plane read no API key, found no CLI
+    and edited no config."""
+    from friday import hermes_bridge
+    home = hermes_bridge.profile_home(
+        os.environ.get(hermes_bridge.ENV_PROFILE, hermes_bridge.DEFAULT_PROFILE))
+    return Path(home) if home else None
+
+
+def _profile_file(env_name: str, name: str) -> Path | None:
+    """An explicit override, else `name` in the profile; None with neither."""
+    explicit = os.environ.get(env_name, "").strip()
+    if explicit:
+        return Path(explicit)
+    home = _profile_home()
+    return home / name if home else None
+
+
+def _hermes_cli() -> str:
+    explicit = os.environ.get("HERMES_CLI", "").strip()
+    if explicit:
+        return explicit
+    found = shutil.which("hermes")
+    if found:
+        return found
+    from friday import hermes_bridge
+    located = hermes_bridge.locate()
+    if located:
+        return str(Path(located["root"]) / "venv" / "Scripts" / "hermes.exe")
+    return ""
+
+
 def _api_key() -> str:
     """The gateway API key, from env or the friday profile's .env.
 
@@ -60,8 +104,9 @@ def _api_key() -> str:
     key = os.environ.get("API_SERVER_KEY", "")
     if key:
         return key
-    profile_env = Path(os.environ.get(
-        "HERMES_PROFILE_ENV", r"D:\hermes\profiles\friday\.env"))
+    profile_env = _profile_file("HERMES_PROFILE_ENV", ".env")
+    if profile_env is None:
+        return ""
     try:
         for line in profile_env.read_text(encoding="utf-8").splitlines():
             if line.startswith("API_SERVER_KEY="):
@@ -79,8 +124,15 @@ def _api(path: str, payload: dict | None = None, timeout: float = 15.0) -> dict:
         headers={"Authorization": f"Bearer {_api_key()}",
                  "Content-Type": "application/json"},
         data=json.dumps(payload).encode() if payload is not None else None)
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError:
+        raise                       # it answered: the caller judges the status
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        reason = getattr(exc, "reason", exc)
+        raise HermesApiUnavailable(
+            f"Hermes' API server is not answering at {_api_base()} ({reason})") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -354,9 +406,8 @@ class ConnectorControlPlane:
         """
         import subprocess
 
-        hermes = os.environ.get(
-            "HERMES_CLI", r"D:\hermes\hermes-agent\venv\Scripts\hermes.exe")
-        if not Path(hermes).exists():
+        hermes = _hermes_cli()
+        if not hermes or not Path(hermes).exists():
             return {"launched": False,
                     "note": "hermes CLI not found for auth launch"}
         try:
@@ -400,8 +451,10 @@ class ConnectorControlPlane:
         """
         import re
 
-        config_path = Path(os.environ.get(
-            "HERMES_PROFILE_CONFIG", r"D:\hermes\profiles\friday\config.yaml"))
+        config_path = _profile_file("HERMES_PROFILE_CONFIG", "config.yaml")
+        if config_path is None:
+            raise FileNotFoundError("no Hermes profile found for FRIDAY; set "
+                                    "HERMES_PROFILE_CONFIG or create the profile")
         text = config_path.read_text(encoding="utf-8")
 
         def replace_key(body: str, key: str, value: str) -> str:
