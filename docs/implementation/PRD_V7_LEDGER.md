@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `ebba0dd283c9d83aa3888596d93f5901cb6043a278d603a760c522568046eaa5`
 - PRD size: 8204 lines, 295141 bytes
-- Repository HEAD: `43c3e07b299232e892093ec8a00277461d43bc3e`
-- Uncommitted paths at generation: 44
-- Generated: 2026-10-06T00:25:16+05:30
+- Repository HEAD: `cecfd100dea3b3134480a6e2c5f094a0df801ef5`
+- Uncommitted paths at generation: 45
+- Generated: 2026-10-06T00:45:07+05:30
 
 ## Status vocabulary
 
@@ -63,7 +63,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
 | INTENT-001 | P0 | **PARTIAL** | Convert non-trivial intent into Objective Contract. | Vague idea golden journey becomes executable objective. | - | `friday/planner.py:119,142,148,153,157,168,201,426,897,942`, `friday/contracts.py:796`, `friday/objectives.py:168,187,652` | 2026-09-27: before, 'create notes.txt containing hello world' planned files_create with path 'friday-notes.txt' and content 'Created by Friday for: create notes', and 'create notes.txt and do not delete anything' planned automations_delete. End to end now: 'I want to keep a reading list: create reading.md containing Dune' is planned, compiled with its contract and driven by the objective executor through the real capability runtime to COMPLETED, and reading.md holds 'Dune' (tests/test_intent_journey.py::test_the_idea_runs_and_the_file_holds_the_persons_words; reverting the named-path or the purpose rule turns it red). The new tests failed first; each rule has a mutation that turns a test red (17 in all, two of which first survived and were pinned by sharper tests). The 62 planner, objective and golden test files pass together (1,035 passed, after an order-dependence in the new journey test - an inherited file-jail singleton - was fixed). The four-chunk suite over this tree (data/baseline_v7_slice4a): all four chunks exit 0, 4,597 passed (1,293, 991, 1,268 and 1,045), none failed. |
-| INTENT-002 | P1 | **PARTIAL** | Ask user only for material ambiguity/authority. | Question-necessity benchmark. | - | `friday/requirements.py:56-115`, `friday/requirements.py:214-218`, `friday/requirements.py:320-351` | Add a question-necessity benchmark: a labelled set of objectives (material vs immaterial ambiguity) through the real requirements path with a counting fake model, reporting unnecessary-ask and missed-ask rates, with a negative control that asks everything. |
+| INTENT-002 | P1 | **PARTIAL** | Ask user only for material ambiguity/authority. | Question-necessity benchmark. | - | `friday/requirements.py:56-115`, `friday/requirements.py:214-218`, `friday/requirements.py:320-351` | GAPS: The model's own materiality classification is still not measured: the fake model is told each label, so the rates describe what the gates do with a model that follows instructions. Measuring the real classifier needs a live model run, outside this worktree.; The 10% unnecessary-ask and 10% missed-ask ceilings are an assumption stated in the test docstring (owner call). The labelled set is small (8 objectives, 30 ambiguities).; already_answered is still a fuzzy bag-of-words match with a 0.4 overlap threshold. A single statement (a decision or a rationale) can still swallow a question by coincidence; this change removes only the cross-field pooling. A stricter rule is an owner design call.; Red-before was shown by running the two new tests against the old pooled matcher via a scratch pytest plugin in %TEMP% (both fail, 59 others pass), not by reverting the tree. The two scratch files in %TEMP% (old_matcher_plugin.py, run_red_check.py) are outside the worktree and could not be removed without approval. |
 
 ## PRD section 11
 
@@ -139,13 +139,13 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| LEARN-001 | P1 | **PARTIAL** | Neural/adaptor promotion tests forgetting/regression. | Promotion blocked on threshold regression. | FR-LRN-001, FR-LRN-002 | `friday/skill_ladder.py:50`, `tests/test_skills_golden.py:252`, `friday/memory_promotion.py:23` | EXTEND: once NEURAL-001 exists, reuse the same rollback/history pattern from friday/skills/lifecycle.py for adaptor promotion rather than building a second regression-gate mechanism. |
+| LEARN-001 | P1 | **PARTIAL** | Neural/adaptor promotion tests forgetting/regression. | Promotion blocked on threshold regression. | FR-LRN-001, FR-LRN-002 | `friday/skill_ladder.py:50`, `tests/test_skills_golden.py:252`, `friday/memory_promotion.py:23` | GAPS: NEURAL-001 (training the policy networks + dataset capture) is not built; this is the promotion/regression seam only. It takes an already-measured held-out score per version and decides promotion; it does not train. Assumed the LEARN-001 acceptance ('promotion blocked on threshold regression') is satisfied by the promotion gate alone, reusing arena rather than waiting on NEURAL-001. |
 
 ## PRD section 27
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| MODEL-004 | P1 | **PARTIAL** | Open-set model onboarding. | New mock route profiled without core rewrite. | FR-MDL-002 | `friday/model_capabilities.py:1-52`, `tests/test_route_fitness.py:22-50` | EXTEND: once a Model Arena/profiling harness exists (see MODEL-003's next_action), wire it to auto-populate friday/model_capabilities.py entries for a newly discovered model instead of requiring a hand-written declaration. |
+| MODEL-004 | P1 | **PARTIAL** | Open-set model onboarding. | New mock route profiled without core rewrite. | FR-MDL-002 | `friday/model_capabilities.py:1-52`, `tests/test_route_fitness.py:22-50` | GAPS: No real Completer adapter over the model gateway yet, so only mock routes are profiled; model_profiling is classified FUTURE in reachability.DECLARED until one exists; Profiling is not auto-triggered on discovery of a new model; a caller must invoke profile_route; max_context and relative_cost are not measurable by a probe and are recorded as None / unknown; Gateway capability_verdict still says 'declared capable' for a profiled route (provenance is in notes and the store, gateway untouched) |
 | EVAL-003 | P1 | **PARTIAL** | Model Arena profiles candidates. | Vendor claim alone cannot promote route. | - | `friday/model_gateway.py`, `tests/test_route_fitness.py:173` | GAPS: The one failure is tests/test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop: @live, the provider answered 'failed' (auth/provider config), outside the gate marker set; not run on the unchanged tree, so pre-existing is inferred, not proven.; Assumed: latest report per route replaces earlier; no expiry; measured-below-target demotes (kept usable, unpromoted) unless require_measured. Nothing sets require_measured yet.; Benchmarks are per route, not per task class: Report carries no task class. |
 
 ## PRD section 28
