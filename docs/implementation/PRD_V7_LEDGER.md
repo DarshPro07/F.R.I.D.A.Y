@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `ebba0dd283c9d83aa3888596d93f5901cb6043a278d603a760c522568046eaa5`
 - PRD size: 8204 lines, 295141 bytes
-- Repository HEAD: `bd247f025dd4dd10537503b365fdf2f917027e36`
-- Uncommitted paths at generation: 43
-- Generated: 2026-10-05T15:28:39+05:30
+- Repository HEAD: `b487a2d426619f1f393eb8c037097caca26cffbc`
+- Uncommitted paths at generation: 45
+- Generated: 2026-10-05T15:45:47+05:30
 
 ## Status vocabulary
 
@@ -27,8 +27,8 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 
 | state | count |
 |---|---:|
-| MISSING | 88 |
-| PARTIAL | 61 |
+| MISSING | 87 |
+| PARTIAL | 62 |
 | VERIFIED | 36 |
 | EXISTING_UNVERIFIED | 9 |
 | DEFERRED_BY_PRD | 2 |
@@ -126,7 +126,7 @@ Unresolved P1: 114 (INTENT-002, CTX-004, CTX-005, COG-002, COG-003, MODEL-003, M
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| CODE-001 | P1 | **MISSING** | Minimal-build policy benchmarked. | A/B diff/cost/quality report. | - | `friday/reflex.py:1-40`, `friday/execution_economics.py:1-50`, `scripts/benchmark_reflex.py:1-40` | REBUILD: design a minimal-build-policy A/B harness (scripts/) that runs a representative coding task with and without the minimal-implementation ladder and records diff size/cost/quality, per PRD section 23. |
+| CODE-001 | P1 | **PARTIAL** | Minimal-build policy benchmarked. | A/B diff/cost/quality report. | - | `friday/reflex.py:1-40`, `friday/execution_economics.py:1-50`, `scripts/benchmark_reflex.py:1-40` | GAPS: No live run recorded: the report in docs/implementation/MINIMAL_BUILD_AB.md is SYNTHETIC (fake runner, evidence false, verdict forced INCONCLUSIVE). A real A/B report needs `scripts/minimal_build_ab.py --live --budget-usd <X>` under the day spend ledger; the live path (ClaudeRunner -> build_kernel.worker_command) is unit-tested with a stub only, never run against the real claude CLI.; Ledger row not edited: CODE-001 stays MISSING in scripts/prd_v7_table.py and PRD_V7_LEDGER.md; moving it to PARTIAL goes through PROGRESS_V7 in scripts/prd_ledger.py (the kernel appends it from this evidence). The tests/test_prd_ledger.py matrix count is unchanged because no row was added.; The 5 corpus tasks are new standalone modules (friday/durations.py etc.) pinned to base 35bd572, not edits to existing FRIDAY code, so the ladder's 'already in the codebase' rung is barely exercised; a live run can only speak for tasks of this shape.; The new tests were not run against the pre-change tree: they import scripts/minimal_build_ab.py, which did not exist, so they fail by construction (ImportError).; MIN_PAIRS=3 and MIN_RUN_USD=0.25 are assumed thresholds; the PRD gives neither. Revisit if the owner wants other values.; JetBrains' ~10% figure is recorded only as a hypothesis, taken from the build packet; no source was checked.; implementer did not claim acceptance met |
 
 ## PRD section 24
 
