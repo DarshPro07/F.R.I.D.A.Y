@@ -3609,6 +3609,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added friday/adaptor_promotion.py: an AdaptorLadder that promotes a neural/adaptor version only via a stored friday.arena report whose gates include no_regression (holdout >= active - tolerance) and holdout_floor. A regression blocks promotion and the active version keeps serving. Reuses the arena gate (ArenaKind.NEURAL_ADAPTOR), no second mechanism. (build run, commit ceab4f975)',
         "next_action": "GAPS: NEURAL-001 (training the policy networks + dataset capture) is not built; this is the promotion/regression seam only. It takes an already-measured held-out score per version and decides promotion; it does not train. Assumed the LEARN-001 acceptance ('promotion blocked on threshold regression') is satisfied by the promotion gate alone, reusing arena rather than waiting on NEURAL-001.",
     }),
+    ('INTENT-002', {
+        "status": PARTIAL,
+        "current_implementation": "Fixed the missed ask the benchmark found: already_answered pooled a decision's words with its rationale and silently swallowed a material question. The two are now matched separately. The benchmark's xfail is now a real test (red on the old matcher), plus two unit tests. (build run, commit 228e35229)",
+        "next_action": "GAPS: The model's own materiality classification is still not measured: the fake model is told each label, so the rates describe what the gates do with a model that follows instructions. Measuring the real classifier needs a live model run, outside this worktree.; The 10% unnecessary-ask and 10% missed-ask ceilings are an assumption stated in the test docstring (owner call). The labelled set is small (8 objectives, 30 ambiguities).; already_answered is still a fuzzy bag-of-words match with a 0.4 overlap threshold. A single statement (a decision or a rationale) can still swallow a question by coincidence; this change removes only the cross-field pooling. A stricter rule is an owner design call.; Red-before was shown by running the two new tests against the old pooled matcher via a scratch pytest plugin in %TEMP% (both fail, 59 others pass), not by reverting the tree. The two scratch files in %TEMP% (old_matcher_plugin.py, run_red_check.py) are outside the worktree and could not be removed without approval.",
+    }),
 ]
 
 
