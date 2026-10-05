@@ -191,6 +191,12 @@ DECLARED = {
                                "Completer adapter over the model gateway, the next "
                                "wiring step. Its output is already read live: "
                                "model_capabilities.get falls back to stored profiles"),
+    "friday/local_experts": (FUTURE,
+                             "MODEL-005: the resident-expert pool, built and tested "
+                             "against a simulated 8 GB machine on the real governor; "
+                             "its callers are the loaders for the Needle, embedding "
+                             "and vision experts, the next wiring step. The governor "
+                             "already calls its reconcile through add_observer"),
     "friday/onboarding": (PRODUCTION,
                           "the owner's interview console: friday.onboarding "
                           "subcommands are dispatched by argparse "

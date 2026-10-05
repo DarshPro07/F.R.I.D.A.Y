@@ -536,6 +536,24 @@ def test_resident_model_is_capped_and_refused_under_high_pressure():
     assert d.decision == G.SHED and "no new local model" in d.reason
 
 
+def test_an_observer_hears_each_fresh_reading_and_cannot_break_it():
+    gov, dial = make()
+    heard = []
+    gov.add_observer(heard.append)
+    gov.add_observer(heard.append)                      # registered once
+    gov.add_observer(lambda p: 1 / 0)                   # a failing observer costs nothing
+    p = gov.pressure(fresh=True)
+    assert heard == [p]
+    cached = G.Governor(thresholds=G.Thresholds(), sampler=dial, sample_ttl_s=60.0, baseline=IDLE)
+    cached.add_observer(heard.append)
+    cached.pressure()
+    cached.pressure()                                   # the second read is the cached one
+    assert len(heard) == 2
+    gov.remove_observer(heard.append)
+    gov.pressure(fresh=True)
+    assert len(heard) == 2
+
+
 def test_every_admitted_lease_records_the_owned_process_fields():
     gov, _ = make()
     d = gov.admit(G.WORKER, label="job", objective_id="obj-1", owner="hermes",

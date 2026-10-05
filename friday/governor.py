@@ -741,6 +741,7 @@ class Governor:
         self._owned: dict[str, OwnedProcess] = {}
         self._unreapable: set[str] = set()
         self.reductions: list[dict] = []                         # bounded history
+        self._observers: list = []                               # called with each fresh Pressure
 
     # -- measurement --------------------------------------------------------
 
@@ -785,7 +786,26 @@ class Governor:
         with self._lock:
             self._last, self._last_at = p, now
         self.reduce_running(p)
+        for observer in list(self._observers):       # a snapshot, called outside the lock
+            try:
+                observer(p)
+            except Exception as exc:  # noqa: BLE001 - an observer's failure never costs the caller its reading
+                logger.warning("governor observer %r failed: %s", observer, exc)
         return p
+
+    def add_observer(self, observer) -> None:
+        """Call `observer(pressure)` after every fresh reading, once the
+        governor's own reductions have run. This is how a holder of resident
+        work that the governor evicts only at HIGH (the local expert pool,
+        MODEL-005) acts at the levels below it. Cached reads do not call it."""
+        with self._lock:
+            if observer not in self._observers:
+                self._observers.append(observer)
+
+    def remove_observer(self, observer) -> None:
+        with self._lock:
+            if observer in self._observers:
+                self._observers.remove(observer)
 
     # -- accounting ---------------------------------------------------------
 
