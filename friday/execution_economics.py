@@ -47,6 +47,17 @@ _MECHANICAL = (
     "count", "list files", "how many", "file size", "rename file",
     "move file", "where is", "locate the file", "path of",
 )
+#: Where an imperative starts: the request, or a clause after a comma,
+#: "then"/"and", optionally softened ("please", "can you").
+_CLAUSE_START = (r"(?:^|[,;:]\s+|\b(?:then|and)\s+)(?:please\s+)?"
+                 r"(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?")
+#: Imperative work verbs. Matched only at a clause start: "make" and "stop"
+#: are ordinary words in questions ("what makes a good key", "how do I stop
+#: a thread") that must stay direct answers, and "stop" is a device command
+#: ("stop the music") unless it is "stop X from <doing>".
+_WORK_VERB = re.compile(
+    _CLAUSE_START + r"(?:change|fix|implement|refactor|build|write|create|add|"
+    r"make|prevent|stop\b(?=.*\bfrom\b))\b", re.I)
 _RESEARCH = (
     "research", "investigate", "compare", "evaluate", "survey",
     "find out", "what are the options",
@@ -79,10 +90,18 @@ class TaskEconomics:
     signals: tuple[str, ...] = ()
 
 
+def wants_a_change(text: str) -> bool:
+    """True when the request is an imperative change to something ("make X
+    survive Y", "stop X from Y", "fix X"), as opposed to a question or a
+    device command. Deterministic; the one owner of this rule."""
+    return bool(_WORK_VERB.search(" ".join((text or "").lower().split())))
+
+
 def classify_task(text: str, *, code_refs: int = 0,
                   acceptance: int = 0) -> TaskEconomics:
     """One deterministic pass over the task text. No model calls."""
     lowered = " ".join((text or "").lower().split())
+    work = wants_a_change(lowered)
 
     def hits(table):
         return tuple(s for s in table if s in lowered)
@@ -92,8 +111,10 @@ def classify_task(text: str, *, code_refs: int = 0,
                      if re.search(r"\b" + re.escape(s) + r"\b", lowered))
 
     # Mechanical phrases are literal commands, not stems: "count" must not
-    # fire inside "counter" and send a code fix to the zero-model route.
-    mech = whole_words(_MECHANICAL)
+    # fire inside "counter" and send a code fix to the zero-model route. An
+    # imperative work verb means the phrase is part of what is being changed
+    # ("fix the word count display"), not the command itself.
+    mech = () if work else whole_words(_MECHANICAL)
     deep = hits(_DEEP_REASONING)
     high = hits(_HIGH_CONSEQUENCE)
     tiny = hits(_TINY_CHANGE)
@@ -108,8 +129,9 @@ def classify_task(text: str, *, code_refs: int = 0,
         kind = "research"
     elif any(w in lowered for w in ("inspect", "trace", "review", "audit")):
         kind = "inspection"
-    elif any(w in lowered for w in ("change", "fix", "implement", "refactor",
-                                    "build", "write", "create", "add ")):
+    elif work or any(w in lowered for w in ("change", "fix", "implement",
+                                            "refactor", "build", "write",
+                                            "create", "add ")):
         kind = "code_change"
     else:
         kind = "question"

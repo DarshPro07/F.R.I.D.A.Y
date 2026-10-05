@@ -10,31 +10,28 @@
   },
   "policies": {
     "adaptive": {
-      "cost_adjusted": 2140000.0,
-      "cost_first_pass": 1940000.0,
+      "cost_adjusted": 2020000.0,
+      "cost_first_pass": 2020000.0,
       "efforts": {
         "high": 11,
-        "low": 12,
-        "medium": 10
+        "low": 10,
+        "medium": 12
       },
       "floor_violations": [],
-      "ledger_value": 776.67,
+      "ledger_value": 810.0,
       "over_provisioned": [
         "default-timeout",
         "compare-stores"
       ],
       "policy": "adaptive",
-      "quality": 0.9394,
+      "quality": 1.0,
       "tasks": 33,
       "tiers": {
         "deep": 11,
-        "economy": 12,
-        "standard": 10
+        "economy": 10,
+        "standard": 12
       },
-      "under_provisioned": [
-        "reconnect",
-        "stale-cache"
-      ]
+      "under_provisioned": []
     },
     "always_deep": {
       "cost_adjusted": 3300000.0,
@@ -136,6 +133,6 @@
     "cheaper": true,
     "floor_ok": true,
     "quality_ok": true,
-    "savings_pct": 35.2
+    "savings_pct": 38.8
   }
 }

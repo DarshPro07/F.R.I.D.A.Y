@@ -64,6 +64,44 @@ def test_a_word_containing_count_is_not_mechanical():
     assert route.level != ee.DETERMINISTIC
 
 
+def test_make_and_stop_requests_are_work_not_questions():
+    """'make X survive Y' and 'stop X from Y' carry no verb the first
+    classifier listed, so they fell through to 'question' and were answered
+    on the economy tier with no worker."""
+    for text in ('Make the voice reconnect logic survive a flaky network.',
+                 'Stop the weather cache from serving stale results after midnight.',
+                 'Can you please make the digest loop retry on timeout?'):
+        econ, route = classify_and_route(text)
+        assert econ.kind == 'code_change', text
+        assert route.level != ee.FRIDAY_DIRECT, text
+
+
+def test_make_and_stop_inside_a_question_stay_direct_answers():
+    for text in ('What makes a good cache key?',
+                 'How do I stop a thread in Python?',
+                 'Why does the cache stop working at midnight?'):
+        econ, route = classify_and_route(text)
+        assert econ.kind == 'question', text
+        assert route.level == ee.FRIDAY_DIRECT, text
+
+
+def test_a_work_verb_beats_a_mechanical_phrase():
+    """'count' is a mechanical command only when it is the request; as part
+    of what is being fixed it is a code change, not a zero-model count."""
+    for text in ('Fix the word count display.',
+                 'Write a script to count the files in the docs folder.'):
+        econ, route = classify_and_route(text)
+        assert econ.kind == 'code_change', text
+        assert route.level != ee.DETERMINISTIC, text
+        assert econ.blast_radius != 'tiny', text
+
+
+def test_a_mechanical_command_that_mentions_a_work_word_stays_mechanical():
+    econ, route = classify_and_route('How many files in the docs folder have a fix in the name?')
+    assert econ.kind == 'mechanical'
+    assert route.level == ee.DETERMINISTIC
+
+
 def test_reasoning_heavy_question_is_not_answered_directly():
     """No work verb makes a request a 'question', but its architecture /
     proof signals still mark it integration scope - the router must honour

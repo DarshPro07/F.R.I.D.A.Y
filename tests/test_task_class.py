@@ -127,5 +127,19 @@ def test_classification_is_explainable_and_serialisable():
     assert d["signals"] and d["reason"]
 
 
+def test_stop_is_a_media_action_only_when_it_has_no_work_to_do():
+    """'stop the music' is one device action; 'stop the cache from serving
+    stale results' is a code change and must reach an executor-capable class."""
+    assert TC.classify("stop the music").task_class == TC.TRIVIAL
+    c = TC.classify("stop the weather cache from serving stale results after midnight")
+    assert c.task_class == TC.STANDARD
+    assert TC.route_for(c.task_class) not in (ee.DETERMINISTIC,)
+
+
+def test_a_work_verb_with_a_mechanical_phrase_is_not_simple():
+    c = TC.classify("fix the word count display")
+    assert c.task_class == TC.STANDARD
+
+
 def test_empty_request_is_simple_not_an_error():
     assert TC.classify("").task_class == TC.SIMPLE

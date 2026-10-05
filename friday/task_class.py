@@ -155,7 +155,8 @@ def classify(text: str, *, code_refs: int = 0, acceptance: int = 0) -> Classific
                               "implementation: executor with independent "
                               "verification", complex_ or (econ.kind,), clauses, econ)
     if (_TRIVIAL_VERBS.match(lowered) and clauses == 1 and len(lowered) <= 80
-            and not _SECOND_ACTION.search(lowered)):
+            and not _SECOND_ACTION.search(lowered)
+            and not ee.wants_a_change(lowered)):
         return Classification(TRIVIAL, "one deterministic device/media action",
                               (lowered.split()[0],), clauses, econ)
     standard = _hits(_STANDARD, lowered)
