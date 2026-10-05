@@ -3565,6 +3565,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'New friday/failure_genome.py: FailureRecord (all 11 PRD-36 fields) in a SQLite ledger that refuses a symptom with no root cause or repair, plus retrieve()/matches() scoring by symptom overlap with task_class as a hard filter. Wired as memory_stack tier 8 so a matching prior repair is in the bundle before a model plans. (build run, commit c4db306ca)',
         "next_action": 'GAPS: No product-code producer yet: capture() is public API and only tests call it, so the genome stays empty until a call site (an MCP tool for Friday, or the Hermes handoff path) records a root-caused failure. Retrieval is wired; capture is not.; Matching is lexical (memory_stack._tokens overlap, Jaccard >= 0.35 + task_class/environment bonuses). A recurrence described in entirely different words will not match; embeddings would, and are not in the memory stack today.; applicability conditions are returned unevaluated (free prose), so the caller must check them.',
     }),
+    ('MODEL-003', {
+        "status": PARTIAL,
+        "current_implementation": 'Baseline-only router eval: scripts/golden_model_router.py frames choose_route as the baseline, splits the effort suite into dev + locked holdout, gates candidates through arena MODEL_ROUTE; frozen in docs/architecture/model-router-baseline.json. No learned router built. (build run, commit 893d1a75e)',
+        "next_action": 'GAPS: Only the second half is met (versioned evaluation report). No learned router exists, so MODEL-003 is PARTIAL, not DONE: nothing yet beats the baseline.; The baseline is already optimal on the 12-task holdout (headroom 0.0%; dev headroom 6.6%, 2 over-provisioned tasks), so no candidate can pass cost_below_baseline on it. A learned router needs fresh, harder labelled tasks first.; The baseline was built against the same suite (COG-002), so it is not blind to it; labels, the 1:3:5 price ladder and MINIMUM_CASES=10 are assumptions.; prd_ledger.py not edited: the kernel owns the PROGRESS_V7 entry (needs the commit hash). Row count is unchanged, so tests/test_prd_ledger.py needs no edit.; No MCP tool or runtime path consumes the report; it is a script, doc and test only.',
+    }),
 ]
 
 
