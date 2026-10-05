@@ -3530,6 +3530,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'One computer_use.Backend interface; Playwright (DOM) and the native desktop (coordinates) register as fabric providers; route() picks one by action path and reports a missing backend UNAVAILABLE without touching the other. Cua Driver spike and REFERENCE-A not done. (build run, commit 2ec529fd0)',
         "next_action": 'GAPS: Cua Driver spike not done: the lock has no standalone cua-driver entry (only a nested third_party/cua-driver/LICENSE.md, MIT, inside OpenMausBot), so there is no SHA to pin; owner must request and pin it, then add a third adapter answering coordinates.probe; REFERENCE-A measurement not run; it needs the live machine; no isolated-computer backend yet; the interface and the computer_use family are ready for one; computer_use.route() is not yet consumed by capability_router or planner, so action-path ordering does not yet account for backend availability; Playwright is a pip dependency pinned by version range (playwright>=1.59,<1.60), not a commit in the lock, so it is registered BUILTIN rather than ADAPTER; backends expose a read-only probe only; browser and desktop actions stay in the policy-gated browser_* and desktop_* tools',
     }),
+    ('EVAL-002', {
+        "status": PARTIAL,
+        "current_implementation": 'Added friday/context_lab.py: 9 of 14 PRD 19.11 scenarios run against a full-history baseline. golden.Report.summary() and the golden release report now carry context metrics and a context_lab gate; scripts/golden_context.py runs the lab too. (build run, commit bb3c7ad99)',
+        "next_action": 'GAPS: 5 of 14 scenarios are reported as unexercised with a reason (coverage 0.6429): semantic needles, multi-hop facts, aggregation, skill bloat, repository-scale code reasoning. Each needs a corpus or question set that does not exist yet.; contradiction/supersession measures open contradictions surviving remediation; superseding a resolved fact is not measured.; The packet cites a Report class at evaluation.py:550; evaluation.py has none. The release report is friday/golden.py Report, so that is where the metrics went; evaluation.py is unchanged.',
+    }),
 ]
 
 
