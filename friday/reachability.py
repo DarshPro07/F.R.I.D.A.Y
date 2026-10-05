@@ -172,6 +172,11 @@ DECLARED = {
     "friday/reflex": (FUTURE,
                       "the local fast path, off by default and behind a "
                       "feature flag; reachable when enabled"),
+    "friday/simple_loop": (FUTURE,
+                           "COG-005: the bounded act/observe/update loop for a "
+                           "SIMPLE request, built and tested; its live caller (the "
+                           "voice turn routing a SIMPLE class to it) is the next "
+                           "wiring step"),
     "friday/shadow": (PRODUCTION,
                       "observes every turn from watch_from_the_side"),
     "friday/forge": (FUTURE, "skill authoring, frozen by the product rescue"),
