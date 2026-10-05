@@ -320,6 +320,10 @@ def decide(workspace: str | Path, changed, *, attempt=None,
     change is a policy this gate has not been given.
     """
     changed = tuple(changed or ())
+    if isinstance(claims, str):
+        raise TypeError(
+            "claims must be a list/tuple of LedgerClaims or ids, not a bare "
+            "string (iterating it would shred it into one-character ids)")
     claim_ids = tuple(getattr(c, "id", c) for c in claims or ())
     if not all(isinstance(i, str) and i for i in claim_ids):
         raise TypeError("claims must be LedgerClaims or non-empty claim ids")

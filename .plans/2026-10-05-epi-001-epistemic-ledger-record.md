@@ -1,7 +1,7 @@
 # Plan: EPI-001 epistemic ledger record
 
 **Date:** 2026-10-05
-**Status:** In Progress
+**Status:** Done
 **Services:** objective-engine (product, research_cache, promotion are one durable-objective path; no cross-service call)
 
 ## Objective
@@ -15,18 +15,18 @@ confidence, freshness, assumptions, contradictions, scope. Today
 ### Feature 1: `friday/epistemic.py` - the one record
 - **Small win:** `LedgerClaim` validates the schema and has a stable `id`
   (scope + normalised claim text), so two sources describing one claim agree on it.
-- **DOD:** [ ] tests/test_epistemic.py
+- **DOD:** [x] tests/test_epistemic.py
 
 ### Feature 2: both existing types convert into it
 - `product.Claim` gains `confidence`, `freshness`, `checked_at` (defaulted) and
   `to_ledger()`; `verify()` stamps freshness and checked_at when it read pages.
 - `research_cache.Artifact.to_ledger()` yields one record per fact.
-- **DOD:** [ ] tests in test_product.py and test_research_cache.py
+- **DOD:** [x] tests in test_product.py and test_research_cache.py
 
 ### Feature 3: `promotion.Decision.claims`
 - `decide(..., claims=())` records the ids of the ledger claims relied on, on
   allowed and refused decisions alike; `as_dict()` carries them.
-- **DOD:** [ ] tests in test_promotion.py
+- **DOD:** [x] tests in test_promotion.py (127 passed: `pytest_brief.py -- tests/test_epistemic.py tests/test_product.py tests/test_promotion.py tests/test_research_cache.py`, run 2026-10-05)
 
 ## Assumptions (revisit if wrong)
 - A claim's `status` is derived: sources -> `sourced`; a PREFERENCE -> `observed`

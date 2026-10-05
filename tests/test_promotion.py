@@ -212,6 +212,16 @@ def test_a_claim_link_that_is_not_an_id_is_rejected(workspace):
                  claims=[{"claim": "not an id"}])
 
 
+def test_a_bare_claim_id_string_is_rejected_not_shredded_into_characters(workspace):
+    """`claims` is documented as a collection of ids; a bare id string is
+    iterable too, and silently splitting it into one-character "ids" would
+    corrupt the link instead of raising. Reject it the same way a malformed
+    entry in a list is rejected."""
+    with pytest.raises(TypeError):
+        P.decide(workspace, ["src/app.py"], attempt=_passed(), approved=True,
+                 claims="clm_0123456789ab")
+
+
 def test_a_passing_verifier_passes(workspace):
     verdict, code, _ = E.verify(
         workspace, E.Verifier(command=(sys.executable, "-c", "raise SystemExit(0)")))
