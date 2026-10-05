@@ -3624,6 +3624,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Gateway capability_verdict now says 'profiled' (not 'declared') for a route known only from a stored profile, via MC.is_declared. Acceptance (mock route profiled, no core rewrite) was already met and still passes. (build run, commit 242c9dd49)",
         "next_action": "GAPS: No real Completer adapter over the model gateway yet, so only mock routes are profiled; model_profiling stays FUTURE in reachability.DECLARED until one exists; Profiling is not auto-triggered on discovery of a new model; a caller must invoke profile_route; max_context and relative_cost are not measurable by a probe and are recorded as None / unknown; A corrupt profile store makes capability_verdict fail open with the reason 'no declared capabilities' (the broad except around MC.get); pre-existing, not changed here",
     }),
+    ('MODEL-006', {
+        "status": PARTIAL,
+        "current_implementation": 'Registry records restricted_domains and safeguard posture. A provider-safeguard refusal is ledgered per (route, domain) and excludes that route for the domain; the next call takes the fallback or ends BLOCKED/ASK_USER. ModelGatewayResult.dispatch added. (build run, commit e1ad03bca)',
+        "next_action": "GAPS: Refusal detection applies only to requests classified into a restricted domain (domain_gate phrase lists, still an owner-pending ASSUMPTION); a refusal on a general-domain request is returned as before.; An exclusion is permanent per (route, domain) until the safeguard ledger is cleared; there is no expiry or clear command yet.; The 'safeguard' registry field is recorded for the inspector only; routing acts on restricted_domains and the ledger.; No real route in model_capabilities._ALL declares restricted_domains yet; no owner-sourced fact to declare.; Read budget (8 files / 400 lines) was exceeded before the first edit, to see infer's reply handling and the fake worker.",
+    }),
 ]
 
 
