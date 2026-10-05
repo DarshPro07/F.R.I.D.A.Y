@@ -3560,6 +3560,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'promotion.decide(claims=...) silently shredded a bare claim-id string into one-character ids (strings are iterable) instead of raising; now rejects it with TypeError like any other malformed claims entry. (build run, commit 1f7859bb5)',
         "next_action": "GAPS: No persistent ledger store: claim ids are content-derived (claim + scope), so a Decision link resolves by recomputation, not lookup (scoped follow-up, not this slice).; Linking claims does not change a decision's verdict; whether a contradicted claim should block promotion is an open policy question for the product owner.; product.Claim.confidence stays 0.0 from verify(): judging a page's support for a claim is a language task, not a keyword heuristic; deliberate, not an oversight.; Status mapping (sources -> sourced, PREFERENCE -> observed, else speculative) is a documented assumption in the plan, not a gap.",
     }),
+    ('FAIL-001', {
+        "status": PARTIAL,
+        "current_implementation": 'New friday/failure_genome.py: FailureRecord (all 11 PRD-36 fields) in a SQLite ledger that refuses a symptom with no root cause or repair, plus retrieve()/matches() scoring by symptom overlap with task_class as a hard filter. Wired as memory_stack tier 8 so a matching prior repair is in the bundle before a model plans. (build run, commit c4db306ca)',
+        "next_action": 'GAPS: No product-code producer yet: capture() is public API and only tests call it, so the genome stays empty until a call site (an MCP tool for Friday, or the Hermes handoff path) records a root-caused failure. Retrieval is wired; capture is not.; Matching is lexical (memory_stack._tokens overlap, Jaccard >= 0.35 + task_class/environment bonuses). A recurrence described in entirely different words will not match; embeddings would, and are not in the memory stack today.; applicability conditions are returned unevaluated (free prose), so the caller must check them.',
+    }),
 ]
 
 
