@@ -1,0 +1,604 @@
+{
+  "requirement": "CODE-001",
+  "mode": "fake",
+  "evidence": false,
+  "banner": "SYNTHETIC RUN: no model was called and nothing was spent. These numbers prove the pipeline works, not that the policy does. Run with --live for a measurement.",
+  "generated_at": "2026-10-05T10:13:51+00:00",
+  "base": "35bd57267ed16f6344fa1a98e04eb7df1968a755",
+  "repeats": 1,
+  "min_pairs": 3,
+  "model": "",
+  "budget_usd": null,
+  "policy": {
+    "ladder": "Minimal implementation ladder: does this need to exist? is it already in the codebase? does stdlib solve it? does native platform/browser behavior solve it? does an installed dependency solve it? can the safe diff be smaller? only then create new abstraction/dependency.",
+    "never": "Never simplify away: validation; security; accessibility; data-loss protection; required error handling; observability essential for truth."
+  },
+  "hypothesis": "JetBrains' reported saving from minimal-build prompting is roughly 10%. That figure is a hypothesis taken from the build packet, not a measurement on FRIDAY tasks; only the verdict above counts.",
+  "tasks": [
+    {
+      "id": "duration-parse",
+      "title": "Parse short duration strings",
+      "guards": [
+        "validation"
+      ],
+      "A": {
+        "runs": 1,
+        "files": 1.0,
+        "added": 13.0,
+        "deleted": 0.0,
+        "lines": 13.0,
+        "new_deps": 0,
+        "cost_usd": 0.0,
+        "seconds": 0.0,
+        "acceptance": 1,
+        "guards": {
+          "validation": 1
+        },
+        "quality_ok": 1,
+        "errors": []
+      },
+      "B": {
+        "runs": 1,
+        "files": 1.0,
+        "added": 13.0,
+        "deleted": 0.0,
+        "lines": 13.0,
+        "new_deps": 0,
+        "cost_usd": 0.0,
+        "seconds": 0.0,
+        "acceptance": 1,
+        "guards": {
+          "validation": 1
+        },
+        "quality_ok": 1,
+        "errors": []
+      },
+      "verdict": {
+        "outcome": "INCONCLUSIVE",
+        "reason": "synthetic run: no model was called",
+        "pairs": 1,
+        "quality_a": 1.0,
+        "quality_b": 1.0,
+        "diff_delta_pct": 0.0,
+        "cost_delta_pct": null
+      }
+    },
+    {
+      "id": "jailed-read",
+      "title": "Read a text file only from inside a directory",
+      "guards": [
+        "security"
+      ],
+      "A": {
+        "runs": 1,
+        "files": 1.0,
+        "added": 9.0,
+        "deleted": 0.0,
+        "lines": 9.0,
+        "new_deps": 0,
+        "cost_usd": 0.0,
+        "seconds": 0.0,
+        "acceptance": 1,
+        "guards": {
+          "security": 1
+        },
+        "quality_ok": 1,
+        "errors": []
+      },
+      "B": {
+        "runs": 1,
+        "files": 1.0,
+        "added": 9.0,
+        "deleted": 0.0,
+        "lines": 9.0,
+        "new_deps": 0,
+        "cost_usd": 0.0,
+        "seconds": 0.0,
+        "acceptance": 1,
+        "guards": {
+          "security": 1
+        },
+        "quality_ok": 1,
+        "errors": []
+      },
+      "verdict": {
+        "outcome": "INCONCLUSIVE",
+        "reason": "synthetic run: no model was called",
+        "pairs": 1,
+        "quality_a": 1.0,
+        "quality_b": 1.0,
+        "diff_delta_pct": 0.0,
+        "cost_delta_pct": null
+      }
+    },
+    {
+      "id": "atomic-json",
+      "title": "Save a JSON state file without ever truncating it",
+      "guards": [
+        "data-loss"
+      ],
+      "A": {
+        "runs": 1,
+        "files": 1.0,
+        "added": 16.0,
+        "deleted": 0.0,
+        "lines": 16.0,
+        "new_deps": 0,
+        "cost_usd": 0.0,
+        "seconds": 0.0,
+        "acceptance": 1,
+        "guards": {
+          "data-loss": 1
+        },
+        "quality_ok": 1,
+        "errors": []
+      },
+      "B": {
+        "runs": 1,
+        "files": 1.0,
+        "added": 16.0,
+        "deleted": 0.0,
+        "lines": 16.0,
+        "new_deps": 0,
+        "cost_usd": 0.0,
+        "seconds": 0.0,
+        "acceptance": 1,
+        "guards": {
+          "data-loss": 1
+        },
+        "quality_ok": 1,
+        "errors": []
+      },
+      "verdict": {
+        "outcome": "INCONCLUSIVE",
+        "reason": "synthetic run: no model was called",
+        "pairs": 1,
+        "quality_a": 1.0,
+        "quality_b": 1.0,
+        "diff_delta_pct": 0.0,
+        "cost_delta_pct": null
+      }
+    },
+    {
+      "id": "status-badge",
+      "title": "Render a status badge for the control room",
+      "guards": [
+        "accessibility",
+        "security",
+        "validation"
+      ],
+      "A": {
+        "runs": 1,
+        "files": 1.0,
+        "added": 11.0,
+        "deleted": 0.0,
+        "lines": 11.0,
+        "new_deps": 0,
+        "cost_usd": 0.0,
+        "seconds": 0.0,
+        "acceptance": 1,
+        "guards": {
+          "accessibility": 1,
+          "security": 1,
+          "validation": 1
+        },
+        "quality_ok": 1,
+        "errors": []
+      },
+      "B": {
+        "runs": 1,
+        "files": 1.0,
+        "added": 11.0,
+        "deleted": 0.0,
+        "lines": 11.0,
+        "new_deps": 0,
+        "cost_usd": 0.0,
+        "seconds": 0.0,
+        "acceptance": 1,
+        "guards": {
+          "accessibility": 1,
+          "security": 1,
+          "validation": 1
+        },
+        "quality_ok": 1,
+        "errors": []
+      },
+      "verdict": {
+        "outcome": "INCONCLUSIVE",
+        "reason": "synthetic run: no model was called",
+        "pairs": 1,
+        "quality_a": 1.0,
+        "quality_b": 1.0,
+        "diff_delta_pct": 0.0,
+        "cost_delta_pct": null
+      }
+    },
+    {
+      "id": "run-limited",
+      "title": "Run an external command with a time limit",
+      "guards": [
+        "error-handling",
+        "observability"
+      ],
+      "A": {
+        "runs": 1,
+        "files": 1.0,
+        "added": 22.0,
+        "deleted": 0.0,
+        "lines": 22.0,
+        "new_deps": 0,
+        "cost_usd": 0.0,
+        "seconds": 0.0,
+        "acceptance": 1,
+        "guards": {
+          "error-handling": 1,
+          "observability": 1
+        },
+        "quality_ok": 1,
+        "errors": []
+      },
+      "B": {
+        "runs": 1,
+        "files": 1.0,
+        "added": 22.0,
+        "deleted": 0.0,
+        "lines": 22.0,
+        "new_deps": 0,
+        "cost_usd": 0.0,
+        "seconds": 0.0,
+        "acceptance": 1,
+        "guards": {
+          "error-handling": 1,
+          "observability": 1
+        },
+        "quality_ok": 1,
+        "errors": []
+      },
+      "verdict": {
+        "outcome": "INCONCLUSIVE",
+        "reason": "synthetic run: no model was called",
+        "pairs": 1,
+        "quality_a": 1.0,
+        "quality_b": 1.0,
+        "diff_delta_pct": 0.0,
+        "cost_delta_pct": null
+      }
+    }
+  ],
+  "overall": {
+    "A": {
+      "runs": 5,
+      "files": 1.0,
+      "added": 14.2,
+      "deleted": 0.0,
+      "lines": 14.2,
+      "new_deps": 0,
+      "cost_usd": 0.0,
+      "seconds": 0.0,
+      "acceptance": 5,
+      "guards": {
+        "validation": 2,
+        "security": 2,
+        "data-loss": 1,
+        "accessibility": 1,
+        "error-handling": 1,
+        "observability": 1
+      },
+      "quality_ok": 5,
+      "errors": []
+    },
+    "B": {
+      "runs": 5,
+      "files": 1.0,
+      "added": 14.2,
+      "deleted": 0.0,
+      "lines": 14.2,
+      "new_deps": 0,
+      "cost_usd": 0.0,
+      "seconds": 0.0,
+      "acceptance": 5,
+      "guards": {
+        "validation": 2,
+        "security": 2,
+        "data-loss": 1,
+        "accessibility": 1,
+        "error-handling": 1,
+        "observability": 1
+      },
+      "quality_ok": 5,
+      "errors": []
+    },
+    "verdict": {
+      "outcome": "INCONCLUSIVE",
+      "reason": "synthetic run: no model was called",
+      "pairs": 5,
+      "quality_a": 1.0,
+      "quality_b": 1.0,
+      "diff_delta_pct": 0.0,
+      "cost_delta_pct": null
+    }
+  },
+  "recommendation": {
+    "scope": "undetermined",
+    "tasks": [],
+    "text": "no recommendation: not enough measured pairs"
+  },
+  "runs": [
+    {
+      "task": "duration-parse",
+      "arm": "A",
+      "rep": 0,
+      "diff": {
+        "files": 1,
+        "added": 13,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/durations.py"
+        ],
+        "notes": [],
+        "lines": 13
+      },
+      "cost_usd": 0.0,
+      "turns": 0,
+      "seconds": 0.0,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "validation": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "duration-parse",
+      "arm": "B",
+      "rep": 0,
+      "diff": {
+        "files": 1,
+        "added": 13,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/durations.py"
+        ],
+        "notes": [],
+        "lines": 13
+      },
+      "cost_usd": 0.0,
+      "turns": 0,
+      "seconds": 0.0,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "validation": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "jailed-read",
+      "arm": "A",
+      "rep": 0,
+      "diff": {
+        "files": 1,
+        "added": 9,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/safe_read.py"
+        ],
+        "notes": [],
+        "lines": 9
+      },
+      "cost_usd": 0.0,
+      "turns": 0,
+      "seconds": 0.0,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "security": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "jailed-read",
+      "arm": "B",
+      "rep": 0,
+      "diff": {
+        "files": 1,
+        "added": 9,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/safe_read.py"
+        ],
+        "notes": [],
+        "lines": 9
+      },
+      "cost_usd": 0.0,
+      "turns": 0,
+      "seconds": 0.0,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "security": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "atomic-json",
+      "arm": "A",
+      "rep": 0,
+      "diff": {
+        "files": 1,
+        "added": 16,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/atomic_json.py"
+        ],
+        "notes": [],
+        "lines": 16
+      },
+      "cost_usd": 0.0,
+      "turns": 0,
+      "seconds": 0.0,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "data-loss": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "atomic-json",
+      "arm": "B",
+      "rep": 0,
+      "diff": {
+        "files": 1,
+        "added": 16,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/atomic_json.py"
+        ],
+        "notes": [],
+        "lines": 16
+      },
+      "cost_usd": 0.0,
+      "turns": 0,
+      "seconds": 0.0,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "data-loss": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "status-badge",
+      "arm": "A",
+      "rep": 0,
+      "diff": {
+        "files": 1,
+        "added": 11,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/status_badge.py"
+        ],
+        "notes": [],
+        "lines": 11
+      },
+      "cost_usd": 0.0,
+      "turns": 0,
+      "seconds": 0.0,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "accessibility": true,
+          "security": true,
+          "validation": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "status-badge",
+      "arm": "B",
+      "rep": 0,
+      "diff": {
+        "files": 1,
+        "added": 11,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/status_badge.py"
+        ],
+        "notes": [],
+        "lines": 11
+      },
+      "cost_usd": 0.0,
+      "turns": 0,
+      "seconds": 0.0,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "accessibility": true,
+          "security": true,
+          "validation": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "run-limited",
+      "arm": "A",
+      "rep": 0,
+      "diff": {
+        "files": 1,
+        "added": 22,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/run_limited.py"
+        ],
+        "notes": [],
+        "lines": 22
+      },
+      "cost_usd": 0.0,
+      "turns": 0,
+      "seconds": 0.0,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "error-handling": true,
+          "observability": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "run-limited",
+      "arm": "B",
+      "rep": 0,
+      "diff": {
+        "files": 1,
+        "added": 22,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/run_limited.py"
+        ],
+        "notes": [],
+        "lines": 22
+      },
+      "cost_usd": 0.0,
+      "turns": 0,
+      "seconds": 0.0,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "error-handling": true,
+          "observability": true
+        },
+        "ok": true
+      },
+      "error": ""
+    }
+  ]
+}
