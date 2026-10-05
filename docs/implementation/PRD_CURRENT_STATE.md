@@ -153,14 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 12dce96 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-05T12:43:32+00:00
+- HEAD: dfdbe70 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-05T13:23:16+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 86, "PARKED_BY_OWNER": 1, "PARTIAL": 63, "VERIFIED": 36}
 - Unresolved P0: 21
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (151): COG-006=ADVISED, COG-005=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), TRAJ-001 (partial x2), MCP-001 (NOT_RED), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (partial x2), CLI-001 (partial x2), ASSUME-001 (failed x2), BBOX-001 (partial x2), CAP-003 (integration refused), BRAIN-001 (cascade exhausted), BROW-003 (partial x2), CAP-004 (integration refused), CAP-FORGE-003 (TEST_TIMEOUT), APPROVAL-001 (stale worktree), BG-001 (partial x2), PKG-001 (partial x2), CAP-FORGE-002 (integration refused), CAPB-001 (TEST_TIMEOUT), CHAOS-001 (partial x2), CODE-001 (blocked), COG-003 (cascade exhausted), COG-002 (partial x2), COG-005 (partial x2)
-- Open escalations: 103
-  - MODEL-012 resolved: controller unpark: integrated by the controller after a clean rebase
+- Last wave (155): CTX-005=FAILED
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), TRAJ-001 (partial x2), MCP-001 (NOT_RED), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (partial x2), CLI-001 (partial x2), ASSUME-001 (failed x2), BBOX-001 (partial x2), CAP-003 (integration refused), BRAIN-001 (cascade exhausted), BROW-003 (partial x2), CAP-004 (integration refused), CAP-FORGE-003 (TEST_TIMEOUT), APPROVAL-001 (stale worktree), BG-001 (partial x2), PKG-001 (partial x2), CAP-FORGE-002 (integration refused), CAPB-001 (TEST_TIMEOUT), CHAOS-001 (partial x2), CODE-001 (blocked), COG-003 (cascade exhausted), COG-002 (partial x2), COG-005 (partial x2), COG-006 (cascade exhausted)
+- Open escalations: 104
   - MODEL-012 blocked: Live FRIDAY.exe text and voice turn needs working LiveKit and TTS credentials, which this host does 
   - - docs_commit: ex.lock': File exists.
 
@@ -173,5 +172,6 @@ an editor o
   - COG-003 cascade: 3 repairs spent
   - COG-002 partial: integrated twice without closing its gaps
   - COG-005 partial: integrated twice without closing its gaps
+  - COG-006 cascade: 3 repairs spent
 - Next ready: MODEL-012, SEC-005
 <!-- build-program:end -->
