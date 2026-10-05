@@ -3490,6 +3490,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Golden eval (33 labelled tasks): adaptive effort is 35.2% cheaper than always-deep at 0.94 first-pass quality (threshold 0.90, deep floor intact). It found and fixed two routing defects; results go through RouteOutcomes and a frozen baseline. (build run, commit 762a435e8)',
         "next_action": "GAPS: QUALITY_THRESHOLD=0.90 and the 1:3:5 price ladder are assumptions; the PRD names a threshold but never sets it; Quality oracle is human labels (min_tier), not measured model output; costs are modelled price-weighted tokens, not live usage; Two labelled misses remain (reconnect, stale-cache): classify_task treats requests with no listed work verb ('make', 'stop') as questions and routes them to economy; A mechanical phrase still beats a code-change verb (e.g. 'fix the word count display' routes deterministic); not measured by the suite, not fixed",
     }),
+    ('COG-005', {
+        "status": PARTIAL,
+        "current_implementation": 'Added friday/simple_loop.py: strict ActionSpec, bounded act/observe/update loop via build_dispatch and the envelope, escalation to objective_start. Not yet called live. (build run, commit 8c5626183)',
+        "next_action": 'GAPS: No live caller: the voice turn does not yet route a SIMPLE class to run_simple; declared FUTURE in friday/reachability.py DECLARED.; The $0.10 bound is metered from the proposer-reported Proposal.cost_usd, not the kernel spend lease, which was not located; owner to confirm.; Escalation hands the original request to objective_start after any actions already ran; Step records are returned but not passed to the planner, so a side-effecting step could be planned again.; objectives.py and planner.py unchanged: the existing objectives.start entry (which calls the planner and compile_objective) is the escalation seam, so the planned objectives.py hook was not needed.; Ran in .venv-build, not .venv-verify (absent on this machine). Regression: test_task_class.py and test_objective_budget.py passed (76 passed with test_reachability and test_simple_loop).',
+    }),
 ]
 
 
