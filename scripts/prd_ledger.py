@@ -3644,6 +3644,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'New local_model_policy (2 GB cap + owner override, 1 resident general, 4K-8K ctx, ctx-before-model-size). ExpertPool refuses over-cap at register, swaps general, evicts general first for vision, reaps idle vision. derive_policy gains default_ctx from measured room. (build run, commit 8fbf62e71)',
         "next_action": "GAPS: ExpertPool has no live caller yet (local_experts is FUTURE in reachability); the owner override is a register() argument, not yet bound to confirmation.py; choose_model/fit_context are tested but not yet called by a loader; pool stores the clamped ctx on Expert/Outcome, the loader must read it; PRD ledger row MODEL-007 not edited here; the kernel's docs(ledger) step owns it; The new tests were written after the implementation; they depend on new symbols (OnboardingRefused, owner_override, local_model_policy) so they cannot pass on the old code, but a red run was not recorded first",
     }),
+    ('MODEL-012', {
+        "status": PARTIAL,
+        "current_implementation": "Flatten raw tool_call/tool turns for any tool-less gateway call, not only when request.tools is set, so _cli_reply's final ask(False) turn no longer ships tool blocks to a tool-less/CLI route. Added a real-gateway regression test; fixed PLAN.md test-file names and the absent slice-2 patch claim. (build run, commit 9265133bf)",
+        "next_action": 'GAPS: tests/live/test_live_providers.py is skipped without FRIDAY_LIVE_PROVIDER_TESTS=1 and was not run against the real Hermes; tool calls through a real provider remain unproven in this worktree.; data/build_runs/MODEL-012.slice2-unintegrated.patch (durable 401 verdicts, CLI cost caps) and its evidence JSON are not present anywhere under data/ in this worktree, so they could not be read or integrated. This slice does not depend on them.; voice_brain._cli_reply is still entered only when a CLI backend is enabled; with none, the typed turn reports the brain offline even if Hermes has a tool-capable API route.; Not shown here (next slices): a real text or voice turn through FRIDAY.exe, the MODEL-002 semantic probe on the CLI route, and the opencode/codex providers.; implementer did not claim acceptance met',
+    }),
 ]
 
 
