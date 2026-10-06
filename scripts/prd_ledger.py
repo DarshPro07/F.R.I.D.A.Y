@@ -3649,6 +3649,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Flatten raw tool_call/tool turns for any tool-less gateway call, not only when request.tools is set, so _cli_reply's final ask(False) turn no longer ships tool blocks to a tool-less/CLI route. Added a real-gateway regression test; fixed PLAN.md test-file names and the absent slice-2 patch claim. (build run, commit 9265133bf)",
         "next_action": 'GAPS: tests/live/test_live_providers.py is skipped without FRIDAY_LIVE_PROVIDER_TESTS=1 and was not run against the real Hermes; tool calls through a real provider remain unproven in this worktree.; data/build_runs/MODEL-012.slice2-unintegrated.patch (durable 401 verdicts, CLI cost caps) and its evidence JSON are not present anywhere under data/ in this worktree, so they could not be read or integrated. This slice does not depend on them.; voice_brain._cli_reply is still entered only when a CLI backend is enabled; with none, the typed turn reports the brain offline even if Hermes has a tool-capable API route.; Not shown here (next slices): a real text or voice turn through FRIDAY.exe, the MODEL-002 semantic probe on the CLI route, and the opencode/codex providers.; implementer did not claim acceptance met',
     }),
+    ('MODEL-005', {
+        "status": PARTIAL,
+        "current_implementation": "Pool and 8 GB test already in tree (111 pool/governor/reachability tests pass). Closed one gap: hardware_profile now derives max_resident_models from the machine's room, so a live pool can hold more than one expert on a big machine. (build run, commit b4f4de7a3)",
+        "next_action": "GAPS: No live caller yet: the Needle/embedding/vision loaders that would register experts with ExpertPool do not exist; local_experts stays FUTURE in reachability.DECLARED; size_gb is RAM cost; GPU-resident experts are judged only by the governor's live GPU readings, not projected; max_resident is a count bound only (room // 2 GB artifact cap, min 1); the pool still judges every load against the live reading; PRD_V7_LEDGER.md MODEL-005 row not edited; left to the kernel's ledger step",
+    }),
 ]
 
 
