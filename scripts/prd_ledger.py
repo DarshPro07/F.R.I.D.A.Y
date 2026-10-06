@@ -3654,6 +3654,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Pool and 8 GB test already in tree (111 pool/governor/reachability tests pass). Closed one gap: hardware_profile now derives max_resident_models from the machine's room, so a live pool can hold more than one expert on a big machine. (build run, commit b4f4de7a3)",
         "next_action": "GAPS: No live caller yet: the Needle/embedding/vision loaders that would register experts with ExpertPool do not exist; local_experts stays FUTURE in reachability.DECLARED; size_gb is RAM cost; GPU-resident experts are judged only by the governor's live GPU readings, not projected; max_resident is a count bound only (room // 2 GB artifact cap, min 1); the pool still judges every load against the live reading; PRD_V7_LEDGER.md MODEL-005 row not edited; left to the kernel's ledger step",
     }),
+    ('MODEL-006', {
+        "status": PARTIAL,
+        "current_implementation": "Acceptance already met by e1ad03b (a recorded refusal changes the next route). This run closes the 'no clear command' gap: SafeguardLedger.clear_refusals and domain_gate.clear_route_exclusion lift an exclusion per route or route+domain, keeping the audit events. (build run, commit c317b0d0a)",
+        "next_action": "GAPS: Refusal detection still applies only to requests classified into a restricted domain (domain_gate phrase lists, owner-pending ASSUMPTION); a refusal on a general-domain request is returned as before.; An exclusion never expires on its own; clear_route_exclusion is a Python seam only, with no MCP tool or CLI wired to it.; The 'safeguard' registry field is recorded for the inspector only; routing acts on restricted_domains and the ledger.; No real route in model_capabilities._ALL declares restricted_domains yet; no owner-sourced fact to declare.; tests/test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop (@live, outside the gate) failed once with input_tokens=0 from the real OpenRouter route and passed on the prior run; not touched by this change.",
+    }),
 ]
 
 
