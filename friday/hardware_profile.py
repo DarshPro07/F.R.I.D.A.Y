@@ -206,7 +206,9 @@ def derive_policy(profile: Profile, thresholds: G.Thresholds | None = None) -> d
     are as many as the room holds at the measured cost of one, within the
     governor's cap and never fewer than one; a local model may take the room,
     within Amendment A3's 2 GB per artifact, and may be offloaded to a GPU only
-    as far as the GPU's own dedicated memory goes. Its default context is the
+    as far as the GPU's own dedicated memory goes; as many such models stay
+    resident as the room holds, never fewer than one (MODEL-005: the cap the
+    governor, and so the local expert pool, works within). Its default context is the
     most of 4K-8K whose KV cache the room holds beside that budget, the 4K floor
     where it holds none (MODEL-007)."""
     t = thresholds or G.Thresholds()
@@ -224,6 +226,7 @@ def derive_policy(profile: Profile, thresholds: G.Thresholds | None = None) -> d
     else:
         vram = max((g.dedicated_gb for g in profile.gpus), default=0.0)
     model_gb = min(MODEL_ARTIFACT_CAP_GB, room_gb)
+    resident = max(1, int(room_gb // MODEL_ARTIFACT_CAP_GB))
     return {
         "room_gb": round(room_gb, 2),
         "workers": {"max": t.max_workers,
@@ -232,7 +235,10 @@ def derive_policy(profile: Profile, thresholds: G.Thresholds | None = None) -> d
         "model": {"ram_budget_gb": round(model_gb, 2),
                   "gpu_offload_gb": None if vram is None else round(min(MODEL_ARTIFACT_CAP_GB, vram), 2),
                   "default_ctx": LMP.LocalModelPolicy().context_for_room(room_gb, model_gb),
-                  "basis": "RAM: the room, within A3's 2 GB per artifact; GPU offload: up to the "
+                  "max_resident": resident,
+                  "basis": "RAM: the room, within A3's 2 GB per artifact; max_resident: how many "
+                           "such artifacts the room holds, never fewer than one (the expert pool "
+                           "still judges each load against the live reading); GPU offload: up to the "
                            "largest GPU's dedicated memory, None where the platform reports no GPUs; "
                            "default_ctx: the most of 4K-8K whose KV cache the room holds beside the "
                            "RAM budget, 4K where it holds none"},
@@ -335,8 +341,11 @@ def for_governor() -> tuple[G.Baseline | None, G.Thresholds]:
 
 
 def _caps(profile: Profile) -> G.Thresholds:
-    return dataclasses.replace(G.Thresholds(), max_workers=profile.policy["workers"]["max"],
-                               max_browsers=profile.policy["browsers"]["max"])
+    default = G.Thresholds()
+    return dataclasses.replace(default, max_workers=profile.policy["workers"]["max"],
+                               max_browsers=profile.policy["browsers"]["max"],
+                               max_resident_models=profile.policy["model"].get(
+                                   "max_resident", default.max_resident_models))
 
 
 # -- RES-004: kept current --------------------------------------------------

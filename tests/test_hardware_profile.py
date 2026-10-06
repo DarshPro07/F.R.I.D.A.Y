@@ -79,6 +79,25 @@ def test_the_default_local_context_comes_from_the_machines_own_room():
     assert tight.policy["model"]["default_ctx"] == 4096
 
 
+def test_resident_models_are_as_many_artifact_slots_as_the_room_holds():
+    """MODEL-005: the governor's resident-model cap comes from the machine, not
+    a constant. The reference machines' rooms (1.47 GB and 2.88 GB) hold one
+    2 GB artifact, as does a tight 8 GB machine's; a roomy 32 GB one holds three."""
+    a = hp.build(REFERENCE_A, readings(total=15.35, used_percent=76.0), cause="test")
+    b = hp.build(REFERENCE_B, readings(total=16.0, used_percent=55.0), cause="test")
+    tight = hp.build(machine(total=8.0, gpus=None), readings(total=8.0, used_percent=70.0), cause="test")
+    roomy = hp.build(machine(total=32.0, gpus=None), readings(total=32.0, used_percent=40.0), cause="test")
+    assert [p.policy["model"]["max_resident"] for p in (a, b, tight, roomy)] == [1, 1, 1, 3]
+    assert hp._caps(roomy).max_resident_models == 3
+    assert hp._caps(a).max_resident_models == 1
+
+
+def test_a_stored_profile_from_before_the_cap_was_derived_keeps_the_default():
+    old = hp.build(REFERENCE_B, readings(total=16.0, used_percent=55.0), cause="test")
+    del old.policy["model"]["max_resident"]
+    assert hp._caps(old).max_resident_models == G.Thresholds().max_resident_models
+
+
 def test_browsers_are_as_many_as_the_room_holds_at_the_measured_cost():
     roomy = hp.build(REFERENCE_B, readings(total=16.0, used_percent=55.0), cause="test",
                      browser_mb=184.0)
@@ -103,6 +122,7 @@ def test_the_governor_starts_from_the_stored_profile_of_this_machine(tmp_path, m
         gov = G.governor()
         assert gov.baseline == profile.baseline and not gov.baseline.provisional
         assert gov.thresholds.max_browsers == profile.policy["browsers"]["max"]
+        assert gov.thresholds.max_resident_models == profile.policy["model"]["max_resident"]
     finally:
         G.configure(None)
 
