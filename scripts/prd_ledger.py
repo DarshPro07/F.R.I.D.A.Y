@@ -3664,6 +3664,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "A batch retry narrowed to the failed items reused the first attempt's idempotency key, so the live port replayed the stored partial result and the failed item was never retried. The key now carries the pending item set; no-items tasks keep run:task. (build run, commit 413a7add2)",
         "next_action": "GAPS: Also ran 19 objective-engine/journey/reachability files: 404 passed, 1 skipped, 0 failed. The other ~50 voice-path files that scripts/test_impact.py lists for agent_friday.py were not run.; Pre-existing, not changed here: a crash between the external effect and the port's call.returned write still re-runs the call; only a capability that dedupes by key itself closes that (see prd_ledger DUR-001 gaps).",
     }),
+    ('ONB-001', {
+        "status": PARTIAL,
+        "current_implementation": "Closed Gap #2: onboarding now derives a concrete first useful task (Onboarding.first_task_plan) bound to the live files_list capability, exposed via the console 'task' subcommand. Tests drive the real files.files_list toolset (real policy gate + fsjail) with independent verification, not a demo fake. (build run, commit 5ead781c9)",
+        "next_action": 'GAPS: Gap #1 unchanged: the journey exercises the launcher helper in-process and does not spawn FRIDAY.exe (no built exe in this source worktree; integration concern).; first_task_plan offers only a read-only folder-listing first task today; richer first tasks remain future work.',
+    }),
 ]
 
 
