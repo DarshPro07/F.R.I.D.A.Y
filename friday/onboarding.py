@@ -493,6 +493,42 @@ class Onboarding:
                     "the profile names reporting work")
         return out
 
+    def first_task_plan(self) -> dict | None:
+        """A concrete, safe first task built from what the interview learned.
+
+        The acceptance is "a new user completes setup AND a useful task", so
+        the profile has to imply a real action, not only a list of suggested
+        workers. The first task FRIDAY can do without asking for anything more
+        is to read a folder the user named: it runs on the person's own files,
+        it is read-only, and it names a capability that already exists in the
+        registry (`files_list`) rather than a placeholder invented for a demo.
+
+        The spec is the shape `objectives.compile_objective` consumes - a task
+        and a one-line manifest entry - so the caller can run it through the
+        durable-objective engine without translating it first. The manifest
+        description is read from the capability registry, so it cannot drift
+        from the tool that actually runs.
+
+        Returns None when the profile names no folder yet: a first task with
+        nothing to point at would be a guess, and this module proposes only
+        what the answers support (see `suggested_workers`).
+        """
+        folders = self.profile().get("folders")
+        folder = folders[0] if isinstance(folders, (list, tuple)) and folders else folders
+        if not folder or not str(folder).strip():
+            return None
+        from friday import capabilities
+        capability = "files_list"
+        known = capabilities.by_id(capability)
+        if known is None:               # the registry is the source of truth
+            return None
+        return {
+            "capability": capability,
+            "arguments": {"path": str(folder)},
+            "why": "read a folder you named, so the first task runs on your own files",
+            "manifest": {"id": capability, "description": known.description},
+        }
+
 
 def state_root_marker(root: Path | str | None = None) -> Path:
     """Where the fact that onboarding finished is recorded.
@@ -572,6 +608,7 @@ def console(argv: list[str] | None = None) -> int:
     pol = sub.add_parser("policy", help="compile policy from the profile")
     pol.add_argument("--level", default="")
     sub.add_parser("workers", help="the specialists this profile justifies")
+    sub.add_parser("task", help="the first useful task this profile justifies")
     done = sub.add_parser("finish", help="compile policy and record setup as complete")
     done.add_argument("--level", default="")
 
@@ -652,6 +689,14 @@ def console(argv: list[str] | None = None) -> int:
         for suggestion in suggestions:
             print(f"{suggestion['role']:<24} {suggestion['specialty']:<28} "
                   f"({suggestion['because']})")
+        return 0
+
+    if args.command == "task":
+        plan = interview.first_task_plan()
+        if not plan:
+            print("no first task yet - name a folder in setup and FRIDAY can start there")
+            return 0
+        print(f"{plan['capability']}  {plan['arguments']['path']}  ({plan['why']})")
         return 0
 
     parser.error(f"unknown command {args.command!r}")

@@ -228,3 +228,85 @@ def test_the_console_finishes_setup_and_refuses_to_finish_early(tmp_path, monkey
     assert O.is_onboarded(tmp_path / "home")
     store.close()
     W.reset_override()
+
+
+# --- the first useful task comes from a real capability, not a demo fake -----
+#
+# The golden journey above drives a test-supplied capability so it can assert
+# the objective engine's wiring in isolation. These prove the complementary
+# half the acceptance needs: the first task is derived from the profile and
+# runs through the live `files_list` capability - the real toolset, its real
+# policy gate and fsjail - with an independent check it cannot influence.
+
+def test_no_first_task_until_a_folder_is_named(fresh):
+    interview, _paths = fresh
+    assert interview.first_task_plan() is None
+    interview.record({"call_me": "Asha"})
+    assert interview.first_task_plan() is None, \
+        "a first task with nothing to point at would be a guess"
+
+
+def test_the_first_useful_task_runs_through_a_real_capability(fresh, tmp_path):
+    from friday import capabilities
+    from friday import contracts as c
+    from friday.fsjail import FileJail
+    from friday.policy import FULL, PolicyEngine
+    from friday.toolsets import files as F
+
+    interview, _paths = fresh
+    folder = tmp_path / "shop"
+    folder.mkdir()
+    for name in ("orders.csv", "returns.docx", "stock.xlsx"):
+        (folder / name).write_text(name, encoding="utf-8")
+    for name, value in _essential_answers(folder).items():
+        interview.record({name: value})
+    interview.skip("company")
+
+    plan = interview.first_task_plan()
+    assert plan["capability"] == "files_list"
+    assert plan["arguments"]["path"] == str(folder)
+    assert capabilities.by_id(plan["capability"]) is not None, \
+        "the first task must name a live capability, not one invented for the test"
+    assert plan["manifest"]["description"] == capabilities.by_id("files_list").description
+
+    # run the plan through the real toolset, with the real gate and fsjail
+    F.reset_jail(FileJail(roots=(folder,)))
+    try:
+        result = F.files_list(c.Run.create("first task", capability="files"),
+                              plan["arguments"]["path"], engine=PolicyEngine(autonomy=FULL))
+    finally:
+        F.reset_jail(None)
+    assert result.status == c.SUCCEEDED, result
+    assert result.output["count"] == 3
+    names = sorted(entry["name"] for entry in result.output["entries"])
+    assert names == ["orders.csv", "returns.docx", "stock.xlsx"]
+    assert result.verification.method == "dir_listing"
+
+    # verified by a command the task cannot influence
+    report = tmp_path / "out" / "inventory.md"
+    report.parent.mkdir()
+    report.write_text("\n".join(f"- {n}" for n in names) + "\n", encoding="utf-8")
+    check = ("import sys; t = open('inventory.md', encoding='utf-8').read(); "
+             "sys.exit(0 if all(n in t for n in %r) else 1)" % (names,))
+    verdict, code, _detail = E.verify(
+        str(report.parent), E.Verifier(command=(sys.executable, "-c", check),
+                                       proves="the report names every file"))
+    assert (verdict, code) == (E.PASSED, 0)
+
+
+def test_the_console_proposes_the_first_task(tmp_path, monkeypatch, capsys):
+    store = Store(tmp_path / "console.sqlite3")
+    store.ensure_default_workspace()
+    interview = O.Onboarding(store, policy=UserPolicy(tmp_path / "policy.sqlite3"))
+    monkeypatch.setattr(O, "Onboarding", lambda workspace_id=None: interview)
+    monkeypatch.delenv(W.ENV_VAR, raising=False)
+    W.reset_override()
+
+    assert O.console(["task"]) == 0
+    assert "no first task yet" in capsys.readouterr().out
+    interview.record({"folders": [str(tmp_path / "shop")]})
+    assert O.console(["task"]) == 0
+    printed = capsys.readouterr().out
+    assert "files_list" in printed and str(tmp_path / "shop") in printed
+    store.close()
+    W.reset_override()
