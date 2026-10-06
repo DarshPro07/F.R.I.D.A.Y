@@ -1627,9 +1627,10 @@ def objective_port(local_dispatch, *, router_of, call_via_router, store=None):
     def _ledger_ids(key, run):
         envelope = getattr(run, "envelope", None)
         run_id = getattr(envelope, "objective_id", "") or ""
-        if store is None or not key or not run_id or not key.startswith(run_id + ":"):
+        if store is None or not key or not run_id:
             return None
-        return run_id, key[len(run_id) + 1:]
+        task_id = O.idempotency_key_task(key, run_id)
+        return (run_id, task_id) if task_id else None
 
     async def call_capability(capability: str, arguments: dict, *, run=None,
                               idempotency_key=None):

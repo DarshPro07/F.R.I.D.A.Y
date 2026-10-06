@@ -12,6 +12,7 @@ compilation belongs to `friday/continuous.py`.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -200,13 +201,37 @@ def replay_task_statuses(events: list[dict]) -> dict[str, str]:
     return statuses
 
 
-def idempotency_key(run_id: str, task_id: str) -> str:
+#: Separates the task id from the batch's item digest in an idempotency key.
+#: A task id is [A-Za-z0-9_-]+ (see _TASK_REF), so it never holds this.
+_ITEMS_MARK = "#"
+
+
+def idempotency_key(run_id: str, task_id: str, items: list | None = None) -> str:
     """The key a side-effecting capability can use to do a call once.
 
     Stable across the attempts of one task on purpose: the attempt that
     died between the call returning and its commit record is re-run under
-    the same key, so a capability that honours it makes the change once."""
-    return f"{run_id}:{task_id}"
+    the same key, so a capability that honours it makes the change once.
+
+    A batch retried for fewer items (OBJ-004) is a different request, so the
+    items it carries are part of its key: a re-run of the same items keeps
+    its key, a retry narrowed to the failed ones gets a new one. Without it a
+    port that replays a recorded result answers the retry with the first
+    attempt's result and the failed items are never retried."""
+    key = f"{run_id}:{task_id}"
+    if isinstance(items, list) and items:
+        digest = hashlib.sha256(
+            "\x00".join(sorted(str(item) for item in items)).encode()).hexdigest()[:16]
+        key += f"{_ITEMS_MARK}{digest}"
+    return key
+
+
+def idempotency_key_task(key: str, run_id: str) -> str:
+    """The task id inside a key `idempotency_key` made for this run, or "" if
+    the key is not one of this run's."""
+    if not key.startswith(run_id + ":"):
+        return ""
+    return key[len(run_id) + 1:].partition(_ITEMS_MARK)[0]
 
 
 #: A side-effecting call returned successfully; written by the port the moment

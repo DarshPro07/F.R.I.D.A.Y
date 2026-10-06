@@ -1157,7 +1157,8 @@ class ContinuousTaskExecutor:
         if self._port_takes_run:
             extra["run"] = run
         if self._port_takes_key and task_id and trajectory._side_effecting(capability_id):
-            extra["idempotency_key"] = O.idempotency_key(envelope.objective_id, task_id)
+            extra["idempotency_key"] = O.idempotency_key(
+                envelope.objective_id, task_id, arguments.get("items"))
         return await self.call_capability(capability_id, arguments, **extra)
 
     async def _reconcile_worker(self, run_id: str, task: dict,
