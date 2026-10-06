@@ -246,6 +246,20 @@ class SafeguardLedger:
         with self._lock, self._connect() as db:
             return db.execute(sql, args).fetchone()[0]
 
+    def clear_refusals(self, route: str, *, domain: str | None = None) -> int:
+        """Delete a route's provider-refusal events and return how many went.
+
+        `domain=None` lifts every domain on the route. Only `provider_refusal`
+        rows are removed, so the restricted-packet and scope audit trail stays.
+        """
+        sql = "DELETE FROM safeguard_events WHERE route=? AND kind='provider_refusal'"
+        args: list = [route]
+        if domain is not None:
+            sql += " AND domain=?"
+            args.append(domain)
+        with self._lock, self._connect() as db:
+            return db.execute(sql, args).rowcount
+
     def seen(self, route: str, packet: str) -> bool:
         with self._lock, self._connect() as db:
             return db.execute(
@@ -358,6 +372,18 @@ def route_excluded(route: str, domain: str, *, led: SafeguardLedger | None = Non
     if not domain:
         return False
     return (led or ledger()).count(route, "provider_refusal", domain=domain) > 0
+
+
+def clear_route_exclusion(route: str, domain: str | None = None, *,
+                          led: SafeguardLedger | None = None) -> int:
+    """Lift a safeguard exclusion so the route is offered the domain again.
+
+    The one way an exclusion ends (MODEL-006): it does not expire on its own. Pass
+    the domain to lift one, or leave it out to lift every domain on the route. It
+    also resets the route's refusal count, which `check` reads for route health.
+    Returns how many refusal events were removed.
+    """
+    return (led or ledger()).clear_refusals(route, domain=domain)
 
 
 def route_name(*parts: str) -> str:

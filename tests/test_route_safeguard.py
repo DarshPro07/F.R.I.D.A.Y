@@ -143,6 +143,47 @@ def test_clearing_the_ledger_restores_the_route(gw, monkeypatch, tmp_path):
     assert A in [(p, m) for _, p, m in gw.route_decision(request(ASK_SCOPE_TEXT)).routes]
 
 
+def test_lifting_an_exclusion_restores_that_route_for_that_domain_only(gw):
+    intervene(*A, domain=DG.CYBER)
+    intervene(*A, domain=DG.CBRNE)
+    assert DG.clear_route_exclusion(KEY_A, DG.CYBER) == 1
+    assert A in [(p, m) for _, p, m in gw.route_decision(request(ASK_SCOPE_TEXT)).routes]
+    assert DG.route_excluded(KEY_A, DG.CBRNE)
+
+
+def test_lifting_without_a_domain_restores_every_domain_on_the_route(gw):
+    intervene(*A, domain=DG.CYBER)
+    intervene(*A, domain=DG.CBRNE)
+    other = DG.route_name("gateway", *B)
+    DG.record_provider_refusal(other, domain=DG.CYBER)
+    assert DG.clear_route_exclusion(KEY_A) == 2
+    assert not DG.route_excluded(KEY_A, DG.CYBER) and not DG.route_excluded(KEY_A, DG.CBRNE)
+    assert DG.route_excluded(other, DG.CYBER)
+
+
+def test_lifting_an_exclusion_keeps_the_audit_events_that_are_not_refusals():
+    led = DG.ledger()
+    led.record(KEY_A, "restricted_packet", domain=DG.CYBER, packet="p")
+    led.record(KEY_A, "provider_refusal", domain=DG.CYBER)
+    assert DG.clear_route_exclusion(KEY_A, DG.CYBER) == 1
+    assert led.count(KEY_A, "restricted_packet", domain=DG.CYBER) == 1
+    assert DG.clear_route_exclusion(KEY_A, DG.CYBER) == 0
+
+
+def test_a_lifted_route_is_called_again_instead_of_skipped(gw, clean_env):
+    # The fake worker keeps the env it started with, so it refuses on A both times:
+    # what the lift changes is that A is attempted again rather than skipped.
+    clean_env.setenv("FAKE_GW_REFUSE_PROVIDERS", A[0])
+    gw.infer(request(ASK_SCOPE_TEXT))
+    skipped = gw.infer(request(ASK_SCOPE_TEXT))
+    assert skipped.attempts == [] and refusals() == 1
+    assert DG.clear_route_exclusion(KEY_A, DG.CYBER) == 1
+    retried = gw.infer(request(ASK_SCOPE_TEXT))
+    assert [a["provider"] for a in retried.attempts] == [A[0]]
+    assert retried.attempts[0]["code"] == "SAFEGUARD_REFUSED"
+    assert served_by(retried) == B and refusals() == 1
+
+
 def test_the_ledger_counts_per_route_and_domain():
     led = DG.ledger()
     led.record("r", "provider_refusal", domain=DG.CYBER)
