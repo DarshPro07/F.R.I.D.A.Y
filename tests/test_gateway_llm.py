@@ -288,7 +288,8 @@ def _ui_turn(monkeypatch, *, cli="claude", result=None):
         def infer(self, request):
             sent.append(request)
             return result or SimpleNamespace(status="ok", provider="claude-cli", model="sonnet",
-                                             response="Monday, sir.", warnings=[], cost_usd=0.003)
+                                             response="Monday, sir.", warnings=[], cost_usd=0.003,
+                                             tool_calls=[], route_kind="cli", tools_carried=False)
 
     monkeypatch.setattr(mg, "gateway", lambda: Gateway())
     return V, remembered, sent
@@ -319,7 +320,8 @@ def test_with_no_cli_enabled_the_typed_turn_still_says_the_brain_is_offline(monk
 def test_a_failed_cli_route_says_why_instead_of_pretending(monkeypatch):
     from types import SimpleNamespace
     failed = SimpleNamespace(status="failed", provider="", model="", response="",
-                             warnings=["claude-cli: signed out"], cost_usd=0.0)
+                             warnings=["claude-cli: signed out"], cost_usd=0.0,
+                             tool_calls=[], route_kind="", tools_carried=False)
     V, remembered, _ = _ui_turn(monkeypatch, result=failed)
     out = V.reply("what day is it?")
     assert out.get("degraded") and "signed out" in out["reply"]
@@ -354,7 +356,8 @@ def test_the_gateway_routes_on_a_worker_thread_without_loading_livekit_plugins()
 def test_the_cli_route_cannot_claim_a_hand_off_to_hermes(monkeypatch):
     from types import SimpleNamespace
     claim = SimpleNamespace(status="ok", provider="claude-cli", model="sonnet",
-                            response="It's going down to Hermes now, sir.", warnings=[], cost_usd=0.0)
+                            response="It's going down to Hermes now, sir.", warnings=[], cost_usd=0.0,
+                            tool_calls=[], route_kind="cli", tools_carried=False)
     V, _, _ = _ui_turn(monkeypatch, result=claim)
     out = V.reply("run validation")
     assert out["reply"].startswith("I have not handed anything to Hermes")
@@ -366,12 +369,14 @@ def test_the_cli_route_tells_its_model_it_has_no_tools_and_a_new_hand_off_wordin
     from types import SimpleNamespace
     said = SimpleNamespace(status="ok", provider="claude-cli", model="sonnet",
                            response="Sending the general sweep to Hermes again, sir.",
-                           warnings=[], cost_usd=0.0)
+                           warnings=[], cost_usd=0.0, tool_calls=[], route_kind="cli",
+                           tools_carried=False)
     V, _, sent = _ui_turn(monkeypatch, result=said)
     out = V.reply("run validation")
     assert out["reply"].startswith("I have not handed anything to Hermes")
-    system = [m["content"] for m in sent[0].context_package if m["role"] == "system"]
-    assert any("answered without tools" in s for s in system)
+    # The note rides on the request: the gateway adds it only when the route that
+    # serves the turn cannot carry the tools it also carries.
+    assert "answered without tools" in sent[0].no_tools_note and sent[0].tools
     for fine in ("I am not sending anything to Hermes.", "Nothing was sent to Hermes."):
         assert V._honest_about_hermes(fine, []) == fine, fine
 

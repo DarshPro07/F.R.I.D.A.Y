@@ -248,7 +248,7 @@ def _providers() -> dict:
 #: call_llm arguments that arrived after the Hermes builds of 2026-05: the
 #: install on a user's machine is not pinned, so these are offered, not assumed.
 #: Everything else _infer passes has been in call_llm's signature throughout.
-_OPTIONAL_KWARGS = ("route_info", "latency_info", "reasoning_config")
+_OPTIONAL_KWARGS = ("route_info", "latency_info", "reasoning_config", "tools")
 
 
 def _accepted(fn, kwargs: dict) -> tuple[dict, list[str]]:
@@ -261,6 +261,25 @@ def _accepted(fn, kwargs: dict) -> tuple[dict, list[str]]:
         return kwargs, []
     dropped = [k for k in _OPTIONAL_KWARGS if k in kwargs and k not in params]
     return {k: v for k, v in kwargs.items() if k not in dropped}, dropped
+
+
+def _tool_calls(response) -> list[dict]:
+    """The tool calls the model asked for, as `{id, name, arguments}` with the
+    arguments left as the JSON string the provider sent (the caller parses and
+    validates them: they are model output, so untrusted)."""
+    try:
+        calls = response.choices[0].message.tool_calls or []
+    except (AttributeError, IndexError, TypeError):
+        return []
+    out = []
+    for call in calls:
+        fn = getattr(call, "function", None)
+        name = str(getattr(fn, "name", "") or "")
+        if not name:
+            continue
+        out.append({"id": str(getattr(call, "id", "") or ""), "name": name,
+                    "arguments": str(getattr(fn, "arguments", "") or "")})
+    return out
 
 
 def _infer(params: dict) -> dict:
@@ -284,6 +303,9 @@ def _infer(params: dict) -> dict:
                   route_info=route, latency_info=latency)
     if reasoning:
         kwargs["reasoning_config"] = reasoning
+    tools = params.get("tools")
+    if tools:
+        kwargs["tools"] = tools
     if provider:
         kwargs["provider"] = provider
         if model:
@@ -313,6 +335,7 @@ def _infer(params: dict) -> dict:
         "latency_ms": elapsed_ms,
         "provider_latency": latency,
         "usage": _usage_dict(response),
+        "tool_calls": _tool_calls(response),
         "entitlement_state": "OK",
         # Arguments this Hermes does not take: a requested reasoning effort it
         # never saw is recorded, not implied.

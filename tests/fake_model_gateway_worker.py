@@ -17,6 +17,12 @@ Behaviour is scripted through env vars:
     FAKE_GW_HANG=1        never answer infer (watchdog tests)
     FAKE_GW_DIE=1         exit abruptly on the first infer (crash tests)
     FAKE_GW_ECHO=1        response is the last user message reversed
+    FAKE_GW_TOOL_CALL='{"name": "use_capability", "arguments": {"family": "clock", ...}}'
+        an infer that carries `tools` answers with this one tool call (no text);
+        once the last message is a `tool` result it answers "TOOL-RESULT: <content>"
+    FAKE_GW_NO_TOOLS=1    behave like a Hermes whose call_llm takes no `tools`: the
+                          argument is dropped and reported in unsupported_arguments
+    FAKE_GW_LOG=<path>    append one JSON line per infer: provider, has_tools, roles
 """
 import json
 import os
@@ -59,6 +65,9 @@ def main():
     hang = os.getenv("FAKE_GW_HANG") == "1"
     die = os.getenv("FAKE_GW_DIE") == "1"
     echo = os.getenv("FAKE_GW_ECHO") == "1"
+    tool_call = json.loads(os.getenv("FAKE_GW_TOOL_CALL") or "null")
+    no_tools = os.getenv("FAKE_GW_NO_TOOLS") == "1"
+    log_path = os.getenv("FAKE_GW_LOG", "")
     calls = 0
     for line in sys.stdin:
         line = line.strip()
@@ -89,6 +98,20 @@ def main():
             msgs = params.get("messages") or []
             last = str(msgs[-1].get("content", "")) if msgs else ""
             text = last[::-1] if echo else "PONG"
+            dropped_tools = bool(params.get("tools")) and no_tools
+            if log_path:
+                with open(log_path, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"provider": provider, "has_tools": bool(params.get("tools")),
+                                         "roles": [m.get("role") for m in msgs],
+                                         "contents": [str(m.get("content", "")) for m in msgs]}) + "\n")
+            tool_calls = []
+            if tool_call and params.get("tools") and not no_tools:
+                if msgs and msgs[-1].get("role") == "tool":
+                    text = "TOOL-RESULT: " + last
+                else:
+                    text = ""
+                    tool_calls = [{"id": "call_1", "name": tool_call["name"],
+                                   "arguments": json.dumps(tool_call["arguments"])}]
             if provider in refusing:
                 text = "I cannot assist with that request. It violates our usage policy."
             prompt_tokens = sum((len(str(m.get("content", "")) ) + 3) // 4 for m in msgs)
@@ -108,7 +131,9 @@ def main():
                 "requested_model": params.get("model") or "",
                 "response": text, "finish_reason": finish, "latency_ms": 7,
                 "provider_latency": {}, "entitlement_state": "OK",
-                "usage": {"input_tokens": prompt_tokens, "output_tokens": output_tokens,
+                "tool_calls": tool_calls,
+                "unsupported_arguments": ["tools"] if dropped_tools else [],
+                "usage":{"input_tokens": prompt_tokens, "output_tokens": output_tokens,
                           "cached_tokens": 0, "reasoning_tokens": reasoning_tokens}}})
         elif method == "shutdown":
             write({"id": rid, "ok": True, "result": {}})

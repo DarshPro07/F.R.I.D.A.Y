@@ -163,6 +163,29 @@ def test_the_gateway_health_view_matches_the_probe_evidence(gateway, inventory):
     assert all(v["state"] != PH.UNPROBED for v in health["providers"].values())
 
 
+def test_a_route_that_carries_tools_returns_the_tool_call_through_the_real_hermes(gateway, inventory):
+    """MODEL-012: `tools` reach Hermes's call_llm and `message.tool_calls` come back.
+
+    Skipped, not passed, when the route that answered cannot carry tools (a
+    signed-in CLI, or a Hermes whose call_llm takes no `tools`)."""
+    from friday.model_gateway import SIMPLE, ModelGatewayRequest, compile_context
+    tool = {"type": "function", "function": {
+        "name": "echo_token", "description": "Records a token. Call it with the token the user gives.",
+        "parameters": {"type": "object", "properties": {"token": {"type": "string"}},
+                       "required": ["token"]}}}
+    result = gateway.infer(ModelGatewayRequest(
+        objective_id="live-tool-call", task_class=SIMPLE, tools=(tool,), worker="live-suite",
+        context_package=compile_context(
+            system="You act only by calling tools; never describe an action instead of doing it.",
+            user="Record the token PAPAYA-77 now.")))
+    assert result.status == "ok", result.warnings
+    if not result.tools_carried:
+        pytest.skip(f"{result.provider} took no tools: {result.warnings}")
+    assert result.tool_calls, f"{result.provider}/{result.model} answered in text: {result.response!r}"
+    call = result.tool_calls[0]
+    assert call["name"] == "echo_token" and "PAPAYA-77" in json.loads(call["arguments"])["token"]
+
+
 def test_usage_is_recorded_per_provider(gateway, inventory):
     """FR-080: every live probe above must have left an attributed telemetry row."""
     from friday.model_gateway import GatewayTelemetry

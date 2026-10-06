@@ -13,6 +13,7 @@ that the language brain is offline. It never claims to have done what it did not
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import os
 import re
@@ -614,11 +615,10 @@ def _run_web(operation, arguments):
 _MAX_TOOL_ROUNDS = 3          # a conversation, not an agent run: bounded on purpose
 
 
-def _capability_tool():
-    from google.genai import types
-    return types.Tool(function_declarations=[types.FunctionDeclaration(
-        name="use_capability",
-        description=(
+def _capability_description():
+    """The one description of `use_capability`, for both the Gemini and the
+    OpenAI-form (model gateway) tool."""
+    return (
             "Look something up through one of Friday's internal capabilities before "
             "answering. Use it when the boss asks about something a capability can "
             "actually check, rather than guessing. Read-only. "
@@ -677,18 +677,43 @@ def _capability_tool():
             "research, scraping, media, commerce) answers 'unreachable ... set "
             "SOME_URL', tell him that setting by name in one line - it is the one "
             "thing he can do about it. "
-            "Families -- " + _capability_menu()),
+            "Families -- " + _capability_menu())
+
+
+_CAPABILITY_ARG_DOCS = {
+    "family": "the capability family",
+    "operation": "the read operation",
+    "arguments": "operation arguments, e.g. {\"project\":\"friday-core\"} "
+                 "or {\"query\":\"...\"}",
+}
+
+
+def _capability_tool():
+    from google.genai import types
+    return types.Tool(function_declarations=[types.FunctionDeclaration(
+        name="use_capability", description=_capability_description(),
         parameters=types.Schema(
             type="OBJECT",
             properties={
-                "family": types.Schema(type="STRING", description="the capability family"),
-                "operation": types.Schema(type="STRING", description="the read operation"),
-                "arguments": types.Schema(
-                    type="OBJECT",
-                    description="operation arguments, e.g. {\"project\":\"friday-core\"} "
-                                "or {\"query\":\"...\"}"),
+                "family": types.Schema(type="STRING",
+                                       description=_CAPABILITY_ARG_DOCS["family"]),
+                "operation": types.Schema(type="STRING",
+                                          description=_CAPABILITY_ARG_DOCS["operation"]),
+                "arguments": types.Schema(type="OBJECT",
+                                          description=_CAPABILITY_ARG_DOCS["arguments"]),
             },
             required=["family", "operation"]))])
+
+
+def _capability_tool_openai() -> dict:
+    """`use_capability` as an OpenAI function schema, for the model gateway."""
+    return {"type": "function", "function": {
+        "name": "use_capability", "description": _capability_description(),
+        "parameters": {"type": "object", "properties": {
+            "family": {"type": "string", "description": _CAPABILITY_ARG_DOCS["family"]},
+            "operation": {"type": "string", "description": _CAPABILITY_ARG_DOCS["operation"]},
+            "arguments": {"type": "object", "description": _CAPABILITY_ARG_DOCS["arguments"]},
+        }, "required": ["family", "operation"]}}}
 
 
 def _run_contacts(operation, arguments):
@@ -1358,14 +1383,42 @@ _NO_TOOLS_NOTE = (
     "the request needs an action, say plainly that it needs a working tool route.")
 
 
+#: One tool result is cut to this many characters before it goes back to the model,
+#: so a large page or file cannot push the next call over the class input budget.
+_TOOL_RESULT_CHARS = 4000
+
+
+def _capability_call(call: dict) -> tuple[str, str, dict]:
+    """(family, operation, arguments) from one gateway tool call.
+
+    The call is model output, so untrusted: a wrong function name, arguments
+    that are not a JSON object, or fields of the wrong type come out empty, and
+    `_run_capability` answers an empty family with its own error."""
+    if call.get("name") != "use_capability":
+        return "", "", {}
+    try:
+        args = json.loads(call.get("arguments") or "{}")
+    except (TypeError, ValueError):
+        return "", "", {}
+    if not isinstance(args, dict):
+        return "", "", {}
+    family, operation, arguments = args.get("family"), args.get("operation"), args.get("arguments")
+    return (family if isinstance(family, str) else "",
+            operation if isinstance(operation, str) else "",
+            arguments if isinstance(arguments, dict) else {})
+
+
 def _cli_reply(text, history, approval_note=""):
-    """A typed turn through the model gateway's signed-in CLI route (MODEL-012).
+    """A typed turn through the model gateway (MODEL-012).
 
     FRIDAY.exe 2026-10-05: with the template GOOGLE_API_KEY the voice agent answered
     through Claude Code, but the control room's typed prompt went to Gemini and
     failed. This is the same route, with the same persona, history and memory
-    context as the Gemini turn. The CLI route has no tools, so it answers and
-    does not act. Returns None when no CLI backend is enabled."""
+    context as the Gemini turn - and the same tool: `use_capability` goes to the
+    gateway in OpenAI form, a route that can carry it may call it, and the result
+    goes back as a `tool` message (round-capped, both honesty gates fed with what
+    ran). A signed-in CLI route runs as pure completion, so on it the turn answers
+    without tools and says so. Returns None when no CLI backend is enabled."""
     from friday import cli_model_provider
     if not cli_model_provider.discover_backends():
         return None
@@ -1374,12 +1427,11 @@ def _cli_reply(text, history, approval_note=""):
     from friday.gateway_llm import TASK_CLASS, fit
 
     turns = _recent_turns()
-    # The clock, too: without a tool the model cannot look it up, and only some
+    # The clock, too: a tool-less route cannot look it up, and only some
     # routes (the Claude CLI) add it themselves - GLM via openrouter answered
     # "what is today's date" with "Let me check that for you." (2026-10-06).
     now = datetime.datetime.now().astimezone()
     messages = [{"role": "system", "content": _persona()},
-                {"role": "system", "content": _NO_TOOLS_NOTE},
                 {"role": "system", "content": "Now: " + now.strftime("%A %d %B %Y, %H:%M %Z")}]
     if turns:
         messages += [{"role": "user" if role == "user" else "assistant", "content": body}
@@ -1393,29 +1445,67 @@ def _cli_reply(text, history, approval_note=""):
         user = "%s\n\n[%s]" % (user, approval_note)
     messages.append({"role": "user", "content": user})
     budget = model_gateway.budget_for(TASK_CLASS)
-    request = model_gateway.ModelGatewayRequest(
-        # One objective per turn, as the voice adapter does: a shared id would hit
-        # the objective token ceiling a few dozen turns in.
-        objective_id=f"ui-ask:{uuid.uuid4().hex[:12]}",
-        task_class=TASK_CLASS,
-        context_package=fit(messages, budget.max_input_tokens),
-        allow_failover=True, worker="ui-ask")
+    tools = (_capability_tool_openai(),)
+
+    def ask(with_tools):
+        return model_gateway.gateway().infer(model_gateway.ModelGatewayRequest(
+            # One objective per call, as the voice adapter does: a shared id would hit
+            # the objective token ceiling a few dozen turns in.
+            objective_id=f"ui-ask:{uuid.uuid4().hex[:12]}",
+            task_class=TASK_CLASS,
+            context_package=fit(messages, budget.max_input_tokens),
+            allow_failover=True, worker="ui-ask",
+            tools=tools if with_tools else (),
+            no_tools_note=_NO_TOOLS_NOTE if with_tools else ""))
+
+    used = []                      # families touched, for the response meta
+    acted = []                     # (family, operation) pairs that ran OK
+    calls_made = 0                 # tool calls the model actually issued
     try:
-        result = model_gateway.gateway().infer(request)
+        result = ask(True)
+        cost_usd = result.cost_usd
+        for _ in range(_MAX_TOOL_ROUNDS):
+            if result.status != "ok" or not result.tool_calls:
+                break
+            calls = [{"id": c.get("id") or "call_%d" % (calls_made + i), "type": "function",
+                      "function": {"name": c.get("name", ""), "arguments": c.get("arguments", "")}}
+                     for i, c in enumerate(result.tool_calls, 1)]
+            messages.append({"role": "assistant", "content": "", "tool_calls": calls})
+            for call, sent in zip(result.tool_calls, calls):
+                calls_made += 1
+                fam, op, arguments = _capability_call(call)
+                out = _run_capability(fam, op, arguments)
+                if "result" in out:
+                    used.append(fam)
+                    acted.append((fam, op))
+                messages.append({"role": "tool", "tool_call_id": sent["id"],
+                                 "content": json.dumps(out, default=str)[:_TOOL_RESULT_CHARS]})
+            result = ask(True)
+            cost_usd += result.cost_usd
+        if result.status == "ok" and result.tool_calls:
+            # The round cap ended the loop with the model still asking for tools: one
+            # more turn with them withheld turns what it found into a sentence.
+            messages.append({"role": "user", "content": "Answer now, in one to three "
+                             "spoken sentences, from what you already found."})
+            result = ask(False)
+            cost_usd += result.cost_usd
     except (model_gateway.BudgetExceeded, model_gateway.GrowthStopped) as exc:
         return {"reply": "My language brain refused this turn: %s" % str(exc)[:140],
                 "degraded": True}
-    if result.status != "ok" or not result.response.strip():
+    answer = result.response.strip() if result.status == "ok" else ""
+    if not answer and not (result.status == "ok" and calls_made):
         detail = "; ".join(result.warnings)[:140] or result.status
         return {"reply": "My language brain is offline: Gemini has no working key and "
-                         "the CLI route failed (%s)." % detail, "degraded": True}
-    # Both gates the Gemini turn has: nothing ran here, so a hand-off to Hermes
-    # or a completed action is a claim the turn cannot back.
-    answer = _honest_about_acting(_honest_about_hermes(result.response.strip(), []), [], 0)
+                         "the model route failed (%s)." % detail, "degraded": True}
+    answer = answer or "I found it, sir, but lost my words - ask me once more."
+    # Both gates the Gemini turn has, fed with what actually ran: a hand-off to Hermes
+    # or a completed action is a claim only a tool call this turn can back.
+    answer = _honest_about_acting(_honest_about_hermes(answer, used), acted, calls_made)
     message_id = _remember_turn("assistant", answer)
     return {"reply": answer, "model": f"{result.provider}/{result.model}",
-            "message_id": message_id, "used_memory": bool(ctx), "used_capabilities": [],
-            "route": "cli", "cost_usd": result.cost_usd}
+            "message_id": message_id, "used_memory": bool(ctx), "used_capabilities": used,
+            "route": result.route_kind or "gateway", "cost_usd": cost_usd,
+            "tools_carried": result.tools_carried}
 
 
 def reply(text, history=None):
