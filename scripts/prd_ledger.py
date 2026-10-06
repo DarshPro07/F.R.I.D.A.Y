@@ -3659,6 +3659,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Acceptance already met by e1ad03b (a recorded refusal changes the next route). This run closes the 'no clear command' gap: SafeguardLedger.clear_refusals and domain_gate.clear_route_exclusion lift an exclusion per route or route+domain, keeping the audit events. (build run, commit c317b0d0a)",
         "next_action": "GAPS: Refusal detection still applies only to requests classified into a restricted domain (domain_gate phrase lists, owner-pending ASSUMPTION); a refusal on a general-domain request is returned as before.; An exclusion never expires on its own; clear_route_exclusion is a Python seam only, with no MCP tool or CLI wired to it.; The 'safeguard' registry field is recorded for the inspector only; routing acts on restricted_domains and the ledger.; No real route in model_capabilities._ALL declares restricted_domains yet; no owner-sourced fact to declare.; tests/test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop (@live, outside the gate) failed once with input_tokens=0 from the real OpenRouter route and passed on the prior run; not touched by this change.",
     }),
+    ('OBJ-004', {
+        "status": PARTIAL,
+        "current_implementation": "A batch retry narrowed to the failed items reused the first attempt's idempotency key, so the live port replayed the stored partial result and the failed item was never retried. The key now carries the pending item set; no-items tasks keep run:task. (build run, commit 413a7add2)",
+        "next_action": "GAPS: Also ran 19 objective-engine/journey/reachability files: 404 passed, 1 skipped, 0 failed. The other ~50 voice-path files that scripts/test_impact.py lists for agent_friday.py were not run.; Pre-existing, not changed here: a crash between the external effect and the port's call.returned write still re-runs the call; only a capability that dedupes by key itself closes that (see prd_ledger DUR-001 gaps).",
+    }),
 ]
 
 
