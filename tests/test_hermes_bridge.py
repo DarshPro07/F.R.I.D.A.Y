@@ -474,3 +474,17 @@ def test_hermes_session_events_are_governor_heartbeats(tmp_path, monkeypatch):
         assert owned.beats is True
     finally:
         supervisor.stop()
+
+
+def test_the_gateway_has_time_to_start_cold(monkeypatch):
+    # Hermes 3729602 starts in 55.8s cold here; the 60s limit failed self-check 3.3
+    # of FRIDAY.exe on 2026-10-08 although Hermes itself was healthy.
+    from friday import hermes_bridge as hb
+    assert hb.HermesSupervisor.READY_TIMEOUT >= 120
+    monkeypatch.setenv("FRIDAY_HERMES_READY_TIMEOUT", "240")
+    assert hb._ready_timeout() == 240.0
+    for bad in ("soon", "-5", "0"):
+        monkeypatch.setenv("FRIDAY_HERMES_READY_TIMEOUT", bad)
+        assert hb._ready_timeout() == 150.0
+    monkeypatch.delenv("FRIDAY_HERMES_READY_TIMEOUT")
+    assert hb._ready_timeout() == 150.0

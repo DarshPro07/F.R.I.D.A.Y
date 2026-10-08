@@ -1224,6 +1224,23 @@ class HermesUnavailable(RuntimeError):
     """Hermes could not be located, started or reached. Says which."""
 
 
+def _ready_timeout(default: float = 150.0) -> float:
+    """Seconds the gateway may take to become ready: FRIDAY_HERMES_READY_TIMEOUT
+    when it is a positive number, else `default`."""
+    raw = os.environ.get("FRIDAY_HERMES_READY_TIMEOUT", "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 0.0
+    if value <= 0:
+        logger.warning("FRIDAY_HERMES_READY_TIMEOUT=%r is not a positive number; using %.0fs",
+                       raw, default)
+        return default
+    return value
+
+
 class HermesSupervisor:
     """
     One Hermes gateway process, owned and supervised by Friday.
@@ -1234,9 +1251,11 @@ class HermesSupervisor:
     handler cheap) and into the work-run log.
     """
 
-    #: How long the gateway may take to say `gateway.ready`. First start on
-    #: a cold machine imports the world; measured 8-15s here.
-    READY_TIMEOUT = 60.0
+    #: How long the gateway may take to say `gateway.ready`. Hermes 3729602
+    #: (updated 2026-10-05) starts in 55.8s cold and 20.8s warm on this
+    #: machine, so the old 60s limit failed a cold start (self-check 3.3,
+    #: 2026-10-08). FRIDAY_HERMES_READY_TIMEOUT overrides it.
+    READY_TIMEOUT = _ready_timeout()
     REQUEST_TIMEOUT = 120.0
 
     def __init__(self, *, log: WorkRunLog | None = None,
@@ -1372,6 +1391,7 @@ class HermesSupervisor:
         env["HERMES_ACCEPT_HOOKS"] = "1"
         logger.info("hermes.starting command=%s", command[0])
         self._ready.clear()
+        started = time.monotonic()
         try:
             self._proc = subprocess.Popen(
                 command, cwd=cwd, env=env,
@@ -1392,6 +1412,8 @@ class HermesSupervisor:
             raise HermesUnavailable(
                 f"Hermes gateway did not become ready within "
                 f"{self.READY_TIMEOUT:.0f}s")
+        # A slowing start shows here long before it hits the limit.
+        logger.info("hermes.ready seconds=%.1f", time.monotonic() - started)
         self.state = CONNECTED
 
     def _launch_plan(self) -> tuple[list[str], str | None]:
