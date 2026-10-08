@@ -4091,6 +4091,14 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_durable_side_effects.py::test_a_committed_side_effect_is_not_done_again_after_a_crash', 'tests/test_durable_side_effects.py::test_a_call_that_did_not_commit_is_run_again', 'tests/test_chaos_restart.py::test_control_plane_killed_mid_task_resumes_in_a_fresh_process'],
         "files": ['friday/objectives.py:159,161', 'friday/continuous.py:285,834,1837', 'friday/store.py:879,3203', 'friday/modification.py:84'],
     }),
+    ('EVAL-001', {
+        "status": VERIFIED,
+        "current_implementation": 'Graded Attempts now carry build commit + verifier fingerprint; promotion refuses unversioned or other-build passes; best_for ignores unversioned rows; Record.promote_model added (FUTURE in reachability). (build run, commit 98f4d90a5)',
+        "next_action": '',
+        "evidence": 'Confirmed at d2b61d805: the build worker found the acceptance already met and changed nothing; tests/test_promotion.py::test_an_unverified_run_is_refused, tests/test_promotion.py::test_a_failed_verifier_is_refused, tests/test_promotion.py::test_graded_records_the_attempt, tests/test_evaluation.py::test_graded_work_is_persisted_where_the_router_reads_it, tests/test_evaluation.py::test_a_failing_verifier_is_recorded_as_failed, tests/test_evaluation.py::test_a_verifier_that_cannot_start_is_inconclusive_not_failed, tests/test_evaluation.py::test_a_caller_held_record_is_not_counted_twice, tests/test_evaluation.py::test_an_unwritable_record_does_not_lose_the_attempt, tests/test_evaluation.py::test_the_suite_never_writes_the_live_record pass at HEAD and an independent verifier judged the existing code to meet it. Worker: Already implemented at HEAD (98f4d90): Attempts carry build_commit + verifier_fingerprint, promotion/best_for/promote_model refuse unversioned rows. Re-verified, no new edit needed: 110 tests pass (evaluation, promotion, reachability).',
+        "tests": ['tests/test_promotion.py::test_an_unverified_run_is_refused', 'tests/test_promotion.py::test_a_failed_verifier_is_refused', 'tests/test_promotion.py::test_graded_records_the_attempt', 'tests/test_evaluation.py::test_graded_work_is_persisted_where_the_router_reads_it', 'tests/test_evaluation.py::test_a_failing_verifier_is_recorded_as_failed', 'tests/test_evaluation.py::test_a_verifier_that_cannot_start_is_inconclusive_not_failed', 'tests/test_evaluation.py::test_a_caller_held_record_is_not_counted_twice', 'tests/test_evaluation.py::test_an_unwritable_record_does_not_lose_the_attempt', 'tests/test_evaluation.py::test_the_suite_never_writes_the_live_record'],
+        "files": ['friday/evaluation.py:249-300', 'friday/development.py:188', 'friday/promotion.py:303', 'tests/conftest.py:182', 'tests/test_promotion.py:36', 'tests/test_promotion.py:43'],
+    }),
 ]
 
 
