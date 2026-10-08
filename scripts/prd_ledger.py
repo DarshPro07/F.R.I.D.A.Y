@@ -4054,6 +4054,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'A direct MCP memory write (memory_remember, memory_record_decision, brain_remember) no longer lets the model pick from_read_material: _reply_tools offers a lineage wrapper without that arg that routes through use_capability, which stamps it from the turn. (build run, commit d383882de)',
         "next_action": 'GAPS: tests/test_voice_path.py (3 live TTS/STT tests) fail here on invalid provider keys, unrelated to this change; excluded from the final run.; Ledger file:line cites to agent_friday.py:1811 (emergency-stop rows in scripts/prd_ledger.py) were already loose and now sit 36 lines off; not edited (ledger out of scope).; Residual unchanged: only the three MEMORY_WRITES tools are wrapped; other tools and policy are out of scope.',
     }),
+    ('SEC-005', {
+        "status": PARTIAL,
+        "current_implementation": 'A delegation under an envelope now runs on a second Hermes gateway started with HERMES_TUI_TOOLSETS = profile toolsets minus file/terminal; started on first scoped delegation, stopped when none holds it. Unscoped delegations keep the shared gateway. Per-run calls route to the owning gateway. (build run, commit e3ae23d4e)',
+        "next_action": "GAPS: Verified against tests/fake_hermes_gateway.py only (it records the env it was launched with); that a real Hermes gateway honours HERMES_TUI_TOOLSETS and keeps the friday_exec bridge registered rests on the ledger's STATICALLY_CONFIRMED reading of tui_gateway/server.py, not a live run.; The scoped gateway is stopped as soon as no scoped run holds it, so each isolated scoped delegation pays a Hermes cold start (20-55s measured); an idle linger would trade that against holding a process.; While a scoped run is working, the shared supervisor's own .state/.health() still describe only the shared gateway.; native_file_toolsets_enabled() is no longer called by delegate(); kept public (tested, test_reachability green).",
+    }),
 ]
 
 
