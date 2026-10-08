@@ -135,6 +135,18 @@ _NEGATIVE_SUBJECT_RE = re.compile(
     r"(?:nothing|nobody|no one|none(?:\s+of\s+\w+)?|no\s+\w+)\s+"
     r"(?:has|have|had|was|were|is|are|got|been)\b[^,;:–—]*", re.I)
 
+#: A sentence that opens with an imperative - a plan step or an instruction,
+#: "- Identify how FRIDAY is started", "1. **Update** the launcher" - tells, it
+#: does not report. 2026-10-09: a plan the owner asked for was replaced with "I
+#: have not actually done that" because its step held the word "started". One
+#: with a first-person subject still reports: "Update: I deployed the fix."
+_IMPERATIVE_RE = re.compile(
+    r"^\W*(?:\d+[.)]\s*)?\W*(?:add|build|call|check|confirm|create|define|document|"
+    r"ensure|extract|find|handle|identify|implement|install|keep|load|make|move|"
+    r"open|parse|pass|print|read|remove|rename|replace|return|review|run|save|set|"
+    r"show|start|stop|test|update|use|verify|wire|write)\b", re.I)
+_FIRST_PERSON_RE = re.compile(r"\b(?:I|I've|I'd|I'm|we|we've)\b")
+
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
@@ -162,6 +174,8 @@ def is_completion_claim(sentence: str) -> bool:
     """An affirmative, past/perfect assertion that something now exists."""
     rest = _NEGATIVE_SUBJECT_RE.sub(" ", sentence)
     if is_negated(rest):
+        return False
+    if _IMPERATIVE_RE.match(rest) and not _FIRST_PERSON_RE.search(rest):
         return False
     return any(rx.search(rest) for rx in _COMPLETION_RE)
 
