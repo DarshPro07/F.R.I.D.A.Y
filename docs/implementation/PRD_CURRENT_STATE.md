@@ -153,11 +153,11 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 1ed24a7 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-08T19:40:31+00:00
+- HEAD: 18c2775 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-08T20:09:39+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 8, "MISSING": 101, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 50}
 - Unresolved P0: 18
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (211): JIT-001=VERIFIER_FAIL
+- Last wave (215): JIT-001=FAILED
 - Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), APPROVAL-001 (integration refused), ACT-001 (integration refused)
 - Open escalations: 177
   - INTENT-002 resolved: controller unpark: RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08
