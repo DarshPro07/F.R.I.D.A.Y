@@ -4024,6 +4024,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_minimal_build_ab.py::test_a_live_report_carries_the_verdict_and_the_recommendation', 'tests/test_minimal_build_ab.py::test_fake_runner_end_to_end_writes_report_with_diff_cost_quality_columns'],
         "files": ['scripts/minimal_build_ab.py', 'docs/implementation/MINIMAL_BUILD_AB.md'],
     }),
+    ('BCON-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Added contracts.write_ceiling and partial_failure_recovery; the five governance readers now use them, so max_external_writes N refuses write N+1 and recovery.on_partial_failure=resume_failed_items_only narrows retries. Old spellings still work. (build run, commit b346db3af)',
+        "next_action": 'GAPS: Only the six requested test files were run, not the 126 files test_impact lists as affected.',
+    }),
 ]
 
 
