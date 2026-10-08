@@ -743,7 +743,15 @@ def integrate(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR, ledger_
 
 #: An owner ruling that keeps a row's extra scope (00-owner-directive-2026-10-08e): its
 #: acceptance alone does not close it, so a no-change run cannot be confirmed.
-KEEP_SCOPE = "keep this extra scope inside the row"
+KEEP_SCOPE = re.compile(r"keep (?:this )?extra scope inside the row", re.I)
+
+
+def carried_rulings(next_action: str) -> str:
+    """The owner rulings in a row's next_action, which the gap list an integration
+    writes must carry: rewritten as a bare "GAPS: ..." they were dropped, and with
+    them the keep-scope guard (CYBER-002, 2026-10-09)."""
+    parts = re.split(r"\s+\|\s+|\n+", next_action or "")
+    return " | ".join(p.strip() for p in parts if "RULING" in p)
 
 
 def confirm_prompt(row: dict, tests: list[str], head: str) -> str:
@@ -778,7 +786,7 @@ def _confirm_existing(req: str, run: dict, row: dict, out: dict, done, *, repo: 
     parked in one night, waiting for a controller to flip them by hand. Prove it on HEAD
     instead: the row's named tests pass there, and a fresh verifier finds the acceptance
     met by the existing code; then the row is VERIFIED on that evidence."""
-    if KEEP_SCOPE in (row.get("next_action") or ""):
+    if KEEP_SCOPE.search(row.get("next_action") or ""):
         return done("NOT_CONFIRMED", detail="the owner keeps extra scope in this row; the worker built none of it")
     head = git(repo, "rev-parse", "HEAD", check=True).stdout.strip()
     tests = named_tests(row.get("tests"))
@@ -875,7 +883,8 @@ def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, pytho
             # A v7 row is VERIFIED only by a named test (prd_ledger --check); a file is not one.
             status, gaps = "PARTIAL", gaps + ["RED/GREEN named no test the ledger can cite"]
         impl = f"{(run.get('evidence') or {}).get('summary', '')} (build run, commit {merged['integrated_commit'][:9]})"
-        nxt = "" if status == "VERIFIED" else "GAPS: " + "; ".join(gaps)
+        rulings = carried_rulings(row.get("next_action") or "")
+        nxt = "" if status == "VERIFIED" else "GAPS: " + "; ".join(gaps) + (f" | {rulings}" if rulings else "")
         proof = evidence_text(run, rg, merged, verifier) if status == "VERIFIED" else ""
         cited = ({"tests": named,
                   "files": cited_files(row, run.get("files_changed", []))}

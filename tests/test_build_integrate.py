@@ -843,3 +843,28 @@ def test_a_no_change_run_that_cannot_be_proven_is_not_confirmed(tmp_path, tests,
     out = go(repo, runs, rows, runner=judged)
     assert out["result"] == "NOT_CONFIRMED" and why in out["detail"]
     assert head(repo) == before
+
+
+def test_a_partial_integration_carries_the_owner_rulings_into_its_gap_list(tmp_path):
+    # 2026-10-09: rewritten as a bare "GAPS: ...", next_action dropped the owner ruling
+    # that kept CYBER-002's extra scope - and with it the guard against closing the row.
+    assert bi.carried_rulings("slice text | RULING 2026-10-08e (owner): keep this extra scope inside the row "
+                              "| more") == "RULING 2026-10-08e (owner): keep this extra scope inside the row"
+    assert bi.carried_rulings("packet\nRULING x: after this slice the probe stays") == (
+        "RULING x: after this slice the probe stays")
+    assert bi.carried_rulings("no rulings here") == ""
+    repo, runs, run, rows = setup(tmp_path, acceptance_met=False)
+    rows = [dict(rows[0], next_action="the slice | RULING 2026-10-08e (owner): keep extra scope inside the row")]
+    out = go(repo, runs, rows)
+    assert out["result"] == "INTEGRATED" and out["ledger_status"] == "PARTIAL"
+    module = bi.load_ledger(repo / "scripts" / "prd_ledger.py")
+    row = {r["id"]: r for r in module.apply_progress(module._load_v7(), module.PROGRESS_V7)}["REQ-1"]
+    assert row["next_action"].startswith("GAPS: ") and "RULING 2026-10-08e (owner): keep extra scope" in row["next_action"]
+
+
+def test_the_keep_scope_ruling_is_recognised_in_either_wording(tmp_path):
+    repo, runs, run, rows = setup(tmp_path)
+    run, rows = _no_change(runs, run, rows, ["tests/test_old.py::test_old"],
+                           "RULING (owner): keep extra scope inside the row")
+    out = go(repo, runs, rows, runner=lambda cmd, prompt, cwd: "")
+    assert out["result"] == "NOT_CONFIRMED" and "extra scope" in out["detail"]
