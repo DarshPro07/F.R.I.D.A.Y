@@ -4044,6 +4044,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Cyber Lab wired live as fabric provider cyber_lab (BUILTIN, restricted, security.authorized_scope): run derives the gate decision itself, then cyber_lab.run_routed under the contract; R3 audit row + hash-bound evidence on every call. (build run, commit aa690dacb)',
         "next_action": "GAPS: No lab provider is registered in production (adapter reports UNAVAILABLE until one calls cyber_lab.register); MockProvider is test-only by design.; fabric.call does not forward run_id to adapter.call, so the ActionResult carries a fresh run id (pre-existing for all adapters); audit rows link via the contract's objective_id.; Scout's 'restricted group in capability_router' not done: that router gates MCP tools, not fabric providers; no MCP tool added, so tool counts are unchanged.; scripts/upstream_lock.py --check reports drift in this worktree (clone dirs are absent); unrelated, cyber_lab has no upstream so it cannot enter the lock.",
     }),
+    ('DUR-001', {
+        "status": PARTIAL,
+        "current_implementation": 'The keyed production port writes call.started before dispatch. A re-run that finds an unresolved start refuses with UNCERTAIN and does not repeat the effect. A raised Exception or non-succeeded result writes call.abandoned, so a genuine retry is allowed. (build run, commit 77489b40b)',
+        "next_action": 'GAPS: Not run: the two new tests against the old code to see them fail (reasoned only: without the intent check the re-run dispatches again and effects reaches 2).; Not run: the other ~45 files in the impact set (voice, router, memory tests) that import agent_friday.py.',
+    }),
 ]
 
 
