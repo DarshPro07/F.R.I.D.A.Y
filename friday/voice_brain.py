@@ -998,6 +998,14 @@ _READ_ONLY_OPERATIONS = frozenset({
 })
 
 
+#: Reads whose result IS evidence about someone else's work. After one of them, "Hermes
+#: completed the last task" is a report of what the read returned, not Friday claiming an
+#: act - the gate replaced exactly that with "I have not done it yet" when asked "what is
+#: Hermes doing right now?" (Chrome capability test of FRIDAY.exe, 2026-10-08).
+_STATUS_READS = frozenset({("hermes", "status"), ("work", "status")})
+_FIRST_PERSON = re.compile(r"\b(?:i|i'?ve|i'?m|i'?ll|i'?d|me|my|myself|we|we'?ve|we'?re|our)\b", re.I)
+
+
 def _honest_about_acting(answer: str, acted, calls_made) -> str:
     """Refuse a completion claim the turn cannot back.
 
@@ -1025,11 +1033,14 @@ def _honest_about_acting(answer: str, acted, calls_made) -> str:
         return answer
     from friday import honesty
 
-    if not honesty.find_claims(text):
+    claims = honesty.find_claims(text)
+    if not claims:
         return answer
     ran = tuple(acted or ())
     if ran and any(pair not in _READ_ONLY_OPERATIONS for pair in ran):
         return answer                      # something that can act ran
+    if set(ran) & _STATUS_READS and not any(_FIRST_PERSON.search(c) for c in claims):
+        return answer                      # a status report about another worker, backed by the read
     if not ran:
         logger.warning("voice: completion claimed with no tool call at all: %r",
                        text[:160])

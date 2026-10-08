@@ -441,3 +441,19 @@ class TestTheCompletionGate:
         said = V._honest_about_acting(
             "I've opened the Start Menu for you, sir.", acted=[], calls_made=0)
         assert "not actually done that" in said.lower()
+
+
+
+def test_a_status_report_about_hermes_is_not_mistaken_for_friday_claiming_an_act():
+    # Chrome capability test of FRIDAY.exe, 2026-10-08: "What is Hermes doing right now?"
+    # ran hermes/status, and the answer about Hermes's finished work was replaced with
+    # "I have not done it yet, sir - what I ran only looked."
+    from friday import voice_brain as V
+    report = "Hermes completed the last task; nothing is running now, sir."
+    assert V._honest_about_acting(report, [("hermes", "status")], 1) == report
+    assert V._honest_about_acting(report, [("work", "status")], 1) == report
+    # A first-person claim is still Friday's own claim, and only a read backs it: refused.
+    mine = "I have opened the Start menu for you, sir."
+    assert V._honest_about_acting(mine, [("hermes", "status")], 1) != mine
+    # Without a status read, a completion statement is still refused, as before.
+    assert V._honest_about_acting(report, [("clock", "now")], 1) != report
