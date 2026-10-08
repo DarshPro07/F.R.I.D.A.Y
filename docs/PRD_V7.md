@@ -1971,6 +1971,19 @@ working set, progressive disclosure and context health (CTX-001, CTX-002, CTX-00
 | FAB-007 | P1 | When no tool-capable API or Hermes route is available, the signed-in Claude Code CLI acts with FRIDAY's capabilities through FRIDAY's own MCP server, under FRIDAY's policy, instead of answering without tools. | With every API route rate-limited (as on 2026-10-08: openrouter 429, openai-codex exhausted), a typed request that needs a capability is completed through Claude Code calling FRIDAY's MCP tools, and the policy gates still apply. Extends MODEL-012. |
 | FAB-008 | P1 | A deterministic pre-router settles trivial decisions before any conversational model is called. | Status, clock and direct commands are answered without a model call; the share of turns that needed a model is measured. Extends ORCH-011, COG-001. |
 
+### 110.1 The owner's answers (2026-10-08 c)
+
+> Recorded verbatim in `docs/plans/build-harness/00-owner-directive-2026-10-08c.md`. Evolution runs on triggers, overnight, and automatically when idle, repairs
+> problems in its own upgrade path without asking, and researches on its own; zones Z1-Z3 promote
+> autonomously after independent verification with automatic rollback, and Z4 trust roots stay
+> proposal-only (a builder that could rewrite its own judge would leave no check that could be trusted).
+> Routing is automatic per task by measured quality and cost. Two requirements are added:
+
+| ID | Pri | Requirement | Acceptance evidence |
+|---|---|---|---|
+| FAB-009 | P1 | A multi-model deliberation mode: two or more models independently produce an answer or a set of ideas, critique and judge each other's work, revise, and FRIDAY returns the verdict they converge on, with the points they still disagree on stated; rounds, models and budget are bounded. | Asked for the best ideas on a question, two different models each propose, each judges the other's proposals with reasons, and the final answer lists what both endorse plus the open disagreements; a deliberation that does not converge within its round limit says so instead of inventing agreement. Owner 2026-10-08. |
+| HARN-001 | P1 | The FRIDAY engineering harness - rules, roles and agents, skills, hooks, verification gates, budgets, and FRIDAY's MCP tools - is available in Hermes as well as in Claude Code, generated from one source so the two never drift. | Working in Hermes with the friday profile, a task follows the same plan-first, test-first and verification rules, sees the same roles and skills, and reaches FRIDAY's MCP tools; a change to the source harness reaches both tools from one regeneration. Research Hermes' own extension points (skills, hooks, profiles, MCP servers, SOUL) first. Owner 2026-10-08. |
+
 ## Appendix C. Implementation controller, updated 2026-09-26 (owner's text, verbatim)
 
 ```text

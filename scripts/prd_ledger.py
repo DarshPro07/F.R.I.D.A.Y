@@ -3669,6 +3669,40 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Closed Gap #2: onboarding now derives a concrete first useful task (Onboarding.first_task_plan) bound to the live files_list capability, exposed via the console 'task' subcommand. Tests drive the real files.files_list toolset (real policy gate + fsjail) with independent verification, not a demo fake. (build run, commit 5ead781c9)",
         "next_action": 'GAPS: Gap #1 unchanged: the journey exercises the launcher helper in-process and does not spawn FRIDAY.exe (no built exe in this source worktree; integration concern).; first_task_plan offers only a read-only folder-listing first task today; richer first tasks remain future work.',
     }),
+    ('EVO-001', {
+        "status": MISSING,
+        "next_action": (
+            'RULING 2026-10-08c (owner, docs/plans/build-harness/00-owner-directive-2026-10-08c.md): evolution ru'
+            'ns on triggers, in an overnight mode, AND automatically when idle; a bug or problem FRIDAY finds in '
+            'its own upgrade path is repaired without asking; research missions are autonomous. Every run still h'
+            'as a named objective, acceptance criteria, a per-experiment budget and a termination condition (the '
+            'daily cap is off, so the per-experiment budget is the only spend bound). Zones Z1-Z3 promote autonom'
+            'ously after independent verification with automatic rollback; Z4 (policy enforcer, secrets broker, t'
+            'he verifier, signing keys) stays proposal-only - a builder that could rewrite its own judge would le'
+            'ave no check that could be trusted.'
+        ),
+    }),
+    ('EVO-003', {
+        "status": MISSING,
+        "next_action": (
+            'RULING 2026-10-08c (owner, docs/plans/build-harness/00-owner-directive-2026-10-08c.md): evolution ru'
+            'ns on triggers, in an overnight mode, AND automatically when idle; a bug or problem FRIDAY finds in '
+            'its own upgrade path is repaired without asking; research missions are autonomous. Every run still h'
+            'as a named objective, acceptance criteria, a per-experiment budget and a termination condition (the '
+            'daily cap is off, so the per-experiment budget is the only spend bound). Zones Z1-Z3 promote autonom'
+            'ously after independent verification with automatic rollback; Z4 (policy enforcer, secrets broker, t'
+            'he verifier, signing keys) stays proposal-only - a builder that could rewrite its own judge would le'
+            'ave no check that could be trusted.'
+        ),
+    }),
+    ('FAB-003', {
+        "status": MISSING,
+        "next_action": (
+            'RULING 2026-10-08c (owner, docs/plans/build-harness/00-owner-directive-2026-10-08c.md): routing is a'
+            "utomatic - the best model per task from measured quality and cost, not the person's pick; quality wh"
+            'ere the task needs it, not everywhere. Rank eligible routes by cost per verified completed task.'
+        ),
+    }),
 ]
 
 

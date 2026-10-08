@@ -1477,4 +1477,17 @@ def table(R7):
            impl='Not built; the requirements it extends are named in its acceptance.',
            files=['friday/voice_brain.py'],
            next_action="Owner 2026-10-08 (docs/plans/build-harness/00-owner-directive-2026-10-08b.md): FRIDAY is the only supervisor; models are interchangeable resources and Claude Code, Codex, Hermes, Gemini CLI and OpenCode are execution runtimes. The proposal ranked the registry, adapters, budgets and benchmark data P0; ranked P1 here behind the running P0 burn-down because MODEL-001/004/012, EVAL-003 and ORCH-* already carry much of it (assumed; the owner may re-rank). Owner decision pending: Quality First Within Subscription for coding with Free First for routine work (the proposal's recommendation), or Free First everywhere."),
+        # --- Amendment A16, added from the owner's answers (2026-10-08 c)
+        R7('FAB-009', '110', "A multi-model deliberation mode: two or more models independently produce an answer or a set of ideas, critique and judge each other's work, revise, and FRIDAY returns the verdict they converge on, with the points they still disagree on stated; rounds, models and budget are bounded.", 'P1',
+           acceptance="Asked for the best ideas on a question, two different models each propose, each judges the other's proposals with reasons, and the final answer lists what both endorse plus the open disagreements; a deliberation that does not converge within its round limit says so instead of inventing agreement. Owner 2026-10-08.",
+           status='MISSING',
+           impl='Not built.',
+           files=['friday/model_gateway.py'],
+           next_action='Owner 2026-10-08 (c) (docs/plans/build-harness/00-owner-directive-2026-10-08c.md). Ranked P1 behind the running P0 burn-down (assumed; the owner may re-rank).'),
+        R7('HARN-001', '110', "The FRIDAY engineering harness - rules, roles and agents, skills, hooks, verification gates, budgets, and FRIDAY's MCP tools - is available in Hermes as well as in Claude Code, generated from one source so the two never drift.", 'P1',
+           acceptance="Working in Hermes with the friday profile, a task follows the same plan-first, test-first and verification rules, sees the same roles and skills, and reaches FRIDAY's MCP tools; a change to the source harness reaches both tools from one regeneration. Research Hermes' own extension points (skills, hooks, profiles, MCP servers, SOUL) first. Owner 2026-10-08.",
+           status='MISSING',
+           impl='Not built.',
+           files=['friday/hermes_bridge.py'],
+           next_action='Owner 2026-10-08 (c) (docs/plans/build-harness/00-owner-directive-2026-10-08c.md). Ranked P1 behind the running P0 burn-down (assumed; the owner may re-rank).'),
     ]
