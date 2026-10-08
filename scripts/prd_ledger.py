@@ -3965,6 +3965,36 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Benchmarked 965 dev cases: best hybrid+cards R@1 0.447, R@3 0.696 (base embedder 0.437/0.692; reranker 0.42/0.59 on 100, 1.6 s each). Targets 0.90/0.97 missed, so Router.search is not rewired; PARTIAL. (build run, commit 2fd4e2abb)',
         "next_action": "GAPS: No measured ranking reaches R@1 >= 0.90 and R@3 >= 0.97 on the development split (best: hybrid+cards, tool_embedder, 0.4466 / 0.6964), so staged ranking was not wired into Router.search and legacy_search stays the shipped ranking.; The 'staged recall on development cases > 0.759' test in tests/test_capability_router.py was not added: with no wiring it would fail, and the threshold must not be weakened. Staged hybrid+cards Success@5 is 0.7534, below legacy recall@6 0.7627.; Reranker measured on the first 100 requests only (about 1.6 s per request, so about 25 min for all 965): R@1 0.42 / R@3 0.59 against 0.40 / 0.62 without it on the same 100. No gain, so not a route to the targets.; Holdout split not run (out of scope).; implementer did not claim acceptance met",
     }),
+    ('BRAIN-001', {
+        "status": MISSING,
+        "current_implementation": 'No structured Project Brain; related pieces (memory, objectives, failure fingerprints) live in separate stores.',
+        "next_action": "Re-apply the Project Brain slice kept at tag wip/brain-001-1008: `git diff HEAD...wip/brain-001-1008` shows commit 70ec74e (Project Brain records). It passed RED/GREEN and failed integration only on tests/test_golden_suite.py::test_corpus_generator_is_idempotent, which it did not touch and which was fixed on main since (4313b00). Re-apply it with Edit, run its own tests, and do NOT edit docs/golden/objectives.jsonl, scripts/golden_corpus.py or tests/test_golden_suite.py (a killed run's out-of-scope edits to them are saved in data/build_runs/BRAIN-001.golden_edits.diff and are not part of this slice). Triage notes: Code against the acceptance (round-trip per record type; human-readable Markdown export) appears complete per the facts; I did not run tests. What remains is integration: land 70ec74e on a base that contains 4313b00 (the integration line, not main), with the worktree's golden edits dropped, then pass the chunked gate and the verifier. Because the advice file says the failure did not reproduce, a g",
+    }),
+    ('EVAL-005', {
+        "status": MISSING,
+        "current_implementation": 'Token usage is recorded per objective by the gateway; nothing joins it with verified outcomes into a productivity report.',
+        "next_action": 'Re-apply ONLY friday/productivity.py and tests/test_productivity.py from tag wip/eval-005-1008 (`git diff HEAD...wip/eval-005-1008 -- friday/productivity.py tests/test_productivity.py`). That commit (2f0dc79) passed RED/GREEN; its cherry-pick conflicted only because it also carried data/prd_v7_requirements.json, data/prd_v7_verdict.json, docs/implementation/PRD_V7_LEDGER.md and scripts/prd_v7_table.py - runtime state and ledger files a build never commits. Re-apply the two code files with Edit and run tests/test_productivity.py.',
+    }),
+    ('CAP-004', {
+        "status": VERIFIED,
+        "current_implementation": 'Capability now carries read_only, consequential, reversible, idempotent, external_side_effect, requires_confirmation. All 192 are classified from side_effect/risk/policy plus two small override sets. registry_problems() refuses undeclared hints and a consequential capability with no confirmation path; it runs at import. (build run, commit 8142d753e)',
+        "next_action": '',
+        "evidence": "controller, 2026-10-08 (after 401999e): the acceptance is met by 8142d75 (INTEGRATED, RED/GREEN OK); the named tests pass at f5c035f. A later RESUME run re-verified it and made no commit, which the integrator refused ('run has no commit'). Not separately confirmed: the summary clause 'policy and verification read them'.",
+        "tests": ['tests/test_capability_hints.py::test_a_consequential_capability_with_no_confirmation_path_is_refused', 'tests/test_capability_hints.py::test_a_declared_confirmation_must_match_what_policy_does'],
+    }),
+    ('CTX-004', {
+        "status": PARTIAL,
+        "current_implementation": 'friday/context_health.py scores PRD 19.5 metrics and maps HEALTHY/NOISY/DEGRADED/ROTTING to prune/summarize/fold/handoff, guarded by CriticalFactSet. Wired into aggregate(), WorkingSet.telemetry and _memory_context. golden_context.py long-run benchmark passes 7/7. (build run, commit 34afaa104)',
+        "next_action": 'Blocked on seams outside CTX-004: the advisory fold/handoff and the unmeasured failed_attempt_density, struggle_score and retrieval_confidence need the PRD 19.6 temp branch and a session-restart seam, which do not exist yet. Unpark when they do.',
+        "files": ['friday/context_health.py', 'friday/memory_stack.py'],
+        "tests": ['tests/test_context_health.py'],
+        "blocker": 'needs the PRD 19.6 temp branch and a session-restart seam (not built)',
+    }),
+    ('CYBER-002', {
+        "status": PARTIAL,
+        "current_implementation": 'Added cyber_lab.run_routed: a domain_gate cyber_lab decision is the only route that reaches a lab provider; other routes or unknown providers yield hash-bound refusal evidence. Contract and tier gating unchanged. (build run, commit f9ca71f8c)',
+        "next_action": 'GAPS: live wiring - no fabric descriptor or executor calls friday/cyber_lab.py run_routed; the acceptance itself (tests/test_cyber_lab.py) is met | RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08e.md): keep extra scope inside the row: build the wiring as a fabric adapter (friday/fabric_adapters/, DESCRIPTOR + start/stop/health/call per AGENTS.md); it touches the upstream lock, the matrix and the tool-count tests, so plan it in slices.',
+    }),
 ]
 
 
