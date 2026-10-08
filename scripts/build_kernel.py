@@ -145,10 +145,34 @@ def code_map(row: dict, runs_dir: Path = RUNS_DIR) -> str:
     return code_capsule.capsule(sorted(files)) if files else ""
 
 
+def gap_list(row: dict) -> bool:
+    """True when next_action is the integrator's "GAPS: ..." list - what is still
+    missing, not a packet saying what to build. Dispatched as a packet it gave
+    workers nothing to edit: empty commits, then parks (APPROVAL-001, CAP-003,
+    ASSUME-001, BG-001; triage 2026-10-08)."""
+    return str(row.get("next_action") or "").lstrip().startswith("GAPS:")
+
+
+def _scouted_before_integration(req: str, runs_dir: Path) -> bool:
+    """True when the last integration landed after the scout reported, so the
+    gaps it left are newer than the findings."""
+    try:
+        scouted = (runs_dir / f"{req}.scout.json").stat().st_mtime
+        integrated = (runs_dir / f"{req}.integration.json").stat().st_mtime
+    except OSError:
+        return False
+    return scouted < integrated
+
+
 def mode_for(row: dict, runs_dir: Path = RUNS_DIR) -> str:
     """SCOUT when the row is too vague to build (no known surface, no cited
-    tests, blank acceptance) and no scout has reported yet; otherwise SHIP."""
-    decision, _ = agent_utility(row, {"has_findings": load_findings(row["id"], runs_dir) is not None})
+    tests, blank acceptance) or its next_action is a gap list, and no scout has
+    reported since; otherwise SHIP."""
+    gaps = gap_list(row)
+    findings = load_findings(row["id"], runs_dir)
+    if findings is not None and gaps and _scouted_before_integration(row["id"], runs_dir):
+        findings = None
+    decision, _ = agent_utility(row, {"has_findings": findings is not None, "gap_list": gaps})
     return decision["orient"]
 
 
@@ -165,7 +189,8 @@ def agent_utility(row: dict, context: dict | None = None) -> tuple[dict, list[st
     (the change touches protected files), attempt (the attempt about to run),
     localized (the failure is small), retry_context_growth (last retry's context
     over its predecessor's), slots (free worker slots), overlap (the file set
-    collides with a running job), failures (repairs already spent)."""
+    collides with a running job), failures (repairs already spent), gap_list
+    (next_action is the integrator's gap list, not a packet)."""
     ctx = context or {}
     reasons: list[str] = []
     known = bool(surface(row)) and bool(row.get("tests")) and bool(str(row.get("acceptance", "")).strip())
@@ -175,6 +200,9 @@ def agent_utility(row: dict, context: dict | None = None) -> tuple[dict, list[st
     elif not known:
         orient = "SCOUT"
         reasons.append("surface, tests or acceptance unknown")
+    elif ctx.get("gap_list"):
+        orient = "SCOUT"
+        reasons.append("next_action is a gap list, not a packet")
     else:
         orient = "SHIP"
         reasons.append("surface, tests and acceptance known")

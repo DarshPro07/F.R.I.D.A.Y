@@ -545,6 +545,24 @@ def test_mode_for_scouts_vague_rows_until_findings_exist(tmp_path):
     assert K.mode_for(vague, tmp_path) == "SHIP"
 
 
+def test_a_gap_list_is_scouted_before_it_is_built(tmp_path):
+    # Triage 2026-10-08: the integrator stores "GAPS: ..." as next_action; dispatched
+    # as a packet it gave workers nothing to edit - empty commits, then parks.
+    good = dict(row("R"), tests=["tests/t.py"])
+    gaps = dict(good, next_action="GAPS: verifier did not PASS")
+    assert K.mode_for(good, tmp_path) == "SHIP"
+    assert K.mode_for(gaps, tmp_path) == "SCOUT"
+    integ, scout = tmp_path / "R.integration.json", tmp_path / "R.scout.json"
+    integ.write_text("{}")
+    scout.write_text(json.dumps({"gap": "g"}))
+    os.utime(integ, (1000, 1000))
+    os.utime(scout, (2000, 2000))
+    assert K.mode_for(gaps, tmp_path) == "SHIP"     # the scout reported after the gaps
+    os.utime(scout, (500, 500))
+    assert K.mode_for(gaps, tmp_path) == "SCOUT"    # findings older than the gaps describe old code
+    assert K.mode_for(good, tmp_path) == "SHIP"     # a real packet still ships
+
+
 def test_budget_table_and_class_choice():
     assert K.BUDGETS == {"SCOUT": (8, 0.75, 900), "MICRO": (20, 1.5, 1500),
                          "NORMAL": (25, 3.0, 2700), "COMPLEX": (40, 6.0, 4500),
@@ -1486,7 +1504,7 @@ def test_mode_for_goes_through_agent_utility(monkeypatch, tmp_path):
     real = K.agent_utility
     monkeypatch.setattr(K, "agent_utility", lambda r, c=None: seen.append(c) or real(r, c))
     assert K.mode_for(row("R-1", files=()), tmp_path) == "SCOUT"
-    assert seen == [{"has_findings": False}]
+    assert seen == [{"has_findings": False, "gap_list": False}]
 
 
 def test_launch_writes_a_started_job_and_finalize_closes_it(monkeypatch, repo, tmp_path):
