@@ -325,9 +325,10 @@ def test_evidence_changes_the_pick(project, monkeypatch):
     monkeypatch.setattr(R, 'BY_ID', {e.id: e for e in both})
     monkeypatch.setattr(R.shutil, 'which', lambda name: f"/usr/bin/{name}")
     record = EV.Record()
+    stamp = {'build_commit': '0a1b2c3', 'verifier_fingerprint': 'f00d'}
     for _ in range(3):
-        record.add(EV.Attempt(task='widget', agent='opencode', verdict=EV.PASSED, exit_code=0))
-        record.add(EV.Attempt(task='widget', agent='claude', verdict=EV.FAILED, exit_code=1))
+        record.add(EV.Attempt(task='widget', agent='opencode', verdict=EV.PASSED, exit_code=0, **stamp))
+        record.add(EV.Attempt(task='widget', agent='claude', verdict=EV.FAILED, exit_code=1, **stamp))
     run = D.for_goal('add a shrink method', project)
     run.project = 'widget'
     choice = run.pick(record=record)

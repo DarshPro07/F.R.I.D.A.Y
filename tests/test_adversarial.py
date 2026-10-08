@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 
 from friday import adversarial as A
+from friday import build_identity
 from friday import contracts as c
 from friday import evaluation as E
 from friday import promotion as PR
@@ -180,16 +181,33 @@ def test_empty_diff_is_inconclusive_and_unavailable_reviewer_is_honest():
     assert down.verdict == A.INCONCLUSIVE and down.error == "down"
 
 
-def _passing_attempt():
-    return E.Attempt(task="t", agent="hermes", verdict=E.PASSED, exit_code=0, detail="ok")
+def _passing_attempt(workspace=None):
+    """
+    A versioned pass. Given a `workspace` it is a repository, and the pass was
+    judged at its head - the stamp the gate compares with the workspace.
+    """
+    commit = "0a1b2c3"
+    if workspace is not None:
+        import subprocess
+
+        if not (workspace / ".git").exists():
+            for args in (("init", "-q"), ("config", "user.email", "t@t"),
+                         ("config", "user.name", "t")):
+                subprocess.run(["git", "-C", str(workspace), *args], check=True)
+            (workspace / "seed.txt").write_text("seed\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(workspace), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(workspace), "commit", "-qm", "seed"], check=True)
+        commit = build_identity.workspace_build(workspace).commit
+    return E.Attempt(task="t", agent="hermes", verdict=E.PASSED, exit_code=0, detail="ok",
+                     build_commit=commit, verifier_fingerprint="f00d")
 
 
 def test_promotion_refuses_a_consequential_change_without_independent_review(tmp_path):
     changed = tuple(f"src/m{i}.py" for i in range(PR.CONSEQUENTIAL_FILES + 1))
-    d = PR.decide(tmp_path, changed, attempt=_passing_attempt(), approved=True)
+    d = PR.decide(tmp_path, changed, attempt=_passing_attempt(tmp_path), approved=True)
     assert not d.allowed and d.reason == PR.NOT_INDEPENDENTLY_REVIEWED
     # A small change does not need the second authority.
-    small = PR.decide(tmp_path, ("src/m0.py",), attempt=_passing_attempt(), approved=True)
+    small = PR.decide(tmp_path, ("src/m0.py",), attempt=_passing_attempt(tmp_path), approved=True)
     assert small.checks[2] == {"check": "independent_review", "ok": True,
                                "detail": "not required at this size"}
 
@@ -199,7 +217,8 @@ def test_promotion_refuses_a_disputed_review_and_accepts_a_confirmed_one(tmp_pat
     disputed = A.ReviewEvidence(verdict=A.DISPUTED, findings=("m2.py breaks on empty input",),
                                 claim_matches_diff="partly", confidence=80,
                                 reviewed_by="reviewer:model_gateway", independent_of="hermes")
-    d = PR.decide(tmp_path, changed, attempt=_passing_attempt(), approved=True, review=disputed)
+    d = PR.decide(tmp_path, changed, attempt=_passing_attempt(tmp_path), approved=True,
+                  review=disputed)
     assert not d.allowed and d.reason == PR.REVIEW_DISPUTED
     assert "empty input" in d.detail
     confirmed = A.ReviewEvidence(verdict=A.CONFIRMED, findings=(), claim_matches_diff="yes",
@@ -208,7 +227,7 @@ def test_promotion_refuses_a_disputed_review_and_accepts_a_confirmed_one(tmp_pat
     for f in changed:
         (tmp_path / f).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / f).write_text("x = 1\n", encoding="utf-8")
-    d = PR.decide(tmp_path, changed, attempt=_passing_attempt(), approved=True,
+    d = PR.decide(tmp_path, changed, attempt=_passing_attempt(tmp_path), approved=True,
                   review=confirmed)
     assert d.allowed, d.detail
     assert {"check": "independent_review", "ok": True,
@@ -220,7 +239,7 @@ def test_the_implementer_reviewing_itself_does_not_count(tmp_path):
     self_review = A.ReviewEvidence(verdict=A.CONFIRMED, findings=(), claim_matches_diff="yes",
                                    confidence=99, reviewed_by="hermes", independent_of="hermes")
     assert not self_review.independent
-    d = PR.decide(tmp_path, changed, attempt=_passing_attempt(), approved=True,
+    d = PR.decide(tmp_path, changed, attempt=_passing_attempt(tmp_path), approved=True,
                   review=self_review)
     assert not d.allowed and d.reason == PR.NOT_INDEPENDENTLY_REVIEWED
     assert any(ch["check"] == "independent_review" and "implementer" in ch["detail"]

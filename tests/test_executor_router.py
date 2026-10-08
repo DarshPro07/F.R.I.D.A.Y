@@ -16,12 +16,13 @@ def record():
 
 
 def _attempts(record, agent, passed, failed, task="build", seconds=10.0):
+    stamp = {"build_commit": "0a1b2c3", "verifier_fingerprint": "f00d"}
     for _ in range(passed):
         record.add(E.Attempt(task=task, agent=agent, verdict=E.PASSED,
-                             seconds=seconds, exit_code=0))
+                             seconds=seconds, exit_code=0, **stamp))
     for _ in range(failed):
         record.add(E.Attempt(task=task, agent=agent, verdict=E.FAILED,
-                             seconds=seconds, exit_code=1))
+                             seconds=seconds, exit_code=1, **stamp))
 
 
 @pytest.fixture

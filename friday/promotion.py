@@ -56,6 +56,13 @@ NOT_APPROVED = "NOT_APPROVED"
 
 NOTHING_TO_PROMOTE = "NOTHING_TO_PROMOTE"
 
+#: EVAL-001: a pass is evidence only when it names the build it judged and
+#: the verifier that judged it, and one judged at another commit is about
+#: other code.
+UNVERSIONED_EVAL = "UNVERSIONED_EVAL"
+
+EVAL_OF_ANOTHER_BUILD = "EVAL_OF_ANOTHER_BUILD"
+
 #: FR-012: the worker that implemented a consequential change is not the
 #: sole authority certifying it. A review by a different attribution is
 #: required past this many changed files; a DISPUTED review refuses.
@@ -297,6 +304,14 @@ def secrets_in(workspace: str | Path, changed, *,
     return found
 
 
+def _same_commit(one: str, other: str) -> bool:
+    """Whether two commit ids, either possibly abbreviated, name one commit."""
+    one, other = (one or "").strip(), (other or "").strip()
+    if min(len(one), len(other)) < 7 or "unknown" in (one, other):
+        return False
+    return one.startswith(other) or other.startswith(one)
+
+
 def decide(workspace: str | Path, changed, *, attempt=None,
            allowed_paths: tuple[str, ...] = (), base_commit: str = "",
            approved: bool = False, review=None,
@@ -306,7 +321,9 @@ def decide(workspace: str | Path, changed, *, attempt=None,
 
     `attempt` is a `friday.evaluation.Attempt` - the objective verdict on
     whether the work works. It is checked first because everything after it
-    is wasted if the tests failed.
+    is wasted if the tests failed. A pass must also be versioned - stamped
+    with the build it judged and the verifier's fingerprint - and (step 4)
+    the build it judged must be the commit the workspace is on now.
 
     `review` is a `friday.adversarial.ReviewEvidence` from a reviewer that
     is not the implementing worker (FR-012). A consequential change - more
@@ -349,7 +366,16 @@ def decide(workspace: str | Path, changed, *, attempt=None,
     if not attempt.passed:
         return decision.note("verified", False, attempt.detail[:200]).refuse(
             NOT_VERIFIED, f"the verifier failed with exit {attempt.exit_code}")
-    decision.note("verified", True, attempt.detail[-200:] if attempt.detail else "")
+    if not attempt.versioned:
+        return decision.note("verified", False, "no build or verifier stamp").refuse(
+            UNVERSIONED_EVAL,
+            "the pass names no build it judged or verifier that judged it, so "
+            "nobody can re-run it; an eval that cannot be reproduced promotes "
+            "nothing")
+    stamp = (f"{attempt.build_commit}{'+dirty' if attempt.build_dirty else ''} "
+             f"verifier {attempt.verifier_fingerprint}")
+    decision.note("verified", True, f"{stamp}: {attempt.detail[-160:]}"
+                  if attempt.detail else stamp)
 
     # 1b. FR-012: a second, independent authority for consequential changes.
     needs_review = (consequential if consequential is not None
@@ -425,6 +451,19 @@ def decide(workspace: str | Path, changed, *, attempt=None,
             return decision.note("base", False, detail).refuse(
                 WRONG_BASE, detail)
         decision.note("base", True, detail[:12])
+    # The base is checked first so a repository that moved under the run says
+    # so. Past it, the pass must be about the commit the workspace is on now:
+    # read fresh, not compared with `base_commit`, because a worker that
+    # commits its work moves HEAD off the base and the pass is about that head.
+    from friday import build_identity
+
+    judged = attempt.build_commit
+    now = build_identity.workspace_build(workspace).commit
+    if not _same_commit(judged, now):
+        detail = (f"the verifier judged {judged[:12]} and the workspace is "
+                  f"now on {now[:12]}")
+        return decision.note("eval_build", False, detail).refuse(
+            EVAL_OF_ANOTHER_BUILD, detail)
 
     # 5. Is there a secret in it? Before anyone is asked to look.
     leaked = secrets_in(workspace, changed)

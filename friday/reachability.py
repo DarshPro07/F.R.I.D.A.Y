@@ -311,6 +311,11 @@ KNOWN: dict[str, tuple[str, str]] = {
         "MODEL-006 slice 1 (c317b0d): lifts a route's safeguard exclusion for an operator through "
         'domain_gate.clear_route_exclusion; no operator command or endpoint calls it yet',
     ),
+    'promote_model': (
+        FUTURE,
+        'EVAL-001: promotes a model over its baseline only on versioned, same-verifier evidence; '
+        'no learned router consumes it yet',
+    ),
 }
 
 #: Never reported. Dunders and framework hooks are called by machinery, not

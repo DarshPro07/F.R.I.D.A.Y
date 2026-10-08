@@ -13,10 +13,13 @@ import pytest
 from friday import evaluation as E
 
 
-def _attempt(agent, verdict, seconds=10.0, task="build", model="", tokens=0):
+def _attempt(agent, verdict, seconds=10.0, task="build", model="", tokens=0,
+             commit="0a1b2c3", fingerprint="f00d"):
+    """A versioned attempt: judged at `commit` by the verifier `fingerprint`."""
     return E.Attempt(task=task, agent=agent, model=model, verdict=verdict,
                      seconds=seconds, tokens=tokens,
-                     exit_code=0 if verdict == E.PASSED else 1)
+                     exit_code=0 if verdict == E.PASSED else 1,
+                     build_commit=commit, verifier_fingerprint=fingerprint)
 
 
 @pytest.fixture
@@ -179,16 +182,81 @@ def test_the_suite_never_writes_the_live_record():
     assert E.record_path().resolve() != live.resolve()
 
 
+def _git(workspace, *args) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ("git", "-c", "user.name=t", "-c", "user.email=t@t", *args),
+        cwd=workspace, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+def _committed(workspace) -> str:
+    """Make the workspace a repository with one commit; its short head."""
+    _git(workspace, "init", "-q")
+    (workspace / "t.py").write_text("pass\n")
+    _git(workspace, "add", ".")
+    _git(workspace, "commit", "-q", "-m", "one")
+    return _git(workspace, "rev-parse", "--short", "HEAD")
+
+
 def test_graded_work_is_persisted_where_the_router_reads_it(workspace):
     """
     With no record of its own an attempt is still evidence: three passes
     are enough for `best_for` to name the agent on the next load.
     """
+    _committed(workspace)
     for _ in range(3):
         E.graded("build", "claude", workspace, _verifier("pass"))
     record = E.Record.load(E.record_path())
     assert [a.verdict for a in record.attempts] == [E.PASSED] * 3
     assert record.best_for("build") == "claude"
+
+
+def test_unversioned_passes_do_not_steer_the_router(workspace, record):
+    """
+    The live record once held 120 test-fixture rows with no build or
+    verifier on them. Graded outside a repository, or written before the
+    stamp, a pass names nothing that can be re-run and routes nothing.
+    """
+    for _ in range(3):
+        E.graded("build", "claude", workspace, _verifier("pass"), record=record)
+    assert {a.build_commit for a in record.attempts} == {"unknown"}
+    for _ in range(3):
+        record.add(E.Attempt(task="build", agent="codex", verdict=E.PASSED,
+                             exit_code=0))
+    assert not any(a.versioned for a in record.attempts)
+    assert record.best_for("build") is None
+
+
+def test_a_graded_attempt_is_versioned_and_linked_to_the_build(workspace):
+    """An eval names the build it judged and the command that judged it."""
+    head = _committed(workspace)
+
+    verifier = E.Verifier(command=(sys.executable, "t.py"), seconds=30.0,
+                          proves="the file runs")
+    first = E.graded("build", "claude", workspace, verifier)
+    # The stamp is the workspace's own commit, not the Friday process's.
+    assert first.build_commit == head
+    assert first.build_dirty is False
+    assert first.verifier_command == verifier.describe()
+    assert first.verifier_seconds == 30.0
+    assert first.verifier_proves == "the file runs"
+    stored = E.Record.load(E.record_path()).attempts[0]
+    assert stored.build_commit == head
+    assert stored.verifier_fingerprint == first.verifier_fingerprint != ""
+
+    # A later attempt in the same process sees the new state: not cached.
+    (workspace / "t.py").write_text("pass  # edited\n")
+    second = E.graded("build", "claude", workspace, verifier)
+    assert second.build_dirty is True
+    # Editing the file the verifier runs changes the verifier's identity.
+    assert second.verifier_fingerprint != first.verifier_fingerprint
+
+
+def test_a_workspace_that_is_not_a_repo_is_stamped_unknown(workspace):
+    attempt = E.graded("build", "claude", workspace, _verifier("pass"))
+    assert attempt.build_commit == "unknown"
 
 
 def test_a_failing_verifier_is_recorded_as_failed(workspace):
@@ -230,3 +298,85 @@ def test_an_unwritable_record_does_not_lose_the_attempt(workspace, monkeypatch,
         attempt = E.graded("build", "claude", workspace, _verifier("pass"))
     assert attempt.verdict == E.PASSED
     assert "could not persist the attempt" in caplog.text
+
+
+# --- model promotion (MODEL-003): only on reproducible evidence -----------
+
+def _scores(record, model, passed, failed, fingerprint="f00d", commit="0a1b2c3"):
+    for verdict in [E.PASSED] * passed + [E.FAILED] * failed:
+        record.add(_attempt("hermes", verdict, model=model,
+                            commit=commit, fingerprint=fingerprint))
+
+
+def test_a_model_that_beats_the_baseline_under_one_verifier_is_promoted(record):
+    _scores(record, "candidate", passed=3, failed=0)
+    _scores(record, "baseline", passed=2, failed=1)
+    promotion = record.promote_model("build", "candidate", baseline="baseline")
+    assert promotion.allowed and promotion.reason == E.PROMOTED
+    assert promotion.verifier_fingerprint == "f00d"
+    assert promotion.builds == ("0a1b2c3",)
+    assert promotion.candidate_score["pass_rate"] == 1.0
+    assert promotion.baseline_score["pass_rate"] == 0.667
+
+
+def test_unversioned_rows_never_promote_a_model(record):
+    """A row that names no build or verifier cannot be re-run."""
+    _scores(record, "candidate", passed=5, failed=0, fingerprint="", commit="")
+    _scores(record, "baseline", passed=0, failed=5, fingerprint="", commit="")
+    promotion = record.promote_model("build", "candidate", baseline="baseline")
+    assert not promotion.allowed and promotion.reason == E.NOT_COMPARABLE
+    assert promotion.unversioned == 10
+
+
+def test_pass_rates_under_different_verifiers_are_not_compared(record):
+    """Two pass rates under different tests are two different exams."""
+    _scores(record, "candidate", passed=3, failed=0, fingerprint="easy")
+    _scores(record, "baseline", passed=1, failed=2, fingerprint="hard")
+    promotion = record.promote_model("build", "candidate", baseline="baseline")
+    assert not promotion.allowed and promotion.reason == E.NOT_COMPARABLE
+
+
+def test_a_tie_keeps_the_baseline(record):
+    _scores(record, "candidate", passed=3, failed=1)
+    _scores(record, "baseline", passed=3, failed=1)
+    promotion = record.promote_model("build", "candidate", baseline="baseline")
+    assert not promotion.allowed
+    assert promotion.reason == E.DOES_NOT_BEAT_BASELINE
+
+
+def test_too_few_attempts_promote_nothing(record):
+    _scores(record, "candidate", passed=2, failed=0)
+    _scores(record, "baseline", passed=0, failed=3)
+    promotion = record.promote_model("build", "candidate", baseline="baseline")
+    assert not promotion.allowed
+    assert promotion.reason == E.NOT_ENOUGH_EVIDENCE
+
+
+def test_a_model_is_not_promoted_over_itself(record):
+    _scores(record, "same", passed=3, failed=0)
+    promotion = record.promote_model("build", "same", baseline="same")
+    assert not promotion.allowed and promotion.reason == E.NOT_COMPARABLE
+
+
+def test_graded_evidence_promotes_a_model(workspace, record):
+    """The same graded() path that gates code feeds model promotion."""
+    head = _committed(workspace)
+    marker = workspace / "works"
+    # One verifier for both models; what each model left behind decides it.
+    verifier = _verifier(
+        f"import os, sys; sys.exit(0 if os.path.exists({str(marker)!r}) else 1)")
+    marker.write_text("yes")
+    for _ in range(3):
+        E.graded("build", "hermes", workspace, verifier, model="candidate",
+                 record=record)
+    E.graded("build", "hermes", workspace, verifier, model="baseline",
+             record=record)
+    marker.unlink()
+    for _ in range(2):
+        E.graded("build", "hermes", workspace, verifier, model="baseline",
+                 record=record)
+    assert [a.verdict for a in record.attempts] == [E.PASSED] * 4 + [E.FAILED] * 2
+    promotion = record.promote_model("build", "candidate", baseline="baseline")
+    assert promotion.allowed, promotion.detail
+    assert promotion.builds == (head,)
+    assert promotion.verifier_fingerprint == verifier.fingerprint(workspace)

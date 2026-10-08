@@ -119,11 +119,14 @@ def _from_manifest() -> dict:
     return found if isinstance(found, dict) else {}
 
 
-def _git(*arguments: str) -> str:
+_PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _git(*arguments: str, cwd: str | None = None) -> str:
     try:
         return subprocess.run(
             ("git", *arguments), capture_output=True, text=True, timeout=5,
-            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            cwd=cwd or _PACKAGE_ROOT,
         ).stdout.strip()
     except Exception:                                       # noqa: BLE001
         return ""
@@ -178,6 +181,25 @@ def current(*, refresh: bool = False) -> Build:
         pid=os.getpid(),
     )
     return _CACHED
+
+
+def workspace_build(workspace: "str | os.PathLike") -> Build:
+    """
+    The build of one *workspace*: its own commit and dirty flag, read fresh.
+
+    `current()` describes the running Friday process; a verifier judges a
+    project or worktree that may sit at another commit or in another repo.
+    Never cached, because a workspace changes between attempts. The registry
+    hash is only meaningful for Friday's own tree, so it is empty elsewhere.
+    """
+    root = os.path.abspath(os.fspath(workspace))
+    commit = _git("rev-parse", "--short", "HEAD", cwd=root) or "unknown"
+    dirty = bool(_git("status", "--porcelain", cwd=root))
+    ours = os.path.normcase(os.path.realpath(root)) == os.path.normcase(
+        os.path.realpath(_PACKAGE_ROOT))
+    return Build(commit=commit, dirty=dirty,
+                 registry_hash=registry_hash() if ours else "",
+                 started_at=_STARTED, pid=os.getpid())
 
 
 def expected() -> Build:

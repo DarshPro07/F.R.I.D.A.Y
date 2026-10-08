@@ -6,6 +6,7 @@ mode of a gate is that it opens.
 """
 import sys
 import pytest
+from friday import build_identity
 from friday import evaluation as E
 from friday import promotion as P
 from friday.epistemic import LedgerClaim
@@ -16,12 +17,21 @@ def workspace(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("def main(): return 1\n",
                                              encoding="utf-8")
+    _repo(tmp_path)
     return tmp_path
 
 
-def _passed(detail: str = "3 passed"):
+def _passed(workspace=None, detail: str = "3 passed", commit: str = "",
+            fingerprint: str = "f00d"):
+    """
+    A pass by the verifier `fingerprint`, judged at `commit` - by default
+    the commit `workspace` is on now, read the way `graded` reads it.
+    """
+    if not commit and workspace is not None:
+        commit = build_identity.workspace_build(workspace).commit
     return E.Attempt(task="t", agent="claude", verdict=E.PASSED,
-                     exit_code=0, detail=detail)
+                     exit_code=0, detail=detail, build_commit=commit,
+                     verifier_fingerprint=fingerprint)
 
 
 def _failed():
@@ -60,19 +70,19 @@ def test_an_inconclusive_verifier_is_not_a_pass(workspace):
 
 
 def test_a_verified_run_nobody_approved_is_refused(workspace):
-    decision = P.decide(workspace, ["src/app.py"], attempt=_passed())
+    decision = P.decide(workspace, ["src/app.py"], attempt=_passed(workspace))
     assert not decision.allowed
     assert decision.reason == P.NOT_APPROVED
 
 
 def test_a_run_that_changed_nothing_is_refused(workspace):
-    decision = P.decide(workspace, [], attempt=_passed(), approved=True)
+    decision = P.decide(workspace, [], attempt=_passed(workspace), approved=True)
     assert not decision.allowed
     assert decision.reason == P.NOTHING_TO_PROMOTE
 
 
 def test_a_verified_approved_in_scope_run_is_allowed(workspace):
-    decision = P.decide(workspace, ["src/app.py"], attempt=_passed(),
+    decision = P.decide(workspace, ["src/app.py"], attempt=_passed(workspace),
                         allowed_paths=("src/",), approved=True)
     assert decision.allowed, decision.detail
     assert decision.reason == ""
@@ -80,7 +90,7 @@ def test_a_verified_approved_in_scope_run_is_allowed(workspace):
 
 def test_a_file_outside_the_scope_is_refused(workspace):
     decision = P.decide(workspace, ["src/app.py", "deploy/prod.yaml"],
-                        attempt=_passed(), allowed_paths=("src/",),
+                        attempt=_passed(workspace), allowed_paths=("src/",),
                         approved=True)
     assert not decision.allowed
     assert decision.reason == P.OUT_OF_SCOPE
@@ -92,7 +102,7 @@ def test_an_unscoped_run_is_not_blocked_by_the_scope_check(workspace):
     The check can only be as strict as the scope it was given. Refusing every
     run that never declared one would just mean nobody declares one.
     """
-    decision = P.decide(workspace, ["anywhere/thing.py"], attempt=_passed(),
+    decision = P.decide(workspace, ["anywhere/thing.py"], attempt=_passed(workspace),
                         allowed_paths=(), approved=True)
     assert decision.allowed
 
@@ -102,7 +112,7 @@ def test_a_forbidden_file_is_refused_even_when_in_scope(workspace):
     A run that edited its own permissions is not a run whose result can be
     trusted to say whether it should have been allowed to.
     """
-    decision = P.decide(workspace, ["src/app.py", ".env"], attempt=_passed(),
+    decision = P.decide(workspace, ["src/app.py", ".env"], attempt=_passed(workspace),
                         allowed_paths=(), approved=True)
     assert not decision.allowed
     assert decision.reason == P.OUT_OF_SCOPE
@@ -111,7 +121,7 @@ def test_a_forbidden_file_is_refused_even_when_in_scope(workspace):
 
 @pytest.mark.parametrize("name", ["id_rsa", ".npmrc", "credentials.json"])
 def test_the_never_list_holds(workspace, name):
-    decision = P.decide(workspace, [name], attempt=_passed(), approved=True)
+    decision = P.decide(workspace, [name], attempt=_passed(workspace), approved=True)
     assert not decision.allowed
 
 
@@ -124,7 +134,7 @@ def test_the_never_list_holds(workspace, name):
 def test_a_secret_in_a_changed_file_is_refused(workspace, secret):
     (workspace / "src" / "config.py").write_text(f'KEY = "{secret}"\n',
                                                  encoding="utf-8")
-    decision = P.decide(workspace, ["src/config.py"], attempt=_passed(),
+    decision = P.decide(workspace, ["src/config.py"], attempt=_passed(workspace),
                         approved=True)
     assert not decision.allowed
     assert decision.reason == P.SECRET_IN_DIFF
@@ -137,7 +147,7 @@ def test_the_secret_scan_runs_before_anyone_is_asked_to_approve(workspace):
     """
     (workspace / "src" / "config.py").write_text(
         'KEY = "ghp' '_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n', encoding="utf-8")
-    decision = P.decide(workspace, ["src/config.py"], attempt=_passed(),
+    decision = P.decide(workspace, ["src/config.py"], attempt=_passed(workspace),
                         approved=False)
     assert decision.reason == P.SECRET_IN_DIFF, \
         "it refused for want of approval before noticing the secret"
@@ -148,19 +158,19 @@ def test_ordinary_code_is_not_called_a_secret(workspace):
     (workspace / "src" / "app.py").write_text(
         "TOKEN_NAME = 'authorization'\n"
         "def sign(key): return f'Bearer {key}'\n", encoding="utf-8")
-    decision = P.decide(workspace, ["src/app.py"], attempt=_passed(),
+    decision = P.decide(workspace, ["src/app.py"], attempt=_passed(workspace),
                         approved=True)
     assert decision.allowed, decision.detail
 
 
 def test_a_binary_or_missing_file_does_not_break_the_scan(workspace):
     decision = P.decide(workspace, ["src/app.py", "src/gone.py"],
-                        attempt=_passed(), approved=True)
+                        attempt=_passed(workspace), approved=True)
     assert decision.allowed
 
 
 def test_every_check_that_ran_is_recorded(workspace):
-    decision = P.decide(workspace, ['src/app.py'], attempt=_passed(), allowed_paths=('src/',), approved=True)
+    decision = P.decide(workspace, ['src/app.py'], attempt=_passed(workspace), allowed_paths=('src/',), approved=True)
     names = [c['check'] for c in decision.checks]
     # FR-012 added 'independent_review' between verified and scope: a one-file
     # change records it as not required, and it still shows in the trail.
@@ -177,7 +187,7 @@ def test_a_refusal_says_which_check_failed(workspace):
 
 
 def test_the_decision_serialises_for_a_report(workspace):
-    decision = P.decide(workspace, ["src/app.py"], attempt=_passed(),
+    decision = P.decide(workspace, ["src/app.py"], attempt=_passed(workspace),
                         approved=True)
     as_dict = decision.as_dict()
     assert as_dict["allowed"] is True
@@ -188,7 +198,7 @@ def test_the_decision_serialises_for_a_report(workspace):
 def test_a_decision_links_the_ledger_claims_it_relied_on(workspace):
     relied_on = LedgerClaim(claim="the vendor API is stable", status="inferred")
 
-    decision = P.decide(workspace, ["src/app.py"], attempt=_passed(),
+    decision = P.decide(workspace, ["src/app.py"], attempt=_passed(workspace),
                         approved=True, claims=[relied_on, "clm_0123456789ab"])
 
     assert decision.allowed
@@ -208,8 +218,8 @@ def test_a_refused_decision_still_links_its_claims(workspace):
 
 def test_a_claim_link_that_is_not_an_id_is_rejected(workspace):
     with pytest.raises(TypeError):
-        P.decide(workspace, ["src/app.py"], attempt=_passed(), approved=True,
-                 claims=[{"claim": "not an id"}])
+        P.decide(workspace, ["src/app.py"], attempt=_passed(workspace),
+                 approved=True, claims=[{"claim": "not an id"}])
 
 
 def test_a_bare_claim_id_string_is_rejected_not_shredded_into_characters(workspace):
@@ -218,8 +228,8 @@ def test_a_bare_claim_id_string_is_rejected_not_shredded_into_characters(workspa
     corrupt the link instead of raising. Reject it the same way a malformed
     entry in a list is rejected."""
     with pytest.raises(TypeError):
-        P.decide(workspace, ["src/app.py"], attempt=_passed(), approved=True,
-                 claims="clm_0123456789ab")
+        P.decide(workspace, ["src/app.py"], attempt=_passed(workspace),
+                 approved=True, claims="clm_0123456789ab")
 
 
 def test_a_passing_verifier_passes(workspace):
@@ -273,7 +283,7 @@ def test_tool_debris_is_refused(workspace, path):
     A reviewer who has to skip six leftovers skims the seventh, which is where
     the real problem is hiding.
     """
-    decision = P.decide(workspace, ['src/app.py', path], attempt=_passed(), approved=True)
+    decision = P.decide(workspace, ['src/app.py', path], attempt=_passed(workspace), approved=True)
     assert not decision.allowed
     assert decision.reason == P.DEBRIS_IN_DIFF
 
@@ -285,7 +295,7 @@ def test_machine_configuration_is_refused(workspace, path):
     allowed to do next time - which is what Graft's own `--no-global` exists
     to prevent.
     """
-    decision = P.decide(workspace, ['src/app.py', path], attempt=_passed(), approved=True)
+    decision = P.decide(workspace, ['src/app.py', path], attempt=_passed(workspace), approved=True)
     assert not decision.allowed
     assert decision.reason == P.GLOBAL_CONFIG_CHANGED
 
@@ -293,7 +303,7 @@ def test_machine_configuration_is_refused(workspace, path):
 def test_an_unreviewed_binary_is_refused(workspace):
     blob = workspace / 'src' / 'vendor.dll'
     blob.write_bytes(b'\x00' * (P.SMALL_BINARY + 1))
-    decision = P.decide(workspace, ['src/app.py', 'src/vendor.dll'], attempt=_passed(), approved=True)
+    decision = P.decide(workspace, ['src/app.py', 'src/vendor.dll'], attempt=_passed(workspace), approved=True)
     assert not decision.allowed
     assert decision.reason == P.UNEXPECTED_BINARY
 
@@ -301,7 +311,7 @@ def test_an_unreviewed_binary_is_refused(workspace):
 def test_a_small_asset_is_allowed(workspace):
     """A small icon in a web app is normal, and refusing it teaches nothing."""
     (workspace / 'src' / 'favicon.ico').write_bytes(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00')
-    decision = P.decide(workspace, ['src/app.py', 'src/favicon.ico'], attempt=_passed(), approved=True)
+    decision = P.decide(workspace, ['src/app.py', 'src/favicon.ico'], attempt=_passed(workspace), approved=True)
     assert decision.allowed, decision.detail
 
 
@@ -311,7 +321,7 @@ def test_debris_is_caught_before_the_secret_scan(workspace):
     interesting part.
     """
     (workspace / 'src' / 'config.py').write_text('KEY = "ghp' '_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n', encoding='utf-8')
-    decision = P.decide(workspace, ['src/config.py', 'src/__pycache__/x.pyc'], attempt=_passed(), approved=True)
+    decision = P.decide(workspace, ['src/config.py', 'src/__pycache__/x.pyc'], attempt=_passed(workspace), approved=True)
     assert decision.reason == P.DEBRIS_IN_DIFF
 
 
@@ -320,17 +330,20 @@ def _repo(path):
 
     def git(*args):
         return subprocess.run(['git', '-C', str(path), *args], capture_output=True, text=True, check=True).stdout
-    git('init', '--quiet')
-    git('config', 'user.email', 't@t.invalid')
-    git('config', 'user.name', 't')
-    git('add', '-A')
-    git('commit', '--quiet', '-m', 'one')
+    # The `workspace` fixture already made it a repository: a second call
+    # reports that commit rather than failing to commit nothing.
+    if not (path / '.git').exists():
+        git('init', '--quiet')
+        git('config', 'user.email', 't@t.invalid')
+        git('config', 'user.name', 't')
+        git('add', '-A')
+        git('commit', '--quiet', '-m', 'one')
     return (git('rev-parse', 'HEAD').strip(), git)
 
 
 def test_the_same_base_is_accepted(workspace):
     head, _ = _repo(workspace)
-    decision = P.decide(workspace, ['src/app.py'], attempt=_passed(), base_commit=head, approved=True)
+    decision = P.decide(workspace, ['src/app.py'], attempt=_passed(commit=head[:7]), base_commit=head, approved=True)
     assert decision.allowed, decision.detail
 
 
@@ -344,7 +357,7 @@ def test_a_moved_base_is_refused(workspace):
     (workspace / 'other.txt').write_text('his own work\n', encoding='utf-8')
     git('add', '-A')
     git('commit', '--quiet', '-m', 'two')
-    decision = P.decide(workspace, ['src/app.py'], attempt=_passed(), base_commit=head, approved=True)
+    decision = P.decide(workspace, ['src/app.py'], attempt=_passed(commit=head[:7]), base_commit=head, approved=True)
     assert not decision.allowed
     assert decision.reason == P.WRONG_BASE
     assert head[:12] in decision.detail
@@ -352,14 +365,97 @@ def test_a_moved_base_is_refused(workspace):
 
 def test_no_base_given_is_not_checked(workspace):
     """The check can only be as strict as what it was told."""
-    decision = P.decide(workspace, ['src/app.py'], attempt=_passed(), approved=True)
+    decision = P.decide(workspace, ['src/app.py'], attempt=_passed(workspace), approved=True)
     assert decision.allowed
 
 
 def test_a_short_commit_prefix_still_matches(workspace):
     head, _ = _repo(workspace)
-    decision = P.decide(workspace, ['src/app.py'], attempt=_passed(), base_commit=head[:8], approved=True)
+    decision = P.decide(workspace, ['src/app.py'], attempt=_passed(commit=head[:7]), base_commit=head[:8], approved=True)
     assert decision.allowed, decision.detail
+
+
+def test_an_unversioned_pass_is_refused(workspace):
+    """A pass that names no build or verifier cannot be re-run."""
+    unstamped = E.Attempt(task="t", agent="claude", verdict=E.PASSED,
+                          exit_code=0, detail="3 passed")
+    decision = P.decide(workspace, ['src/app.py'], attempt=unstamped, approved=True)
+    assert not decision.allowed
+    assert decision.reason == P.UNVERSIONED_EVAL
+    outside_a_repo = _passed(commit="unknown")
+    decision = P.decide(workspace, ['src/app.py'], attempt=outside_a_repo, approved=True)
+    assert decision.reason == P.UNVERSIONED_EVAL
+
+
+def test_a_pass_judged_at_another_build_is_refused(workspace):
+    """The verdict is about the code it judged, not whatever is there now."""
+    head, _ = _repo(workspace)
+    decision = P.decide(workspace, ['src/app.py'], attempt=_passed(commit="deadbee"),
+                        base_commit=head, approved=True)
+    assert not decision.allowed
+    assert decision.reason == P.EVAL_OF_ANOTHER_BUILD
+    # Stamps are short commits (build_identity), so that is what the message names.
+    assert "deadbee" in decision.detail and head[:7] in decision.detail
+
+
+def test_the_gate_records_the_build_and_verifier_it_trusted(workspace):
+    """A graded pass links the promotion to the build it judged."""
+    head, _ = _repo(workspace)
+    attempt = E.graded("t", "claude", workspace,
+                       E.Verifier(command=(sys.executable, "-c", "pass")),
+                       record=E.Record())
+    decision = P.decide(workspace, ['src/app.py'], attempt=attempt,
+                        base_commit=head, approved=True)
+    assert decision.allowed, decision.detail
+    verified = next(c for c in decision.checks if c["check"] == "verified")
+    assert verified["detail"].startswith(f"{head[:7]}")
+    assert attempt.verifier_fingerprint in verified["detail"]
+
+
+def _commit_worker_change(workspace, git):
+    """What a worker that commits its own work leaves: HEAD one commit past the base."""
+    (workspace / 'src' / 'app.py').write_text('def main(): return 2\n', encoding='utf-8')
+    git('add', '-A')
+    git('commit', '--quiet', '-m', 'worker')
+    return git('rev-parse', 'HEAD').strip()
+
+
+def test_a_pass_stamped_with_the_workers_committed_head_is_accepted(workspace):
+    """
+    A worker that commits moves HEAD off the base it started from. The verifier
+    ran on that committed head and the stamp names it, so the pass is about the
+    code that would land, and refusing it for not being the base would refuse
+    every worker that commits.
+    """
+    base, git = _repo(workspace)
+    head = _commit_worker_change(workspace, git)
+    assert head != base
+    attempt = E.graded("t", "claude", workspace,
+                       E.Verifier(command=(sys.executable, "-c", "pass")),
+                       record=E.Record())
+    assert head.startswith(attempt.build_commit)
+    decision = P.decide(workspace, ['src/app.py'], attempt=attempt, approved=True)
+    assert decision.allowed, decision.detail
+    verified = next(c for c in decision.checks if c["check"] == "verified")
+    assert verified["detail"].startswith(attempt.build_commit)
+
+
+def test_a_pass_stamped_with_a_different_commit_is_refused_after_the_worker_commits(workspace):
+    """
+    The verdict was reached on the base; the worker then committed on top. The
+    stamp names a commit that is no longer the workspace's head, so the pass
+    speaks for code that is not the code being promoted.
+    """
+    base, git = _repo(workspace)
+    attempt = E.graded("t", "claude", workspace,
+                       E.Verifier(command=(sys.executable, "-c", "pass")),
+                       record=E.Record())
+    assert base.startswith(attempt.build_commit)
+    head = _commit_worker_change(workspace, git)
+    decision = P.decide(workspace, ['src/app.py'], attempt=attempt, approved=True)
+    assert not decision.allowed
+    assert decision.reason == P.EVAL_OF_ANOTHER_BUILD
+    assert base[:7] in decision.detail and head[:7] in decision.detail
 
 
 def test_a_directory_that_is_not_a_repository_is_refused_not_assumed(tmp_path):
