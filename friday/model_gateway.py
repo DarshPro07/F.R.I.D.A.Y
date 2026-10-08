@@ -1035,6 +1035,11 @@ class ModelGateway:
         cannot carry another resident model, which fails over like any other
         unavailable route.
 
+        The governor evicts a resident model under HIGH pressure, and its
+        cleanup must not block, so the cleanup only flags the eviction; this
+        thread, which owns the call, asks the worker to unload the model once
+        the call returns (the worker serves one request at a time anyway).
+
         A CLI provider never reaches the worker: the backend answers, and its
         reply is shaped like the worker's so the loop above cannot tell."""
         backend = self._cli.get(provider)
@@ -1052,14 +1057,37 @@ class ModelGateway:
             return self.worker.call("infer", params, timeout=timeout)
         from friday import governor as G
         gov = G.governor()
+        evicted = threading.Event()
         decision = gov.admit(G.MODEL, label=f"{provider}/{params.get('model', '')}"[:60],
-                             owner="model_gateway", deadline_s=timeout + 30.0)
+                             owner="model_gateway", deadline_s=timeout + 30.0,
+                             cleanup=evicted.set)
         if not decision.admitted:
             raise GatewayUnavailable(f"governor {decision.decision}: {decision.reason}")
         try:
             return self.worker.call("infer", params, timeout=timeout)
         finally:
             gov.release(decision.lease, retire_queue=False)
+            if evicted.is_set():
+                self._unload_local(provider, str(params.get("model") or ""))
+
+    def _unload_local(self, provider: str, model: str) -> None:
+        """Ask the worker to drop a local model the governor evicted. A failure
+        is logged, never raised: it must not replace the call's own result."""
+        try:
+            reply = self.worker.call("unload", {"provider": provider, "model": model},
+                                     timeout=15.0)
+        except Exception as exc:  # noqa: BLE001 - the infer result outranks the unload
+            logger.warning("governor evicted %s/%s but unloading it failed: %s",
+                           provider, model, exc)
+            return
+        if not reply.get("ok", True):
+            logger.warning("governor evicted %s/%s but the worker refused to unload it: %s",
+                           provider, model, (reply.get("error") or {}).get("message", ""))
+            return
+        result = reply.get("result") or {}
+        if result.get("supported") is False:
+            logger.warning("governor evicted %s/%s but it cannot be unloaded: %s",
+                           provider, model, result.get("reason", ""))
 
     # -- routing (FR-075) ---------------------------------------------------
 

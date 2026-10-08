@@ -18,6 +18,8 @@ per line, `id` echoed. Methods:
     {"id": 3, "method": "infer", "params": {ModelGatewayRequest}}
         -> {"id": 3, "ok": true, "result": {ModelGatewayResult}}
     {"id": 4, "method": "shutdown"}
+    {"id": 5, "method": "unload", "params": {"provider": ..., "model": ...}}
+        -> {"id": 5, "ok": true, "result": {"supported": bool, "unloaded": [...], "reason": ...}}
 
 The ModelGatewayRequest params understood here are `messages`, `provider`,
 `model`, `max_output_tokens`, `temperature`, `timeout_s`, `reasoning`.
@@ -376,6 +378,67 @@ def _infer(params: dict) -> dict:
     }
 
 
+#: Providers whose server has a documented call to drop a resident model.
+_OLLAMA_IDS = frozenset({"ollama", "ollama-local"})
+UNLOAD_TIMEOUT_S = 10.0
+
+
+def _ollama_http(root: str, path: str, body: dict | None = None) -> dict:
+    """One request to the local Ollama server. Redirects are refused: an
+    unload goes to the loopback endpoint the provider named and nowhere else."""
+    import urllib.request
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    request = urllib.request.Request(
+        root + path, method="POST" if body is not None else "GET",
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={"Content-Type": "application/json"})
+    with urllib.request.build_opener(NoRedirect).open(
+            request, timeout=UNLOAD_TIMEOUT_S) as reply:
+        return json.loads(reply.read().decode() or "{}")
+
+
+def _unload(params: dict, *, providers=None, http=None) -> dict:
+    """Ask a LOCAL model server to drop a resident model so its RAM/VRAM comes
+    back (RES-001: the governor evicts a resident model under HIGH pressure).
+
+    Only Ollama has an unload implemented here (`keep_alive: 0` on
+    `/api/generate`, the documented call). Any other provider reports
+    `supported: false` with the reason; nothing is guessed. The request goes
+    only to an endpoint `_route_kind_for` proves is this machine. With no
+    model named, whatever the server reports resident (`/api/ps`) is dropped.
+    """
+    provider = str(params.get("provider") or "").strip()
+    model = str(params.get("model") or "").strip()
+    if not provider:
+        raise ValueError("unload requires a provider")
+
+    def refused(reason: str) -> dict:
+        return {"supported": False, "unloaded": [], "reason": reason}
+
+    listed = (providers or _providers)().get("providers", [])
+    entry = next((p for p in listed if p.get("id") == provider), None)
+    if entry is None:
+        return refused(f"provider {provider!r} is not configured")
+    if _route_kind_for(entry) != "local":
+        return refused(f"provider {provider!r} is not a local endpoint; nothing sent")
+    if provider not in _OLLAMA_IDS:
+        return refused(f"no unload call is implemented for {provider!r}")
+    root = str(entry.get("base_url") or "").strip().rstrip("/")
+    root = root[:-3] if root.endswith("/v1") else root
+    call = http or _ollama_http
+    names = [model] if model else [
+        str(m.get("name") or m.get("model") or "")
+        for m in call(root, "/api/ps").get("models", [])]
+    names = [n for n in names if n]
+    for name in names:
+        call(root, "/api/generate", {"model": name, "keep_alive": 0})
+    return {"supported": True, "unloaded": names, "reason": ""}
+
+
 def _boot_hermes() -> None:
     """Hermes's launch contract, before any request is read: every Hermes entry
     point imports hermes_bootstrap first (tui_gateway/entry.py, gateway/run.py,
@@ -418,6 +481,8 @@ def serve() -> None:
                 _reply({"id": rid, "ok": True, "result": _providers()})
             elif method == "infer":
                 _reply({"id": rid, "ok": True, "result": _infer(params)})
+            elif method == "unload":
+                _reply({"id": rid, "ok": True, "result": _unload(params)})
             elif method == "shutdown":
                 _reply({"id": rid, "ok": True, "result": {}})
                 return
