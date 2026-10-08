@@ -457,3 +457,30 @@ def test_a_status_report_about_hermes_is_not_mistaken_for_friday_claiming_an_act
     assert V._honest_about_acting(mine, [("hermes", "status")], 1) != mine
     # Without a status read, a completion statement is still refused, as before.
     assert V._honest_about_acting(report, [("clock", "now")], 1) != report
+
+
+
+def test_a_contact_saved_with_model_field_names_is_found_by_name(tmp_path, monkeypatch):
+    # Chrome capability test of FRIDAY.exe, 2026-10-08: "saved Test Person", then every
+    # lookup came back empty - the model asked {"name": ...} and lookup read only "query".
+    from friday import voice_brain as V
+    from friday.store import Store
+    from friday.toolsets import memory as M
+    db = Store(tmp_path / "s.sqlite3")
+    monkeypatch.setattr(M, "store", lambda: db)
+    out = V._run_contacts("save", {"name": "Test Person", "phone_number": "555-0142"})
+    assert out == {"result": "saved Test Person (phone)"}
+    found = V._run_contacts("lookup", {"name": "Test Person"})["result"]
+    assert found and found[0]["phone"] == "555-0142"
+
+
+def test_a_capability_called_by_its_own_name_is_understood():
+    from friday import voice_brain as V
+    call = {"name": "contacts.lookup", "arguments": '{"name": "Test Person"}'}
+    assert V._capability_call(call) == ("contacts", "lookup", {"name": "Test Person"})
+    assert V._capability_call({"name": "contacts_lookup", "arguments": '{"name": "X"}'})[:2] == ("contacts", "lookup")
+    assert V._capability_call({"name": "nonsense.op", "arguments": "{}"}) == ("", "", {})
+    surface = V._surface()
+    if "code_intelligence" in surface:                 # a family whose name has an underscore
+        assert V._capability_call({"name": "code_intelligence.search", "arguments": "{}"})[:2] ==             ("code_intelligence", "search")
+    assert "use_capability" in V._run_capability("", "", {})["error"]

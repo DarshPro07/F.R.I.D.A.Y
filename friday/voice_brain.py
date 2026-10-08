@@ -716,6 +716,13 @@ def _capability_tool_openai() -> dict:
         }, "required": ["family", "operation"]}}}
 
 
+#: What a contact's fields are called in the store, and what models call them instead.
+_CONTACT_COLUMNS = ("relation", "phone", "email", "aliases", "notes")
+_CONTACT_FIELD = {"phone_number": "phone", "mobile": "phone", "number": "phone", "tel": "phone",
+                  "telephone": "phone", "email_address": "email", "mail": "email",
+                  "note": "notes", "relationship": "relation", "alias": "aliases"}
+
+
 def _run_contacts(operation, arguments):
     """The one write a spoken turn may do unaided: remember a person.
 
@@ -731,11 +738,19 @@ def _run_contacts(operation, arguments):
             name = (arguments.get("name") or "").strip()
             if not name:
                 return {"error": "a contact needs a name"}
-            db.save_contact(name, **{k: v for k, v in arguments.items() if k != "name"})
-            return {"result": "saved %s" % name}
+            # The store keeps only its own column names and drops the rest silently,
+            # so "phone_number" saved a name with no number (2026-10-08).
+            fields = {_CONTACT_FIELD.get(k, k): v for k, v in arguments.items() if k != "name"}
+            kept = sorted(k for k in fields if k in _CONTACT_COLUMNS and fields[k] not in (None, ""))
+            db.save_contact(name, **{k: fields[k] for k in kept})
+            return {"result": "saved %s%s" % (name, " (%s)" % ", ".join(kept) if kept else "")}
         if operation == "list":
             return {"result": db.contacts(limit=50)}
-        return {"result": db.find_contacts(arguments.get("query") or "", limit=5)}
+        # Models ask by name as often as by query: {"name": "Test Person"} searched
+        # for nothing and every lookup came back empty (2026-10-08).
+        query = arguments.get("query") or arguments.get("name") or " ".join(
+            str(v) for v in arguments.values() if isinstance(v, str))
+        return {"result": db.find_contacts(query, limit=5)}
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)[:200]}
 
@@ -787,8 +802,8 @@ def _run_capability(family, operation, arguments):
     surface = _surface()
     allowed = surface.get(family)
     if allowed is None:
-        return {"error": "no capability family %r; choose from %s"
-                % (family, ", ".join(sorted(surface)))}
+        return {"error": "no capability family %r; call use_capability with a family and an "
+                         "operation from: %s" % (family, ", ".join(sorted(surface)))}
     # Friday-own writes: licensed by the owner's words for THIS turn or not
     # done (A-036). Before any family-specific handling, so no family can
     # forget to ask.
@@ -1405,13 +1420,21 @@ def _capability_call(call: dict) -> tuple[str, str, dict]:
     The call is model output, so untrusted: a wrong function name, arguments
     that are not a JSON object, or fields of the wrong type come out empty, and
     `_run_capability` answers an empty family with its own error."""
-    if call.get("name") != "use_capability":
-        return "", "", {}
     try:
         args = json.loads(call.get("arguments") or "{}")
     except (TypeError, ValueError):
         return "", "", {}
     if not isinstance(args, dict):
+        return "", "", {}
+    name = str(call.get("name") or "")
+    if name != "use_capability":
+        # Models also call the capability by its own name - "contacts.lookup",
+        # "contacts_lookup" - with the arguments flat. Only a known family is read
+        # that way; anything else stays empty and gets the corrective error.
+        surface = _surface()
+        for i, ch in enumerate(name):
+            if ch in "._" and name[:i] in surface and name[i + 1:]:
+                return name[:i], name[i + 1:], args
         return "", "", {}
     family, operation, arguments = args.get("family"), args.get("operation"), args.get("arguments")
     return (family if isinstance(family, str) else "",
