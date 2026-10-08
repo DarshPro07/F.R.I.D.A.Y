@@ -201,23 +201,18 @@ _TOOLSET_KEYS = ("toolsets", "platform_toolsets", "enabled_toolsets")
 _NATIVE_FILE_TOOLSETS = ("file", "terminal")
 
 
-def native_file_toolsets_enabled(profile: str = "") -> tuple[str, ...]:
+def _toolset_names_in_profile_config(profile: str = "") -> list[str]:
     """
-    Which of Hermes' own unrestricted `file`/`terminal` toolsets the profile
-    config turns on - none in the friday profile, where only FRIDAY's exec
-    bridge is registered (see `native_tools_healthy`).
-
-    A delegation held to an execution envelope gets FRIDAY's jail-backed file
-    capability and nothing else, and Hermes cannot enforce the envelope on its
-    own tools, so `delegate` refuses when this is not empty. No profile at all
-    (no Hermes install here) names none; a config that is there and cannot be
-    read raises ValueError, because then nothing is known.
+    The lower-cased toolset names a Hermes profile's config turns on, in the
+    order they are found. No profile at all (no Hermes install here) finds
+    none; a config that is there and cannot be read raises ValueError,
+    because then nothing is known.
     """
     home = os.environ.get(ENV_PROFILE_HOME) or profile_home(
         profile or os.environ.get(ENV_PROFILE, DEFAULT_PROFILE))
     config_path = Path(home) / "config.yaml" if home else None
     if config_path is None or not config_path.is_file():
-        return ()
+        return []
     import yaml
     try:
         config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
@@ -242,7 +237,42 @@ def native_file_toolsets_enabled(profile: str = "") -> tuple[str, ...]:
                 walk(item)
 
     walk(config)
+    return found
+
+
+def native_file_toolsets_enabled(profile: str = "") -> tuple[str, ...]:
+    """
+    Which of Hermes' own unrestricted `file`/`terminal` toolsets the profile
+    config turns on - none in the friday profile, where only FRIDAY's exec
+    bridge is registered (see `native_tools_healthy`).
+
+    A delegation held to an execution envelope gets FRIDAY's jail-backed file
+    capability and nothing else, and Hermes cannot enforce the envelope on its
+    own tools, so `delegate` refuses when this is not empty. No profile at all
+    (no Hermes install here) names none; a config that is there and cannot be
+    read raises ValueError, because then nothing is known.
+    """
+    found = _toolset_names_in_profile_config(profile)
     return tuple(name for name in _NATIVE_FILE_TOOLSETS if name in found)
+
+
+def scoped_gateway_toolsets(profile: str = "") -> tuple[str, ...]:
+    """
+    Which toolsets, beyond Hermes' own native `file`/`terminal`, the profile
+    config names - the set a scoped delegation's own gateway should be
+    started with (HERMES_TUI_TOOLSETS), so it carries no more surface than
+    the profile already grants. A config that names none of them does not
+    say what a scoped gateway should get, and guessing Hermes' own defaults
+    would silently grant more than the profile intended, so this raises
+    instead.
+    """
+    seen: list[str] = []
+    for name in _toolset_names_in_profile_config(profile):
+        if name not in _NATIVE_FILE_TOOLSETS and name not in seen:
+            seen.append(name)
+    if not seen:
+        raise ValueError("profile names no toolsets; refusing to guess Hermes defaults")
+    return tuple(seen)
 
 
 #: Hermes gateway event type → Friday event name. Anything absent is
@@ -1262,7 +1292,8 @@ class HermesSupervisor:
                  on_event=None, answer_question=None,
                  command: list[str] | None = None,
                  cwd: str | None = None,
-                 profile: str | None = None) -> None:
+                 profile: str | None = None,
+                 extra_env: dict[str, str] | None = None) -> None:
         self.log = log or WorkRunLog()
         self.on_event = on_event
         #: Callable(question: str, options: list[str]) -> str | None.
@@ -1272,6 +1303,10 @@ class HermesSupervisor:
         self.answer_question = answer_question
         self._command = command
         self._cwd = cwd
+        #: Applied over the gateway's environment in `start()`, after
+        #: Friday's own overrides - e.g. HERMES_TUI_TOOLSETS for a scoped
+        #: delegation's gateway (see `scoped_gateway_toolsets`).
+        self._extra_env = extra_env
         #: Which Hermes profile the gateway runs under. None → env override
         #: or DEFAULT_PROFILE. Tests pass profile="" (with their own
         #: command) to skip the isolation they do not need.
@@ -1389,6 +1424,8 @@ class HermesSupervisor:
         # blocks forever. Hermes's own gateway modes ship an --accept-hooks
         # flag for exactly this; the env form is its documented equivalent.
         env["HERMES_ACCEPT_HOOKS"] = "1"
+        if self._extra_env:
+            env.update(self._extra_env)
         logger.info("hermes.starting command=%s", command[0])
         self._ready.clear()
         started = time.monotonic()

@@ -421,13 +421,14 @@ def test_commands_come_back_when_the_delegation_is_released(area):
 
 # -- the supervisor holds it for the life of the run ---------------------------------------
 
-def _supervisor(tmp_path, monkeypatch, *, hang=True):
+def _supervisor(tmp_path, monkeypatch, *, hang=True, extra_env=None):
     for key in ("FAKE_HERMES_CLARIFY", "FAKE_HERMES_HANG", "FAKE_HERMES_DIE"):
         monkeypatch.delenv(key, raising=False)
     if hang:
         monkeypatch.setenv("FAKE_HERMES_HANG", "1")
     supervisor = hb.HermesSupervisor(log=hb.WorkRunLog(tmp_path / "bridge.sqlite3"),
-                                     command=[sys.executable, FAKE], profile="")
+                                     command=[sys.executable, FAKE], profile="",
+                                     extra_env=extra_env)
     supervisor.READY_TIMEOUT = 20
     return supervisor
 
@@ -479,6 +480,31 @@ def test_a_delegation_that_would_share_the_bridge_under_another_workspace_is_ref
         supervisor.stop()
 
 
+def test_a_supervisor_with_extra_env_passes_it_to_the_gateway_process(tmp_path, monkeypatch):
+    dump = tmp_path / "env.json"
+    monkeypatch.setenv("FAKE_HERMES_ENV_DUMP", str(dump))
+    supervisor = _supervisor(tmp_path, monkeypatch, hang=False,
+                              extra_env={"HERMES_TUI_TOOLSETS": "web"})
+    try:
+        supervisor.start()
+        seen = json.loads(dump.read_text(encoding="utf-8"))
+    finally:
+        supervisor.stop()
+    assert seen.get("HERMES_TUI_TOOLSETS") == "web"
+
+
+def test_a_supervisor_with_no_extra_env_adds_none(tmp_path, monkeypatch):
+    dump = tmp_path / "env.json"
+    monkeypatch.setenv("FAKE_HERMES_ENV_DUMP", str(dump))
+    supervisor = _supervisor(tmp_path, monkeypatch, hang=False)
+    try:
+        supervisor.start()
+        seen = json.loads(dump.read_text(encoding="utf-8"))
+    finally:
+        supervisor.stop()
+    assert "HERMES_TUI_TOOLSETS" not in seen
+
+
 # -- Hermes' own file tools are not a way around it -----------------------------------------
 
 def _profile(tmp_path, monkeypatch, config: str) -> None:
@@ -504,6 +530,17 @@ def test_a_profile_config_that_cannot_be_read_names_nothing_known(tmp_path, monk
     _profile(tmp_path, monkeypatch, "toolsets: [unclosed\n")
     with pytest.raises(ValueError, match="cannot be read"):
         hb.native_file_toolsets_enabled()
+
+
+def test_scoped_gateway_toolsets_drops_native_ones_and_dedupes(tmp_path, monkeypatch):
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web, memory]\n")
+    assert hb.scoped_gateway_toolsets() == ("web", "memory")
+
+
+def test_scoped_gateway_toolsets_refuses_to_guess_when_the_profile_names_none(tmp_path, monkeypatch):
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal]\n")
+    with pytest.raises(ValueError, match="refusing to guess"):
+        hb.scoped_gateway_toolsets()
 
 
 def test_a_delegation_under_an_envelope_is_refused_while_hermes_file_tools_are_on(area, tmp_path, monkeypatch):
