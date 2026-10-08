@@ -515,3 +515,24 @@ def test_only_a_question_about_friday_gets_the_status_line(monkeypatch, text, ca
         "mcp": {"total": 1}, "system": {"ram_percent": 1}})
     out = V._try_command(text)
     assert (bool(out) and out.get("action") == "status") is canned
+
+
+def test_a_request_for_content_is_judged_only_on_her_own_claims():
+    # End-to-end test of FRIDAY.exe, 2026-10-09: guidance for a status update and a plan
+    # were replaced with "I have not actually done that" because of their sample lines.
+    from friday import voice_brain as V
+    guidance = ("Keep it short:\n- Completed the API integration and initial testing.\n"
+                "- installed/package launcher invocation")
+    ask = "Give me guidance for writing a short project status update."
+    assert V._honest_about_acting(guidance, acted=[], calls_made=0, request=ask) == guidance
+    plan = "Plan how you would add a --version flag. Just the plan, don't change anything."
+    assert V._honest_about_acting(guidance, acted=[], calls_made=0, request=plan) == guidance
+    # Her own claim in the first person is still judged, whatever was asked.
+    mine = "I have created the file for you, sir."
+    assert V._honest_about_acting(mine, acted=[], calls_made=0, request=ask) != mine
+    # An action request keeps every rule: an elliptical claim with nothing run is refused.
+    assert V._honest_about_acting("Created the note.", acted=[], calls_made=0,
+                                  request="Create a note called x.md") != "Created the note."
+    # And a question that is not a content request keeps every rule too.
+    assert V._honest_about_acting("Created the note.", acted=[], calls_made=0,
+                                  request="What's the date?") != "Created the note."

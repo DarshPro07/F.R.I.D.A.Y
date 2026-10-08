@@ -1020,8 +1020,27 @@ _READ_ONLY_OPERATIONS = frozenset({
 _STATUS_READS = frozenset({("hermes", "status"), ("work", "status")})
 _FIRST_PERSON = re.compile(r"\b(?:i|i'?ve|i'?m|i'?ll|i'?d|me|my|myself|we|we'?ve|we'?re|our)\b", re.I)
 
+#: A request for content - a plan, guidance, an outline, an explanation, an
+#: example or a template - with no action asked of FRIDAY. Its answer is text to
+#: read, so a sample line in it ("- Completed the API integration") is not her
+#: claim; only one she makes in the first person is. End-to-end test of
+#: FRIDAY.exe, 2026-10-09: status-update guidance and a plan were replaced with
+#: "I have not actually done that" on their own sample lines and labels.
+_CONTENT_ASK = re.compile(
+    r"\b(?:plan|guidance|guide|outline|explain|explanation|example|examples|template|"
+    r"structure|tips|advice|draft|how (?:should|would|do|can) (?:i|you|we))\b", re.I)
+_ACTION_ASK = re.compile(
+    r"^\W*(?:please\s+)?(?:create|save|delete|remove|send|email|open|close|run|install|"
+    r"download|move|rename|copy|book|schedule|remind|start|stop|launch|turn (?:on|off)|"
+    r"play|post|publish|submit|buy|pay)\b", re.I)
 
-def _honest_about_acting(answer: str, acted, calls_made) -> str:
+
+def _asks_for_content(request: str) -> bool:
+    low = (request or "").strip()
+    return bool(_CONTENT_ASK.search(low)) and not _ACTION_ASK.search(low)
+
+
+def _honest_about_acting(answer: str, acted, calls_made, request: str = "") -> str:
     """Refuse a completion claim the turn cannot back.
 
     `_honest_about_hermes` closed this for one family after Friday announced a
@@ -1049,6 +1068,8 @@ def _honest_about_acting(answer: str, acted, calls_made) -> str:
     from friday import honesty
 
     claims = honesty.find_claims(text)
+    if claims and _asks_for_content(request):
+        claims = [c for c in claims if _FIRST_PERSON.search(c)]
     if not claims:
         return answer
     ran = tuple(acted or ())
@@ -1543,7 +1564,7 @@ def _cli_reply(text, history, approval_note=""):
     answer = answer or "I found it, sir, but lost my words - ask me once more."
     # Both gates the Gemini turn has, fed with what actually ran: a hand-off to Hermes
     # or a completed action is a claim only a tool call this turn can back.
-    answer = _honest_about_acting(_honest_about_hermes(answer, used), acted, calls_made)
+    answer = _honest_about_acting(_honest_about_hermes(answer, used), acted, calls_made, request=text)
     message_id = _remember_turn("assistant", answer)
     return {"reply": answer, "model": f"{result.provider}/{result.model}",
             "message_id": message_id, "used_memory": bool(ctx), "used_capabilities": used,
@@ -1722,7 +1743,7 @@ def reply(text, history=None):
             answer = (resp.text or "").strip() or (
                 "I found it, sir, but lost my words - ask me once more.")
         answer = _honest_about_hermes(answer, used)
-        answer = _honest_about_acting(answer, acted, calls_made)
+        answer = _honest_about_acting(answer, acted, calls_made, request=text)
         message_id = _remember_turn("assistant", answer)
         latency = timer.report()
         return {"reply": answer, "model": name, "message_id": message_id,
