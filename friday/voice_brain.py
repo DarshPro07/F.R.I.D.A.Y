@@ -1059,14 +1059,17 @@ def _honest_about_acting(answer: str, acted, calls_made) -> str:
     if not ran:
         logger.warning("voice: completion claimed with no tool call at all: %r",
                        text[:160])
+        # The gate cannot know whether the action is allowed, so the recovery
+        # never promises it: a delete outside the workspace was promised here
+        # and then, rightly, refused on the second ask (2026-10-08).
         return ("I have not actually done that, sir - I said it without doing "
-                "it. Nothing on your machine was touched. Ask me once more and "
-                "I will carry it out properly, or say 'plan it' and I will show "
-                "you the steps first.")
+                "it. Nothing on your machine was touched. Ask me again and I "
+                "will try it properly, or tell you if it is not allowed; say "
+                "'plan it' and I will show you the steps first.")
     logger.warning("voice: completion claimed, only read-only ran (%s): %r",
                    sorted(ran), text[:160])
     return ("I have not done it yet, sir - what I ran only looked. Say the "
-            "word and I will carry it out.")
+            "word and I will try it, or tell you if it is not allowed.")
 
 
 def _grounded_work_answer(low: str):

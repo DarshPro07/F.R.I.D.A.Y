@@ -404,6 +404,17 @@ class TestTheCompletionGate:
             "I have deleted the file, sir.", acted=[("web", "search")], calls_made=1)
         assert "have not done it yet" in said.lower()
 
+    def test_the_recovery_never_promises_an_action_that_may_be_refused(self):
+        """Chrome capability test of FRIDAY.exe, 2026-10-08: asked to delete a
+        file outside its workspace, the model claimed it had; the recovery then
+        promised "ask me once more and I will carry it out properly", and the
+        second ask was - rightly - refused. The gate cannot know what is allowed."""
+        for acted in ([], [("files", "read")]):
+            said = V._honest_about_acting(
+                "I have deleted the file, sir.", acted=acted, calls_made=len(acted))
+            assert "carry it out" not in said.lower()
+            assert "not allowed" in said.lower()
+
     def test_every_family_that_can_act_is_in_the_gate(self):
         """Structural: a new write-capable family must be added to
         `_ACTED_FAMILIES` or its claims are refused even when true."""
