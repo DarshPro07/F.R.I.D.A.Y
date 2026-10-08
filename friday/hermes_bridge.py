@@ -431,8 +431,8 @@ class TaskBundle:
         "not a transcript."
     )
 
-    def render(self) -> str:
-        """The exact text sent as the Hermes prompt.
+    def _sections(self) -> list[tuple[str, str]]:
+        """(title, rendered text) for every non-empty section, in prompt order.
 
         The first ten sections are the task contract, in a fixed order a
         worker can rely on; an objective's critical facts, when it has them,
@@ -477,17 +477,28 @@ class TaskBundle:
             if not value:
                 continue
             if isinstance(value, str):
-                parts.append(f"{title}\n{value}")
+                parts.append((title, f"{title}\n{value}"))
             else:
-                parts.append(title + "\n" + "\n".join(f"- {v}" for v in value))
-        return "\n\n".join(parts)
+                parts.append(
+                    (title, title + "\n" + "\n".join(f"- {v}" for v in value)))
+        return parts
+
+    def render(self) -> str:
+        """The exact text sent as the Hermes prompt."""
+        return "\n\n".join(text for _, text in self._sections())
 
     def measure(self) -> dict:
         text = self.render()
+        # Keyed by the bare title: the long ones carry an explanatory
+        # parenthetical that is prompt text, not a name.
+        sections = {title.split("(")[0].strip(): len(rendered) // 4
+                    for title, rendered in self._sections()}
         return {"chars": len(text), "approx_tokens": len(text) // 4,
                 "oversized": len(text) > self.SOFT_LIMIT_CHARS,
                 "code_refs": len(self.code_refs),
-                "skill_hints": len(self.skill_hints)}
+                "skill_hints": len(self.skill_hints),
+                "sections": sections,
+                "total_tokens": sum(sections.values())}
 
 
 # ---------------------------------------------------------------------------

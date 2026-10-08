@@ -51,6 +51,13 @@ def test_bundle_measure_flags_oversize():
     assert huge.measure()['oversized'] is True
 
 
+def test_bundle_measure_reports_tokens_per_section():
+    m = hb.TaskBundle(goal='g', known_facts=('a',)).measure()
+    assert 'GOAL' in m['sections'] and 'KNOWN FACTS' in m['sections']
+    assert 'ACCEPTANCE CRITERIA' not in m['sections']
+    assert m['total_tokens'] == sum(m['sections'].values())
+
+
 def test_work_run_log_round_trip(tmp_path):
     log = hb.WorkRunLog(tmp_path / 'runs.sqlite3')
     run_id = log.create(task='inspect', bundle_chars=100)
