@@ -163,6 +163,18 @@ _DATED_RE = re.compile(
     rf"\b(?:in|since|on|by|from|until|during|circa)\s+(?:(?:early|mid|late)[- ]+)?(?:{_MONTH}\s+(?:\d{{1,2}},?\s+)?)?"
     rf"(?:1[89]|20)\d{{2}}\b|\b{_MONTH}\s+\d{{1,2}},?\s+(?:1[89]|20)\d{{2}}\b", re.I)
 
+#: Template text and list labels describe too. A placeholder - "[What was
+#: completed since the last update]" - is text for the reader to fill in; a
+#: short list item that is a participle and a bare noun - "- installed package"
+#: - labels something. 2026-10-09 end-to-end test: status-update guidance and
+#: a plan were replaced with "I have not actually done that" on exactly these.
+#: An item with an object - "- Created the note", "- Sent it" - still reports.
+_PLACEHOLDER_RE = re.compile(r"\[[^\]]*\]|\{\{[^}]*\}\}|<[^<>]*>")
+_LABEL_RE = re.compile(
+    rf"^\W*(?:\d+[.)]\s*)?\W*(?:{_CLAIM_VERBS})\s+"
+    r"(?!(?:the|a|an|your|my|it|them|this|that|these|those|his|her|their|our)\b)"
+    r"[a-z]+(?:\s+[a-z]+){0,2}\W*$", re.I)
+
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
@@ -188,11 +200,11 @@ def is_negated(sentence: str) -> bool:
 
 def is_completion_claim(sentence: str) -> bool:
     """An affirmative, past/perfect assertion that something now exists."""
-    rest = _NEGATIVE_SUBJECT_RE.sub(" ", sentence)
+    rest = _NEGATIVE_SUBJECT_RE.sub(" ", _PLACEHOLDER_RE.sub(" ", sentence))
     if is_negated(rest):
         return False
     mine = _FIRST_PERSON_RE.search(rest)
-    if not mine and (_IMPERATIVE_RE.match(rest) or _DATED_RE.search(rest)):
+    if not mine and (_IMPERATIVE_RE.match(rest) or _DATED_RE.search(rest) or _LABEL_RE.match(rest)):
         return False
     rest = _ADJECTIVAL_RE.sub(" ", rest)
     return any(rx.search(rest) for rx in _COMPLETION_RE)
