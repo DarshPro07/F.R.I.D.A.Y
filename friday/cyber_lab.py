@@ -103,6 +103,10 @@ def get(name: str) -> LabProvider | None:
     return _REGISTRY.get(name)
 
 
+def names() -> tuple[str, ...]:
+    return tuple(sorted(_REGISTRY))
+
+
 def execute(provider: LabProvider, auth: T.SecurityAuthorization | None,
             request: LabRequest, *, now: datetime | None = None) -> LabEvidence:
     """Gate, then run. A refusal never reaches the provider."""
