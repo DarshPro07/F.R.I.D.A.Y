@@ -536,3 +536,18 @@ def test_a_request_for_content_is_judged_only_on_her_own_claims():
     # And a question that is not a content request keeps every rule too.
     assert V._honest_about_acting("Created the note.", acted=[], calls_made=0,
                                   request="What's the date?") != "Created the note."
+
+
+
+def test_a_denial_to_a_did_you_question_claims_nothing():
+    # End-to-end test of FRIDAY.exe, 2026-10-09: an honest "No" that recapped this
+    # conversation's real work was replaced with "I have not actually done that".
+    from friday import voice_brain as V
+    ask = "Did you email my report to the team?"
+    no = ("No - I did **not** email your report to the team.\n\nIn this conversation, I only:\n"
+          "- created and read `final-check.md`")
+    assert V._honest_about_acting(no, acted=[], calls_made=0, request=ask) == no
+    yes = "Yes, I emailed it to the team."
+    assert V._honest_about_acting(yes, acted=[], calls_made=0, request=ask) != yes
+    assert V._honest_about_acting("No idea. Created the note.", acted=[], calls_made=0,
+                                  request="What's the date?") != "No idea. Created the note."

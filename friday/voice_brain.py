@@ -1035,6 +1035,14 @@ _ACTION_ASK = re.compile(
     r"play|post|publish|submit|buy|pay)\b", re.I)
 
 
+#: "Did you email my report?" answered "No - I did not ... In this conversation I
+#: only: - created and read final-check.md" was replaced with "I have not actually
+#: done that" on the recap line (2026-10-09). A denial of the action asked about
+#: claims nothing; a "Yes, I emailed it" is still judged.
+_DID_YOU = re.compile(r"^\W*(?:did|have|has|were|was)\s+(?:you|friday)\b", re.I)
+_DENIAL = re.compile(r"^\W*(?:no|nope|not\s+yet|i\s+(?:did\s+not|didn'?t|have\s+not|haven'?t|never))\b", re.I)
+
+
 def _asks_for_content(request: str) -> bool:
     low = (request or "").strip()
     return bool(_CONTENT_ASK.search(low)) and not _ACTION_ASK.search(low)
@@ -1068,6 +1076,8 @@ def _honest_about_acting(answer: str, acted, calls_made, request: str = "") -> s
     from friday import honesty
 
     claims = honesty.find_claims(text)
+    if claims and _DID_YOU.match(request or "") and _DENIAL.match(text):
+        return answer
     if claims and _asks_for_content(request):
         claims = [c for c in claims if _FIRST_PERSON.search(c)]
     if not claims:
