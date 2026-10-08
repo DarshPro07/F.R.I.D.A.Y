@@ -1,0 +1,148 @@
+{
+ "requirement": "CTX-002",
+ "split": "development",
+ "requests": 965,
+ "models_dir": "F:/F.R.I.D.A.Y/cache/models",
+ "targets": {
+  "success_at_1": 0.9,
+  "success_at_3": 0.97
+ },
+ "decision": {
+  "wired_into_router_search": false,
+  "best_ranking": "hybrid+cards with tool_embedder",
+  "success_at_1": 0.4466,
+  "success_at_3": 0.6964,
+  "reason": "no ranking measured reaches R@1 >= 0.90 and R@3 >= 0.97; legacy_search stays the shipped ranking, status stays PARTIAL"
+ },
+ "legacy_recall_at_6": {
+  "found": 736,
+  "recall_at_6": 0.7627
+ },
+ "intents": {
+  "tools": 194,
+  "baseline_chars": 110155,
+  "starting_chars": 17202,
+  "starting_reduction": 0.8438,
+  "cases": 127,
+  "found": 127,
+  "worst_reduction": 0.8209
+ },
+ "runs": {
+  "tool_embedder": {
+   "embedder": "tool_embedder",
+   "router": {
+    "success_at_1": 0.3751,
+    "success_at_3": 0.6269,
+    "success_at_5": 0.7098,
+    "success_at_10": 0.8218,
+    "success_at_20": 0.8839,
+    "mrr": 0.527,
+    "ms_per_request": 11.16
+   },
+   "hybrid": {
+    "success_at_1": 0.4124,
+    "success_at_3": 0.6808,
+    "success_at_5": 0.7575,
+    "success_at_10": 0.8456,
+    "success_at_20": 0.9244,
+    "mrr": 0.5655,
+    "ms_per_request": 27.34
+   },
+   "hybrid+cards": {
+    "success_at_1": 0.4466,
+    "success_at_3": 0.6964,
+    "success_at_5": 0.7534,
+    "success_at_10": 0.8549,
+    "success_at_20": 0.9275,
+    "mrr": 0.5883,
+    "ms_per_request": 25.72
+   },
+   "peak_ram_mb": 805.9
+  },
+  "tool_embedder_base": {
+   "embedder": "tool_embedder_base",
+   "router": {
+    "success_at_1": 0.3751,
+    "success_at_3": 0.6269,
+    "success_at_5": 0.7098,
+    "success_at_10": 0.8218,
+    "success_at_20": 0.8839,
+    "mrr": 0.527,
+    "ms_per_request": 10.29
+   },
+   "hybrid": {
+    "success_at_1": 0.4135,
+    "success_at_3": 0.685,
+    "success_at_5": 0.7617,
+    "success_at_10": 0.856,
+    "success_at_20": 0.9223,
+    "mrr": 0.5683,
+    "ms_per_request": 40.35
+   },
+   "hybrid+cards": {
+    "success_at_1": 0.4373,
+    "success_at_3": 0.6922,
+    "success_at_5": 0.7731,
+    "success_at_10": 0.8642,
+    "success_at_20": 0.9316,
+    "mrr": 0.5844,
+    "ms_per_request": 40.48
+   },
+   "peak_ram_mb": 1267.2
+  },
+  "tool_embedder_with_reranker_sample_100": {
+   "embedder": "tool_embedder",
+   "router": {
+    "success_at_1": 0.3751,
+    "success_at_3": 0.6269,
+    "success_at_5": 0.7098,
+    "success_at_10": 0.8218,
+    "success_at_20": 0.8839,
+    "mrr": 0.527,
+    "ms_per_request": 17.29
+   },
+   "hybrid": {
+    "success_at_1": 0.4124,
+    "success_at_3": 0.6808,
+    "success_at_5": 0.7575,
+    "success_at_10": 0.8456,
+    "success_at_20": 0.9244,
+    "mrr": 0.5655,
+    "ms_per_request": 35.52
+   },
+   "hybrid+cards": {
+    "success_at_1": 0.4466,
+    "success_at_3": 0.6964,
+    "success_at_5": 0.7534,
+    "success_at_10": 0.8549,
+    "success_at_20": 0.9275,
+    "mrr": 0.5883,
+    "ms_per_request": 34.32
+   },
+   "hybrid+cards (reranker sample)": {
+    "success_at_1": 0.4,
+    "success_at_3": 0.62,
+    "success_at_5": 0.65,
+    "success_at_10": 0.75,
+    "success_at_20": 0.92,
+    "mrr": 0.5321,
+    "ms_per_request": 33.03
+   },
+   "hybrid+cards+reranker": {
+    "success_at_1": 0.42,
+    "success_at_3": 0.59,
+    "success_at_5": 0.74,
+    "success_at_10": 0.86,
+    "success_at_20": 0.92,
+    "mrr": 0.5525,
+    "ms_per_request": 1565.35,
+    "requests": 100
+   },
+   "peak_ram_mb": 1993.7
+  }
+ },
+ "notes": [
+  "the reranker reads 20 documents per request at about 1.6 s each, so it was measured on the first 100 requests beside the same 100 without it",
+  "ms_per_request varies with host load; the accuracy figures are deterministic and identical across the three runs"
+ ]
+}

@@ -258,9 +258,29 @@ def resolve_embedder(embedder_id: str):
                          "pass --models-dir or set FRIDAY_MODELS_DIR, or --embedder none")
 
 
-def retrieval_benchmark(router, cases, embedder_id: str, embedder) -> tuple[dict, dict]:
+def _reranked(staged, reranker, head: int):
+    """Rank of `staged` with the cross-encoder reordering its first `head` names."""
+    from friday import tool_router
+
+    text = dict(zip(staged.retriever.ids, staged.retriever.texts))
+
+    def rank(query):
+        fused, agree = staged.rank(query)
+        names = [n for n, _ in fused]
+        top, tail = names[:head], names[head:]
+        scores = reranker.score(query, [text[n] for n in top]) if top else []
+        order = sorted(range(len(top)), key=lambda i: (-scores[i], i))
+        return [top[i] for i in order] + tail, agree, tool_router.margin_of(fused)
+
+    return rank
+
+
+def retrieval_benchmark(router, cases, embedder_id: str, embedder, reranker=None,
+                        rerank_sample: int = 0) -> tuple[dict, dict]:
     """Success@1/3/5/10/20, MRR, latency and peak RAM; shipped router, baseline hybrid
-    (no cards) and hybrid with tool cards, over the same requests."""
+    (no cards), hybrid with tool cards and, given a reranker, hybrid with cards
+    reordered by it, over the same requests (the first `rerank_sample` of them, if set,
+    for the reranker row and its no-reranker twin)."""
     from friday import tool_models, tool_router
 
     out = {"embedder": embedder_id if embedder else "none (hash and bm25 only)"}
@@ -280,6 +300,14 @@ def retrieval_benchmark(router, cases, embedder_id: str, embedder) -> tuple[dict
             return [n for n, _ in fused], agree, tool_router.margin_of(fused)
 
         out[label], kept[label] = _measure(rank, cases)
+        if reranker is not None and cards:
+            # The cross-encoder reads 20 documents per request; a sample bounds that cost, and
+            # the same requests are measured without it so the two rows stay comparable.
+            subset = cases[:rerank_sample] if rerank_sample else cases
+            if rerank_sample:
+                out["hybrid+cards (reranker sample)"], _ = _measure(rank, subset)
+            out["hybrid+cards+reranker"], _ = _measure(_reranked(staged, reranker, 20), subset)
+            out["hybrid+cards+reranker"]["requests"] = len(subset)
     out["peak_ram_mb"] = _peak_rss_mb()
     return out, kept
 
@@ -379,6 +407,11 @@ def main(argv: list[str] | None = None) -> int:
                         "(default FRIDAY_MODELS_DIR, else <cache>/models)")
     parser.add_argument("--embedder", default=tool_models.EMBEDDER.id,
                         help="a pin id from friday/tool_models.py, or 'none'")
+    parser.add_argument("--reranker", action="store_true",
+                        help="also measure the pinned cross-encoder reordering the hybrid+cards head")
+    parser.add_argument("--rerank-sample", type=int, default=0,
+                        help="measure the reranker on the first N requests only (it reads 20 "
+                        "documents per request), beside the same N without it")
     parser.add_argument("--thresholds", action="store_true",
                         help="sweep the direct-route thresholds on development")
     args = parser.parse_args(argv)
@@ -387,6 +420,7 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["FRIDAY_MODELS_DIR"] = args.models_dir
 
     embedder = resolve_embedder(args.embedder)
+    reranker = resolve_embedder(tool_models.RERANKER.id) if args.reranker else None
     router = _router()
     if args.split == "holdout":
         result = {"chooser_run": _chooser_run(args, router, embedder, None, frozen)}
@@ -400,7 +434,8 @@ def main(argv: list[str] | None = None) -> int:
         report = R.disclosure_report(router, [(text, sorted(ok)[0]) for text, ok in cases])
         found = sum(1 for (text, ok) in cases
                     if any(m["capability"] in ok for m in router.legacy_search(text, limit=6)))
-        retrievers, kept = retrieval_benchmark(router, cases, args.embedder, embedder)
+        retrievers, kept = retrieval_benchmark(router, cases, args.embedder, embedder, reranker,
+                                            args.rerank_sample)
         result["development"] = {**_summary(report), "found": found,
                                  "recall_at_6": round(found / len(cases), 4) if cases else 0.0,
                                  "requests": len(cases), "retrievers": retrievers}

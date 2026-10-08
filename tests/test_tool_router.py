@@ -313,6 +313,59 @@ def test_a_named_embedder_that_cannot_load_stops_the_run_instead_of_being_skippe
     assert BENCH.resolve_embedder("none") is None
 
 
+class _PrefersDocument:
+    """A cross-encoder that scores one document highest and every other by position."""
+
+    def __init__(self, favourite: str):
+        self.favourite, self.seen = favourite, []
+
+    def score(self, query, docs):
+        self.seen.append(list(docs))
+        return [10.0 if self.favourite in doc else -float(i) for i, doc in enumerate(docs)]
+
+
+def test_the_reranker_row_reorders_only_the_head_and_keeps_the_staged_tail():
+    ids = [f"tool_{c}" for c in "abcdef"]
+    texts = [f"{name} handles {word}" for name, word in zip(ids, ("alpha", "beta", "gamma", "delta", "kappa", "omega"))]
+    staged = tool_router.StagedRouter(ids, texts, shipped=lambda q: [])
+    reranker = _PrefersDocument("omega")
+    rank = BENCH._reranked(staged, reranker, 3)
+
+    ranked, agree, margin = rank("handles")                 # a word every tool's text carries: all six rank
+    unranked = [name for name, _ in staged.rank("handles")[0]]
+    assert len(unranked) == len(ids)
+
+    assert len(reranker.seen[0]) == 3                       # the cross-encoder read the head, not the catalogue
+    assert ranked[3:] == unranked[3:]                       # beyond the head the staged order stands
+    assert sorted(ranked) == sorted(unranked)               # nothing dropped or duplicated
+    assert 0.0 <= agree <= 1.0 and margin >= 0.0
+
+
+def test_the_reranker_row_is_measured_when_a_reranker_is_given_and_absent_otherwise(monkeypatch):
+    class _Router:
+        def legacy_search(self, text, limit=6):
+            return [{"capability": "tool_a"}]
+
+    names = ["tool_a", "tool_b"]
+    staged = tool_router.StagedRouter(names, ["a alpha", "b beta"], shipped=lambda q: ["tool_a"])
+    monkeypatch.setattr(BENCH, "_staged", lambda *a, **k: staged)
+    cases = [("beta", {"tool_b"}), ("alpha", {"tool_a"})]
+
+    without, _ = BENCH.retrieval_benchmark(_Router(), cases, "none", None)
+    with_one, _ = BENCH.retrieval_benchmark(_Router(), cases, "none", None, _PrefersDocument("beta"))
+
+    assert "hybrid+cards+reranker" not in without
+    assert set(with_one["hybrid+cards+reranker"]) == {*(f"success_at_{k}" for k in BENCH.KS), "mrr",
+                                                      "ms_per_request", "requests"}
+    assert with_one["hybrid+cards+reranker"]["requests"] == 2 and "hybrid+cards (reranker sample)" not in with_one
+
+    sampled, _ = BENCH.retrieval_benchmark(_Router(), cases, "none", None, _PrefersDocument("beta"), 1)
+    assert sampled["hybrid+cards+reranker"]["requests"] == 1       # a bounded reranker run...
+    assert "hybrid+cards (reranker sample)" in sampled              # ...beside its twin on the same request
+    accuracy = lambda row: {key: value for key, value in row.items() if key != "ms_per_request"}  # noqa: E731
+    assert accuracy(sampled["hybrid"]) == accuracy(with_one["hybrid"])   # the other rows still use every request
+
+
 def test_the_sweep_counts_a_direct_route_on_an_abstain_request_as_wrong():
     # (ranked, agree, margin, acceptable): two confident-and-right rows, one confident-and-wrong.
     rows = [(["a"], 1.0, 0.5, {"a"}), (["b"], 1.0, 0.5, {"b"}), (["c"], 1.0, 0.5, {"x"}),
