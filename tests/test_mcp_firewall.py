@@ -125,6 +125,46 @@ def test_the_voice_agent_withholds_a_suspended_servers_tools(tmp_path, monkeypat
     assert "changed" in reply["say_this"] and "isn't answering" not in reply["say_this"]
 
 
+LOOPBACK = "http://127.0.0.1:8000/sse"
+
+
+def _narrowing_agent(tmp_path, monkeypatch):
+    """A FridayAgent wired onto the firewall under test, serving its tools from
+    FRIDAY's own loopback server (never suspended), so _narrow_tools reaches the
+    normal path where Hermes discovery runs."""
+    import agent_friday
+    from friday import capability_router
+
+    firewall = MF.Firewall(tmp_path / "mcp_pins.json")
+    monkeypatch.setattr(MF, "default", lambda: firewall)
+    monkeypatch.setattr(agent_friday, "mcp_sse_url", lambda: LOOPBACK)
+    agent = object.__new__(agent_friday.FridayAgent)
+    agent._toolset = type("Toolset", (), {"tools": _tools()})()
+    agent._router = capability_router.Router()
+    agent._tools_offline = False
+    agent._tools_suspended = ""
+    agent._apply_tools = lambda: None
+    return agent, firewall
+
+
+def test_the_voice_agent_registers_hermes_configured_mcp_servers(tmp_path, monkeypatch):
+    agent, firewall = _narrowing_agent(tmp_path, monkeypatch)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / "config.yaml").write_text(
+        "mcp_servers:\n  notes:\n    url: 'https://notes.example/sse'\n", encoding="utf-8")
+    asyncio.run(agent._narrow_tools())
+    assert firewall.status("hermes:notes")["state"] == MF.EXTERNAL_DISCOVERED
+
+
+def test_hermes_discovery_never_breaks_tool_loading(tmp_path, monkeypatch):
+    agent, _ = _narrowing_agent(tmp_path, monkeypatch)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / "config.yaml").write_text("mcp_servers: {oops: [unbalanced\n", encoding="utf-8")
+    asyncio.run(agent._narrow_tools())
+    assert set(agent._router.all_tools) == {"notes_read", "notes_list"}
+    assert not agent._tools_offline
+
+
 def test_a_changed_server_name_suspends_the_server_but_a_new_sdk_version_does_not(firewall):
     pinned = {"name": "notes", "version": "1.0"}
     firewall.admit(REMOTE, _tools(), pinned)

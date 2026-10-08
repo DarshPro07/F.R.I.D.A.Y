@@ -1342,6 +1342,13 @@ class FridayAgent(Agent):
             logger.info("MCP tools are back: %d exposed", len(tools))
         self._tools_offline = False
         self._router.load(tools)
+        # MCP-001: register Hermes' own configured MCP servers (hermes:<name>,
+        # EXTERNAL_DISCOVERED) so the firewall knows them. Read-only; nothing is
+        # started or called. Never silent and never fatal to tool loading.
+        try:
+            mcp_firewall.discover_hermes()
+        except Exception:
+            logger.warning("Hermes MCP discovery failed", exc_info=True)
         orphans = capability_router.unassigned(self._router.known_names)
         if orphans:
             # Reachable, but nobody grouped them - worth knowing about.
