@@ -306,6 +306,11 @@ KNOWN: dict[str, tuple[str, str]] = {
         FUTURE,
         'result of verify_world_monitor_destination; the verifier is built but not wired to the browser-open path',
     ),
+    'clear_refusals': (
+        FUTURE,
+        "MODEL-006 slice 1 (c317b0d): lifts a route's safeguard exclusion for an operator through "
+        'domain_gate.clear_route_exclusion; no operator command or endpoint calls it yet',
+    ),
 }
 
 #: Never reported. Dunders and framework hooks are called by machinery, not

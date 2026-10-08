@@ -578,6 +578,15 @@ def test_status_is_partial_with_gaps(tmp_path):
     assert "GAPS: implementer did not claim acceptance met" in (repo / "scripts" / "prd_ledger.py").read_text()
 
 
+def test_a_verified_row_keeps_its_curated_citations_and_gains_new_files():
+    # 2026-10-08: MCP-001 went VERIFIED and its twelve firewall citations were replaced
+    # with the one file the slice touched; the test that follows them broke.
+    row = {"files": ["friday/mcp_firewall.py:149,225", "agent_friday.py:739,1330"]}
+    assert bi.cited_files(row, ["agent_friday.py", "friday\\new.py", "tests/test_x.py"]) == [
+        "friday/mcp_firewall.py:149,225", "agent_friday.py:739,1330", "friday/new.py"]
+    assert bi.cited_files({}, ["a.py", "tests/t.py"]) == ["a.py"]
+
+
 def test_decide_status_needs_every_proof():
     run = {"evidence": {"acceptance_met": True, "gaps": []}}
     ok, merged = {"result": "OK"}, {"result": "INTEGRATED"}

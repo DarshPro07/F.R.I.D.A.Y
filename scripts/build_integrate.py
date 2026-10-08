@@ -463,6 +463,18 @@ def still_failing(ids: list[str], sha: str, repo: Path, python: str) -> set[str]
 
 # ---------------------------------------------------------------- ledger
 
+def cited_files(row: dict, changed: list[str]) -> list[str]:
+    """A VERIFIED row's file citations: what it already cites - a curated
+    "path:line,line" keeps its lines - plus each changed code file not cited yet.
+    2026-10-08: MCP-001's twelve firewall citations were replaced with the one
+    file its last slice touched, and the test that follows them broke."""
+    have = [str(f) for f in row.get("files") or []]
+    paths = {f.partition(":")[0] for f in have}
+    new = [f for f in (str(c).replace("\\", "/") for c in changed or [])
+           if not f.startswith("tests/") and f not in paths]
+    return have + new
+
+
 def decide_status(run: dict, rg: dict, merged: dict, required: bool, verifier: dict | None) -> tuple[str, list[str]]:
     """VERIFIED only when every proof is present; else PARTIAL with the gaps."""
     gaps = list((run.get("evidence") or {}).get("gaps") or [])
@@ -749,8 +761,7 @@ def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, pytho
         nxt = "" if status == "VERIFIED" else "GAPS: " + "; ".join(gaps)
         proof = evidence_text(run, rg, merged, verifier) if status == "VERIFIED" else ""
         cited = ({"tests": list(rg.get("tests") or []),
-                  "files": [f.replace("\\", "/") for f in run.get("files_changed", [])
-                            if not f.replace("\\", "/").startswith("tests/")]}
+                  "files": cited_files(row, run.get("files_changed", []))}
                  if status == "VERIFIED" else None)
         append_progress(Path(ledger_path), req, status, impl, nxt, proof, cited)
         commit_ledger(Path(ledger_path), req, status, repo)
