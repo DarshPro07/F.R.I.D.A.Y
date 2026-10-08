@@ -1272,7 +1272,11 @@ def _try_command(text):
     # ...and to short utterances: a pasted page that mentions "status" is not
     # a status question (2026-09-03: the pasted validation prompt got the
     # canned "Online." line three times).
-    if len(low.split()) <= 12 and re.search(r"\b(status|how are you|are you (?:up|online|ok)|all systems|"
+    # ...and to FRIDAY's own status: "the status of my social integrations" and
+    # "a project status update" got the canned line too (end-to-end test of
+    # FRIDAY.exe, 2026-10-09), so a bare "status" counts only alone or as hers.
+    if len(low.split()) <= 12 and re.search(r"^\W*status\W*$|\b(your status|friday'?s status|status report|"
+                 r"how are you|are you (?:up|online|ok)|all systems|"
                  r"systems? (?:nominal|status|ok|online|up|report)|"
                  r"system (?:status|health)|health check)\b", low):
         from friday.ui_server import build_state

@@ -495,3 +495,23 @@ def test_a_capability_called_by_its_own_name_is_understood():
     if "code_intelligence" in surface:                 # a family whose name has an underscore
         assert V._capability_call({"name": "code_intelligence.search", "arguments": "{}"})[:2] ==             ("code_intelligence", "search")
     assert "use_capability" in V._run_capability("", "", {})["error"]
+
+
+@pytest.mark.parametrize("text, canned", [
+    ("status", True),
+    ("What's your status?", True),
+    ("system status", True),
+    ("How are you?", True),
+    ("What's the status of my social media integrations?", False),
+    ("Give me guidance for writing a short project status update.", False),
+])
+def test_only_a_question_about_friday_gets_the_status_line(monkeypatch, text, canned):
+    # End-to-end test of FRIDAY.exe, 2026-10-09: "the status of my social integrations" and
+    # "a project status update" were both answered with "Online. GBrain ..., Hermes ...".
+    from friday import ui_server
+    from friday import voice_brain as V
+    monkeypatch.setattr(ui_server, "build_state", lambda: {
+        "connections": {"gbrain": {"status": "available"}, "hermes": {"status": "healthy"}},
+        "mcp": {"total": 1}, "system": {"ram_percent": 1}})
+    out = V._try_command(text)
+    assert (bool(out) and out.get("action") == "status") is canned
