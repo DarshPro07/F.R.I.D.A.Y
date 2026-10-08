@@ -395,6 +395,10 @@ def test_completion_claims_detected(text):
     "- Identify how FRIDAY is started: likely a Python CLI entry point,",
     "1. **Update** the launcher so the version is printed.",
     "Run the tests once it is installed.",
+    # 2026-10-09: descriptions, not reports - an adjective and dated world facts.
+    "The saved number for **E2E Tester** is **555-0199**.",
+    "pytest was first released in 2004.",
+    "On Oct 6, 2026, Anthropic published a new post.",
 ])
 def test_non_claims_not_flagged(text):
     assert not honesty.find_claims(text), text
@@ -406,6 +410,9 @@ def test_non_claims_not_flagged(text):
     "No problem, I deleted the file.",
     "Update: I deployed the fix.",
     "Created the file.",
+    "Your 2026 report has been sent.",
+    "The file is saved.",
+    "I saved the 2026 budget.",
 ])
 def test_a_negative_word_that_is_not_the_subject_leaves_the_claim(text):
     assert honesty.find_claims(text), text

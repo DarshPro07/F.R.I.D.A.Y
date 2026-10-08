@@ -147,6 +147,22 @@ _IMPERATIVE_RE = re.compile(
     r"show|start|stop|test|update|use|verify|wire|write)\b", re.I)
 _FIRST_PERSON_RE = re.compile(r"\b(?:I|I've|I'd|I'm|we|we've)\b")
 
+#: Completion words that describe rather than report. As an adjective after a
+#: determiner - "The saved number for E2E Tester is 555-0199" - and in a dated
+#: fact about the world - "pytest was first released in 2004", "On Oct 6, 2026,
+#: Anthropic published ..." - they say nothing about what FRIDAY did. 2026-10-09
+#: end-to-end test: both replaced correct answers with "I have not done it yet".
+#: "Your 2026 report has been sent" holds no date expression and stays a claim.
+_CLAIM_VERBS = ("created|opened|sent|changed|deleted|printed|built|deployed|completed|learned|"
+                "saved|installed|generated|downloaded|wrote|updated|launched|started|released|published")
+_ADJECTIVAL_RE = re.compile(
+    r"\b(?:the|a|an|your|my|this|that|these|those|its|their|our)\s+(?:recently\s+|newly\s+)?"
+    rf"(?:{_CLAIM_VERBS}|{'|'.join(CLAIM_EVIDENCE)})\s+(?=\w)", re.I)
+_MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
+_DATED_RE = re.compile(
+    rf"\b(?:in|since|on|by|from|until|during|circa)\s+(?:(?:early|mid|late)[- ]+)?(?:{_MONTH}\s+(?:\d{{1,2}},?\s+)?)?"
+    rf"(?:1[89]|20)\d{{2}}\b|\b{_MONTH}\s+\d{{1,2}},?\s+(?:1[89]|20)\d{{2}}\b", re.I)
+
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
@@ -175,8 +191,10 @@ def is_completion_claim(sentence: str) -> bool:
     rest = _NEGATIVE_SUBJECT_RE.sub(" ", sentence)
     if is_negated(rest):
         return False
-    if _IMPERATIVE_RE.match(rest) and not _FIRST_PERSON_RE.search(rest):
+    mine = _FIRST_PERSON_RE.search(rest)
+    if not mine and (_IMPERATIVE_RE.match(rest) or _DATED_RE.search(rest)):
         return False
+    rest = _ADJECTIVAL_RE.sub(" ", rest)
     return any(rx.search(rest) for rx in _COMPLETION_RE)
 
 

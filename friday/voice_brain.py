@@ -1057,8 +1057,10 @@ def _honest_about_acting(answer: str, acted, calls_made) -> str:
     if set(ran) & _STATUS_READS and not any(_FIRST_PERSON.search(c) for c in claims):
         return answer                      # a status report about another worker, backed by the read
     if not ran:
-        logger.warning("voice: completion claimed with no tool call at all: %r",
-                       text[:160])
+        # The flagged sentences, not just the opening: a false positive is only
+        # diagnosable from the sentence that tripped the gate (2026-10-09).
+        logger.warning("voice: completion claimed with no tool call at all: %r; claims %r",
+                       text[:160], [c[:120] for c in claims[:3]])
         # The gate cannot know whether the action is allowed, so the recovery
         # never promises it: a delete outside the workspace was promised here
         # and then, rightly, refused on the second ask (2026-10-08).
@@ -1066,8 +1068,8 @@ def _honest_about_acting(answer: str, acted, calls_made) -> str:
                 "it. Nothing on your machine was touched. Ask me again and I "
                 "will try it properly, or tell you if it is not allowed; say "
                 "'plan it' and I will show you the steps first.")
-    logger.warning("voice: completion claimed, only read-only ran (%s): %r",
-                   sorted(ran), text[:160])
+    logger.warning("voice: completion claimed, only read-only ran (%s): %r; claims %r",
+                   sorted(ran), text[:160], [c[:120] for c in claims[:3]])
     return ("I have not done it yet, sir - what I ran only looked. Say the "
             "word and I will try it, or tell you if it is not allowed.")
 
