@@ -153,16 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 913e16c on prd-v7/slice-7-adaptive-hardware, updated 2026-10-06T02:11:36+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 9, "MISSING": 77, "PARKED_BY_OWNER": 1, "PARTIAL": 72, "VERIFIED": 36}
+- HEAD: 5d27789 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-08T14:26:08+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 8, "MISSING": 94, "PARKED_BY_OWNER": 1, "PARTIAL": 73, "VERIFIED": 36}
 - Unresolved P0: 21
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (194): MODEL-012=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), TRAJ-001 (partial x2), MCP-001 (NOT_RED), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (partial x2), CLI-001 (partial x2), ASSUME-001 (failed x2), BBOX-001 (partial x2), CAP-003 (integration refused), BRAIN-001 (cascade exhausted), BROW-003 (partial x2), CAP-004 (integration refused), CAP-FORGE-003 (TEST_TIMEOUT), APPROVAL-001 (stale worktree), BG-001 (partial x2), PKG-001 (partial x2), CAP-FORGE-002 (integration refused), CAPB-001 (TEST_TIMEOUT), CHAOS-001 (partial x2), CODE-001 (blocked), COG-003 (cascade exhausted), COG-002 (partial x2), COG-005 (partial x2), COG-006 (cascade exhausted), CTX-004 (integration refused), SEC-005 (stale worktree), CTX-005 (NOT_RED), CTX-007 (integration refused), EVAL-002 (partial x2), CUA-001 (partial x2), EPI-001 (partial x2), EVAL-003 (integration refused), EVAL-004 (blocked), EVAL-005 (CONFLICT), EXP-001 (CONFLICT), FAIL-001 (partial x2), LEARN-001 (integration refused), INTENT-002 (blocked), MODEL-003 (blocked), MODEL-004 (partial x2)
-- Open escalations: 122
-  - EVAL-003 integration: refusing EVAL-003: run has no commit
-  - EVAL-004 blocked: Owner decision: for capability path, router-mode promotion (gate fed only by the sealed-holdout run)
-  - EVAL-005 integration: {"requirement": "EVAL-005", "result": "CONFLICT", "red_green": {"result": "OK", "tests": ["tests/tes
+- Last wave (199): MODEL-012=VERIFIER_FAIL
+- Parked: CORE-001 (PARKED_BY_OWNER), DOMAIN-001 (partial x2), EVAL-001 (failed x2), ACT-001 (failed x2), CTX-001 (partial x2), BCON-001 (partial x2), CYBER-002 (partial x2), DUR-001 (partial x2), INTENT-001 (integration refused), JIT-001 (partial x2), MEM-003 (stale worktree), MEM-002 (partial x2), TRAJ-001 (partial x2), MCP-001 (NOT_RED), CTX-002 (VERIFIER_FAIL), CTX-003 (integration refused), RES-001 (VERIFIER_FAIL), BROW-004 (partial x2), CLI-001 (partial x2), ASSUME-001 (failed x2), BBOX-001 (partial x2), CAP-003 (integration refused), BRAIN-001 (cascade exhausted), BROW-003 (partial x2), CAP-004 (integration refused), CAP-FORGE-003 (TEST_TIMEOUT), APPROVAL-001 (stale worktree), BG-001 (partial x2), PKG-001 (partial x2), CAP-FORGE-002 (integration refused), CAPB-001 (TEST_TIMEOUT), CHAOS-001 (partial x2), CODE-001 (blocked), COG-003 (cascade exhausted), COG-002 (partial x2), COG-005 (partial x2), COG-006 (cascade exhausted), CTX-004 (integration refused), SEC-005 (stale worktree), CTX-005 (NOT_RED), CTX-007 (integration refused), EVAL-002 (partial x2), CUA-001 (partial x2), EPI-001 (partial x2), EVAL-003 (integration refused), EVAL-004 (blocked), EVAL-005 (CONFLICT), EXP-001 (CONFLICT), FAIL-001 (partial x2), LEARN-001 (integration refused), INTENT-002 (blocked), MODEL-003 (blocked), MODEL-004 (partial x2), MODEL-005 (partial x2), MODEL-006 (partial x2), ONB-001 (partial x2)
+- Open escalations: 125
   - EXP-001 integration: {"requirement": "EXP-001", "result": "CONFLICT", "red_green": {"result": "OK", "tests": ["tests/test
   - FAIL-001 partial: integrated twice without closing its gaps
   - MODEL-012 resolved: controller unpark: owner 2026-10-06: tool calls through the gateway (stale worktree removed; slice-2
@@ -170,5 +167,8 @@ That is the first implementation target of this program.
   - INTENT-002 blocked: Measuring the real classifier needs a live model run outside this worktree (per the packet); I did n
   - MODEL-003 blocked: Owner decision/data needed: a fresh, harder, independently labelled task set (with headroom over cho
   - MODEL-004 partial: integrated twice without closing its gaps
-- Next ready: MODEL-005, MODEL-006
+  - MODEL-005 partial: integrated twice without closing its gaps
+  - MODEL-006 partial: integrated twice without closing its gaps
+  - ONB-001 partial: integrated twice without closing its gaps
+- Next ready: MODEL-012, EVO-001
 <!-- build-program:end -->
