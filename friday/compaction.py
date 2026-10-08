@@ -128,7 +128,7 @@ def _governance_lines(governance: dict) -> list[str]:
     lines = [f"{CONSTRAINT}: never {kind}" for kind in governance.get("forbidden") or ()]
     for kind, names in sorted((governance.get("protected") or {}).items()):
         lines += [f"{CONSTRAINT}: do not {kind} {name}" for name in names]
-    ceiling = int(governance.get("max_side_effects") or 0)
+    ceiling = contracts.write_ceiling(governance)
     if ceiling:
         lines.append(f"{CONSTRAINT}: at most {ceiling} changes")
     return lines

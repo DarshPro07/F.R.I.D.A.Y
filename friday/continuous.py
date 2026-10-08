@@ -881,7 +881,7 @@ class ContinuousTaskExecutor:
         outcomes = {**((task.get("detail") or {}).get("item_outcomes") or {}),
                     **c.item_outcomes(result)}
         pending = sorted(i for i, ok in outcomes.items() if not ok)
-        if pending and governance.get("recovery") == c.RESUME_FAILED_ITEMS_ONLY:
+        if pending and c.partial_failure_recovery(governance) == c.RESUME_FAILED_ITEMS_ONLY:
             task = {**task, "detail": {**(task.get("detail") or {}),
                                        "item_outcomes": outcomes}}
             self._requeue_or_block(

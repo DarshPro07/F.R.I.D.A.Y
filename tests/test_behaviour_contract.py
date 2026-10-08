@@ -287,6 +287,74 @@ def test_resume_failed_items_only_retries_only_the_failed_items(tmp_path):
     assert task["detail"]["item_outcomes"] == {"a": True, "b": True, "c": True}
 
 
+def test_the_prds_spelling_of_the_write_limit_is_held_by_the_executor(tmp_path):
+    """`max_external_writes` is the PRD's name for the ceiling: the write after
+    the Nth is refused, exactly as for the internal `max_side_effects`."""
+    store = Store(tmp_path / "ada.sqlite3")
+    contract = c.ObjectiveContract(goal="create three notes, at most 2 external writes",
+                                   governance={"max_external_writes": 2})
+    tasks = [{"id": f"t{i}", "capability": "files_create",
+              "arguments": {"path": f"n{i}.txt", "content": "x"},
+              "dependencies": [f"t{i - 1}"] if i > 1 else []} for i in (1, 2, 3)]
+    run_id = _compile(store, tasks, contract)["run_id"]
+    made: list[str] = []
+
+    async def port(capability, arguments):
+        made.append(arguments["path"])
+        return {"status": "succeeded", "output": {}, "side_effects": [f"wrote {arguments['path']}"]}
+
+    _drive(store, run_id, port)
+    assert made == ["n1.txt", "n2.txt"], made
+    third = [t for t in store.objective_tasks(run_id) if t["task_id"].endswith("t3")][0]
+    assert third["status"] != O.TaskStatus.SUCCEEDED
+    assert "at most 2" in str(third.get("evidence") or ""), third
+
+
+def test_the_write_ceiling_is_the_strictest_limit_the_contract_names():
+    assert c.write_ceiling({"max_external_writes": 3, "max_side_effects": 2}) == 2
+    assert c.write_ceiling({"max_external_writes": 2}) == 2
+    assert c.write_ceiling({"max_side_effects": 4}) == 4
+    assert c.write_ceiling({"max_external_writes": 0, "max_side_effects": 5}) == 5
+    assert c.write_ceiling({}) == 0
+    assert c.write_ceiling(None) == 0
+
+
+def test_the_prds_spelling_of_the_recovery_retries_only_the_failed_items(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    contract = c.ObjectiveContract(
+        goal="file three reports, retry only the failed ones",
+        governance={"recovery": {"on_partial_failure": c.RESUME_FAILED_ITEMS_ONLY}})
+    run_id = _compile(store, [{"id": "t1", "capability": "files_create",
+                               "arguments": {"items": ["a", "b", "c"]}}],
+                      contract)["run_id"]
+    calls: list[list[str]] = []
+
+    async def port(capability, arguments):
+        calls.append(list(arguments["items"]))
+        rows = [{"item": i, "ok": not (i == "b" and len(calls) == 1)}
+                for i in arguments["items"]]
+        return {"status": "succeeded", "output": {"items": rows}}
+
+    _drive(store, run_id, port, through_retries=True)
+    assert calls == [["a", "b", "c"], ["b"]], calls
+    (task,) = store.objective_tasks(run_id)
+    assert task["status"] == O.TaskStatus.SUCCEEDED
+
+
+def test_the_declared_recovery_is_read_in_either_spelling():
+    assert c.partial_failure_recovery({"recovery": c.RESUME_FAILED_ITEMS_ONLY}) \
+        == c.RESUME_FAILED_ITEMS_ONLY
+    assert c.partial_failure_recovery(
+        {"recovery": {"on_partial_failure": c.RESUME_FAILED_ITEMS_ONLY}}) \
+        == c.RESUME_FAILED_ITEMS_ONLY
+    assert c.partial_failure_recovery({"recovery": {"on_timeout": "x"}}) == ""
+    assert c.partial_failure_recovery({}) == ""
+    assert c.partial_failure_recovery(None) == ""
+    narrowed = c.resume_arguments({"recovery": {"on_partial_failure": c.RESUME_FAILED_ITEMS_ONLY}},
+                                  {"items": ["a", "b"]}, {"a": True, "b": False})
+    assert narrowed == {"items": ["b"]}
+
+
 def test_without_the_declared_recovery_a_retry_is_not_narrowed():
     arguments = {"items": ["a", "b"]}
     assert c.resume_arguments({}, arguments, {"a": True, "b": False}) is arguments

@@ -96,7 +96,7 @@ def _outside_contract(governance: dict, started: list[str],
             found.append(f"{capability} ({kind} was forbidden)")
         elif _side_effecting(capability):
             effects.append(task)
-    ceiling = int(governance.get("max_side_effects") or 0)
+    ceiling = K.write_ceiling(governance)
     if ceiling and len(effects) > ceiling:
         found.append(f"{len(effects)} steps with side effects against a limit of {ceiling}")
     return found

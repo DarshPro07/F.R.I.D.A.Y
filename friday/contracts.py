@@ -934,6 +934,39 @@ def item_outcomes(result) -> dict[str, bool]:
     return outcomes
 
 
+def write_ceiling(governance: dict | None) -> int:
+    """
+    The most changes the contract allows (BCON-001), 0 when it sets no limit.
+    The PRD's spelling `max_external_writes` and the internal
+    `max_side_effects` are the same limit; when both are given the stricter
+    one holds.
+    """
+    limits = []
+    for key in ("max_external_writes", "max_side_effects"):
+        try:
+            limit = int((governance or {}).get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if limit > 0:
+            limits.append(limit)
+    return min(limits, default=0)
+
+
+def partial_failure_recovery(governance: dict | None) -> str:
+    """
+    The declared recovery after a partial failure (BCON-001), "" when none.
+    The internal spelling is `recovery: "<strategy>"`; the PRD's is
+    `recovery: {"on_partial_failure": "<strategy>"}`.
+    """
+    recovery = (governance or {}).get("recovery")
+    if isinstance(recovery, str):
+        return recovery
+    if isinstance(recovery, dict):
+        declared = recovery.get("on_partial_failure")
+        return declared if isinstance(declared, str) else ""
+    return ""
+
+
 def resume_arguments(governance: dict | None, arguments: dict,
                      outcomes: dict[str, bool] | None) -> dict:
     """
@@ -942,7 +975,7 @@ def resume_arguments(governance: dict | None, arguments: dict,
     it already did. Any other recovery, or no recorded per-item state, leaves
     the arguments as they were.
     """
-    if (governance or {}).get("recovery") != RESUME_FAILED_ITEMS_ONLY or not outcomes:
+    if partial_failure_recovery(governance) != RESUME_FAILED_ITEMS_ONLY or not outcomes:
         return arguments
     items = arguments.get("items")
     if not isinstance(items, list):

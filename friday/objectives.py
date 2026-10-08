@@ -868,8 +868,7 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
     # executor never has to assume the person, attended.
     minted = envelope_for(run_id, [cap for cap in planned if cap in known],
                           provenance=provenance, attended=attended)
-    ceiling = int((contract.governance or {}).get("max_side_effects") or 0) \
-        if contract is not None else 0
+    ceiling = contracts.write_ceiling(contract.governance) if contract is not None else 0
     if ceiling:
         # BCON-001: "at most N changes" is the executor's ceiling to hold.
         minted = replace(minted, max_side_effects=ceiling)
