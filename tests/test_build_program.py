@@ -1355,3 +1355,17 @@ def test_the_controllers_inbox_is_applied_under_the_lock_and_archived(env, tmp_p
     st = state_of(env)
     assert st["parked"] == {} and st["repairs"]["A"] == 2 and "A" in st["repair_queue"]
     assert not (runs / BP.INBOX).exists() and list(runs.glob("controller_inbox.applied-*.jsonl"))
+
+
+def test_a_dry_run_plans_with_the_inbox_and_leaves_it_queued(env, tmp_path):
+    # 2026-10-08: the chain's readiness check is a dry run. Blind to the inbox, it saw only a
+    # 4 GB P0 that could not fit, so the real run that applies 37 queued unparks never started.
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / BP.INBOX).write_text(json.dumps({"action": "unpark", "req": "B"}) + "\n", encoding="utf-8")
+    env.state.parent.mkdir(parents=True, exist_ok=True)
+    env.state.write_text(json.dumps({"parked": {"B": "partial x2"}}), encoding="utf-8")
+    res, _ = go(env, FakeKernel(ids=("B",)), runs_dir=runs, dry_run=True)
+    assert res["stop_reason"] == "dry run"                       # B is planned, not "no ready work"
+    assert (runs / BP.INBOX).exists()                            # still queued for the real run
+    assert state_of(env)["parked"] == {"B": "partial x2"}         # a dry run writes no state

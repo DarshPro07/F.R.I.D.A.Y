@@ -184,11 +184,12 @@ def release_lock(path: Path) -> None:
 INBOX = "controller_inbox.jsonl"
 
 
-def apply_inbox(state: dict, runs_dir: Path) -> list[str]:
+def apply_inbox(state: dict, runs_dir: Path, archive: bool = True) -> list[str]:
     """Apply the controller's queued edits - {"action": "unpark"|"requeue", "req", "step", "why"} per
     line - then archive the inbox. Edits written to the state file while a run held it were lost to
     that run's next write, and waiters racing the lock died to quoting bugs and memory reaping
-    (2026-10-02..04): one reader, under the lock, removes the race."""
+    (2026-10-02..04): one reader, under the lock, removes the race. archive=False applies them to
+    `state` only and leaves the inbox for the real run (a dry run plans with them)."""
     path = Path(runs_dir) / INBOX
     if not path.exists():
         return []
@@ -214,7 +215,8 @@ def apply_inbox(state: dict, runs_dir: Path) -> list[str]:
         state["escalations"].append({"req": req, "kind": "resolved", "at": now(),
                                      "detail": f"controller {action}: {cmd.get('why', '')}"})
         applied.append(f"{action} {req}")
-    path.replace(path.with_name(f"controller_inbox.applied-{int(time.time())}.jsonl"))
+    if archive:
+        path.replace(path.with_name(f"controller_inbox.applied-{int(time.time())}.jsonl"))
     return applied
 
 
@@ -627,8 +629,12 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
             return {"stop_reason": "dirty tree", "waves": []}
     worktrees = worktrees or k._worktrees_root()
     state = load_state(state_file)
-    if not dry_run:
-        for done in apply_inbox(state, runs_dir or k.RUNS_DIR):
+    # A dry run plans with the queued edits applied in memory and leaves the inbox for the
+    # real run. The chain's readiness check is a dry run: blind to the inbox, it kept 37
+    # queued unparks waiting behind a 4 GB P0 that never fit, and no real run - the only
+    # reader of the inbox - ever started (2026-10-08). A dry run writes no state.
+    for done in apply_inbox(state, runs_dir or k.RUNS_DIR, archive=not dry_run):
+        if not dry_run:
             out(f"inbox: {done}")
     integrated: set[str] = set()
     resumed: set[str] = set()
