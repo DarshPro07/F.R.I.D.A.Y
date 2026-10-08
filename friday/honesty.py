@@ -123,6 +123,18 @@ _COMPLETION_RE = tuple(re.compile(p, re.I) for p in COMPLETION_PATTERNS) + (
 )
 _NEGATION_RE = tuple(re.compile(p, re.I) for p in NEGATION_PATTERNS)
 
+#: A clause whose subject is a negative - "Nothing has changed", "no files were
+#: deleted", "..., and none of it was sent" - asserts that nothing was done. It
+#: is taken out before the sentence is judged, and the rest is judged as usual:
+#: "Hermes completed the task; nothing is running" still claims the completion.
+#: 2026-10-08: a refusal ending "Nothing has changed since you asked" was read as
+#: a claim and replaced with "I have not actually done that". The auxiliary is
+#: required, so "I sent it, nothing else needed" stays a claim.
+_NEGATIVE_SUBJECT_RE = re.compile(
+    r"(?:^|[,;:–—]|\s-\s)\s*(?:and\s+|so\s+|but\s+)?"
+    r"(?:nothing|nobody|no one|none(?:\s+of\s+\w+)?|no\s+\w+)\s+"
+    r"(?:has|have|had|was|were|is|are|got|been)\b[^,;:–—]*", re.I)
+
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
@@ -148,9 +160,10 @@ def is_negated(sentence: str) -> bool:
 
 def is_completion_claim(sentence: str) -> bool:
     """An affirmative, past/perfect assertion that something now exists."""
-    if is_negated(sentence):
+    rest = _NEGATIVE_SUBJECT_RE.sub(" ", sentence)
+    if is_negated(rest):
         return False
-    return any(rx.search(sentence) for rx in _COMPLETION_RE)
+    return any(rx.search(rest) for rx in _COMPLETION_RE)
 
 
 def find_claims(text: str) -> list[str]:

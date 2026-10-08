@@ -385,9 +385,24 @@ def test_completion_claims_detected(text):
     "I'm working on it.",
     "That isn't done yet.",
     "I don't have that capability connected.",
+    # 2026-10-08: a refusal with a negative subject was read as a completion claim.
+    "Nothing has changed since you asked two minutes ago.",
+    "Nothing was changed.",
+    "No files were deleted.",
+    "None of it was sent.",
+    "That file is outside my workspace, and nothing was touched.",
 ])
 def test_non_claims_not_flagged(text):
     assert not honesty.find_claims(text), text
+
+
+@pytest.mark.parametrize("text", [
+    "I sent it, nothing else needed.",
+    "I've sent it, no problem.",
+    "No problem, I deleted the file.",
+])
+def test_a_negative_word_that_is_not_the_subject_leaves_the_claim(text):
+    assert honesty.find_claims(text), text
 
 
 def test_audit_with_no_run_rejects_any_claim():
