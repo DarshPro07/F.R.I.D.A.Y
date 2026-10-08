@@ -938,6 +938,27 @@ def test_a_requirement_left_partial_twice_is_parked_across_runs(env):
     assert "A" in state_of(env)["parked"]
 
 
+@pytest.mark.parametrize("progress, slices", [(True, 4), (False, 2)])
+def test_a_partial_row_that_makes_progress_runs_on_and_one_that_stalls_parks(env, progress, slices):
+    # 2026-10-08: parking at two PARTIAL slices made 25 of 55 parks, most of them rows
+    # that were advancing. Different gaps each time is progress, up to MAX_PARTIALS.
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")] * 6}
+    calls = []
+
+    class Partial(FakeIntegrator):
+        def integrate(self, req):
+            calls.append(req)
+            gaps = [f"gap {len(calls)}"] if progress else ["the same gap"]
+            return {**super().integrate(req), "ledger_status": "PARTIAL", "gaps": gaps}
+
+    for _ in range(6):
+        go(env, k, bi=Partial(k, close=False))
+    assert [x[0] for x in k.launches] == ["A"] * slices
+    assert state_of(env)["parked"]["A"] == f"partial x{slices}"
+    assert BP.MAX_PARTIALS == 4
+
+
 def test_a_failed_docs_commit_is_an_escalation_not_silence(env):
     k = FakeKernel(ids=("A",))
     k.script = {"A": [rec("A")]}

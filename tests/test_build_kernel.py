@@ -1943,3 +1943,23 @@ def test_a_standing_entry_replaces_the_coded_budget_and_a_day_override_still_win
     assert K.day_limits(runs) == (20.0, 25.0)
     (runs / K.DAY_BUDGET_FILE).write_text(json.dumps({"standing": {"soft": "x"}}), encoding="utf-8")
     assert K.day_limits(runs) == (K.DAY_SOFT_USD, K.DAY_HARD_USD)
+
+
+def test_a_build_commit_never_adds_a_path_the_main_checkout_already_holds(repo, tmp_path):
+    # EVAL-005, 2026-10-08: the worker regenerated data/prd_v7_requirements.json, which the
+    # main checkout holds untracked; the commit carried it and the cherry-pick refused.
+    base = _git(repo, "rev-parse", "HEAD")
+    (repo / "data").mkdir()
+    (repo / "data" / "state.json").write_text("{}")             # untracked in the main checkout
+    wt = tmp_path / "wt"
+    _git(repo, "worktree", "add", "-q", "-b", "build/r-1", str(wt), "HEAD")
+    (wt / "data").mkdir()
+    (wt / "data" / "state.json").write_text('{"x": 1}')
+    (wt / "new.py").write_text("x = 1\n")
+    sha, files = K._commit_run(K.Running("R-1", None, wt, base_sha=base, repo=repo), {"summary": "adds new.py"})
+    assert sha and files == ["new.py"]
+    wt2 = tmp_path / "wt2"                                     # a change made only of such paths is no change
+    _git(repo, "worktree", "add", "-q", "-b", "build/r-2", str(wt2), "HEAD")
+    (wt2 / "data").mkdir()
+    (wt2 / "data" / "state.json").write_text('{"y": 2}')
+    assert K._commit_run(K.Running("R-2", None, wt2, base_sha=base, repo=repo), {"summary": "s"}) == ("", [])

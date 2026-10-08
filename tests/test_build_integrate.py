@@ -711,6 +711,33 @@ def _attempted(runs, run, attempt_id="att-1"):
     (runs / "REQ-1.json").write_text(json.dumps({**run, "attempt_id": attempt_id}), encoding="utf-8")
 
 
+def test_a_verifier_that_ran_out_of_turns_gets_one_more_run_with_twice_the_turns(tmp_path):
+    # RES-001, 2026-10-08: the verifier stopped on error_max_turns before judging anything,
+    # and INSUFFICIENT_EVIDENCE refused a change whose RED/GREEN had passed.
+    import build_kernel
+    repo, runs, run, rows = setup(tmp_path, priority="P0")
+    _attempted(runs, run)
+    turns = []
+
+    def runner(cmd, prompt, cwd):
+        turns.append(int(cmd[cmd.index("--max-turns") + 1]))
+        if len(turns) == 1:
+            return json.dumps({"subtype": "error_max_turns", "is_error": True, "total_cost_usd": 0.3})
+        return json.dumps({"result": '{"verdict": "PASS", "requirement_ids": ["REQ-1"]}', "total_cost_usd": 0.4})
+
+    receipt = bi.run_verifier(rows[0], run, {"result": "OK"}, repo=repo, runner=runner, runs_dir=runs)
+    assert receipt["verdict"] == "PASS"
+    assert turns == [turns[0], min(build_kernel.VERIFIER_MAX_TURNS, 2 * turns[0])]
+
+    turns.clear()                                   # a verifier that finished is not run again
+
+    def judged(cmd, prompt, cwd):
+        turns.append(1)
+        return json.dumps({"result": '{"verdict": "FAIL", "failing_criteria": ["x"]}', "total_cost_usd": 0.2})
+    assert bi.run_verifier(rows[0], run, {"result": "OK"}, repo=repo, runner=judged, runs_dir=runs)["verdict"] == "FAIL"
+    assert turns == [1]
+
+
 def test_the_verifier_runs_on_the_budget_its_launch_held_then_gives_it_back(tmp_path):
     # 2026-10-03 owner: the spend lease covers verifiers too. A build launch holds its
     # verifier's budget; the verifier uses it, records the actual cost, releases the rest.

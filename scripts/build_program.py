@@ -41,6 +41,9 @@ DOCS_DIR = "docs/implementation"
 BEGIN = b"<!-- build-program:begin -->"
 END = b"<!-- build-program:end -->"
 MAX_ATTEMPTS = 2
+#: PARTIAL slices a row may integrate before the controller looks, while each one
+#: leaves different gaps (progress). Two in a row with the same gaps park at once.
+MAX_PARTIALS = 4
 MAX_REPAIRS = len(build_kernel.CASCADE)  # repair, advisor, advised implementer
 # Rejections a worker can answer by editing its own change; CONFLICT is a merge
 # problem and an integrator refusal is a refusal, so neither is sent back.
@@ -204,6 +207,7 @@ def apply_inbox(state: dict, runs_dir: Path, archive: bool = True) -> list[str]:
             continue
         state["parked"].pop(req, None)
         state["partials"].pop(req, None)
+        state.get("partial_gaps", {}).pop(req, None)
         state["attempts"].pop(req, None)
         state["cascade"].pop(req, None)
         if action == "requeue":
@@ -234,6 +238,7 @@ def load_state(path: Path) -> dict:
             "repair_queue": dict(old.get("repair_queue") or {}),
             "cascade": dict(old.get("cascade") or {}),
             "partials": dict(old.get("partials") or {}),
+            "partial_gaps": dict(old.get("partial_gaps") or {}),
             "capsule_decision": old.get("capsule_decision"),
             "escalations": list(old.get("escalations") or []),
             "spend_usd_total": float(old.get("spend_usd_total") or 0.0)}
@@ -552,12 +557,19 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
         spend += float((res.get("verifier") or {}).get("cost_usd") or 0.0)
         if res["result"] == "INTEGRATED":
             integrated.add(req)
-            # A PARTIAL row stays ready; cap how often a run may pay for it.
+            # A PARTIAL row stays ready; cap how often a run may pay for it. A slice that
+            # leaves different gaps made progress, so it may go on to MAX_PARTIALS; the
+            # same gaps twice (or none reported) is no progress. Parking every row at two
+            # slices made 25 of the 55 parks of 2026-10-08, each waiting on the controller.
             if res.get("ledger_status") == "PARTIAL":
-                state["partials"][req] = state["partials"].get(req, 0) + 1
-                if state["partials"][req] >= MAX_ATTEMPTS:
-                    park(state, req, f"partial x{state['partials'][req]}", "partial",
-                         "integrated twice without closing its gaps")
+                n = state["partials"][req] = state["partials"].get(req, 0) + 1
+                gaps = sorted(res.get("gaps") or [])
+                stalled = not gaps or state.setdefault("partial_gaps", {}).get(req) == gaps
+                state.setdefault("partial_gaps", {})[req] = gaps
+                if n >= MAX_PARTIALS or (n >= MAX_ATTEMPTS and stalled):
+                    park(state, req, f"partial x{n}", "partial",
+                         "integrated without closing its gaps"
+                         + ("" if n >= MAX_PARTIALS else "; the same gaps twice, so no progress"))
             return "INTEGRATED", spend, True
         if res["result"] in REPAIRABLE and state["repairs"].get(req, 0) < MAX_REPAIRS:
             state["repair_queue"][req] = {"result": res["result"], "at": now()}

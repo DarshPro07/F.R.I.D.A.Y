@@ -230,14 +230,15 @@ def verifier_model(files: list[str]) -> str:
     return "opus" if any(_protected(f) for f in files) else "sonnet"
 
 
-def verifier_command(cost_usd: float, files: list[str] = (), exe: str | None = None) -> list[str]:
+def verifier_command(cost_usd: float, files: list[str] = (), exe: str | None = None,
+                     turns: int | None = None) -> list[str]:
     """Turns and budget sized to the change (build_kernel.verifier_turns and
     verifier_budget - the amount finalize held for it under the day's spend lease)."""
     budget = build_kernel.verifier_budget(cost_usd, files)
     return [exe or shutil.which("claude") or "claude", "-p", "--model", verifier_model(list(files)),
             "--allowedTools", VERIFIER_TOOLS,
             "--strict-mcp-config", "--settings", '{"disableAllHooks": true}',
-            "--max-turns", str(build_kernel.verifier_turns(files)), "--max-budget-usd", f"{budget:.2f}",
+            "--max-turns", str(turns or build_kernel.verifier_turns(files)), "--max-budget-usd", f"{budget:.2f}",
             "--output-format", "json"]
 
 
@@ -298,8 +299,20 @@ def run_verifier(row: dict, run: dict, rg: dict, *, repo: Path = ROOT, runner=No
     cwd = Path(run.get("worktree") or repo)
     if not cwd.is_dir():
         cwd = repo
-    cmd = verifier_command(run.get("cost_usd", 0), run.get("files_changed", []))
-    key = verify_key(run)
+    turns = build_kernel.verifier_turns(run.get("files_changed", []))
+    receipt = _verify_once(row, run, rg, repo, runner, runs_dir, cwd, turns, verify_key(run))
+    if receipt.get("stop") == "error_max_turns" and turns < build_kernel.VERIFIER_MAX_TURNS:
+        # It ran out of turns before judging anything (RES-001, 2026-10-08: 15 turns,
+        # then INSUFFICIENT_EVIDENCE refused a change whose RED/GREEN had passed).
+        # One more run with twice the turns; a second stop stands.
+        more = min(build_kernel.VERIFIER_MAX_TURNS, 2 * turns)
+        receipt = _verify_once(row, run, rg, repo, runner, runs_dir, cwd, more, verify_key(run) + ":more-turns")
+    return receipt
+
+
+def _verify_once(row: dict, run: dict, rg: dict, repo: Path, runner, runs_dir: Path, cwd: Path,
+                 turns: int, key: str) -> dict:
+    cmd = verifier_command(run.get("cost_usd", 0), run.get("files_changed", []), turns=turns)
     build_kernel.spend_guard(key, "verify", str(run.get("requirement")), "VERIFIER",
                              float(cmd[cmd.index("--max-budget-usd") + 1]), runs_dir)
     try:
@@ -742,6 +755,7 @@ def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, pytho
         append_progress(Path(ledger_path), req, status, impl, nxt, proof, cited)
         commit_ledger(Path(ledger_path), req, status, repo)
         out["ledger_status"] = status
+        out["gaps"] = gaps
     remove_worker(run, repo)
     return done("INTEGRATED")
 

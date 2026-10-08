@@ -1780,6 +1780,15 @@ def _commit_run(run: Running, evidence: dict) -> tuple[str, list[str]]:
     # path .gitignore already ignores, and this repository ignores .build/.
     _git(["add", "-A"], run.wt, 60)
     _git(["rm", "-r", "-q", "--cached", "--ignore-unmatch", ".build"], run.wt, 60)
+    # A new file at a path the main checkout already holds - runtime state such as
+    # data/prd_v7_requirements.json, untracked there - can never be integrated: the
+    # cherry-pick refuses to overwrite it (EVAL-005, 2026-10-08). It stays out.
+    added = _git(["diff", "--cached", "--name-only", "--diff-filter=A"], run.wt, 60).splitlines()
+    clash = [p for p in added if (Path(run.repo) / p).exists()]
+    if clash:
+        _git(["rm", "-q", "--cached", "--", *clash], run.wt, 60)
+        if not _git(["diff", "--cached", "--name-only"], run.wt, 60).strip():
+            return "", []
     _git(["-c", "user.name=DarshPro07", "-c", "user.email=DarshPro07", "commit",
           "-m", commit_subject(run.req, evidence), "-m", commit_body(run.req, evidence)],
          run.wt, 120)
