@@ -153,23 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 18c2775 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-08T20:09:39+00:00
+- HEAD: 7556eef on prd-v7/slice-7-adaptive-hardware, updated 2026-10-08T21:07:20+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 8, "MISSING": 101, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 50}
 - Unresolved P0: 18
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (215): JIT-001=FAILED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), APPROVAL-001 (integration refused), ACT-001 (integration refused)
-- Open escalations: 177
-  - INTENT-002 resolved: controller unpark: RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08
-  - CTX-002 resolved: controller unpark: RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08
-  - APPROVAL-001 integration: refusing APPROVAL-001: run has no commit
-  - ACT-001 integration: refusing ACT-001: the checkout has tracked changes
-  - - ledger_render: LEDGER PROBLEM [v7]: MCP-001: VERIFIED v7 row names no test
-v7: 1 problem(s); artifacts not written
+- Last wave (221): DUR-001=REFUSED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), APPROVAL-001 (integration refused), ACT-001 (integration refused), JIT-001 (cascade exhausted), EVAL-001 (integration refused), BCON-001 (integration refused), CYBER-002 (integration refused), DUR-001 (integration refused)
+- Open escalations: 182
   - BRAIN-001 resolved: controller unpark: controller, 2026-10-08 (after 401999e)
   - EVAL-005 resolved: controller unpark: controller, 2026-10-08 (after 401999e)
   - CYBER-002 resolved: controller unpark: controller, 2026-10-08 (after 401999e)
   - CAP-004 resolved: controller unpark: controller, 2026-10-08 (after 401999e)
   - RES-001 resolved: controller unpark: re-apply from wip/res-001-1008
+  - JIT-001 cascade: 3 repairs spent
+  - EVAL-001 integration: refusing EVAL-001: run has no commit
+  - BCON-001 integration: refusing BCON-001: run has no commit
+  - CYBER-002 integration: refusing CYBER-002: run has no commit
+  - DUR-001 integration: refusing DUR-001: run has no commit
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
