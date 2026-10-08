@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 8b563e4 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-08T15:59:30+00:00
+- HEAD: ff3314b on prd-v7/slice-7-adaptive-hardware, updated 2026-10-08T17:00:54+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 8, "MISSING": 101, "PARKED_BY_OWNER": 1, "PARTIAL": 62, "VERIFIED": 47}
 - Unresolved P0: 19
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (201): SEC-005=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), CYBER-002 (partial x2), CTX-002 (VERIFIER_FAIL), RES-001 (VERIFIER_FAIL), BRAIN-001 (cascade exhausted), CAP-004 (integration refused), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), CUA-001 (partial x2), EPI-001 (partial x2), EVAL-005 (CONFLICT), EXP-001 (CONFLICT), FAIL-001 (partial x2), INTENT-002 (blocked), MODEL-003 (blocked), ONB-001 (partial x2)
-- Open escalations: 162
-  - CTX-003 resolved: controller unpark: unpark triage wf_5253313a, 2026-10-08: VERIFIED by controller
-  - CTX-005 resolved: controller unpark: unpark triage wf_5253313a, 2026-10-08: VERIFIED by controller
-  - CTX-007 resolved: controller unpark: unpark triage wf_5253313a, 2026-10-08: VERIFIED by controller
-  - EVAL-002 resolved: controller unpark: unpark triage wf_5253313a, 2026-10-08: VERIFIED by controller
-  - EVAL-003 resolved: controller unpark: unpark triage wf_5253313a, 2026-10-08: VERIFIED by controller
-  - INTENT-001 resolved: controller unpark: unpark triage wf_5253313a, 2026-10-08: VERIFIED by controller
-  - LEARN-001 resolved: controller unpark: unpark triage wf_5253313a, 2026-10-08: VERIFIED by controller
+- Last wave (202): CTX-002=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), CYBER-002 (partial x2), RES-001 (VERIFIER_FAIL), BRAIN-001 (cascade exhausted), CAP-004 (integration refused), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EVAL-005 (CONFLICT), EXP-001 (CONFLICT)
+- Open escalations: 169
   - MODEL-005 resolved: controller unpark: unpark triage wf_5253313a, 2026-10-08: VERIFIED by controller
   - MODEL-006 resolved: controller unpark: unpark triage wf_5253313a, 2026-10-08: VERIFIED by controller
   - DOMAIN-001 resolved: controller unpark: unpark triage wf_5253313a, 2026-10-08: already VERIFIED; the park was stale
-- Next ready: MODEL-012, MCP-001
+  - CUA-001 resolved: controller unpark: RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08
+  - EPI-001 resolved: controller unpark: RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08
+  - FAIL-001 resolved: controller unpark: RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08
+  - MODEL-003 resolved: controller unpark: RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08
+  - ONB-001 resolved: controller unpark: RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08
+  - INTENT-002 resolved: controller unpark: RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08
+  - CTX-002 resolved: controller unpark: RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08
+- Next ready: MODEL-012, APPROVAL-001
 <!-- build-program:end -->
