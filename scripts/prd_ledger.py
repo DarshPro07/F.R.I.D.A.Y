@@ -4029,6 +4029,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added contracts.write_ceiling and partial_failure_recovery; the five governance readers now use them, so max_external_writes N refuses write N+1 and recovery.on_partial_failure=resume_failed_items_only narrows retries. Old spellings still work. (build run, commit b346db3af)',
         "next_action": 'GAPS: Only the six requested test files were run, not the 126 files test_impact lists as affected.',
     }),
+    ('CTX-001', {
+        "status": PARTIAL,
+        "current_implementation": 'TaskBundle.measure() now reports per-section tokens (sections{title: len//4}) and total_tokens; section building moved into _sections(), render() output unchanged. Existing measure keys kept. (build run, commit 88e81db06)',
+        "next_action": "GAPS: The 1 failure is tests/test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop: a @live test against the real Hermes gateway (provider='' model='' status=failed). model_gateway.py does not use TaskBundle or measure(); not caused by this change, and live tests were out of scope. tests/test_hermes_bridge.py -m 'not live': 32 passed.; The new test was written before the change and not run against the old code; it fails there by construction because measure() had no 'sections' key.",
+    }),
 ]
 
 
