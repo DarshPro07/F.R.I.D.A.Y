@@ -139,7 +139,7 @@ def test_integrated_with_ledger(tmp_path):
     assert "affected tests" in row["evidence"]
     # 2026-10-02: --check refuses a VERIFIED v7 row that names no test; the entry
     # cites the RED/GREEN tests and the changed files.
-    assert row["tests"] == ["tests/test_twice.py"] and "calc.py" in row["files"]
+    assert row["tests"] == ["tests/test_twice.py::test_twice"] and "calc.py" in row["files"]
     saved = json.loads((runs / "REQ-1.integration.json").read_text())
     assert saved["result"] == "INTEGRATED" and saved["integrated_commit"]
     assert sh(repo, "branch", "--list", "build/req-1") == ""  # worker branch removed on success
@@ -380,6 +380,16 @@ def test_assertion_red_is_recorded(tmp_path):
     repo, runs, run, rows = setup(tmp_path, files)
     rg = bi.red_green(run, bi.commit_test_files(run, repo), repo, sys.executable)
     assert rg["result"] == "OK" and rg["red_kind"] == "assertion"
+    # 2026-10-08: a VERIFIED write cited the test FILE and the ledger check refused it;
+    # the tests that failed at the base are the ones that prove the change.
+    assert rg["proving"] == ["tests/test_twice.py::test_twice"]
+
+
+def test_the_ledger_cites_named_tests_only():
+    assert bi.named_tests(["tests\\t.py::test_a[1 2]", "tests/t.py::test_a[3]", "tests/t.py", "tests/u.py::test_b"]) == [
+        "tests/t.py::test_a", "tests/u.py::test_b"]
+    assert bi.named_tests(["tests/t.py::test_%d" % i for i in range(20)], limit=3) == [
+        "tests/t.py::test_0", "tests/t.py::test_1", "tests/t.py::test_2"]
 
 
 # ---------------------------------------------------------------- merge fast path

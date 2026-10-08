@@ -159,12 +159,40 @@ def red_green(run: dict, tests: list[str], repo: Path = ROOT, python: str = VENV
     if rc not in (1, 2):
         return {"result": "NOT_RED", "tests": tests, "red_rc": rc}
     red_kind = "collection" if rc == 2 or "ERROR collecting" in out else "assertion"
+    # The tests that prove the change: those that failed at the base. A collection
+    # RED names none, so then every test the commit's files hold at the commit.
+    proving = failed_ids(out.splitlines()) if red_kind == "assertion" else []
     with temp_worktree(repo, run["commit"]) as wt:
         rc, out = run_pytest(python, wt, tests)
+        if rc == 0 and not named_tests(proving):
+            proving = collected_ids(python, wt, tests)
     if rc != 0:
         return {"result": "NOT_GREEN", "tests": tests, "red_kind": red_kind, "green_rc": rc,
                 "tail": out.strip().splitlines()[-5:]}
-    return {"result": "OK", "tests": tests, "red_kind": red_kind}
+    return {"result": "OK", "tests": tests, "red_kind": red_kind, "proving": named_tests(proving)}
+
+
+def collected_ids(python: str, cwd: Path, files: list[str]) -> list[str]:
+    try:
+        res = subprocess.run([python, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", *files],
+                             cwd=cwd, capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=TEST_S)
+    except subprocess.TimeoutExpired:
+        return []
+    return [ln.strip() for ln in res.stdout.splitlines() if "::" in ln]
+
+
+def named_tests(ids, limit: int = 12) -> list[str]:
+    """Test ids as the ledger cites them - forward slashes, parameters dropped,
+    each once, at most `limit`. A v7 row is VERIFIED only by a named test;
+    2026-10-08: MCP-001 was written VERIFIED citing a test FILE (the RED/GREEN
+    file list), the ledger check failed, and every controller landing stopped."""
+    out: list[str] = []
+    for test_id in ids or ():
+        base = str(test_id).replace(chr(92), "/").split("[", 1)[0]
+        if "::" in base and base not in out:
+            out.append(base)
+    return out[:limit]
 
 
 # ---------------------------------------------------------------- verifier
@@ -757,10 +785,14 @@ def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, pytho
     out["pre_existing_failures"] = merged.get("pre_existing", [])
     if not no_ledger:
         status, gaps = decide_status(run, rg, merged, required, verifier)
+        named = named_tests(rg.get("proving") or rg.get("tests"))
+        if status == "VERIFIED" and not named:
+            # A v7 row is VERIFIED only by a named test (prd_ledger --check); a file is not one.
+            status, gaps = "PARTIAL", gaps + ["RED/GREEN named no test the ledger can cite"]
         impl = f"{(run.get('evidence') or {}).get('summary', '')} (build run, commit {merged['integrated_commit'][:9]})"
         nxt = "" if status == "VERIFIED" else "GAPS: " + "; ".join(gaps)
         proof = evidence_text(run, rg, merged, verifier) if status == "VERIFIED" else ""
-        cited = ({"tests": list(rg.get("tests") or []),
+        cited = ({"tests": named,
                   "files": cited_files(row, run.get("files_changed", []))}
                  if status == "VERIFIED" else None)
         append_progress(Path(ledger_path), req, status, impl, nxt, proof, cited)
