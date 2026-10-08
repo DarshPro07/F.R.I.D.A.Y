@@ -199,6 +199,9 @@ def native_tools_healthy(timeout: float = 20.0) -> bool:
 #: toolsets that read and change files or run commands outside FRIDAY's bridge.
 _TOOLSET_KEYS = ("toolsets", "platform_toolsets", "enabled_toolsets")
 _NATIVE_FILE_TOOLSETS = ("file", "terminal")
+#: The variable Hermes' gateway reads for the toolsets it enables; it replaces
+#: the profile's own for that process (`session.create` takes no toolsets).
+ENV_GATEWAY_TOOLSETS = "HERMES_TUI_TOOLSETS"
 
 
 def _toolset_names_in_profile_config(profile: str = "") -> list[str]:
@@ -248,8 +251,9 @@ def native_file_toolsets_enabled(profile: str = "") -> tuple[str, ...]:
 
     A delegation held to an execution envelope gets FRIDAY's jail-backed file
     capability and nothing else, and Hermes cannot enforce the envelope on its
-    own tools, so `delegate` refuses when this is not empty. No profile at all
-    (no Hermes install here) names none; a config that is there and cannot be
+    own tools, so it runs on a gateway started without them
+    (`scoped_gateway_toolsets`) however this answers. No profile at all (no
+    Hermes install here) names none; a config that is there and cannot be
     read raises ValueError, because then nothing is known.
     """
     found = _toolset_names_in_profile_config(profile)
@@ -1282,6 +1286,18 @@ def _ready_timeout(default: float = 150.0) -> float:
     return value
 
 
+def _on_the_gateway_running_it(method):
+    """A call about one run goes to the gateway that run is on: a scoped
+    delegation's own, or this supervisor's shared one."""
+    @functools.wraps(method)
+    def routed(self, work_run_id, *args, **kwargs):
+        gateway = self._scoped_runs.get(work_run_id)
+        if gateway is not None:
+            return getattr(gateway, method.__name__)(work_run_id, *args, **kwargs)
+        return method(self, work_run_id, *args, **kwargs)
+    return routed
+
+
 class HermesSupervisor:
     """
     One Hermes gateway process, owned and supervised by Friday.
@@ -1304,7 +1320,8 @@ class HermesSupervisor:
                  command: list[str] | None = None,
                  cwd: str | None = None,
                  profile: str | None = None,
-                 extra_env: dict[str, str] | None = None) -> None:
+                 extra_env: dict[str, str] | None = None,
+                 owner: "HermesSupervisor | None" = None) -> None:
         self.log = log or WorkRunLog()
         self.on_event = on_event
         #: Callable(question: str, options: list[str]) -> str | None.
@@ -1366,9 +1383,32 @@ class HermesSupervisor:
         #: Leases whose delegation was registered with its envelope for the
         #: exec bridge to hold it to; released with the lease.
         self._scoped: set[str] = set()
-        self.log.on_terminal_hook = self._release_lease
+        #: The supervisor whose scoped gateway this is, or None for the one
+        #: that owns the work-run log's terminal hook.
+        self._owner = owner
+        #: A delegation under an envelope runs on a second gateway of its
+        #: own, started with the profile's toolsets minus Hermes' native
+        #: `file`/`terminal` (see `_lease_scoped_gateway`): the first scoped
+        #: delegation starts it and it is stopped when none holds it.
+        self._scoped_gateway: HermesSupervisor | None = None
+        self._scoped_holds = 0
+        self._scoped_lock = threading.Lock()
+        #: work_run_id -> the scoped gateway that runs it, so a call about
+        #: the run (`@_on_the_gateway_running_it`) and its terminal
+        #: transition reach that gateway and not the shared one.
+        self._scoped_runs: dict[str, HermesSupervisor] = {}
+        if owner is None:
+            self.log.on_terminal_hook = self._release_lease
 
     def _release_lease(self, work_run_id: str) -> None:
+        scoped = self._scoped_runs.get(work_run_id)
+        if scoped is not None:
+            scoped._release_lease(work_run_id)
+            # The terminal event is handled on that gateway's reader thread,
+            # and stopping the gateway from it would wait on itself.
+            threading.Thread(target=self._retire_scoped_gateway_if_idle,
+                             name="hermes-scoped-retire", daemon=True).start()
+            return
         lease = self._leases.pop(work_run_id, "")
         if lease:
             from friday import governor as G
@@ -1377,6 +1417,63 @@ class HermesSupervisor:
                 from friday import delegation_scope
                 self._scoped.discard(lease)
                 delegation_scope.release(lease)
+
+    # -- the scoped gateway -------------------------------------------------
+
+    def _lease_scoped_gateway(self) -> "HermesSupervisor":
+        """
+        The gateway a delegation under an envelope runs on, held until
+        `_return_scoped_gateway`. It is built here and started by its own
+        `delegate`, after the checks that can still refuse the task.
+
+        Its toolsets are the profile's minus Hermes' own `file`/`terminal`,
+        which cannot be held to an envelope, so the task's only file access
+        is FRIDAY's jail-backed capability. A profile that names no toolsets
+        or whose config cannot be read refuses the delegation: guessing
+        Hermes' defaults could grant more than the profile intended.
+        """
+        from friday import contracts as c
+        try:
+            toolsets = scoped_gateway_toolsets(self.profile)
+        except ValueError as exc:
+            raise c.OutsideEnvelope(f"the profile's tools cannot be verified: {exc}") from exc
+        native = [name for name in toolsets if name.lower() in _NATIVE_FILE_TOOLSETS]
+        if native:
+            raise c.OutsideEnvelope(
+                f"a gateway for a delegation under an envelope would carry Hermes' own "
+                f"{', '.join(native)} toolset, which cannot be held to it")
+        with self._scoped_lock:
+            gateway = self._scoped_gateway
+            if gateway is None:
+                gateway = HermesSupervisor(
+                    log=self.log, on_event=self.on_event,
+                    answer_question=self.answer_question,
+                    command=self._command, cwd=self._cwd, profile=self.profile,
+                    extra_env={**(self._extra_env or {}),
+                               ENV_GATEWAY_TOOLSETS: ",".join(toolsets)},
+                    owner=self)
+                gateway.READY_TIMEOUT = self.READY_TIMEOUT
+                for work_run_id, old in list(self._scoped_runs.items()):
+                    if not old.alive():           # a retired gateway's runs are over
+                        self._scoped_runs.pop(work_run_id, None)
+                self._scoped_gateway = gateway
+            self._scoped_holds += 1
+            return gateway
+
+    def _return_scoped_gateway(self) -> None:
+        with self._scoped_lock:
+            self._scoped_holds -= 1
+        self._retire_scoped_gateway_if_idle()
+
+    def _retire_scoped_gateway_if_idle(self) -> None:
+        """Stop the scoped gateway once nothing holds it: no delegation
+        starting on it and no run of its still holding a lease."""
+        with self._scoped_lock:
+            gateway = self._scoped_gateway
+            if gateway is None or self._scoped_holds or gateway._leases:
+                return
+            self._scoped_gateway = None
+        gateway.stop()
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -1456,7 +1553,7 @@ class HermesSupervisor:
             target=self._drain_stderr, daemon=True, name="hermes-stderr")
         self._stderr_reader.start()
         if not self._ready.wait(self.READY_TIMEOUT):
-            self.stop()
+            self._stop_process()
             raise HermesUnavailable(
                 f"Hermes gateway did not become ready within "
                 f"{self.READY_TIMEOUT:.0f}s")
@@ -1502,7 +1599,18 @@ class HermesSupervisor:
                     "warning": f"commands.catalog: {exc}"}
 
     def stop(self) -> None:
-        """Orderly shutdown. Friday owns the process it started."""
+        """Orderly shutdown of this gateway and the scoped one, if any.
+        Friday owns the processes it started."""
+        with self._scoped_lock:
+            scoped, self._scoped_gateway = self._scoped_gateway, None
+        if scoped is not None:
+            scoped.stop()
+        self._stop_process()
+
+    def _stop_process(self) -> None:
+        """Stop this supervisor's own gateway process. A restart or a failed
+        start of the shared gateway leaves the scoped one, and the runs on
+        it, alone."""
         proc = self._proc
         self._proc = None
         self.state = DISCONNECTED
@@ -1550,7 +1658,7 @@ class HermesSupervisor:
     def restart(self) -> None:
         """Crash recovery: stop, start, and mark affected runs truthfully."""
         held = dict(self._session_runs)
-        self.stop()
+        self._stop_process()
         self._session_runs.clear()
         self.start()
         # Sessions died with the process. The durable stored ids survive and
@@ -1912,21 +2020,23 @@ class HermesSupervisor:
         the task is interrupted if it is still running then.
         `scope`, that envelope, is registered for the life of the run
         (`delegation_scope`): the exec bridge then holds every file call the
-        task makes to its roots. A delegation under a scope is refused when
-        Hermes' own `file`/`terminal` toolsets are on in the profile, since
-        those cannot be held to it (`native_file_toolsets_enabled`).
+        task makes to its roots. Hermes' own `file`/`terminal` toolsets
+        cannot be held to it, so a delegation under a scope runs on a second
+        gateway without them (`_lease_scoped_gateway`) while one without a
+        scope runs on the shared gateway as before.
         """
         from friday import contracts as c
-        if scope is not None:
+        if scope is not None and self._owner is None:
+            gateway = self._lease_scoped_gateway()
             try:
-                native = native_file_toolsets_enabled()
-            except ValueError as exc:
-                raise c.OutsideEnvelope(f"the profile's tools cannot be verified: {exc}") from exc
-            if native:
-                raise c.OutsideEnvelope(
-                    f"Hermes' own {', '.join(native)} toolset is on in this profile and "
-                    f"cannot be held to an envelope; a delegation under one gets only "
-                    f"FRIDAY's file capability")
+                return gateway.delegate(
+                    bundle, friday_run_id=friday_run_id, model=model,
+                    provider=provider, workspace=workspace,
+                    route_reason=route_reason, wait=wait,
+                    turn_timeout=turn_timeout, reasoning_effort=reasoning_effort,
+                    share_memory=share_memory, expires_in=expires_in, scope=scope)
+            finally:
+                self._return_scoped_gateway()
         # DOMAIN-001: classified before a lease is taken or a session made.
         from friday import domain_gate
         gate_route = domain_gate.route_name("hermes", provider, model)
@@ -1965,6 +2075,8 @@ class HermesSupervisor:
             task=bundle.goal[:500], friday_run_id=friday_run_id,
             bundle_chars=measure["chars"], token_budget=bundle.token_budget)
         self._leases[work_run_id] = decision.lease
+        if self._owner is not None:
+            self._owner._scoped_runs[work_run_id] = self
         self._gate_routes[work_run_id] = gate_route
 
         create: dict = {"source": "friday", "title": f"Friday: {bundle.goal[:60]}"}
@@ -2034,6 +2146,7 @@ class HermesSupervisor:
             out["result"] = self.wait_for(work_run_id, timeout=turn_timeout)
         return out
 
+    @_on_the_gateway_running_it
     def wait_for(self, work_run_id: str, *, timeout: float = 900.0) -> dict:
         """Block until the run's turn completes, then return the record."""
         record = self.log.get(work_run_id)
@@ -2052,6 +2165,7 @@ class HermesSupervisor:
             self._forget_session(sid)
         return final
 
+    @_on_the_gateway_running_it
     def progress(self, work_run_id: str) -> dict:
         """What Hermes is doing on this run, right now, from the event stream.
 
@@ -2092,6 +2206,7 @@ class HermesSupervisor:
                 "route_reason": route_reason, "switched_from": switched_from,
                 "handoff": record.get("handoff", "")}
 
+    @_on_the_gateway_running_it
     def steer(self, work_run_id: str, text: str) -> dict:
         """
         Mid-run course correction, without killing the turn.
@@ -2186,6 +2301,9 @@ class HermesSupervisor:
         now = datetime.now(timezone.utc)
         mine = set(self._session_runs.values())
         stopped = []
+        scoped = self._scoped_gateway
+        if scoped is not None:
+            stopped.extend(scoped.expire_overdue())
         for row in self.log.active():
             wid = row.get("work_run_id")
             raw = row.get("expires_at") or ""
@@ -2233,6 +2351,7 @@ class HermesSupervisor:
         threading.Thread(target=_run, name=f"hermes-stop-{work_run_id}",
                          daemon=True).start()
 
+    @_on_the_gateway_running_it
     def interrupt(self, work_run_id: str) -> dict:
         record = self.log.get(work_run_id)
         if record is None:
@@ -2268,6 +2387,7 @@ class HermesSupervisor:
                                         via="stopped-by-user")
         return result
 
+    @_on_the_gateway_running_it
     def usage(self, work_run_id: str) -> dict:
         """Token accounting for one run, from Hermes's own session.usage."""
         record = self.log.get(work_run_id)
@@ -2320,6 +2440,7 @@ class HermesSupervisor:
     TURN_STALLED = "TURN_STALLED"
     HEALTHY_WORKING = "WORKING"
 
+    @_on_the_gateway_running_it
     def stall_state(self, work_run_id: str) -> dict:
         """
         What a run is actually doing, from its structured event ledger.
@@ -2374,6 +2495,7 @@ class HermesSupervisor:
             report["state"] = self.HEALTHY_WORKING
         return report
 
+    @_on_the_gateway_running_it
     def recover_stalled(self, work_run_id: str) -> dict:
         """
         Contain a stall without touching Hermes internals.

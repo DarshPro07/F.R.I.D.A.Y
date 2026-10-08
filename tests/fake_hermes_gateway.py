@@ -12,10 +12,10 @@ Behaviour is scripted through env vars so one binary covers every test:
                             (for crash-recovery tests)
     FAKE_HERMES_CAPPED=1    message.complete arrives with status "error"
                             and a rate-limit sentence (quota routing tests)
-    FAKE_HERMES_ENV_DUMP=p  before gateway.ready, write this process's own
-                            HERMES_* environment as JSON to path p (so a
-                            test can see what the launching supervisor
-                            actually put in this process's environment)
+    FAKE_HERMES_ENV_DUMP=p  before gateway.ready, append this process's own
+                            HERMES_* environment as one JSON line to path p
+                            (so a test can see what the launching supervisor
+                            actually put in each process's environment)
 """
 import json
 import os
@@ -49,8 +49,8 @@ def main():
 
     if env_dump:
         seen = {k: v for k, v in os.environ.items() if k.startswith("HERMES_")}
-        with open(env_dump, "w", encoding="utf-8") as fh:
-            json.dump(seen, fh)
+        with open(env_dump, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(seen) + "\n")
 
     event("gateway.ready", "", {"skin": {}})
     sessions = {}

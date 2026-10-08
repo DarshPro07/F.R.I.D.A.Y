@@ -71,6 +71,9 @@ def area(tmp_path, monkeypatch):
     F.reset_jail(FileJail(roots=(tmp_path,)))
     monkeypatch.setenv("FRIDAY_BRIDGE_WORKSPACE", str(here.profile))
     monkeypatch.setattr(bridge, "_env", None)
+    # A delegation under an envelope runs on a gateway started with the
+    # profile's toolsets, so the profile has to name some.
+    _profile(tmp_path, monkeypatch, "toolsets: [web]\n")
     yield here
     F.reset_jail(None)
     if bridge._env is not None:
@@ -543,14 +546,144 @@ def test_scoped_gateway_toolsets_refuses_to_guess_when_the_profile_names_none(tm
         hb.scoped_gateway_toolsets()
 
 
-def test_a_delegation_under_an_envelope_is_refused_while_hermes_file_tools_are_on(area, tmp_path, monkeypatch):
-    _profile(tmp_path, monkeypatch, "toolsets: [file, web]\n")
+def _gateway_envs(dump: Path) -> list[dict]:
+    """The HERMES_* environment of every gateway process started, in order."""
+    return [json.loads(line) for line in dump.read_text(encoding="utf-8").splitlines()]
+
+
+def _until(condition, seconds: float = 15.0) -> bool:
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if condition():
+            return True
+        time.sleep(0.1)
+    return condition()
+
+
+def test_a_delegation_under_an_envelope_runs_on_a_gateway_without_hermes_file_tools(area, tmp_path, monkeypatch):
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web, memory]\n")
+    dump = tmp_path / "env.jsonl"
+    monkeypatch.setenv("FAKE_HERMES_ENV_DUMP", str(dump))
     supervisor = _supervisor(area.root, monkeypatch)
     try:
-        with pytest.raises(c.OutsideEnvelope, match="cannot be held to an envelope"):
+        supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                            scope=_envelope(area), expires_in=3600)
+        (env,) = _gateway_envs(dump)
+        assert env[hb.ENV_GATEWAY_TOOLSETS] == "web,memory"
+        assert not supervisor.alive()               # the shared gateway was not used
+        assert len(S.active()) == 1
+    finally:
+        supervisor.stop()
+
+
+def test_a_delegation_without_an_envelope_stays_on_the_shared_gateway_with_no_override(area, tmp_path, monkeypatch):
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web]\n")
+    dump = tmp_path / "env.jsonl"
+    monkeypatch.setenv("FAKE_HERMES_ENV_DUMP", str(dump))
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        supervisor.delegate(hb.TaskBundle(goal="quick job"), wait=True, turn_timeout=30)
+        (env,) = _gateway_envs(dump)
+        assert hb.ENV_GATEWAY_TOOLSETS not in env
+        assert supervisor._scoped_gateway is None
+    finally:
+        supervisor.stop()
+
+
+def test_scoped_and_unscoped_delegations_run_on_gateways_of_their_own(area, tmp_path, monkeypatch):
+    dump = tmp_path / "env.jsonl"
+    monkeypatch.setenv("FAKE_HERMES_ENV_DUMP", str(dump))
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        supervisor.delegate(hb.TaskBundle(goal="scoped"), workspace=str(area.workspace),
+                            scope=_envelope(area), expires_in=3600, wait=True, turn_timeout=30)
+        supervisor.delegate(hb.TaskBundle(goal="unscoped"), wait=True, turn_timeout=30)
+        scoped_env, shared_env = _gateway_envs(dump)
+        assert scoped_env[hb.ENV_GATEWAY_TOOLSETS] == "web"
+        assert hb.ENV_GATEWAY_TOOLSETS not in shared_env
+        # the scoped gateway did not take the log's terminal hook from the
+        # shared one: the unscoped run's worker slot was freed at its end
+        assert supervisor.log.on_terminal_hook == supervisor._release_lease
+        assert supervisor._leases == {}
+        assert S.active() == []
+    finally:
+        supervisor.stop()
+
+
+def test_the_scoped_gateway_is_stopped_once_no_run_holds_it(area, monkeypatch):
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        supervisor.delegate(hb.TaskBundle(goal="scoped"), workspace=str(area.workspace),
+                            scope=_envelope(area), expires_in=3600, wait=True, turn_timeout=30)
+        assert supervisor._scoped_gateway is None
+        (ran_on,) = set(supervisor._scoped_runs.values())
+        assert not ran_on.alive()
+        assert S.active() == []
+    finally:
+        supervisor.stop()
+
+
+def test_runs_under_an_envelope_share_one_gateway_and_the_last_to_end_stops_it(area, tmp_path, monkeypatch):
+    dump = tmp_path / "env.jsonl"
+    monkeypatch.setenv("FAKE_HERMES_ENV_DUMP", str(dump))
+    supervisor = _supervisor(area.root, monkeypatch)
+    try:
+        first = supervisor.delegate(hb.TaskBundle(goal="first"), workspace=str(area.workspace),
+                                    scope=_envelope(area), expires_in=3600)["work_run_id"]
+        second = supervisor.delegate(hb.TaskBundle(goal="second"), workspace=str(area.workspace),
+                                     scope=_envelope(area), expires_in=3600)["work_run_id"]
+        assert len(_gateway_envs(dump)) == 1
+        gateway = supervisor._scoped_gateway
+        assert gateway is not None and gateway.alive()
+        # calls about a run reach the gateway the run is on, not the shared one
+        assert supervisor.steer(first, "go left")["status"] == "queued"
+        supervisor.interrupt(first)
+        assert _until(lambda: supervisor.log.get(first)["status"] in hb.TERMINAL)
+        assert gateway.alive()                      # the second run still holds it
+        supervisor.interrupt(second)
+        assert _until(lambda: not gateway.alive())
+        assert supervisor._scoped_gateway is None
+        assert S.active() == []
+    finally:
+        supervisor.stop()
+
+
+def test_a_run_under_an_envelope_is_stopped_at_its_end_without_its_timer(area, monkeypatch):
+    supervisor = _supervisor(area.root, monkeypatch)
+    try:
+        run = supervisor.delegate(hb.TaskBundle(goal="long job"), workspace=str(area.workspace),
+                                  scope=_envelope(area), expires_in=3600)["work_run_id"]
+        past = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
+        supervisor.log.update(run, expires_at=past)
+        assert supervisor.expire_overdue() == [run]
+        assert _until(lambda: S.active() == [])
+    finally:
+        supervisor.stop()
+
+
+def test_a_delegation_under_an_envelope_is_refused_when_its_gateway_would_still_have_file_tools(area, monkeypatch):
+    monkeypatch.setattr(hb, "scoped_gateway_toolsets", lambda profile="": ("web", "File"))
+    supervisor = _supervisor(area.root, monkeypatch)
+    try:
+        with pytest.raises(c.OutsideEnvelope, match="File"):
             supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
                                 scope=_envelope(area), expires_in=3600)
         assert S.active() == []
+        assert supervisor._scoped_gateway is None
+        assert supervisor.state == hb.DISCONNECTED      # nothing was started
+    finally:
+        supervisor.stop()
+
+
+def test_a_delegation_under_an_envelope_is_refused_when_the_profile_names_no_other_toolsets(area, tmp_path, monkeypatch):
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal]\n")
+    supervisor = _supervisor(area.root, monkeypatch)
+    try:
+        with pytest.raises(c.OutsideEnvelope, match="refusing to guess"):
+            supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                scope=_envelope(area), expires_in=3600)
+        assert S.active() == []
+        assert supervisor._scoped_gateway is None
         assert supervisor.state == hb.DISCONNECTED      # nothing was started
     finally:
         supervisor.stop()
