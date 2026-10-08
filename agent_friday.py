@@ -1228,15 +1228,15 @@ class FridayAgent(Agent):
                      not in self._already_read]
             logger.info("answer.tools_withheld %s",
                         ",".join(sorted(self._already_read)))
-        if not self._turn_owned_by:
-            return tools
-        allowed = [
-            tool for tool in tools
-            if ownership.is_conversational(
-                getattr(getattr(tool, "info", None), "name", ""))]
-        logger.info("objective.owns_tools run_id=%s offered=%d of=%d",
-                    self._turn_owned_by, len(allowed), len(tools))
-        return allowed
+        if self._turn_owned_by:
+            allowed = [
+                tool for tool in tools
+                if ownership.is_conversational(
+                    getattr(getattr(tool, "info", None), "name", ""))]
+            logger.info("objective.owns_tools run_id=%s offered=%d of=%d",
+                        self._turn_owned_by, len(allowed), len(tools))
+            tools = allowed
+        return [self._lineage_checked(tool) for tool in tools]
 
     def _apply_tools(self) -> None:
         """
@@ -1592,6 +1592,42 @@ class FridayAgent(Agent):
         # schedule is a different product, and not the one the boss asked
         # for. Keep it to the greeting.
         await self.session.say(greeting)
+
+    def _lineage_checked(self, tool):
+        """
+        A memory write the model can call directly still gets its lineage from
+        the turn (MEM-002).
+
+        `memory_remember` and its siblings are MCP tools in the active set, so
+        a direct call skips `use_capability` - the one place that overwrites
+        `from_read_material` from `_read_this_turn` - and the flag stays
+        whatever the model typed, default False: a page the turn read is then
+        stored as the person's own words. So the model is offered a same-named
+        tool whose schema has no such argument and whose body runs through
+        `use_capability`, which keeps that rule in a single place.
+        """
+        name = getattr(getattr(tool, "info", None), "name", "")
+        schema = getattr(getattr(tool, "info", None), "raw_schema", None)
+        if name not in MEMORY_WRITES or not isinstance(schema, dict):
+            return tool
+        wrappers = self.__dict__.setdefault("_lineage_wrappers", {})
+        wrapper = wrappers.get(name)
+        if wrapper is None:
+            parameters = json.loads(json.dumps(schema.get("parameters") or {}))
+            parameters.get("properties", {}).pop("from_read_material", None)
+            if isinstance(parameters.get("required"), list):
+                parameters["required"] = [
+                    key for key in parameters["required"]
+                    if key != "from_read_material"]
+
+            async def _write(raw_arguments: dict) -> str:
+                return await self.use_capability(
+                    name, json.dumps(raw_arguments or {}))
+
+            wrapper = function_tool(
+                _write, raw_schema={**schema, "parameters": parameters})
+            wrappers[name] = wrapper
+        return wrapper
 
 
 # ---------------------------------------------------------------------------
