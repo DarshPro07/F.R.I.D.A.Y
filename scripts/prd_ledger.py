@@ -3995,6 +3995,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added cyber_lab.run_routed: a domain_gate cyber_lab decision is the only route that reaches a lab provider; other routes or unknown providers yield hash-bound refusal evidence. Contract and tier gating unchanged. (build run, commit f9ca71f8c)',
         "next_action": 'GAPS: live wiring - no fabric descriptor or executor calls friday/cyber_lab.py run_routed; the acceptance itself (tests/test_cyber_lab.py) is met | RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08e.md): keep extra scope inside the row: build the wiring as a fabric adapter (friday/fabric_adapters/, DESCRIPTOR + start/stop/health/call per AGENTS.md); it touches the upstream lock, the matrix and the tool-count tests, so plan it in slices.',
     }),
+    ('RES-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Governor samples GPU/network, governs model residency, stops running optional/surplus work, and records section 55 fields; Hermes/Claude send heartbeats, stop is non-blocking, double release keeps the queue, stress test stops a real helper. (build run, commit 4e6096455)',
+        "next_action": 'Re-apply the slice kept at tag wip/res-001-1008 (`git diff HEAD...wip/res-001-1008`, commit f39ceba, 3 files): it passed RED/GREEN, then the verifier ran out of turns (fixed in 401999e: it now gets a second run) and a later rebase onto HEAD conflicted. Re-apply it with Edit onto the current code and run its tests. Remaining gap outside the acceptance: non-nvidia GPU sampling (optional). Triage: Only the verifier verdict and the merge are missing. Residual honest gap: GPU sampling is nvidia-smi only. The ledger next_action still lists all three auto-generated GAPS, including the two already fixed.',
+    }),
 ]
 
 
