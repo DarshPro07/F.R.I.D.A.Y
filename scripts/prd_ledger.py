@@ -4083,6 +4083,14 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_trust.py::test_security_tools_are_disabled_without_a_contract', 'tests/test_trust.py::test_out_of_scope_host_and_action_are_blocked_even_when_the_tool_asks'],
         "files": ['friday/trust.py:123', 'friday/trust.py:200', 'friday/contracts.py:486'],
     }),
+    ('DUR-001', {
+        "status": VERIFIED,
+        "current_implementation": 'The keyed production port writes call.started before dispatch. A re-run that finds an unresolved start refuses with UNCERTAIN and does not repeat the effect. A raised Exception or non-succeeded result writes call.abandoned, so a genuine retry is allowed. (build run, commit 77489b40b)',
+        "next_action": '',
+        "evidence": 'Confirmed at 04c5ad05f: the build worker found the acceptance already met and changed nothing; tests/test_durable_side_effects.py::test_a_committed_side_effect_is_not_done_again_after_a_crash, tests/test_durable_side_effects.py::test_a_call_that_did_not_commit_is_run_again, tests/test_chaos_restart.py::test_control_plane_killed_mid_task_resumes_in_a_fresh_process pass at HEAD and an independent verifier judged the existing code to meet it. Worker: No code change needed. Both new tests fail when their guard is removed (pending_call refusal; abandon-on-raise) and pass restored. Impact set 1436 passed, 0 failed (72 files, not live/slow); chaos_restart 2/2.',
+        "tests": ['tests/test_durable_side_effects.py::test_a_committed_side_effect_is_not_done_again_after_a_crash', 'tests/test_durable_side_effects.py::test_a_call_that_did_not_commit_is_run_again', 'tests/test_chaos_restart.py::test_control_plane_killed_mid_task_resumes_in_a_fresh_process'],
+        "files": ['friday/objectives.py:159,161', 'friday/continuous.py:285,834,1837', 'friday/store.py:879,3203', 'friday/modification.py:84'],
+    }),
 ]
 
 
