@@ -125,6 +125,18 @@ def test_diff_measure_counts_files_added_deleted_and_new_dependencies_on_a_temp_
     assert sorted(stat.paths) == ["app.py", "gone.txt", "new.py", "pyproject.toml", "requirements.txt"]
 
 
+@pytest.mark.parametrize("ignored", [True, False])
+def test_the_packet_in_build_is_never_diff_whether_or_not_it_is_ignored(tmp_path, ignored):
+    # 2026-10-08: the first live A/B arm died in diff_stat - git refuses the exclude
+    # pathspec ":(exclude).build" once .gitignore ignores .build/ (since 8617c31).
+    repo, base = _repo(tmp_path, {".gitignore": ".build/\n"} if ignored else None)
+    (repo / ".build").mkdir()
+    (repo / ".build" / "packet.md").write_text("the task\n", encoding="utf-8", newline="\n")
+    (repo / "new.py").write_text("1\n", encoding="utf-8", newline="\n")
+    stat = M.diff_stat(repo, base)
+    assert stat.paths == ["new.py"] and stat.files == 1
+
+
 def test_an_unreadable_manifest_is_noted_not_fatal(tmp_path):
     repo, base = _repo(tmp_path)
     (repo / "package.json").write_text("{not json", encoding="utf-8")

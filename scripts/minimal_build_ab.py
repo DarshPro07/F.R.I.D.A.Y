@@ -562,7 +562,12 @@ def diff_stat(workdir: Path, base: str) -> DiffStat:
     """What the worker changed against the base, new files included. The worktree is
     scratch, so staging it is free and is what lets numstat see an untracked file."""
     workdir = Path(workdir)
-    git(workdir, "add", "-A", "--", ".", ":(exclude).build")
+    git(workdir, "add", "-A", "--", ".")
+    # The worker's packet lives in .build and is never diff. Unstaged here rather than
+    # excluded in the pathspec: git refuses an exclude pathspec that names an ignored
+    # path, and .gitignore has ignored .build/ since 8617c31 - the first live A/B arm
+    # died on it (2026-10-08). --ignore-unmatch covers a base that never staged it.
+    git(workdir, "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".build")
     stat = DiffStat()
     for row in git(workdir, "diff", "--cached", "--no-renames", "--numstat", base).splitlines():
         added, deleted, path = row.split("\t", 2)
