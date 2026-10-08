@@ -1,14 +1,14 @@
 {
   "requirement": "CODE-001",
-  "mode": "fake",
-  "evidence": false,
-  "banner": "SYNTHETIC RUN: no model was called and nothing was spent. These numbers prove the pipeline works, not that the policy does. Run with --live for a measurement.",
-  "generated_at": "2026-10-05T10:13:51+00:00",
+  "mode": "live",
+  "evidence": true,
+  "banner": null,
+  "generated_at": "2026-10-08T17:34:34+00:00",
   "base": "35bd57267ed16f6344fa1a98e04eb7df1968a755",
-  "repeats": 1,
+  "repeats": 3,
   "min_pairs": 3,
-  "model": "",
-  "budget_usd": null,
+  "model": "sonnet",
+  "budget_usd": 10.0,
   "policy": {
     "ladder": "Minimal implementation ladder: does this need to exist? is it already in the codebase? does stdlib solve it? does native platform/browser behavior solve it? does an installed dependency solve it? can the safe diff be smaller? only then create new abstraction/dependency.",
     "never": "Never simplify away: validation; security; accessibility; data-loss protection; required error handling; observability essential for truth."
@@ -22,45 +22,45 @@
         "validation"
       ],
       "A": {
-        "runs": 1,
-        "files": 1.0,
-        "added": 13.0,
+        "runs": 3,
+        "files": 2.0,
+        "added": 109.67,
         "deleted": 0.0,
-        "lines": 13.0,
+        "lines": 109.67,
         "new_deps": 0,
-        "cost_usd": 0.0,
-        "seconds": 0.0,
-        "acceptance": 1,
+        "cost_usd": 0.2584,
+        "seconds": 65.03,
+        "acceptance": 3,
         "guards": {
-          "validation": 1
+          "validation": 3
         },
-        "quality_ok": 1,
+        "quality_ok": 3,
         "errors": []
       },
       "B": {
-        "runs": 1,
-        "files": 1.0,
-        "added": 13.0,
+        "runs": 3,
+        "files": 2.0,
+        "added": 76.0,
         "deleted": 0.0,
-        "lines": 13.0,
+        "lines": 76.0,
         "new_deps": 0,
-        "cost_usd": 0.0,
-        "seconds": 0.0,
-        "acceptance": 1,
+        "cost_usd": 0.2581,
+        "seconds": 66.65,
+        "acceptance": 3,
         "guards": {
-          "validation": 1
+          "validation": 3
         },
-        "quality_ok": 1,
+        "quality_ok": 3,
         "errors": []
       },
       "verdict": {
-        "outcome": "INCONCLUSIVE",
-        "reason": "synthetic run: no model was called",
-        "pairs": 1,
+        "outcome": "ADOPT",
+        "reason": "quality at parity, diff and cost not worse",
+        "pairs": 3,
         "quality_a": 1.0,
         "quality_b": 1.0,
-        "diff_delta_pct": 0.0,
-        "cost_delta_pct": null
+        "diff_delta_pct": -30.7,
+        "cost_delta_pct": -0.1
       }
     },
     {
@@ -70,45 +70,45 @@
         "security"
       ],
       "A": {
-        "runs": 1,
-        "files": 1.0,
-        "added": 9.0,
+        "runs": 3,
+        "files": 2.0,
+        "added": 111.0,
         "deleted": 0.0,
-        "lines": 9.0,
+        "lines": 111.0,
         "new_deps": 0,
-        "cost_usd": 0.0,
-        "seconds": 0.0,
-        "acceptance": 1,
+        "cost_usd": 0.2663,
+        "seconds": 59.21,
+        "acceptance": 3,
         "guards": {
-          "security": 1
+          "security": 3
         },
-        "quality_ok": 1,
+        "quality_ok": 3,
         "errors": []
       },
       "B": {
-        "runs": 1,
-        "files": 1.0,
-        "added": 9.0,
+        "runs": 3,
+        "files": 2.0,
+        "added": 92.67,
         "deleted": 0.0,
-        "lines": 9.0,
+        "lines": 92.67,
         "new_deps": 0,
-        "cost_usd": 0.0,
-        "seconds": 0.0,
-        "acceptance": 1,
+        "cost_usd": 0.3016,
+        "seconds": 74.08,
+        "acceptance": 3,
         "guards": {
-          "security": 1
+          "security": 3
         },
-        "quality_ok": 1,
+        "quality_ok": 3,
         "errors": []
       },
       "verdict": {
-        "outcome": "INCONCLUSIVE",
-        "reason": "synthetic run: no model was called",
-        "pairs": 1,
+        "outcome": "REJECT",
+        "reason": "quality held but the cost got worse: nothing was saved",
+        "pairs": 3,
         "quality_a": 1.0,
         "quality_b": 1.0,
-        "diff_delta_pct": 0.0,
-        "cost_delta_pct": null
+        "diff_delta_pct": -16.5,
+        "cost_delta_pct": 13.3
       }
     },
     {
@@ -118,45 +118,47 @@
         "data-loss"
       ],
       "A": {
-        "runs": 1,
-        "files": 1.0,
-        "added": 16.0,
+        "runs": 3,
+        "files": 2.0,
+        "added": 134.67,
         "deleted": 0.0,
-        "lines": 16.0,
+        "lines": 134.67,
         "new_deps": 0,
-        "cost_usd": 0.0,
-        "seconds": 0.0,
-        "acceptance": 1,
+        "cost_usd": 0.2952,
+        "seconds": 91.96,
+        "acceptance": 3,
         "guards": {
-          "data-loss": 1
+          "data-loss": 3
         },
-        "quality_ok": 1,
-        "errors": []
+        "quality_ok": 3,
+        "errors": [
+          "error_max_budget_usd"
+        ]
       },
       "B": {
-        "runs": 1,
-        "files": 1.0,
-        "added": 16.0,
+        "runs": 3,
+        "files": 2.0,
+        "added": 90.67,
         "deleted": 0.0,
-        "lines": 16.0,
+        "lines": 90.67,
         "new_deps": 0,
-        "cost_usd": 0.0,
-        "seconds": 0.0,
-        "acceptance": 1,
+        "cost_usd": 0.2621,
+        "seconds": 60.74,
+        "acceptance": 3,
         "guards": {
-          "data-loss": 1
+          "data-loss": 3
         },
-        "quality_ok": 1,
+        "quality_ok": 3,
         "errors": []
       },
       "verdict": {
-        "outcome": "INCONCLUSIVE",
-        "reason": "synthetic run: no model was called",
-        "pairs": 1,
+        "outcome": "ADOPT",
+        "reason": "quality at parity, diff and cost not worse",
+        "pairs": 3,
         "quality_a": 1.0,
         "quality_b": 1.0,
-        "diff_delta_pct": 0.0,
-        "cost_delta_pct": null
+        "diff_delta_pct": -32.7,
+        "cost_delta_pct": -11.2
       }
     },
     {
@@ -168,49 +170,49 @@
         "validation"
       ],
       "A": {
-        "runs": 1,
-        "files": 1.0,
-        "added": 11.0,
+        "runs": 3,
+        "files": 2.0,
+        "added": 94.67,
         "deleted": 0.0,
-        "lines": 11.0,
+        "lines": 94.67,
         "new_deps": 0,
-        "cost_usd": 0.0,
-        "seconds": 0.0,
-        "acceptance": 1,
+        "cost_usd": 0.2641,
+        "seconds": 60.87,
+        "acceptance": 3,
         "guards": {
-          "accessibility": 1,
-          "security": 1,
-          "validation": 1
+          "accessibility": 3,
+          "security": 3,
+          "validation": 3
         },
-        "quality_ok": 1,
+        "quality_ok": 3,
         "errors": []
       },
       "B": {
-        "runs": 1,
-        "files": 1.0,
-        "added": 11.0,
+        "runs": 3,
+        "files": 2.0,
+        "added": 79.0,
         "deleted": 0.0,
-        "lines": 11.0,
+        "lines": 79.0,
         "new_deps": 0,
-        "cost_usd": 0.0,
-        "seconds": 0.0,
-        "acceptance": 1,
+        "cost_usd": 0.2491,
+        "seconds": 65.66,
+        "acceptance": 3,
         "guards": {
-          "accessibility": 1,
-          "security": 1,
-          "validation": 1
+          "accessibility": 3,
+          "security": 3,
+          "validation": 3
         },
-        "quality_ok": 1,
+        "quality_ok": 3,
         "errors": []
       },
       "verdict": {
-        "outcome": "INCONCLUSIVE",
-        "reason": "synthetic run: no model was called",
-        "pairs": 1,
+        "outcome": "ADOPT",
+        "reason": "quality at parity, diff and cost not worse",
+        "pairs": 3,
         "quality_a": 1.0,
         "quality_b": 1.0,
-        "diff_delta_pct": 0.0,
-        "cost_delta_pct": null
+        "diff_delta_pct": -16.5,
+        "cost_delta_pct": -5.7
       }
     },
     {
@@ -221,107 +223,121 @@
         "observability"
       ],
       "A": {
-        "runs": 1,
-        "files": 1.0,
-        "added": 22.0,
+        "runs": 3,
+        "files": 2.0,
+        "added": 206.33,
         "deleted": 0.0,
-        "lines": 22.0,
+        "lines": 206.33,
         "new_deps": 0,
-        "cost_usd": 0.0,
-        "seconds": 0.0,
-        "acceptance": 1,
+        "cost_usd": 0.3172,
+        "seconds": 140.01,
+        "acceptance": 3,
         "guards": {
-          "error-handling": 1,
-          "observability": 1
+          "error-handling": 3,
+          "observability": 3
         },
-        "quality_ok": 1,
-        "errors": []
+        "quality_ok": 3,
+        "errors": [
+          "error_max_budget_usd"
+        ]
       },
       "B": {
-        "runs": 1,
-        "files": 1.0,
-        "added": 22.0,
+        "runs": 3,
+        "files": 2.0,
+        "added": 143.0,
         "deleted": 0.0,
-        "lines": 22.0,
+        "lines": 143.0,
         "new_deps": 0,
-        "cost_usd": 0.0,
-        "seconds": 0.0,
-        "acceptance": 1,
+        "cost_usd": 0.3148,
+        "seconds": 100.45,
+        "acceptance": 3,
         "guards": {
-          "error-handling": 1,
-          "observability": 1
+          "error-handling": 3,
+          "observability": 3
         },
-        "quality_ok": 1,
-        "errors": []
+        "quality_ok": 3,
+        "errors": [
+          "error_max_budget_usd"
+        ]
       },
       "verdict": {
-        "outcome": "INCONCLUSIVE",
-        "reason": "synthetic run: no model was called",
-        "pairs": 1,
+        "outcome": "ADOPT",
+        "reason": "quality at parity, diff and cost not worse",
+        "pairs": 3,
         "quality_a": 1.0,
         "quality_b": 1.0,
-        "diff_delta_pct": 0.0,
-        "cost_delta_pct": null
+        "diff_delta_pct": -30.7,
+        "cost_delta_pct": -0.8
       }
     }
   ],
   "overall": {
     "A": {
-      "runs": 5,
-      "files": 1.0,
-      "added": 14.2,
+      "runs": 15,
+      "files": 2.0,
+      "added": 131.27,
       "deleted": 0.0,
-      "lines": 14.2,
+      "lines": 131.27,
       "new_deps": 0,
-      "cost_usd": 0.0,
-      "seconds": 0.0,
-      "acceptance": 5,
+      "cost_usd": 0.2802,
+      "seconds": 83.42,
+      "acceptance": 15,
       "guards": {
-        "validation": 2,
-        "security": 2,
-        "data-loss": 1,
-        "accessibility": 1,
-        "error-handling": 1,
-        "observability": 1
+        "validation": 6,
+        "security": 6,
+        "data-loss": 3,
+        "accessibility": 3,
+        "error-handling": 3,
+        "observability": 3
       },
-      "quality_ok": 5,
-      "errors": []
+      "quality_ok": 15,
+      "errors": [
+        "error_max_budget_usd",
+        "error_max_budget_usd"
+      ]
     },
     "B": {
-      "runs": 5,
-      "files": 1.0,
-      "added": 14.2,
+      "runs": 15,
+      "files": 2.0,
+      "added": 96.27,
       "deleted": 0.0,
-      "lines": 14.2,
+      "lines": 96.27,
       "new_deps": 0,
-      "cost_usd": 0.0,
-      "seconds": 0.0,
-      "acceptance": 5,
+      "cost_usd": 0.2772,
+      "seconds": 73.52,
+      "acceptance": 15,
       "guards": {
-        "validation": 2,
-        "security": 2,
-        "data-loss": 1,
-        "accessibility": 1,
-        "error-handling": 1,
-        "observability": 1
+        "validation": 6,
+        "security": 6,
+        "data-loss": 3,
+        "accessibility": 3,
+        "error-handling": 3,
+        "observability": 3
       },
-      "quality_ok": 5,
-      "errors": []
+      "quality_ok": 15,
+      "errors": [
+        "error_max_budget_usd"
+      ]
     },
     "verdict": {
-      "outcome": "INCONCLUSIVE",
-      "reason": "synthetic run: no model was called",
-      "pairs": 5,
+      "outcome": "ADOPT",
+      "reason": "quality at parity, diff and cost not worse",
+      "pairs": 15,
       "quality_a": 1.0,
       "quality_b": 1.0,
-      "diff_delta_pct": 0.0,
-      "cost_delta_pct": null
+      "diff_delta_pct": -26.7,
+      "cost_delta_pct": -1.1
     }
   },
   "recommendation": {
-    "scope": "undetermined",
-    "tasks": [],
-    "text": "no recommendation: not enough measured pairs"
+    "scope": "per-task",
+    "tasks": [
+      "atomic-json",
+      "duration-parse",
+      "run-limited",
+      "status-badge"
+    ],
+    "text": "enable the ladder only for tasks like: atomic-json, duration-parse, run-limited, status-badge"
   },
   "runs": [
     {
@@ -329,19 +345,20 @@
       "arm": "A",
       "rep": 0,
       "diff": {
-        "files": 1,
-        "added": 13,
+        "files": 2,
+        "added": 102,
         "deleted": 0,
         "new_deps": 0,
         "paths": [
-          "friday/durations.py"
+          "friday/durations.py",
+          "tests/test_durations.py"
         ],
         "notes": [],
-        "lines": 13
+        "lines": 102
       },
-      "cost_usd": 0.0,
-      "turns": 0,
-      "seconds": 0.0,
+      "cost_usd": 0.2536,
+      "turns": 13,
+      "seconds": 79.3,
       "quality": {
         "acceptance": true,
         "guards": {
@@ -356,19 +373,132 @@
       "arm": "B",
       "rep": 0,
       "diff": {
-        "files": 1,
-        "added": 13,
+        "files": 2,
+        "added": 78,
         "deleted": 0,
         "new_deps": 0,
         "paths": [
-          "friday/durations.py"
+          "friday/durations.py",
+          "tests/test_durations.py"
         ],
         "notes": [],
-        "lines": 13
+        "lines": 78
       },
-      "cost_usd": 0.0,
-      "turns": 0,
-      "seconds": 0.0,
+      "cost_usd": 0.2717,
+      "turns": 14,
+      "seconds": 56.24,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "validation": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "duration-parse",
+      "arm": "B",
+      "rep": 1,
+      "diff": {
+        "files": 2,
+        "added": 77,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/durations.py",
+          "tests/test_durations.py"
+        ],
+        "notes": [],
+        "lines": 77
+      },
+      "cost_usd": 0.2414,
+      "turns": 12,
+      "seconds": 65.72,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "validation": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "duration-parse",
+      "arm": "A",
+      "rep": 1,
+      "diff": {
+        "files": 2,
+        "added": 125,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/durations.py",
+          "tests/test_durations.py"
+        ],
+        "notes": [],
+        "lines": 125
+      },
+      "cost_usd": 0.26,
+      "turns": 13,
+      "seconds": 56.93,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "validation": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "duration-parse",
+      "arm": "A",
+      "rep": 2,
+      "diff": {
+        "files": 2,
+        "added": 102,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/durations.py",
+          "tests/test_durations.py"
+        ],
+        "notes": [],
+        "lines": 102
+      },
+      "cost_usd": 0.2616,
+      "turns": 12,
+      "seconds": 58.86,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "validation": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "duration-parse",
+      "arm": "B",
+      "rep": 2,
+      "diff": {
+        "files": 2,
+        "added": 73,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/durations.py",
+          "tests/test_durations.py"
+        ],
+        "notes": [],
+        "lines": 73
+      },
+      "cost_usd": 0.2613,
+      "turns": 14,
+      "seconds": 78.0,
       "quality": {
         "acceptance": true,
         "guards": {
@@ -383,19 +513,20 @@
       "arm": "A",
       "rep": 0,
       "diff": {
-        "files": 1,
-        "added": 9,
+        "files": 2,
+        "added": 92,
         "deleted": 0,
         "new_deps": 0,
         "paths": [
-          "friday/safe_read.py"
+          "friday/safe_read.py",
+          "tests/test_safe_read.py"
         ],
         "notes": [],
-        "lines": 9
+        "lines": 92
       },
-      "cost_usd": 0.0,
-      "turns": 0,
-      "seconds": 0.0,
+      "cost_usd": 0.246,
+      "turns": 12,
+      "seconds": 54.52,
       "quality": {
         "acceptance": true,
         "guards": {
@@ -410,19 +541,132 @@
       "arm": "B",
       "rep": 0,
       "diff": {
-        "files": 1,
-        "added": 9,
+        "files": 2,
+        "added": 95,
         "deleted": 0,
         "new_deps": 0,
         "paths": [
-          "friday/safe_read.py"
+          "friday/safe_read.py",
+          "tests/test_safe_read.py"
         ],
         "notes": [],
-        "lines": 9
+        "lines": 95
       },
-      "cost_usd": 0.0,
-      "turns": 0,
-      "seconds": 0.0,
+      "cost_usd": 0.3251,
+      "turns": 14,
+      "seconds": 110.33,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "security": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "jailed-read",
+      "arm": "B",
+      "rep": 1,
+      "diff": {
+        "files": 2,
+        "added": 92,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/safe_read.py",
+          "tests/test_safe_read.py"
+        ],
+        "notes": [],
+        "lines": 92
+      },
+      "cost_usd": 0.2927,
+      "turns": 11,
+      "seconds": 63.3,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "security": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "jailed-read",
+      "arm": "A",
+      "rep": 1,
+      "diff": {
+        "files": 2,
+        "added": 145,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/safe_read.py",
+          "tests/test_safe_read.py"
+        ],
+        "notes": [],
+        "lines": 145
+      },
+      "cost_usd": 0.3017,
+      "turns": 13,
+      "seconds": 79.12,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "security": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "jailed-read",
+      "arm": "A",
+      "rep": 2,
+      "diff": {
+        "files": 2,
+        "added": 96,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/safe_read.py",
+          "tests/test_safe_read.py"
+        ],
+        "notes": [],
+        "lines": 96
+      },
+      "cost_usd": 0.2512,
+      "turns": 10,
+      "seconds": 43.99,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "security": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "jailed-read",
+      "arm": "B",
+      "rep": 2,
+      "diff": {
+        "files": 2,
+        "added": 91,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/safe_read.py",
+          "tests/test_safe_read.py"
+        ],
+        "notes": [],
+        "lines": 91
+      },
+      "cost_usd": 0.287,
+      "turns": 11,
+      "seconds": 48.6,
       "quality": {
         "acceptance": true,
         "guards": {
@@ -437,19 +681,48 @@
       "arm": "A",
       "rep": 0,
       "diff": {
-        "files": 1,
-        "added": 16,
+        "files": 2,
+        "added": 167,
         "deleted": 0,
         "new_deps": 0,
         "paths": [
-          "friday/atomic_json.py"
+          "friday/atomic_json.py",
+          "tests/test_atomic_json.py"
         ],
         "notes": [],
-        "lines": 16
+        "lines": 167
       },
-      "cost_usd": 0.0,
-      "turns": 0,
-      "seconds": 0.0,
+      "cost_usd": 0.3472,
+      "turns": 17,
+      "seconds": 90.49,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "data-loss": true
+        },
+        "ok": true
+      },
+      "error": "error_max_budget_usd"
+    },
+    {
+      "task": "atomic-json",
+      "arm": "B",
+      "rep": 0,
+      "diff": {
+        "files": 2,
+        "added": 83,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/atomic_json.py",
+          "tests/test_atomic_json.py"
+        ],
+        "notes": [],
+        "lines": 83
+      },
+      "cost_usd": 0.2733,
+      "turns": 16,
+      "seconds": 46.97,
       "quality": {
         "acceptance": true,
         "guards": {
@@ -462,21 +735,106 @@
     {
       "task": "atomic-json",
       "arm": "B",
-      "rep": 0,
+      "rep": 1,
       "diff": {
-        "files": 1,
-        "added": 16,
+        "files": 2,
+        "added": 95,
         "deleted": 0,
         "new_deps": 0,
         "paths": [
-          "friday/atomic_json.py"
+          "friday/atomic_json.py",
+          "tests/test_atomic_json.py"
         ],
         "notes": [],
-        "lines": 16
+        "lines": 95
       },
-      "cost_usd": 0.0,
-      "turns": 0,
-      "seconds": 0.0,
+      "cost_usd": 0.2503,
+      "turns": 13,
+      "seconds": 61.93,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "data-loss": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "atomic-json",
+      "arm": "A",
+      "rep": 1,
+      "diff": {
+        "files": 2,
+        "added": 123,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/atomic_json.py",
+          "tests/test_atomic_json.py"
+        ],
+        "notes": [],
+        "lines": 123
+      },
+      "cost_usd": 0.2798,
+      "turns": 14,
+      "seconds": 134.53,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "data-loss": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "atomic-json",
+      "arm": "A",
+      "rep": 2,
+      "diff": {
+        "files": 2,
+        "added": 114,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/atomic_json.py",
+          "tests/test_atomic_json.py"
+        ],
+        "notes": [],
+        "lines": 114
+      },
+      "cost_usd": 0.2587,
+      "turns": 12,
+      "seconds": 50.85,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "data-loss": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "atomic-json",
+      "arm": "B",
+      "rep": 2,
+      "diff": {
+        "files": 2,
+        "added": 94,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/atomic_json.py",
+          "tests/test_atomic_json.py"
+        ],
+        "notes": [],
+        "lines": 94
+      },
+      "cost_usd": 0.2628,
+      "turns": 13,
+      "seconds": 73.32,
       "quality": {
         "acceptance": true,
         "guards": {
@@ -491,19 +849,20 @@
       "arm": "A",
       "rep": 0,
       "diff": {
-        "files": 1,
-        "added": 11,
+        "files": 2,
+        "added": 105,
         "deleted": 0,
         "new_deps": 0,
         "paths": [
-          "friday/status_badge.py"
+          "friday/status_badge.py",
+          "tests/test_status_badge.py"
         ],
         "notes": [],
-        "lines": 11
+        "lines": 105
       },
-      "cost_usd": 0.0,
-      "turns": 0,
-      "seconds": 0.0,
+      "cost_usd": 0.2526,
+      "turns": 12,
+      "seconds": 59.63,
       "quality": {
         "acceptance": true,
         "guards": {
@@ -520,19 +879,140 @@
       "arm": "B",
       "rep": 0,
       "diff": {
-        "files": 1,
-        "added": 11,
+        "files": 2,
+        "added": 92,
         "deleted": 0,
         "new_deps": 0,
         "paths": [
-          "friday/status_badge.py"
+          "friday/status_badge.py",
+          "tests/test_status_badge.py"
         ],
         "notes": [],
-        "lines": 11
+        "lines": 92
       },
-      "cost_usd": 0.0,
-      "turns": 0,
-      "seconds": 0.0,
+      "cost_usd": 0.2444,
+      "turns": 11,
+      "seconds": 58.11,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "accessibility": true,
+          "security": true,
+          "validation": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "status-badge",
+      "arm": "B",
+      "rep": 1,
+      "diff": {
+        "files": 2,
+        "added": 89,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/status_badge.py",
+          "tests/test_status_badge.py"
+        ],
+        "notes": [],
+        "lines": 89
+      },
+      "cost_usd": 0.2481,
+      "turns": 12,
+      "seconds": 71.86,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "accessibility": true,
+          "security": true,
+          "validation": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "status-badge",
+      "arm": "A",
+      "rep": 1,
+      "diff": {
+        "files": 2,
+        "added": 118,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/status_badge.py",
+          "tests/test_status_badge.py"
+        ],
+        "notes": [],
+        "lines": 118
+      },
+      "cost_usd": 0.2866,
+      "turns": 15,
+      "seconds": 65.03,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "accessibility": true,
+          "security": true,
+          "validation": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "status-badge",
+      "arm": "A",
+      "rep": 2,
+      "diff": {
+        "files": 2,
+        "added": 61,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/status_badge.py",
+          "tests/test_status_badge.py"
+        ],
+        "notes": [],
+        "lines": 61
+      },
+      "cost_usd": 0.253,
+      "turns": 14,
+      "seconds": 57.95,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "accessibility": true,
+          "security": true,
+          "validation": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "status-badge",
+      "arm": "B",
+      "rep": 2,
+      "diff": {
+        "files": 2,
+        "added": 56,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/status_badge.py",
+          "tests/test_status_badge.py"
+        ],
+        "notes": [],
+        "lines": 56
+      },
+      "cost_usd": 0.2549,
+      "turns": 13,
+      "seconds": 67.01,
       "quality": {
         "acceptance": true,
         "guards": {
@@ -549,19 +1029,20 @@
       "arm": "A",
       "rep": 0,
       "diff": {
-        "files": 1,
-        "added": 22,
+        "files": 2,
+        "added": 216,
         "deleted": 0,
         "new_deps": 0,
         "paths": [
-          "friday/run_limited.py"
+          "friday/run_limited.py",
+          "tests/test_run_limited.py"
         ],
         "notes": [],
-        "lines": 22
+        "lines": 216
       },
-      "cost_usd": 0.0,
-      "turns": 0,
-      "seconds": 0.0,
+      "cost_usd": 0.3072,
+      "turns": 13,
+      "seconds": 78.95,
       "quality": {
         "acceptance": true,
         "guards": {
@@ -577,19 +1058,20 @@
       "arm": "B",
       "rep": 0,
       "diff": {
-        "files": 1,
-        "added": 22,
+        "files": 2,
+        "added": 144,
         "deleted": 0,
         "new_deps": 0,
         "paths": [
-          "friday/run_limited.py"
+          "friday/run_limited.py",
+          "tests/test_run_limited.py"
         ],
         "notes": [],
-        "lines": 22
+        "lines": 144
       },
-      "cost_usd": 0.0,
-      "turns": 0,
-      "seconds": 0.0,
+      "cost_usd": 0.3292,
+      "turns": 18,
+      "seconds": 90.34,
       "quality": {
         "acceptance": true,
         "guards": {
@@ -599,6 +1081,122 @@
         "ok": true
       },
       "error": ""
+    },
+    {
+      "task": "run-limited",
+      "arm": "B",
+      "rep": 1,
+      "diff": {
+        "files": 2,
+        "added": 135,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/run_limited.py",
+          "tests/test_run_limited.py"
+        ],
+        "notes": [],
+        "lines": 135
+      },
+      "cost_usd": 0.2809,
+      "turns": 15,
+      "seconds": 137.22,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "error-handling": true,
+          "observability": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "run-limited",
+      "arm": "A",
+      "rep": 1,
+      "diff": {
+        "files": 2,
+        "added": 216,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/run_limited.py",
+          "tests/test_run_limited.py"
+        ],
+        "notes": [],
+        "lines": 216
+      },
+      "cost_usd": 0.3459,
+      "turns": 14,
+      "seconds": 129.93,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "error-handling": true,
+          "observability": true
+        },
+        "ok": true
+      },
+      "error": "error_max_budget_usd"
+    },
+    {
+      "task": "run-limited",
+      "arm": "A",
+      "rep": 2,
+      "diff": {
+        "files": 2,
+        "added": 187,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/run_limited.py",
+          "tests/test_run_limited.py"
+        ],
+        "notes": [],
+        "lines": 187
+      },
+      "cost_usd": 0.2984,
+      "turns": 13,
+      "seconds": 211.15,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "error-handling": true,
+          "observability": true
+        },
+        "ok": true
+      },
+      "error": ""
+    },
+    {
+      "task": "run-limited",
+      "arm": "B",
+      "rep": 2,
+      "diff": {
+        "files": 2,
+        "added": 150,
+        "deleted": 0,
+        "new_deps": 0,
+        "paths": [
+          "friday/run_limited.py",
+          "tests/test_run_limited.py"
+        ],
+        "notes": [],
+        "lines": 150
+      },
+      "cost_usd": 0.3342,
+      "turns": 16,
+      "seconds": 73.78,
+      "quality": {
+        "acceptance": true,
+        "guards": {
+          "error-handling": true,
+          "observability": true
+        },
+        "ok": true
+      },
+      "error": "error_max_budget_usd"
     }
   ]
 }

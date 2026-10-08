@@ -4008,6 +4008,22 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_mcp_firewall.py'],
         "files": ['agent_friday.py'],
     }),
+    ('MCP-001', {
+        "status": VERIFIED,
+        "current_implementation": "Wired mcp_firewall.discover_hermes() into FridayAgent._narrow_tools on the normal (non-suspended) path, so Hermes' configured mcp_servers register as hermes:<name> EXTERNAL_DISCOVERED when the voice agent loads tools. Guarded by try/except + logger.warning; never silent, never fatal. (build run, commit c264fd2c5)",
+        "next_action": '',
+        "evidence": 'build run MCP-001, commit c264fd2c5; RED (assertion) at f5c035f5c and GREEN at the commit for tests/test_mcp_firewall.py; affected tests passed; fresh verifier PASS ($0.47)',
+        "tests": ['tests/test_mcp_firewall.py::test_a_changed_server_name_suspends_the_server_but_a_new_sdk_version_does_not', 'tests/test_mcp_firewall.py::test_the_voice_agent_withholds_a_suspended_servers_tools'],
+        "files": ['friday/mcp_firewall.py:149,225,241,303,336,360,474,538,718,752,862,932', 'agent_friday.py:739,1330'],
+    }),
+    ('CODE-001', {
+        "status": VERIFIED,
+        "current_implementation": 'Added scripts/minimal_build_ab.py, an A/B harness for the PRD s23 ladder: 5-task corpus with held-out acceptance and guard probes, diff/cost/quality measurement, verdict, report. Fake runner only; no live run yet, so the row stays PARTIAL. (build run, commit f494c8206)',
+        "next_action": '',
+        "evidence": "Controller, 2026-10-08: the owner-approved live A/B (RULING 2026-10-08e) ran 5 tasks x 2 arms x 3 repeats with sonnet under a $10 ceiling and ended 23:04: ADOPT (15 pairs) - quality at parity, diff and cost not worse. The real report is docs/implementation/MINIMAL_BUILD_AB.md/.json (mode live, evidence true); the generator's tests pass at HEAD.",
+        "tests": ['tests/test_minimal_build_ab.py::test_a_live_report_carries_the_verdict_and_the_recommendation', 'tests/test_minimal_build_ab.py::test_fake_runner_end_to_end_writes_report_with_diff_cost_quality_columns'],
+        "files": ['scripts/minimal_build_ab.py', 'docs/implementation/MINIMAL_BUILD_AB.md'],
+    }),
 ]
 
 
