@@ -3905,6 +3905,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "evidence": 'Controller, unpark triage wf_5253313a, 2026-10-08: the acceptance text is met by e1ad03b (INTEGRATED, RED/GREEN OK); tests/test_route_safeguard.py::test_a_refusal_is_recorded_and_the_second_attempt_takes_the_fallback pass at 9cb564d (211 passed, 1 skipped with the batch). The row stayed PARTIAL only on worker-listed caveats beyond the acceptance, recorded here and not built: No acceptance gap. Optional follow-ups: refusal detection for general-domain requests, exclusion expiry, an MCP/CLI wiring for clear_route_exclusion, and owner-declared restricted_domains on real routes. None is required by the acceptance text.',
         "tests": ['tests/test_route_safeguard.py::test_a_refusal_is_recorded_and_the_second_attempt_takes_the_fallback'],
     }),
+    ('APPROVAL-001', {
+        "status": PARTIAL,
+        "current_implementation": "Lease blast radius now uses CAP-004's six consequence flags + risk (side_effect dropped, flags encode it); any undeclared flag gives unknown:unknown. Tests: 3 flag-flip cases against the lease, 1 undeclared-flag case; risk-flip tests unedited and green. (build run, commit d350fd539)",
+        "next_action": "GAPS: graph_version is recorded on the lease (test_the_approval_records_the_plan_it_was_given_for) but not compared at use; only plan_hash is (capability_runtime.py:512). Out of scope here.; Packet test (a) expected RUN_WAITING_PERMISSION from a driven run after a flag flip; it cannot: JIT-001 (capability_runtime.py:380, fingerprint() hashes C.HINTS at :590) refuses the changed capability first, so the run ends PARTIAL with no note.txt. The flag tests therefore call CapabilityRuntime._approval_on_record directly (private method) to reach the lease.; Impact-set run (47 test files, scripts/test_impact.py --direct) deliberately not run, per packet; only the two named files ran. blast_radius strings changed shape (effect flags instead of side_effect); other test files that hard-code the old 'write:LOW:...' form were not checked.; Lease and JIT fingerprint both hash the flags now. An approval is only consulted when run.envelope is set (capability_runtime.py:413), so within a driven run the flag check in the lease sits behind JIT; it is independent defence in depth, reachable only by calling the lease directly.",
+    }),
 ]
 
 
