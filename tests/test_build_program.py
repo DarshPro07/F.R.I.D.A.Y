@@ -1390,3 +1390,19 @@ def test_a_dry_run_plans_with_the_inbox_and_leaves_it_queued(env, tmp_path):
     assert res["stop_reason"] == "dry run"                       # B is planned, not "no ready work"
     assert (runs / BP.INBOX).exists()                            # still queued for the real run
     assert state_of(env)["parked"] == {"B": "partial x2"}         # a dry run writes no state
+
+
+def test_a_confirmed_row_is_progress_not_a_park(env):
+    # 2026-10-09: a run that changed nothing because the acceptance was already met is
+    # confirmed on HEAD (VERIFIED) - progress, never a park.
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+
+    class Confirms(FakeIntegrator):
+        def integrate(self, req):
+            self.k.closed.add(req)
+            return {"requirement": req, "result": "CONFIRMED", "verifier": None}
+
+    res, _ = go(env, k, bi=Confirms(k))
+    assert "A" not in state_of(env)["parked"] and [x[0] for x in k.launches] == ["A"]
+    assert res["stop_reason"] != "no progress"

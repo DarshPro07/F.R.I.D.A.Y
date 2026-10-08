@@ -555,6 +555,11 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
         except Exception as exc:  # any crash may sit between the cherry-pick and its guarded reset
             return recover_crash(state, req, head, exc, repo, runner), spend, False
         spend += float((res.get("verifier") or {}).get("cost_usd") or 0.0)
+        if res["result"] == "CONFIRMED":
+            # Already met: the worker changed nothing, and HEAD passed the named tests and
+            # a fresh verifier. VERIFIED without a commit - progress, not a park.
+            integrated.add(req)
+            return "CONFIRMED", spend, True
         if res["result"] == "INTEGRATED":
             integrated.add(req)
             # A PARTIAL row stays ready; cap how often a run may pay for it. A slice that

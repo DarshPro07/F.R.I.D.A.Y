@@ -181,7 +181,9 @@ def test_refuses_a_run_that_is_not_done(tmp_path, state):
 
 
 def test_refuses_without_a_commit(tmp_path):
-    repo, runs, run, rows = setup(tmp_path)
+    # A worker that claims the acceptance is already met is confirmed on HEAD instead
+    # (test_a_run_that_changed_nothing_is_confirmed_on_head); one that does not is refused.
+    repo, runs, run, rows = setup(tmp_path, acceptance_met=False)
     run["commit"] = ""
     (runs / "REQ-1.json").write_text(json.dumps(run), encoding="utf-8")
     with pytest.raises(KernelError, match="no commit"):
@@ -793,3 +795,51 @@ def test_failed_ids_use_forward_slashes_whatever_pytest_printed():
     lines = ["FAILED tests\\test_broken.py::test_broken - assert 2 == 3",
              "FAILED tests/test_old.py::test_old"]
     assert bi.failed_ids(lines) == ["tests/test_broken.py::test_broken", "tests/test_old.py::test_old"]
+
+
+def _no_change(runs, run, rows, tests, next_action=""):
+    run = dict(run, commit="", files_changed=[],
+               evidence=dict(run["evidence"], acceptance_met=True, summary="No code change needed"))
+    (runs / "REQ-1.json").write_text(json.dumps(run), encoding="utf-8")
+    return run, [dict(rows[0], tests=tests, files=["calc.py"], next_action=next_action)]
+
+
+def test_a_run_that_changed_nothing_is_confirmed_on_head(tmp_path):
+    # 2026-10-09: four rows in one night were refused "run has no commit" and parked,
+    # although each worker had found the acceptance already met.
+    repo, runs, run, rows = setup(tmp_path)
+    run, rows = _no_change(runs, run, rows, ["tests/test_old.py::test_old"])
+    before = head(repo)
+    asked = []
+
+    def paid(cmd, prompt, cwd):
+        asked.append(prompt)
+        return json.dumps({"result": '{"verdict": "PASS", "requirement_ids": ["REQ-1"]}', "total_cost_usd": 0.2})
+
+    out = go(repo, runs, rows, runner=paid)
+    assert out["result"] == "CONFIRMED" and out["ledger_status"] == "VERIFIED"
+    assert "ALREADY met" in asked[0] and "tests/test_old.py::test_old" in asked[0]
+    module = bi.load_ledger(repo / "scripts" / "prd_ledger.py")
+    row = {r["id"]: r for r in module.apply_progress(module._load_v7(), module.PROGRESS_V7)}["REQ-1"]
+    assert row["status"] == "VERIFIED" and row["tests"] == ["tests/test_old.py::test_old"]
+    assert sh(repo, "log", "--format=%s", f"{before}..HEAD").splitlines() == [
+        "docs(ledger): REQ-1 -> VERIFIED from build run"]
+
+
+@pytest.mark.parametrize("tests, next_action, verdict, why", [
+    (["tests/test_old.py::test_old"], "RULING: keep this extra scope inside the row", "PASS", "extra scope"),
+    ([], "", "PASS", "names no test"),
+    (["tests/test_old.py::test_old"], "", "FAIL", "verifier did not find"),
+])
+def test_a_no_change_run_that_cannot_be_proven_is_not_confirmed(tmp_path, tests, next_action, verdict, why):
+    repo, runs, run, rows = setup(tmp_path)
+    run, rows = _no_change(runs, run, rows, tests, next_action)
+    before = head(repo)
+
+    def judged(cmd, prompt, cwd):
+        return json.dumps({"result": '{"verdict": "%s", "failing_criteria": ["x"]}' % verdict,
+                           "total_cost_usd": 0.1})
+
+    out = go(repo, runs, rows, runner=judged)
+    assert out["result"] == "NOT_CONFIRMED" and why in out["detail"]
+    assert head(repo) == before

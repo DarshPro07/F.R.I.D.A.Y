@@ -320,31 +320,36 @@ def verify_key(run: dict) -> str:
 
 
 def run_verifier(row: dict, run: dict, rg: dict, *, repo: Path = ROOT, runner=None,
-                 runs_dir: Path = RUNS_DIR) -> dict:
+                 runs_dir: Path = RUNS_DIR, prompt: str | None = None, files: list[str] | None = None,
+                 key: str | None = None) -> dict:
     """Run the fresh verifier inside the day's budget: it uses the lease its build
     launch reserved (or takes one under the hard ceiling; SpendCapReached when none
-    fits, and nothing runs), records its actual cost, then gives the lease back."""
+    fits, and nothing runs), records its actual cost, then gives the lease back.
+    `prompt`, `files` and `key` replace the change's own (a confirm judges HEAD)."""
     cwd = Path(run.get("worktree") or repo)
     if not cwd.is_dir():
         cwd = repo
-    turns = build_kernel.verifier_turns(run.get("files_changed", []))
-    receipt = _verify_once(row, run, rg, repo, runner, runs_dir, cwd, turns, verify_key(run))
+    files = run.get("files_changed", []) if files is None else files
+    key = key or verify_key(run)
+    turns = build_kernel.verifier_turns(files)
+    receipt = _verify_once(row, run, rg, repo, runner, runs_dir, cwd, turns, key, prompt, files)
     if receipt.get("stop") == "error_max_turns" and turns < build_kernel.VERIFIER_MAX_TURNS:
         # It ran out of turns before judging anything (RES-001, 2026-10-08: 15 turns,
         # then INSUFFICIENT_EVIDENCE refused a change whose RED/GREEN had passed).
         # One more run with twice the turns; a second stop stands.
         more = min(build_kernel.VERIFIER_MAX_TURNS, 2 * turns)
-        receipt = _verify_once(row, run, rg, repo, runner, runs_dir, cwd, more, verify_key(run) + ":more-turns")
+        receipt = _verify_once(row, run, rg, repo, runner, runs_dir, cwd, more, key + ":more-turns", prompt, files)
     return receipt
 
 
 def _verify_once(row: dict, run: dict, rg: dict, repo: Path, runner, runs_dir: Path, cwd: Path,
-                 turns: int, key: str) -> dict:
-    cmd = verifier_command(run.get("cost_usd", 0), run.get("files_changed", []), turns=turns)
+                 turns: int, key: str, prompt: str | None = None, files: list[str] | None = None) -> dict:
+    files = run.get("files_changed", []) if files is None else files
+    cmd = verifier_command(run.get("cost_usd", 0), files, turns=turns)
     build_kernel.spend_guard(key, "verify", str(run.get("requirement")), "VERIFIER",
                              float(cmd[cmd.index("--max-budget-usd") + 1]), runs_dir)
     try:
-        out = (runner or default_runner)(cmd, verifier_prompt(row, run, rg, repo), cwd)
+        out = (runner or default_runner)(cmd, prompt or verifier_prompt(row, run, rg, repo), cwd)
     except (subprocess.SubprocessError, OSError) as exc:
         return {"verdict": "INSUFFICIENT_EVIDENCE", "requirement_ids": [],
                 "failing_criteria": [f"verifier did not run: {type(exc).__name__}"], "evidence_refs": []}
@@ -736,11 +741,88 @@ def integrate(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR, ledger_
                                    runs_dir)
 
 
+#: An owner ruling that keeps a row's extra scope (00-owner-directive-2026-10-08e): its
+#: acceptance alone does not close it, so a no-change run cannot be confirmed.
+KEEP_SCOPE = "keep this extra scope inside the row"
+
+
+def confirm_prompt(row: dict, tests: list[str], head: str) -> str:
+    return f"""You are an independent verifier. A build worker changed nothing and claims the acceptance below is
+ALREADY met by the code at HEAD ({head[:9]}). Judge the existing code against all of it: read the files the
+ledger names and the named tests. PASS only when every acceptance item is met by code that exists now and the
+named tests prove it; FAIL for any item that is missing, stubbed or only claimed; INSUFFICIENT_EVIDENCE when
+you cannot tell. Reply with ONE JSON object and nothing else:
+{{"verdict": "PASS|FAIL|INSUFFICIENT_EVIDENCE", "requirement_ids": [...], "failing_criteria": [...], "evidence_refs": ["file:line", ...]}}
+
+## Requirement {row['id']}
+{row.get('summary', '')}
+
+## Acceptance
+{row.get('acceptance', '')}
+
+## Next action in the ledger (owner rulings here are binding)
+{row.get('next_action', '') or '(none)'}
+
+## Files the ledger names
+{', '.join(map(str, row.get('files') or [])) or '(none)'}
+
+## Named tests (they pass at HEAD)
+{chr(10).join(tests)}
+"""
+
+
+def _confirm_existing(req: str, run: dict, row: dict, out: dict, done, *, repo: Path, runs_dir: Path,
+                      ledger_path: Path, python: str, runner, dry_run: bool, no_ledger: bool) -> dict:
+    """The worker changed nothing and says the acceptance is already met. 2026-10-09:
+    BCON-001, CYBER-002, DUR-001 and EVAL-001 were each refused 'run has no commit' and
+    parked in one night, waiting for a controller to flip them by hand. Prove it on HEAD
+    instead: the row's named tests pass there, and a fresh verifier finds the acceptance
+    met by the existing code; then the row is VERIFIED on that evidence."""
+    if KEEP_SCOPE in (row.get("next_action") or ""):
+        return done("NOT_CONFIRMED", detail="the owner keeps extra scope in this row; the worker built none of it")
+    head = git(repo, "rev-parse", "HEAD", check=True).stdout.strip()
+    tests = named_tests(row.get("tests"))
+    files = sorted({str(t).split("::")[0] for t in row.get("tests") or [] if str(t).split("::")[0].endswith(".py")})
+    if not tests and files:
+        with temp_worktree(repo, head) as wt:
+            tests = named_tests(collected_ids(python, wt, files))
+    if not tests:
+        return done("NOT_CONFIRMED", detail="the row names no test to confirm the acceptance with")
+    if dry_run:
+        return done("DRY_RUN", tests=tests)
+    with temp_worktree(repo, head) as wt:
+        rc, output = run_pytest(python, wt, tests)
+    if rc != 0:
+        return done("NOT_CONFIRMED", detail="the named tests fail at HEAD", tests=tests,
+                    tail=output.strip().splitlines()[-5:])
+    code = [str(f).split(":")[0] for f in row.get("files") or []]
+    out["verifier"] = verdict = run_verifier(row, run, {}, repo=repo, runner=runner, runs_dir=runs_dir,
+                                             prompt=confirm_prompt(row, tests, head), files=code,
+                                             key=verify_key(run) + ":confirm")
+    if verdict.get("verdict") != "PASS":
+        return done("NOT_CONFIRMED", detail="the verifier did not find the acceptance met at HEAD", tests=tests)
+    if not no_ledger:
+        summary = str((run.get("evidence") or {}).get("summary") or run.get("summary") or "")[:300]
+        evidence = (f"Confirmed at {head[:9]}: the build worker found the acceptance already met and changed "
+                    f"nothing; {', '.join(tests)} pass at HEAD and an independent verifier judged the existing "
+                    f"code to meet it. Worker: {summary}")
+        append_progress(Path(ledger_path), req, "VERIFIED", row.get("current_implementation", ""), "", evidence,
+                        {"tests": tests, "files": cited_files(row, [])})
+        commit_ledger(Path(ledger_path), req, "VERIFIED", repo)
+        out["ledger_status"] = "VERIFIED"
+    return done("CONFIRMED", tests=tests)
+
+
 def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, python: str,
                rows: list[dict] | None, runner, dry_run: bool, no_ledger: bool) -> dict:
     run = load_run(req, runs_dir)
     why = refuse_reason(run, repo)
-    if why:
+    # A DONE run with no commit that says the acceptance is already met is confirmed on
+    # HEAD rather than refused - on a clean checkout, like any integration.
+    confirm = why == "run has no commit" and bool((run.get("evidence") or {}).get("acceptance_met"))
+    if confirm and git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+        why, confirm = "the checkout has tracked changes", False
+    if why and not confirm:
         raise KernelError(f"refusing {req}: {why}")
     row = next((r for r in (rows if rows is not None else load_rows()) if r["id"] == req), None)
     if row is None:
@@ -755,6 +837,9 @@ def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, pytho
                 json.dumps(out, indent=2), encoding="utf-8", newline="\n")
         return out
 
+    if confirm:
+        return _confirm_existing(req, run, row, out, done, repo=repo, runs_dir=runs_dir, ledger_path=ledger_path,
+                                 python=python, runner=runner, dry_run=dry_run, no_ledger=no_ledger)
     try:
         clash = collision(run, repo)
     except KernelError as exc:  # the base is no longer an ancestor of HEAD
