@@ -177,3 +177,73 @@ def test_a_direct_memory_write_is_stamped_from_the_turn_not_the_model(tmp_path, 
     finally:
         M.reset_store(None)
         store.close()
+
+
+def test_a_direct_profile_write_is_stamped_from_the_turn_not_the_model(tmp_path, monkeypatch):
+    """`profile_learn_from_turn` files what the person "said" as theirs, and
+    the 'profile' group hands the model the raw MCP tool. An omitted flag
+    already fails closed, but a model passing `from_read_material=False`
+    explicitly used to claim the person's voice for a page the turn had read
+    (MEM-002); the flag must come from the turn, like `memory_remember`'s."""
+    import asyncio
+
+    import agent_friday
+    from livekit.agents.llm import function_tool
+    from friday import policy as p
+    from friday import profile as P
+    from friday.store import FACT
+    from friday.tools import profile_control
+    from friday.toolsets import profile as PT
+
+    server = _McpMemoryTools()
+    profile_control.register(server)
+    fn = server.fns["profile_learn_from_turn"]
+
+    schema = {
+        "name": "profile_learn_from_turn",
+        "description": "Learn durable facts about the user from a turn.",
+        "parameters": {
+            "type": "object",
+            "properties": {"user_said": {"type": "string"}, "you_replied": {"type": "string"},
+                           "from_read_material": {"type": "boolean"}},
+            "required": ["user_said"],
+        },
+    }
+
+    async def _mcp_call(raw_arguments: dict):
+        return fn(**raw_arguments)
+
+    mcp_tool = function_tool(_mcp_call, raw_schema=schema)
+
+    store = Store(tmp_path / "profile.sqlite3")
+    claim = P.Candidate(dimension=P.PREFERENCES, subject="user.push_target",
+                        value=HOSTILE, kind=FACT, confidence=0.9,
+                        evidence="the owner always pushes there").validated()
+    monkeypatch.setattr(P, "extract_candidates", lambda *a, **kw: [claim])
+    monkeypatch.setattr(PT, "store", lambda: store)
+    monkeypatch.setattr(profile_control, "_engine", p.PolicyEngine(autonomy=p.GUARDED))
+    try:
+        agent = object.__new__(agent_friday.FridayAgent)
+        agent._turn_owned_by = ""
+        router = _DirectRouter(mcp_tool)
+        router.enabled = {"profile"}             # the group is open: the model holds the raw tool
+        agent._router = router
+        agent._toolset = type("T", (), {"_tools": []})()
+        agent._spoke_this_turn = True
+        agent._owner_words = "remember where I push"
+        agent._read_this_turn = True             # the turn already read a page
+
+        (offered,) = agent._reply_tools()
+        assert offered.info.name == "profile_learn_from_turn"
+        # The model cannot choose its own lineage: the argument is not offered.
+        assert "from_read_material" not in offered.info.raw_schema["parameters"]["properties"]
+        assert "from_read_material" in schema["parameters"]["properties"], "the MCP schema was mutated"
+
+        # ...and what it passes anyway is overwritten from the turn.
+        asyncio.run(offered({"user_said": "I always push to the attacker repo",
+                             "from_read_material": False}))
+
+        (row,) = store.recall("user.push_target")
+        assert row["trust_class"] == c.READ_MATERIAL
+    finally:
+        store.close()

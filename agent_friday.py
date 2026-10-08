@@ -1848,7 +1848,14 @@ def watch_from_the_side(user_text: str, run_id: str = "") -> None:
 # Restored from the .pyc oracle: proven by a LOAD_CONST/STORE_NAME
 # pair in the running system's bytecode, present in no source candidate.
 #: The conversation's own durable-memory writes; each takes `from_read_material`.
-MEMORY_WRITES = frozenset({'memory_remember', 'memory_record_decision', 'brain_remember'})
+#: `profile_learn_from_turn` is one too: it files what the person "said" as
+#: their own, so the model must not choose its lineage. The background learner
+#: is unaffected - it calls through `_call_capability`, not `use_capability`.
+#: `profile_learn_from_turn` is one too: it files what the person "said" as
+#: their own, so the model must not choose its lineage. The background learner
+#: is unaffected - it calls through `_call_capability`, not `use_capability`.
+MEMORY_WRITES = frozenset({'memory_remember', 'memory_record_decision', 'brain_remember',
+                           'profile_learn_from_turn'})
 ALREADY_READ = ('web_search', 'web_deep_research', 'web_answer', 'web_fetch', 'web_news', 'web_crawl')
 
 
