@@ -134,6 +134,7 @@ def test_a_turn_is_learned_from_without_the_model_asking(learner_factory):
     assert ("profile_learn_from_turn", {
         "user_said": "I switched the whole rig over to Linux",
         "you_replied": "Noted, boss.",
+        "from_read_material": False,
     }) in mcp.calls
     assert learner.learned == 1
     assert "OS: Linux" in learner.brief
@@ -339,7 +340,7 @@ def test_typed_input_gets_the_same_treatment_as_spoken(learner_factory):
     # test_the_turn_hook_observes_without_touching_the_context.
     assert learner._queue.qsize() == 1
     assert learner._queue.get_nowait() == (
-        "always keep it under three sentences", "Standing by.")
+        "always keep it under three sentences", "Standing by.", False)
 
 
 def test_typed_input_does_not_pollute_the_stored_history(learner_factory):

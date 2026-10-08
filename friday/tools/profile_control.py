@@ -60,6 +60,14 @@ def _flatten(result: c.ActionResult) -> dict:
     return body
 
 
+def _read(flag: bool | None) -> bool:
+    # Fail closed: only the voice agent knows what the turn consumed, and it
+    # always sets the flag. A caller that omits it (a direct MCP client, or the
+    # model reaching this through use_capability) cannot claim the person's
+    # authority for what it writes (MEM-002).
+    return True if flag is None else flag
+
+
 def _execute(request: str, fn, *args, **kwargs) -> dict:
     run = c.Run.create(request, capability="profile")
     return _flatten(fn(run, *args, engine=_get_engine(), **kwargs))
@@ -68,7 +76,8 @@ def _execute(request: str, fn, *args, **kwargs) -> dict:
 def register(mcp):
 
     @mcp.tool()
-    def profile_learn_from_turn(user_said: str, you_replied: str = "") -> dict:
+    def profile_learn_from_turn(user_said: str, you_replied: str = "",
+                                from_read_material: bool | None = None) -> dict:
         """
         Learn durable facts about the user from a turn of conversation.
 
@@ -83,7 +92,8 @@ def register(mcp):
         which is right. Do not pick one yourself.
         """
         return _execute("learn from this turn", PT.profile_learn_from_turn,
-                        user_said, you_replied)
+                        user_said, you_replied,
+                        from_read_material=_read(from_read_material))
 
     @mcp.tool()
     def profile_get() -> dict:

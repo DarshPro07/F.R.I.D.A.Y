@@ -729,6 +729,9 @@ class FridayAgent(Agent):
     _acted_this_turn: tuple[str, ...] = ()
     #: Whether this turn consumed a tool result or a page; reset per turn.
     _read_this_turn: bool = False
+    #: Whether the turn before this one did. Its reply is what the learner gets
+    #: as context, and a reply that read a page may be that page restated.
+    _prior_turn_read: bool = False
     #: Why the tool server's tools are withheld while the MCP firewall has it
     #: suspended (MCP-001); "" otherwise.
     _tools_suspended: str = ""
@@ -1429,8 +1432,16 @@ class FridayAgent(Agent):
                 logger.exception("continuity.accept_user_turn failed; continuing the turn")
 
         try:
+            # What this turn read (a page, a tool result) decides whether what
+            # is learned from it is the person's voice or read material. The
+            # reply the extractor would see as context is withheld when the
+            # turn that produced it read something: it may be that page
+            # restated, and a "yes" to it must not carry the page in as theirs.
             self._learner.observe(
-                user_text, assistant_text=autolearn.last_assistant_text(turn_ctx))
+                user_text,
+                assistant_text=("" if self._prior_turn_read
+                                else autolearn.last_assistant_text(turn_ctx)),
+                from_read_material=self._read_this_turn)
         except Exception:                                    # noqa: BLE001
             # Learning is best-effort; it may never cost a reply.
             logger.exception("autolearn failed; continuing the turn")
@@ -1493,6 +1504,7 @@ class FridayAgent(Agent):
         """
         self._already_read = ()
         self._acted_this_turn = ()
+        self._prior_turn_read = getattr(self, "_read_this_turn", False)
         self._read_this_turn = False
         self._spoke_this_turn = False
         self._router.note_turn()

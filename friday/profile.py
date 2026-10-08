@@ -36,6 +36,7 @@ import json
 import os
 from dataclasses import asdict, dataclass
 
+from friday.contracts import READ_MATERIAL
 from friday.store import FACT, INFERENCE, MEMORY_KINDS, PATTERN, PREFERENCE, Store
 
 #: The dimensions of the model, in the user's own terms.
@@ -324,31 +325,63 @@ def decide(candidate: Candidate, existing: dict | None) -> tuple[str, str]:
 def learn_from_turn(
     store: Store, user_text: str, *, assistant_text: str = "",
     conversation_id: str | None = None, run_id: str | None = None,
+    from_read_material: bool = False,
 ) -> list[Outcome]:
     """
     Extract and reconcile in one step, with key alignment wired up.
 
     This is the entry point callers should use; it passes the existing subject
     keys to the extractor so a correction lands on the fact it corrects.
+
+    `from_read_material` is the turn's lineage (MEM-002): the turn consumed a
+    page or a tool result. What it teaches is kept as read material, and the
+    reply - which may be that page restated - is not shown to the extractor.
     """
     candidates = extract_candidates(
-        user_text, assistant_text=assistant_text,
+        user_text, assistant_text="" if from_read_material else assistant_text,
         existing_subjects=known_subjects(store),
     )
-    return learn(store, candidates, conversation_id=conversation_id, run_id=run_id)
+    return learn(store, candidates, conversation_id=conversation_id,
+                 run_id=run_id, from_read_material=from_read_material)
 
 
 def learn(
     store: Store, candidates: list[Candidate], *,
     conversation_id: str | None = None, run_id: str | None = None,
+    from_read_material: bool = False,
 ) -> list[Outcome]:
-    """Record candidates, reconciling each against what is already known."""
+    """
+    Record candidates, reconciling each against what is already known.
+
+    From a turn that read something, a candidate is stored as read material
+    and can never replace or reinforce a row the person wrote (or one that
+    predates trust classes); the same policy as `memory_promotion.promote`.
+    """
     outcomes: list[Outcome] = []
+    trust_class = READ_MATERIAL if from_read_material else ""
 
     for candidate in candidates:
         current = store.recall(candidate.subject)
         existing = current[0] if current else None
         action, reason = decide(candidate, existing)
+
+        if from_read_material:
+            # Superseding retires every active row on the subject, so every
+            # one is checked, not only the newest.
+            theirs = next((row for row in current
+                           if row.get("trust_class") != READ_MATERIAL), None)
+            if action == "store" and theirs is not None:
+                action, existing = "conflict", theirs
+                reason = (
+                    f"read material cannot overrule what you said "
+                    f"({theirs['value']!r}); kept yours, flagged"
+                )
+            elif action == "reinforce" and existing.get("trust_class") != READ_MATERIAL:
+                action = "reject"
+                reason = (
+                    f"read material does not reinforce what you said "
+                    f"({existing['value']!r})"
+                )
 
         observation_id = store.add_observation(
             dimension=candidate.dimension, subject=candidate.subject,
@@ -370,6 +403,7 @@ def learn(
                 source=f"learned from conversation: {candidate.evidence[:120]}",
                 scope=candidate.dimension, confidence=candidate.confidence,
                 run_id=run_id, observation_id=observation_id,
+                trust_class=trust_class,
             )
             store.set_observation_status(observation_id, "accepted", memory_id)
             outcomes.append(Outcome("stored", candidate.subject, candidate.value,
@@ -389,6 +423,7 @@ def learn(
                 source=f"{existing['source']} (+ seen again: {candidate.evidence[:80]})",
                 scope=candidate.dimension, confidence=raised, run_id=run_id,
                 evidence_count=seen, observation_id=observation_id,
+                trust_class=trust_class,
             )
             store.set_observation_status(observation_id, "accepted", memory_id)
             outcomes.append(Outcome(

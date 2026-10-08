@@ -243,10 +243,11 @@ def test_friday_records_the_objective_before_learning_the_turn(monkeypatch):
             seen.append(('objective', text))
 
     class FakeLearner:
-        def observe(self, text, assistant_text):
+        def observe(self, text, assistant_text, from_read_material):
             seen.append(('learn', text))
     monkeypatch.setattr(A.autolearn, 'last_assistant_text', lambda ctx: '')
-    agent = SimpleNamespace(_continuity=FakeContinuity(), _learner=FakeLearner())
+    agent = SimpleNamespace(_continuity=FakeContinuity(), _learner=FakeLearner(), _read_this_turn=False,
+                           _prior_turn_read=False)
     A.FridayAgent.prepare_turn(agent, object(), 'audit the workspace')
     assert seen == [('objective', 'audit the workspace'), ('learn', 'audit the workspace')]
 

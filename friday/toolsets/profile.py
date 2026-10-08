@@ -110,11 +110,15 @@ def profile_explain(
 
 
 def profile_learn_from_turn(
-    run: c.Run, user_said: str, you_replied: str = "", *,
+    run: c.Run, user_said: str, you_replied: str = "",
+    from_read_material: bool = False, *,
     engine: PolicyEngine = default_engine,
 ) -> c.ActionResult:
     """
     Learn durable facts from a turn, then read them back.
+
+    `from_read_material` is the voice agent's word that the turn consumed a
+    page or tool result (MEM-002): what is learned is kept as read material.
 
     A conflict is not a failure and not something to resolve here: it means
     the boss has said two things that cannot both be true, and the only
@@ -128,7 +132,8 @@ def profile_learn_from_turn(
 
     try:
         outcomes = P.learn_from_turn(store(), user_said,
-                                     assistant_text=you_replied)
+                                     assistant_text=you_replied,
+                                     from_read_material=from_read_material)
     except P.ExtractionError as exc:
         return run.record(c.failed(started, str(exc)))
 

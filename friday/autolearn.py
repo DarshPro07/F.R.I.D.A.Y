@@ -111,9 +111,14 @@ class AutoLearner:
 
     # -- observe -----------------------------------------------------------
 
-    def observe(self, user_text: str, assistant_text: str = "") -> bool:
+    def observe(self, user_text: str, assistant_text: str = "",
+                from_read_material: bool = False) -> bool:
         """
         Queue a turn to learn from. Returns whether it was queued.
+
+        `from_read_material` is the turn's lineage (MEM-002): it consumed a
+        page or a tool result, so what is learned is read material, never the
+        person's voice.
 
         Never blocks and never raises: it is called from the turn hook, and a
         problem here must cost the reply nothing.
@@ -125,13 +130,14 @@ class AutoLearner:
             return False  # the same sentence twice teaches nothing new
         self._last_seen = text
 
+        turn = (text, (assistant_text or "").strip(), from_read_material)
         try:
-            self._queue.put_nowait((text, (assistant_text or "").strip()))
+            self._queue.put_nowait(turn)
         except asyncio.QueueFull:
             try:
                 self._queue.get_nowait()      # drop the oldest, keep the newest
                 self._queue.task_done()
-                self._queue.put_nowait((text, (assistant_text or "").strip()))
+                self._queue.put_nowait(turn)
                 logger.warning("autolearn is behind; dropped the oldest turn")
             except (asyncio.QueueEmpty, asyncio.QueueFull):
                 return False
@@ -139,9 +145,9 @@ class AutoLearner:
 
     async def _worker(self) -> None:
         while True:
-            user_text, assistant_text = await self._queue.get()
+            user_text, assistant_text, from_read_material = await self._queue.get()
             try:
-                await self._learn(user_text, assistant_text)
+                await self._learn(user_text, assistant_text, from_read_material)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -150,11 +156,13 @@ class AutoLearner:
             finally:
                 self._queue.task_done()
 
-    async def _learn(self, user_text: str, assistant_text: str) -> None:
-        result = payload(await self._invoke(
-            "profile_learn_from_turn",
-            {"user_said": user_text, "you_replied": assistant_text},
-        ))
+    async def _learn(self, user_text: str, assistant_text: str,
+                     from_read_material: bool = False) -> None:
+        # Always explicit: the tool treats an omitted flag as read material
+        # (fail closed), so a clean turn has to say it is the person's own.
+        arguments = {"user_said": user_text, "you_replied": assistant_text,
+                     "from_read_material": bool(from_read_material)}
+        result = payload(await self._invoke("profile_learn_from_turn", arguments))
         if result.get("status") != "succeeded":
             logger.info("profile_learn_from_turn: %s",
                         result.get("error") or result.get("status") or "no result")
