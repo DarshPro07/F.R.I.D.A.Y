@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 2bcebdd on prd-v7/slice-7-adaptive-hardware, updated 2026-10-08T22:51:18+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 8, "MISSING": 101, "PARKED_BY_OWNER": 1, "PARTIAL": 59, "VERIFIED": 50}
-- Unresolved P0: 18
+- HEAD: 072a22f on prd-v7/slice-7-adaptive-hardware, updated 2026-10-08T23:47:44+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 8, "MISSING": 101, "PARKED_BY_OWNER": 1, "PARTIAL": 54, "VERIFIED": 55}
+- Unresolved P0: 13
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (227): MEM-002=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), APPROVAL-001 (integration refused), ACT-001 (integration refused), JIT-001 (cascade exhausted), EVAL-001 (integration refused), BCON-001 (integration refused), CYBER-002 (integration refused), DUR-001 (integration refused)
-- Open escalations: 182
-  - BRAIN-001 resolved: controller unpark: controller, 2026-10-08 (after 401999e)
-  - EVAL-005 resolved: controller unpark: controller, 2026-10-08 (after 401999e)
-  - CYBER-002 resolved: controller unpark: controller, 2026-10-08 (after 401999e)
-  - CAP-004 resolved: controller unpark: controller, 2026-10-08 (after 401999e)
-  - RES-001 resolved: controller unpark: re-apply from wip/res-001-1008
-  - JIT-001 cascade: 3 repairs spent
+- Last wave (233): TRAJ-001=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), ACT-001 (integration refused), JIT-001 (cascade exhausted), MEM-003 (NOT_CONFIRMED)
+- Open escalations: 188
   - EVAL-001 integration: refusing EVAL-001: run has no commit
   - BCON-001 integration: refusing BCON-001: run has no commit
   - CYBER-002 integration: refusing CYBER-002: run has no commit
   - DUR-001 integration: refusing DUR-001: run has no commit
+  - APPROVAL-001 resolved: controller unpark: controller re-ran integration 2026-10-09: CONFIRMED
+  - BCON-001 resolved: controller unpark: controller re-ran integration 2026-10-09: CONFIRMED
+  - CYBER-002 resolved: controller unpark: controller re-ran integration 2026-10-09: CONFIRMED
+  - DUR-001 resolved: controller unpark: controller re-ran integration 2026-10-09: CONFIRMED
+  - EVAL-001 resolved: controller unpark: controller re-ran integration 2026-10-09: CONFIRMED
+  - MEM-003 integration: {"requirement": "MEM-003", "result": "NOT_CONFIRMED", "red_green": {}, "verifier": {"verdict": "FAIL
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
