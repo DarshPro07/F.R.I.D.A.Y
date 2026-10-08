@@ -180,6 +180,71 @@ def test_the_production_port_does_not_repeat_a_call_that_already_returned(tmp_pa
     assert store.objective_run(run_id)["status"] == O.RUN_COMPLETED
 
 
+def test_a_call_that_started_but_never_recorded_is_not_repeated(tmp_path):
+    """The process died after the effect and before its result was recorded:
+    the outcome is unknown, so the re-run refuses rather than repeat it."""
+    import agent_friday
+
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store)
+    effects: list[str] = []
+
+    async def local(capability, arguments, run=None):
+        effects.append(capability)
+        raise _Died()
+
+    port = agent_friday.objective_port(local, router_of=lambda: None,
+                                       call_via_router=None, store=store)
+    first = ContinuousTaskExecutor(store, call_capability=port, executor_id="first")
+    first.stop()
+    with pytest.raises(_Died):
+        asyncio.run(first.start(run_id))
+    assert effects == ["files_create"]
+    names = [e["event"] for e in store.objective_events(run_id)]
+    assert O.EVENT_CALL_STARTED in names
+    assert O.EVENT_CALL_RETURNED not in names and O.EVENT_CALL_ABANDONED not in names
+
+    _expire_lease(store, run_id)
+    asyncio.run(_recover(store, run_id, port))
+    assert effects == ["files_create"], "an effect of unknown outcome was repeated"
+    (task,) = store.objective_tasks(run_id)
+    assert task["status"] != O.TaskStatus.SUCCEEDED
+
+
+def test_a_call_that_raised_may_be_run_again(tmp_path):
+    """A raised Exception means the call is known not to have completed, so
+    the intent is abandoned and a genuine retry is not blocked."""
+    import agent_friday
+
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store)
+    effects: list[str] = []
+    fail = {"now": True}
+
+    async def local(capability, arguments, run=None):
+        effects.append(capability)
+        if fail["now"]:
+            raise RuntimeError("upstream refused")
+        return {"status": "succeeded", "output": {}, "side_effects": ["wrote note.txt"]}
+
+    port = agent_friday.objective_port(local, router_of=lambda: None,
+                                       call_via_router=None, store=store)
+    key = O.idempotency_key(run_id, store.objective_tasks(run_id)[0]["task_id"])
+    first = ContinuousTaskExecutor(store, call_capability=port, executor_id="first")
+    first.stop()
+    asyncio.run(first.start(run_id))
+    events = store.objective_events(run_id)
+    assert effects == ["files_create"]
+    assert O.EVENT_CALL_ABANDONED in [e["event"] for e in events]
+    assert not O.pending_call(events, key)
+
+    fail["now"] = False
+    run = type("R", (), {"envelope": type("E", (), {"objective_id": run_id})()})()
+    result = asyncio.run(port("files_create", {}, run=run, idempotency_key=key))
+    assert result["status"] == "succeeded"
+    assert effects == ["files_create", "files_create"]
+
+
 def test_the_event_log_alone_says_what_each_task_is(tmp_path):
     store = Store(tmp_path / "ada.sqlite3")
     run_id = _compile(store)

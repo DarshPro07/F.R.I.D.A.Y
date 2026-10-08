@@ -1649,12 +1649,39 @@ def objective_port(local_dispatch, *, router_of, call_via_router, store=None):
                                    idempotency_key)
             if done is not None:
                 return done
-        result = await _dispatch(capability, arguments, run)
-        if (ids is not None and isinstance(result, dict)
-                and str(result.get("status") or "").lower() == "succeeded"):
+            # A prior attempt wrote its intent and never recorded how it
+            # ended (the process died mid-call): the effect may have
+            # happened, so it is not made again.
+            if O.pending_call(store.objective_events(ids[0], limit=100000),
+                              idempotency_key):
+                return {"status": "failed",
+                        "error": ("UNCERTAIN: a prior attempt started this call and "
+                                  "its outcome was not recorded; not repeated"),
+                        "side_effects": []}
             store.append_objective_event(
-                ids[0], O.EVENT_CALL_RETURNED, task_id=ids[1],
-                detail={"key": idempotency_key, "result": result})
+                ids[0], O.EVENT_CALL_STARTED, task_id=ids[1],
+                detail={"key": idempotency_key})
+        try:
+            result = await _dispatch(capability, arguments, run)
+        except Exception:
+            # Raised, so the call is known not to have completed: a genuine
+            # retry is allowed. A BaseException (the process dying) leaves
+            # the intent unresolved on purpose.
+            if ids is not None:
+                store.append_objective_event(
+                    ids[0], O.EVENT_CALL_ABANDONED, task_id=ids[1],
+                    detail={"key": idempotency_key})
+            raise
+        if ids is not None:
+            if (isinstance(result, dict)
+                    and str(result.get("status") or "").lower() == "succeeded"):
+                store.append_objective_event(
+                    ids[0], O.EVENT_CALL_RETURNED, task_id=ids[1],
+                    detail={"key": idempotency_key, "result": result})
+            else:
+                store.append_objective_event(
+                    ids[0], O.EVENT_CALL_ABANDONED, task_id=ids[1],
+                    detail={"key": idempotency_key})
         return result
 
     async def _dispatch(capability: str, arguments: dict, run):

@@ -249,6 +249,33 @@ def recorded_call(events: list[dict], key: str) -> dict | None:
             return detail["result"]
     return None
 
+
+#: A side-effecting call is about to be made; written by the port before the
+#: dispatch, so a death between the call and its return leaves a trace that
+#: the outcome is unknown.
+EVENT_CALL_STARTED = "call.started"
+
+#: The call under that key ended without a recorded result by a path the port
+#: saw (it raised, or it reported failure), so the outcome is known and a
+#: genuine retry is allowed.
+EVENT_CALL_ABANDONED = "call.abandoned"
+
+
+def pending_call(events: list[dict], key: str) -> bool:
+    """True when a call under `key` started and nothing since says how it
+    ended: no later `call.returned` or `call.abandoned` with that key."""
+    pending = False
+    for event in events:
+        detail = event.get("detail")
+        if not isinstance(detail, dict) or detail.get("key") != key:
+            continue
+        name = event.get("event")
+        if name == EVENT_CALL_STARTED:
+            pending = True
+        elif name in (EVENT_CALL_RETURNED, EVENT_CALL_ABANDONED):
+            pending = False
+    return pending
+
 UNMAPPED_CAPABILITY = 'objective.unmapped'
 
 #: A task id may only be referenced by dependencies after it is defined.
