@@ -4109,6 +4109,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "profile_learn_from_turn added to MEMORY_WRITES: the model can no longer pass from_read_material=false to file read material as the person's words; use_capability and the direct-tool wrapper now stamp the flag from the turn. Test fails without the change. (build run, commit 71a1cd5b0)",
         "next_action": "GAPS: The 3 failures are tests/test_voice_path.py live TTS/STT tests (test_tts_produces_real_audio, test_tts_stt_round_trip, test_stt_needs_an_http_session_outside_a_job) rejected with 401 invalid_api_key on the placeholder OpenAI key; unrelated to this change.; The new test fails with profile_learn_from_turn removed from MEMORY_WRITES (verified by reverting the line and rerunning), and passes with it.; The flag is still the voice agent's word at turn start (self._read_this_turn); reads the model makes later in the turn are not seen by the background learner.; The packet's earlier GAPS text called this one-liner an owner decision; this packet's scout acceptance plan names it as the fix, so it was applied.; docs/implementation/PRD_V7_LEDGER.md, scripts/prd_ledger.py and data/prd_v7_*.json were not touched by this run (git status shows only the two files above).",
     }),
+    ('RES-001', {
+        "status": PARTIAL,
+        "current_implementation": "Re-applied wip/res-001-1008 onto current code: a model the governor evicts under pressure is now really unloaded (gateway flags eviction, worker 'unload' sends Ollama keep_alive 0, loopback only). 8 new tests; 3 fail without the hook. (build run, commit 4c875e493)",
+        "next_action": 'GAPS: GPU sampling is nvidia-smi only (non-nvidia sampling is optional, outside the acceptance); Only Ollama has an unload call; other local providers report supported:false and log a warning; scripts/stress_low_ram.py was not re-run (low-RAM host); the real-reading CRITICAL test in test_governor_reduction.py covers real helper processes; ledger next_action still lists the already-fixed auto-generated GAPS',
+    }),
 ]
 
 
