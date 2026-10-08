@@ -3283,6 +3283,28 @@ class Store:
             rows.append(got)
         return rows
 
+    def objective_events_named(self, run_id: str, names: tuple[str, ...]) -> list[dict]:
+        """Every event of a run whose name is in `names`, oldest first, however
+        old. For the few events that outlive the `recent_objective_events`
+        window (a flag the person answered, the resume after it); callers pass
+        names that are rare per run, so this is not capped."""
+        if not names:
+            return []
+        marks = ",".join("?" * len(names))
+        rows = []
+        for row in self._conn.execute(
+            f"SELECT * FROM objective_events WHERE run_id=? AND event IN ({marks}) "
+            "ORDER BY id", (run_id, *names),
+        ):
+            got = dict(row)
+            if got.get("detail"):
+                try:
+                    got["detail"] = json.loads(got["detail"])
+                except json.JSONDecodeError:
+                    pass
+            rows.append(got)
+        return rows
+
     def objective_events(self, run_id: str, limit: int = 1000, after_id: int = 0) -> list[dict]:
         """A run's events in order; `after_id` resumes after the last row of a prior page."""
         rows = []

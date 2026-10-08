@@ -551,3 +551,43 @@ def test_carrying_on_runs_the_steps_without_asking_about_the_question_again(tmp_
     assert run["status"] == O.RUN_COMPLETED, run
     assert calls == ["files_write"] * 3
     assert len([e for e in store.objective_events(run_id) if e["event"] == T.EVENT_FLAGGED]) == 1
+
+
+# -- "carry on" survives a run longer than the store's recent-events window ----------
+
+def _pad(store, run_id, n):
+    """`n` events that mean nothing to the trajectory, as a long run records."""
+    for _ in range(n):
+        store.append_objective_event(run_id, "run.note")
+
+
+def _long_run_under_an_open_question(tmp_path, *, flagged):
+    store = Store(tmp_path / "ada.sqlite3")
+    contract = c.ObjectiveContract(goal="tidy the folder", open_questions=OPEN)
+    run_id = _compile_under(store, contract, "files_write", 3, chained=False)
+    if flagged:
+        store.append_objective_event(run_id, T.EVENT_FLAGGED, detail={
+            "verdict": T.DRIFTING, "signals": {"unanswered_questions": len(OPEN)}})
+        store.append_objective_event(run_id, O.EVENT_RUN_RESUMED, detail={"reason": "carry on"})
+    _pad(store, run_id, 600)
+    return store, run_id, tuple(t["task_id"] for t in store.objective_tasks(run_id))
+
+
+def test_carry_on_is_remembered_after_more_events_than_the_recent_window_holds(tmp_path):
+    store, run_id, tasks = _long_run_under_an_open_question(tmp_path, flagged=True)
+    kept = {e["event"] for e in store.recent_objective_events(run_id)}
+    assert T.EVENT_FLAGGED not in kept and O.EVENT_RUN_RESUMED not in kept
+
+    found = T.for_run(store, run_id, upcoming=tasks)
+
+    assert found.verdict == T.ON_TRACK, found
+    assert found.signals["pending_side_effects"] == []
+
+
+def test_a_long_run_never_asked_about_the_question_is_still_asked(tmp_path):
+    store, run_id, tasks = _long_run_under_an_open_question(tmp_path, flagged=False)
+
+    found = T.for_run(store, run_id, upcoming=tasks)
+
+    assert found.verdict == T.DRIFTING, found
+    assert found.signals["pending_side_effects"] == ["files_write"] * 3

@@ -66,6 +66,25 @@ def test_admission_classifies_and_persists_the_objective_schema():
     assert created and created[0]["detail"]["classification"]["task_class"] == "COMPLEX"
 
 
+def test_named_events_are_found_however_old_and_only_for_their_run(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    store.append_objective_event("r1", "run.flagged", detail={"signals": {"n": 1}})
+    store.append_objective_event("r1", "run.note")
+    store.append_objective_event("r2", "run.flagged")
+    for _ in range(600):
+        store.append_objective_event("r1", "run.note")
+    store.append_objective_event("r1", "run.resumed")
+
+    found = store.objective_events_named("r1", ("run.flagged", "run.resumed"))
+
+    assert [e["event"] for e in found] == ["run.flagged", "run.resumed"]
+    assert found[0]["detail"] == {"signals": {"n": 1}}
+    assert found[0]["id"] < found[1]["id"]
+    assert all(e["run_id"] == "r1" for e in found)
+    assert store.objective_events_named("r1", ()) == []
+    assert len(store.recent_objective_events("r1")) == 500
+
+
 def test_critical_wording_sets_the_r3_floor():
     store = Store(":memory:")
     run_id = compile_(store, "delete all the old backups permanently",

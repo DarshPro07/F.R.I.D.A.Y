@@ -232,6 +232,17 @@ def spend_fraction(store, run_id: str) -> float:
     return max(fractions, default=0.0)
 
 
+def _events_for(store, run_id: str) -> list[dict]:
+    """The run's newest events, plus every flag and resume however old: a long
+    run pushes the flag the person answered, and the resume after it, out of the
+    recent window, and without them a "carry on" would be forgotten and the same
+    questions asked again."""
+    merged = {e["id"]: e for e in store.recent_objective_events(run_id)}
+    for e in store.objective_events_named(run_id, (EVENT_FLAGGED, _RESUMED)):
+        merged.setdefault(e["id"], e)
+    return [merged[i] for i in sorted(merged)]
+
+
 def for_run(store, run_id: str, upcoming: tuple = ()) -> Assessment:
     """`assess` over what the store holds for this run, and the ids of the
     tasks about to be dispatched."""
@@ -242,7 +253,7 @@ def for_run(store, run_id: str, upcoming: tuple = ()) -> Assessment:
         # An unreadable contract leaves the other signals; the executor logs it.
         contract = {}
     contract = contract if isinstance(contract, dict) else {}
-    return assess(store.recent_objective_events(run_id), store.objective_tasks(run_id),
+    return assess(_events_for(store, run_id), store.objective_tasks(run_id),
                   spend=spend_fraction(store, run_id),
                   governance=dict(contract.get("governance") or {}),
                   open_questions=tuple(contract.get("open_questions") or ()),
