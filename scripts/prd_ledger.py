@@ -4034,6 +4034,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'TaskBundle.measure() now reports per-section tokens (sections{title: len//4}) and total_tokens; section building moved into _sections(), render() output unchanged. Existing measure keys kept. (build run, commit 88e81db06)',
         "next_action": "GAPS: The 1 failure is tests/test_model_gateway.py::test_live_hermes_gateway_answers_without_an_agent_loop: a @live test against the real Hermes gateway (provider='' model='' status=failed). model_gateway.py does not use TaskBundle or measure(); not caused by this change, and live tests were out of scope. tests/test_hermes_bridge.py -m 'not live': 32 passed.; The new test was written before the change and not run against the old code; it fails there by construction because measure() had no 'sections' key.",
     }),
+    ('EVAL-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Graded Attempts now carry build commit + verifier fingerprint; promotion refuses unversioned or other-build passes; best_for ignores unversioned rows; Record.promote_model added (FUTURE in reachability). (build run, commit 98f4d90a5)',
+        "next_action": 'GAPS: promote_model has no consumer: no learned router exists yet (reachability KNOWN FUTURE).; Rows already in data/evaluation/attempts.json are unversioned and are ignored by best_for; the file was not touched (out of scope).',
+    }),
 ]
 
 
