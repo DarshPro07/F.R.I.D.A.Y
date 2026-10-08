@@ -848,3 +848,35 @@ class TestTheTransportModel:
         picks = gw.candidates(request(privacy_policy="local_only", allow_failover=True))
         assert not [p for _, p, _ in picks if p == "custom"], (
             f"local_only routed to a public endpoint: {picks}")
+
+
+
+def test_the_worker_never_returns_the_models_reasoning_as_its_answer(monkeypatch):
+    # Capability test of FRIDAY.exe, 2026-10-08: GLM-5.2 sent no content and no tool
+    # call; Hermes's extract_content_or_reasoning returned its chain of thought, and
+    # the owner read "The boss wants me to save a file ... The\n\nboss\n\nwants me".
+    import types
+    from friday import hermes_model_gateway_worker as W
+
+    def reply(content, tool_calls=()):
+        message = types.SimpleNamespace(content=content, reasoning="The boss wants me to save a file.",
+                                        reasoning_content="The boss wants me to save a file.",
+                                        tool_calls=list(tool_calls))
+        choice = types.SimpleNamespace(message=message, finish_reason="stop")
+        usage = types.SimpleNamespace(prompt_tokens=8, completion_tokens=9, total_tokens=17)
+        return types.SimpleNamespace(choices=[choice], model="glm", usage=usage)
+
+    call = types.SimpleNamespace(id="c1", function=types.SimpleNamespace(
+        name="use_capability", arguments='{"family": "files", "operation": "write"}'))
+    answers = iter([reply(""), reply(None, [call]), reply("<think>plan it</think> Saved, sir.")])
+
+    def call_llm(task=None, *, provider=None, model=None, messages, temperature=None,
+                 max_tokens=None, timeout=None, tools=None):
+        return next(answers)
+
+    _hermes_with(call_llm, monkeypatch)
+    params = {"messages": [{"role": "user", "content": "save it"}], "provider": "openrouter"}
+    assert W._infer(params)["response"] == ""                     # no reasoning as an answer
+    out = W._infer(params)
+    assert out["response"] == "" and out["tool_calls"][0]["name"] == "use_capability"
+    assert W._infer(params)["response"] == "Saved, sir."          # inline think block removed

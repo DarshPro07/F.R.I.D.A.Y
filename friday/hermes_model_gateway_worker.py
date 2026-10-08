@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import os
 import sys
 import time
@@ -282,8 +283,33 @@ def _tool_calls(response) -> list[dict]:
     return out
 
 
+#: Inline reasoning some models put in the content itself, as closed pairs.
+_THINK_BLOCKS = re.compile(r"<(think|thinking|reasoning|reflection)>.*?</\1>", re.S | re.I)
+
+
+def _answer_text(response) -> str:
+    """The answer's content, inline think blocks removed - and nothing else.
+
+    Hermes's extract_content_or_reasoning falls back to the model's reasoning
+    fields when the content is empty: right for a compaction summary, wrong
+    for an answer a person reads. GLM-5.2 via openrouter answered a request
+    with no content and no tool call, and its chain of thought - chopped and
+    repeated, "The boss wants me to save ... The\n\nboss\n\nwants me" -
+    reached the owner as the reply (capability test of FRIDAY.exe,
+    2026-10-08). Empty stays empty, so the gateway's own empty-answer path
+    (one widened retry, then failover) runs instead."""
+    try:
+        content = response.choices[0].message.content
+    except (AttributeError, IndexError, TypeError):
+        return ""
+    if isinstance(content, list):          # content parts, as some providers send them
+        content = "".join(part.get("text", "") if isinstance(part, dict) else str(getattr(part, "text", ""))
+                          for part in content)
+    return _THINK_BLOCKS.sub("", str(content or "")).strip()
+
+
 def _infer(params: dict) -> dict:
-    from agent.auxiliary_client import call_llm, extract_content_or_reasoning
+    from agent.auxiliary_client import call_llm
 
     messages = params.get("messages") or []
     if not isinstance(messages, list) or not messages:
@@ -319,7 +345,7 @@ def _infer(params: dict) -> dict:
         # the main runtime keeps it on the profile's primary model.
         response = call_llm(task="title_generation", **kwargs)
     elapsed_ms = int((time.monotonic() - started) * 1000)
-    text = extract_content_or_reasoning(response) or ""
+    text = _answer_text(response)
     finish = None
     try:
         finish = response.choices[0].finish_reason
