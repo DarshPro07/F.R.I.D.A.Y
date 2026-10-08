@@ -63,7 +63,7 @@ UNAVAILABLE; CLI-only when the worker is dead. Then a real text turn.
   against a fake CLI, plus a real run on this host with no Hermes `friday` profile
   and no API key: `model.infer` -> `claude-cli`/`claude-sonnet-5-5`, "12 times 12
   is 144.", `cost_usd` 0.002336 recorded, probe HEALTHY.
-- Turn it on/off: `FRIDAY_CLI_MODEL_PROVIDERS` ("claude" by default, "off" to
+- Turn it on/off: `FRIDAY_CLI_MODEL_PROVIDERS` ("claude,codex" by default since slice 3, "off" to
   disable; the test session sets "off" so no test spends the subscription).
 
 ## Slice 1: the gateway as the voice agent's LLM (2026-10-05)
@@ -85,15 +85,50 @@ Assumed `discover_backends()` is the "CLI configured" test (no `configured()` ex
 enabled, not installed or signed in, so a missing CLI fails at turn time, not at startup.
 Proof: `tests/test_gateway_llm.py` (15), incl. the fake-CLI turn with `cost_usd > 0` recorded.
 
+## Slice 3: Codex backend; opencode ruled out (2026-10-08)
+Owner ruling 2026-10-05b: use opencode free models, Codex and Claude Code logins when signed in. The
+ledger's condition for each: build it only if a no-tools answer-only mode is verified with a fake and one
+live call; otherwise record why not.
+
+Measured on this host (codex-cli 0.160.0 "Logged in using ChatGPT"; opencode 1.18.35):
+- **opencode: NOT buildable as pure completion.** `opencode run` has no tools-off flag. The free tier answers
+  only a default-shaped request: a custom agent with every tool disabled gets HTTP 403 "free tier can only be
+  used from within OpenCode". The config-level `tools {"*": false}`, `permission {"*": "deny"}` and
+  `permission {"bash": "deny", ...}` (via OPENCODE_CONFIG_CONTENT) were all ignored: the `bash` tool ran
+  `echo hi` and completed in each. A backend here would let the model run shell commands. Not built.
+- **Codex: buildable.** `codex exec --json --ephemeral --ignore-user-config --ignore-rules
+  --skip-git-repo-check -s read-only -m <model> --disable <tool features> -c web_search=disabled -` with the prompt
+  on stdin, cwd = scratch dir. With the tool features disabled the input drops 32,574 -> 11,039 tokens and the
+  tool-bait prompt ("run `echo hi`") is answered in text; without them the model tried `exec_command` and only
+  the read-only sandbox stopped it. Events are JSONL: `item.completed` {agent_message | reasoning | error |
+  command_execution | file_change | mcp_tool_call | web_search | todo_list ...}, `turn.completed.usage`,
+  `turn.failed.error.message`, `error.message`.
+
+Design: `CodexBackend(CliBackend)` in `friday/cli_model_provider.py`, id `codex-cli`, model `gpt-5.5`
+(the model the person's own Codex config uses), in `BACKENDS` and `DEFAULT_ENABLED` after claude. Two layers:
+prevention (read-only sandbox, user config/rules/hooks ignored, tool features disabled) and detection (any
+event item other than agent_message / reasoning / error makes the call FAIL and the text is discarded, so
+a tool use is never mistaken for an answer). The answer is the last `agent_message`. Cost: ChatGPT sign-in
+bills no per-call price, so `cost_usd` is 0.0 and tokens are recorded. `CliBackend.prompt()` is added so a backend
+that cannot take `--system-prompt` carries the instruction in the prompt. `model_capabilities` declares
+`codex-cli/gpt-5.5` with `tools=False`.
+
+Proof: `tests/test_cli_model_provider.py` against `tests/fake_cli_model.py` (a codex dialect): argv has the read-only
+sandbox, the disables and `-`; success; tool item -> failure, answer discarded; shell-looking text inert; signed-out;
+absent; timeout; sign-in check; the gateway lands on codex when claude is absent. One `live` test each is
+skipped without FRIDAY_LIVE_PROVIDER_TESTS=1.
+
 ## Out of scope / blockers
 - Voice turn: LiveKit AgentSession uses its own Gemini LLM plugin, not
   `model.infer`; it needs a LiveKit LLM adapter and working LiveKit + TTS keys
   (.env holds placeholders). NOT proven; reported as a blocker, not a pass.
 - FRIDAY.exe was not rebuilt or driven: the text turn was proven through the same
   `model.infer` tool and process-wide `gateway()` the exe calls.
-- Codex: signed in (ChatGPT) but `codex` 0.121.0 here is too old for its default
-  model ("gpt-5.5 requires a newer version of Codex"), so a no-tools run could not be
-  proven. It has no `--tools ""`; it needs `--disable shell_tool` (and friends) and an
-  event-stream check that no command ran. Upgrade Codex, then add a `CliBackend`.
+- Codex: built in slice 3 (above) once the controller upgraded it to 0.160.0. Proven with a fake
+  (40 tests in `tests/test_cli_model_provider.py`) and one real call on this host: `CodexBackend().complete`
+  answered "144", `gpt-5.5`, 8,545 input tokens, cost 0.0, 16 s, sign-in read by `codex login status` in 2.6 s.
+  The `--disable` list is a denylist that can drift as Codex adds tool features; the second layer (a tool
+  event fails the call) and the read-only sandbox are what keep it honest.
+- opencode: not built, see slice 3. Revisit only if opencode ships a tools-off switch the free tier accepts.
 - Antigravity: `antigravity` is the IDE launcher (VS Code fork); its CLI has no
   headless completion command, so there is nothing to put behind `CliBackend`.

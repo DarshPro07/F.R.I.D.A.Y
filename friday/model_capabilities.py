@@ -134,6 +134,8 @@ _ALL: tuple[ModelCapabilities, ...] = (
     # from the CLI's answer.
     *(_cli_cap(name, "claude-cli", provider="anthropic", relative_latency=latency)
       for name, latency in (("sonnet", "medium"), ("opus", "high"), ("haiku", "low"))),
+    # --- backend "codex-cli": the signed-in Codex CLI, read-only, tools off ---
+    _cli_cap("gpt-5.5", "codex-cli", provider="openai", relative_latency="medium"),
 )
 
 CAPABILITIES: dict[tuple[str, str], ModelCapabilities] = {

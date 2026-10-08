@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -63,7 +64,8 @@ _MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,63}$")
 #: Variables that would change WHICH identity the CLI answers as, or bind the
 #: child to the session that launched it. A stale ANTHROPIC_API_KEY in the
 #: environment would otherwise mask the sign-in this transport exists to use.
-_SCRUB_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDECODE",
+_SCRUB_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY",
+              "CODEX_API_KEY", "CLAUDECODE",
               "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT",
               "HERMES_SESSION_ID", "HERMES_AGENT", "HERMES_TURN_LEASE_TIMEOUT",
               "HERMES_KANBAN_BOARD", "HERMES_SESSION_SOURCE",
@@ -194,6 +196,11 @@ class CliBackend:
     def parse(self, stdout: str, *, model: str) -> Completion:
         raise NotImplementedError
 
+    def prompt(self, messages: list[dict]) -> str:
+        """What goes on stdin. A backend with no `--system-prompt` flag
+        overrides this to carry the instruction in the prompt itself."""
+        return render_prompt(messages)
+
     # -- shared --------------------------------------------------------------
 
     def entry(self) -> dict:
@@ -219,7 +226,7 @@ class CliBackend:
         if path is None:
             raise CliUnavailable(f"the {self.id} CLI is not installed or not on PATH")
         argv = self.command(path, model)
-        prompt = render_prompt(messages)
+        prompt = self.prompt(messages)
         started = time.monotonic()
         try:
             proc = subprocess.run(
@@ -336,11 +343,143 @@ def _number(value) -> float:
     return number if number >= 0 else 0.0
 
 
-#: Every backend this module knows, by the name `ENABLE_ENV` uses.
-BACKENDS: dict[str, type[CliBackend]] = {"claude": ClaudeCodeBackend}
+#: Codex features that give the model a tool. Measured on codex-cli 0.160.0:
+#: with these off the request drops from 32,574 to 11,039 input tokens and a
+#: "run `echo hi`" prompt is answered in text; with them on the model tried
+#: `exec_command` and only the read-only sandbox stopped it.
+_CODEX_TOOL_FEATURES = (
+    "shell_tool", "unified_exec", "multi_agent", "apps", "plugins", "hooks",
+    "view_image", "browser_use", "computer_use", "image_generation",
+    "tool_suggest", "skill_search", "sleep_tool")
 
-#: Enabled when `ENABLE_ENV` is unset: the one backend that is built and proven.
-DEFAULT_ENABLED = ("claude",)
+#: Codex event items that are text. Any other item type (command_execution,
+#: file_change, mcp_tool_call, web_search, todo_list, ...) means a tool ran or
+#: was attempted, and the call fails instead of returning its text.
+_CODEX_TEXT_ITEMS = frozenset({"agent_message", "reasoning", "error"})
+
+_CODEX_SIGNED_OUT = re.compile(r"not logged in|logged out|log ?in required|please (?:log|sign) ?in", re.I)
+
+
+class CodexBackend(CliBackend):
+    """`codex exec`: Codex, signed in with the person's ChatGPT account.
+
+    Codex has no "no tools" flag, so the answer-only mode is two layers:
+    prevention (read-only sandbox, user config / rules / hooks ignored, every
+    tool feature disabled) and detection (a tool event in the stream fails the
+    call, so a tool use is never mistaken for an answer). A ChatGPT sign-in
+    has no per-call price, so `cost_usd` is 0.0 and the tokens are recorded.
+    """
+
+    id = "codex-cli"
+    label = "Codex (signed-in CLI)"
+    default_model = "gpt-5.5"
+    models = ("gpt-5.5",)
+
+    def locate(self) -> str | None:
+        found = shutil.which("codex")
+        if found:
+            return found
+        # npm's global bin, which a service PATH often lacks.
+        shim = Path(os.environ.get("APPDATA", "")) / "npm" / "codex.cmd"
+        return str(shim) if os.environ.get("APPDATA") and shim.is_file() else None
+
+    def status_command(self, path: str) -> list[str]:
+        """A local read of the sign-in state; it makes no model call."""
+        return [path, "login", "status"]
+
+    def signed_in(self) -> tuple[bool, str]:
+        path = self.locate()
+        if path is None:
+            return False, "not installed or not on PATH"
+        try:
+            proc = subprocess.run(
+                self.status_command(path), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=SIGN_IN_CHECK_TIMEOUT_S,
+                cwd=_scratch_dir(), env=_child_env(),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return True, f"sign-in not verified: {type(exc).__name__}"
+        said = " ".join(f"{proc.stdout or ''} {proc.stderr or ''}".split())
+        if _CODEX_SIGNED_OUT.search(said):
+            return False, "signed out: run `codex login`"
+        if proc.returncode == 0 and re.search(r"logged in", said, re.I):
+            return True, said[:80]
+        return True, "sign-in not verified: `codex login status` gave no verdict"
+
+    def prompt(self, messages: list[dict]) -> str:
+        # No --system-prompt here, and Codex's own instructions are a coding
+        # agent's: the instruction rides in front of the transcript.
+        return f"{_SYSTEM_PROMPT}\n\n{render_prompt(messages)}"
+
+    def command(self, path: str, model: str) -> list[str]:
+        disables = [arg for name in _CODEX_TOOL_FEATURES for arg in ("--disable", name)]
+        return [path, "exec", "--json", "--ephemeral", "--ignore-user-config",
+                "--ignore-rules", "--skip-git-repo-check", "-s", "read-only",
+                "-m", model, *disables, "-c", "web_search=disabled", "-"]
+
+    def parse(self, stdout: str, *, model: str) -> Completion:
+        answer: str | None = None
+        usage: dict = {}
+        tools: list[str] = []
+        warnings: list[str] = []
+        failed = ""
+        errors: list[str] = []
+        events = 0
+        for line in (stdout or "").splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            events += 1
+            kind = str(event.get("type") or "")
+            if kind.startswith("item."):
+                item = event.get("item")
+                item = item if isinstance(item, dict) else {}
+                item_type = str(item.get("type") or "")
+                if item_type not in _CODEX_TEXT_ITEMS:
+                    tools.append(item_type or "unknown")
+                elif item_type == "agent_message" and kind == "item.completed":
+                    answer = str(item.get("text") or "")
+                elif item_type == "error":
+                    warnings.append(" ".join(str(item.get("message") or "").split())[:200])
+            elif kind == "turn.completed" and isinstance(event.get("usage"), dict):
+                usage = event["usage"]
+            elif kind == "turn.failed":
+                err = event.get("error")
+                failed = str(err.get("message") if isinstance(err, dict) else err or "")
+            elif kind == "error":
+                errors.append(str(event.get("message") or ""))
+        if not events:
+            raise CliFailure(PROVIDER_ERROR, "codex returned output that is not JSONL events")
+        if tools:
+            raise CliFailure(PROVIDER_ERROR, "codex used a tool (" + ", ".join(sorted(set(tools)))
+                             + "); the answer was discarded")
+        if failed or (answer is None and errors):
+            code, message = classify_text(failed or errors[-1])
+            raise CliFailure(code, message)
+        if answer is None:
+            raise CliFailure(PROVIDER_ERROR, "codex returned no answer")
+
+        def count(key: str) -> int:
+            return int(_number(usage.get(key)))
+
+        return Completion(
+            text=answer, model=model, cost_usd=0.0,
+            input_tokens=count("input_tokens"), output_tokens=count("output_tokens"),
+            cached_tokens=count("cached_input_tokens"),
+            reasoning_tokens=count("reasoning_output_tokens"), warnings=warnings)
+
+
+#: Every backend this module knows, by the name `ENABLE_ENV` uses.
+BACKENDS: dict[str, type[CliBackend]] = {"claude": ClaudeCodeBackend, "codex": CodexBackend}
+
+#: Enabled when `ENABLE_ENV` is unset, in the order the gateway tries them.
+DEFAULT_ENABLED = ("claude", "codex")
 
 
 def known_models() -> dict[str, tuple[str, ...]]:

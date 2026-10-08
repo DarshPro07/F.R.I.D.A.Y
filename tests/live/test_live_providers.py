@@ -194,3 +194,16 @@ def test_usage_is_recorded_per_provider(gateway, inventory):
         rows = tel.for_objective(f"live-probe-{p['id']}")
         assert rows, f"no telemetry row for {p['id']}"
         assert all(r.get("worker") == "live-suite" for r in rows)
+
+
+def test_the_signed_in_codex_cli_answers_text_only_when_it_is_installed():
+    """MODEL-012: the real Codex CLI, read-only with every tool feature off, returns text.
+    Skipped when Codex is absent or signed out - that is the route reporting UNAVAILABLE."""
+    from friday import cli_model_provider as cli
+    from friday.model_gateway import compile_context
+    backend = cli.CodexBackend()
+    if not backend.entry()["authenticated"]:
+        pytest.skip("codex is not installed or not signed in on this host")
+    done = backend.complete(compile_context(system="", user="What is 12 times 12? Answer with the number only."),
+                            timeout_s=120)
+    assert "144" in done.text and done.cost_usd == 0.0 and done.input_tokens > 0
