@@ -4000,6 +4000,14 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Governor samples GPU/network, governs model residency, stops running optional/surplus work, and records section 55 fields; Hermes/Claude send heartbeats, stop is non-blocking, double release keeps the queue, stress test stops a real helper. (build run, commit 4e6096455)',
         "next_action": 'Re-apply the slice kept at tag wip/res-001-1008 (`git diff HEAD...wip/res-001-1008`, commit f39ceba, 3 files): it passed RED/GREEN, then the verifier ran out of turns (fixed in 401999e: it now gets a second run) and a later rebase onto HEAD conflicted. Re-apply it with Edit onto the current code and run its tests. Remaining gap outside the acceptance: non-nvidia GPU sampling (optional). Triage: Only the verifier verdict and the merge are missing. Residual honest gap: GPU sampling is nvidia-smi only. The ledger next_action still lists all three auto-generated GAPS, including the two already fixed.',
     }),
+    ('MCP-001', {
+        "status": VERIFIED,
+        "current_implementation": "Wired mcp_firewall.discover_hermes() into FridayAgent._narrow_tools on the normal (non-suspended) path, so Hermes' configured mcp_servers register as hermes:<name> EXTERNAL_DISCOVERED when the voice agent loads tools. Guarded by try/except + logger.warning; never silent, never fatal. (build run, commit c264fd2c5)",
+        "next_action": '',
+        "evidence": 'build run MCP-001, commit c264fd2c5; RED (assertion) at f5c035f5c and GREEN at the commit for tests/test_mcp_firewall.py; affected tests passed; fresh verifier PASS ($0.47)',
+        "tests": ['tests/test_mcp_firewall.py'],
+        "files": ['agent_friday.py'],
+    }),
 ]
 
 
