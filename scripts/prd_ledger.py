@@ -4049,6 +4049,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'The keyed production port writes call.started before dispatch. A re-run that finds an unresolved start refuses with UNCERTAIN and does not repeat the effect. A raised Exception or non-succeeded result writes call.abandoned, so a genuine retry is allowed. (build run, commit 77489b40b)',
         "next_action": 'GAPS: Not run: the two new tests against the old code to see them fail (reasoned only: without the intent check the re-run dispatches again and effects reaches 2).; Not run: the other ~45 files in the impact set (voice, router, memory tests) that import agent_friday.py.',
     }),
+    ('MEM-003', {
+        "status": PARTIAL,
+        "current_implementation": 'A direct MCP memory write (memory_remember, memory_record_decision, brain_remember) no longer lets the model pick from_read_material: _reply_tools offers a lineage wrapper without that arg that routes through use_capability, which stamps it from the turn. (build run, commit d383882de)',
+        "next_action": 'GAPS: tests/test_voice_path.py (3 live TTS/STT tests) fail here on invalid provider keys, unrelated to this change; excluded from the final run.; Ledger file:line cites to agent_friday.py:1811 (emergency-stop rows in scripts/prd_ledger.py) were already loose and now sit 36 lines off; not edited (ledger out of scope).; Residual unchanged: only the three MEMORY_WRITES tools are wrapped; other tools and policy are out of scope.',
+    }),
 ]
 
 
