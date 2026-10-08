@@ -4114,6 +4114,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Re-applied wip/res-001-1008 onto current code: a model the governor evicts under pressure is now really unloaded (gateway flags eviction, worker 'unload' sends Ollama keep_alive 0, loopback only). 8 new tests; 3 fail without the hook. (build run, commit 4c875e493)",
         "next_action": 'GAPS: GPU sampling is nvidia-smi only (non-nvidia sampling is optional, outside the acceptance); Only Ollama has an unload call; other local providers report supported:false and log a warning; scripts/stress_low_ram.py was not re-run (low-RAM host); the real-reading CRITICAL test in test_governor_reduction.py covers real helper processes; ledger next_action still lists the already-fixed auto-generated GAPS',
     }),
+    ('TRAJ-001', {
+        "status": PARTIAL,
+        "current_implementation": "A 'carry on' waiver now survives runs past the 500-event window: trajectory.for_run merges every flag and resume (new Store.objective_events_named, uncapped) with the recent events, deduped by id. Waiver test fails without the merge, passes with it. (build run, commit 6841ba70b)",
+        "next_action": 'GAPS: Only 8 of the 105 impacted test files were run (store.py is imported widely); the rest were not run on this host.; The store test went in tests/test_objective_ledger.py: there is no dedicated store test file, and that one already exercises Store objective events.; continuous.py:293 still reads recent_objective_events(limit=2000); not part of this slice.',
+    }),
 ]
 
 
