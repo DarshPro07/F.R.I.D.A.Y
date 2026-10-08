@@ -4075,6 +4075,14 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_behaviour_contract.py::test_a_change_still_in_flight_counts_toward_the_limit', 'tests/test_behaviour_contract.py::test_an_edit_to_the_plan_is_held_to_the_same_contract', 'tests/test_behaviour_contract.py::test_the_contract_reads_what_is_forbidden_and_what_is_limited', 'tests/test_behaviour_contract.py::test_a_named_prohibition_protects_what_it_names', 'tests/test_behaviour_contract.py::test_a_plan_that_does_what_the_person_forbade_is_not_compiled', 'tests/test_behaviour_contract.py::test_a_protected_name_cannot_be_the_target_of_what_was_forbidden', 'tests/test_behaviour_contract.py::test_the_change_after_the_limit_is_refused_not_made'],
         "files": ['friday/contracts.py:643,813,821,852', 'friday/planner.py:943,947,954', 'friday/objectives.py:176,184,716,741', 'friday/continuous.py:1043'],
     }),
+    ('CYBER-002', {
+        "status": VERIFIED,
+        "current_implementation": 'Cyber Lab wired live as fabric provider cyber_lab (BUILTIN, restricted, security.authorized_scope): run derives the gate decision itself, then cyber_lab.run_routed under the contract; R3 audit row + hash-bound evidence on every call. (build run, commit aa690dacb)',
+        "next_action": '',
+        "evidence": 'Confirmed at ee256d2cd: the build worker found the acceptance already met and changed nothing; tests/test_trust.py::test_security_tools_are_disabled_without_a_contract, tests/test_trust.py::test_out_of_scope_host_and_action_are_blocked_even_when_the_tool_asks pass at HEAD and an independent verifier judged the existing code to meet it. Worker: No code change needed: acceptance already met. tests/test_cyber_lab.py proves MockProvider on an unauthorized host is blocked and an expired contract refuses (provider never called). 39 targeted tests pass; worktree clean.',
+        "tests": ['tests/test_trust.py::test_security_tools_are_disabled_without_a_contract', 'tests/test_trust.py::test_out_of_scope_host_and_action_are_blocked_even_when_the_tool_asks'],
+        "files": ['friday/trust.py:123', 'friday/trust.py:200', 'friday/contracts.py:486'],
+    }),
 ]
 
 
