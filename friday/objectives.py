@@ -577,18 +577,22 @@ _OTHER_PEOPLE_KEYS = ("recipient", "recipients", "to", "cc", "bcc", "email",
 def blast_radius(capability_id: str, arguments: dict | None = None) -> str:
     """
     How far one action reaches, as a comparable value (APPROVAL-001): the
-    capability's declared effect (`side_effect`, `risk`) combined with the
-    action's target scope - how many targets, and whether they are somebody
-    else's. An approval is bound to it, so an action that reaches further than
-    the one the person said yes to is not covered by that yes. A capability
-    the registry has never heard of is "unknown:unknown", which never equals a
-    declared one.
+    capability's declared consequence flags (`capabilities.HINTS`: read-only,
+    consequential, reversible, idempotent, external, confirmed) and `risk`,
+    combined with the action's target scope - how many targets, and whether
+    they are somebody else's. `side_effect` is not listed: the flags already
+    encode it. An approval is bound to it, so an action that reaches further
+    than the one the person said yes to is not covered by that yes. A
+    capability the registry has never heard of, or one that has not declared
+    every flag, is "unknown:unknown", which never equals a declared one.
     """
     from friday import capabilities
 
     capability = capabilities.by_id(capability_id)
-    if capability is None:
+    if capability is None or any(getattr(capability, n) is None
+                                 for n in capabilities.HINTS):
         return "unknown:unknown"
+    effect = ",".join(n for n in capabilities.HINTS if getattr(capability, n)) or "none"
     arguments = dict(arguments or {})
     targets = 0
     for key in _TARGET_KEYS:
@@ -598,7 +602,7 @@ def blast_radius(capability_id: str, arguments: dict | None = None) -> str:
         targets += len(value) if isinstance(value, (list, tuple, set)) else 1
     scope = "many" if targets > 1 else "one"
     whose = "others" if any(arguments.get(k) for k in _OTHER_PEOPLE_KEYS) else "own"
-    return f"{capability.side_effect}:{capability.risk}:{scope}:{whose}"
+    return f"{effect}:{capability.risk}:{scope}:{whose}"
 
 
 def plan_hash(store: Store, run_id: str) -> str:

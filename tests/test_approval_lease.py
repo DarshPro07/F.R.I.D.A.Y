@@ -189,6 +189,47 @@ def test_a_change_of_blast_radius_makes_the_approval_stale(bench, monkeypatch):
     assert not (root / "note.txt").exists(), "a yes to a narrower action was acted on"
 
 
+@pytest.mark.parametrize("flag", ["consequential", "reversible", "idempotent"])
+def test_a_change_of_a_consequence_flag_makes_the_approval_stale(bench, monkeypatch, flag):
+    """The consequence flags are part of the radius: a yes given while the
+    capability was reversible does not cover it once it is not, even when
+    `side_effect` and `risk` are unchanged. Asked of the lease itself: a run
+    with an envelope meets the JIT fingerprint (which also hashes the flags)
+    first, so a driven run would be refused before the lease is consulted."""
+    import dataclasses
+
+    from friday import capabilities as CAPS
+
+    store, run_id, root = bench
+    _parked_then_approved(store, run_id)
+    (record,) = [a for a in json.loads(store.objective_run(run_id)["approvals"])
+                 if a["decision"] == "APPROVED"]
+    runtime = CR.CapabilityRuntime(engine=PO.PolicyEngine(autonomy=PO.GUARDED))
+
+    def lease():
+        return runtime._approval_on_record("files_create", record["parameters"],
+                                           record["decided_by"], run_id)
+
+    assert lease() == run_id, "the unchanged capability should honour its own yes"
+    declared = CAPS.CAPABILITIES["files_create"]
+    monkeypatch.setitem(
+        CAPS.CAPABILITIES, "files_create",
+        dataclasses.replace(declared, **{flag: not getattr(declared, flag)}))
+    assert lease() == "", f"a yes given before {flag} changed still authorises"
+    assert not (root / "note.txt").exists()
+
+
+def test_a_capability_with_an_undeclared_flag_has_an_unknown_blast_radius(monkeypatch):
+    import dataclasses
+
+    from friday import capabilities as CAPS
+
+    declared = CAPS.CAPABILITIES["files_create"]
+    monkeypatch.setitem(CAPS.CAPABILITIES, "files_create",
+                        dataclasses.replace(declared, idempotent=None))
+    assert O.blast_radius("files_create", {"path": "a.txt"}) == "unknown:unknown"
+
+
 def test_an_approval_with_no_blast_radius_is_not_honoured(bench):
     store, run_id, root = bench
     _parked_then_approved(store, run_id)
