@@ -39,9 +39,16 @@ import time
 import traceback
 
 
+#: The protocol stream, bound before any Hermes import. Hermes (since 3729602)
+#: installs thread-scoped proxies over sys.stdout when its model client loads;
+#: replies written to sys.stdout after that vanished, so every infer "did not
+#: answer within 65s" and FRIDAY fell back to its tool-less CLI (2026-10-08).
+_PROTOCOL = sys.stdout
+
+
 def _reply(obj: dict) -> None:
-    sys.stdout.write(json.dumps(obj, default=str) + "\n")
-    sys.stdout.flush()
+    _PROTOCOL.write(json.dumps(obj, default=str) + "\n")
+    _PROTOCOL.flush()
 
 
 def _err(rid, code: str, message: str, **extra) -> None:
@@ -369,7 +376,25 @@ def _infer(params: dict) -> dict:
     }
 
 
+def _boot_hermes() -> None:
+    """Hermes's launch contract, before any request is read: every Hermes entry
+    point imports hermes_bootstrap first (tui_gateway/entry.py, gateway/run.py,
+    cli.py). Since 3729602 Hermes's dependencies live in a committed environment,
+    and the bootstrap relaunches a process on another interpreter into it - on
+    Windows by running the relaunched child to the end, which inherits this
+    worker's stdin and stdout and serves the requests itself. Reached instead from
+    inside the first request, that relaunch reran the worker after its stdin was
+    consumed and it exited 0 with no reply: every infer "did not answer within
+    65s" (2026-10-08). The relaunch is a SystemExit and ends this process by design."""
+    try:
+        import hermes_bootstrap
+        hermes_bootstrap.harden_import_path()
+    except Exception as exc:  # noqa: BLE001 - a Hermes that cannot boot answers each request with its error
+        print(f"hermes bootstrap failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+
+
 def serve() -> None:
+    _boot_hermes()
     for line in sys.stdin:
         line = line.strip()
         if not line:

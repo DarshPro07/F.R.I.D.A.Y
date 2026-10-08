@@ -880,3 +880,50 @@ def test_the_worker_never_returns_the_models_reasoning_as_its_answer(monkeypatch
     out = W._infer(params)
     assert out["response"] == "" and out["tool_calls"][0]["name"] == "use_capability"
     assert W._infer(params)["response"] == "Saved, sir."          # inline think block removed
+
+
+def test_worker_replies_survive_hermes_replacing_stdout(monkeypatch):
+    # 2026-10-08: the updated Hermes installs thread-scoped proxies over sys.stdout when its
+    # model client is imported; replies written to sys.stdout then vanished and every infer
+    # timed out ("gateway worker did not answer infer within 65s").
+    import importlib.util
+    import io
+    import json
+    import sys
+    from pathlib import Path
+    real = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", real)
+    path = Path(__file__).resolve().parent.parent / "friday" / "hermes_model_gateway_worker.py"
+    spec = importlib.util.spec_from_file_location("gateway_worker_fresh", path)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    monkeypatch.setattr(sys, "stdout", io.StringIO())          # what Hermes does on import
+    worker._reply({"id": 7, "ok": True})
+    assert json.loads(real.getvalue()) == {"id": 7, "ok": True}
+
+
+def test_the_worker_boots_hermes_before_it_reads_a_request(monkeypatch):
+    # 2026-10-08: Hermes (3729602) relaunches a process into its committed dependency
+    # environment from hermes_bootstrap; reached from inside the first request, the relaunch
+    # reran the worker after its stdin was consumed and it exited 0 with no reply.
+    import importlib.util
+    import io
+    import json
+    import sys
+    import types
+    from pathlib import Path
+    stdin = io.StringIO(json.dumps({"id": 1, "method": "hello"}) + "\n")
+    booted = []
+    boot = types.ModuleType("hermes_bootstrap")
+    boot.harden_import_path = lambda *a: booted.append(stdin.tell())
+    monkeypatch.setitem(sys.modules, "hermes_bootstrap", boot)
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stdin", stdin)
+    path = Path(__file__).resolve().parent.parent / "friday" / "hermes_model_gateway_worker.py"
+    spec = importlib.util.spec_from_file_location("gateway_worker_boot", path)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    worker.serve()
+    assert booted == [0]                                   # booted before a byte of stdin was read
+    assert json.loads(out.getvalue())["id"] == 1
