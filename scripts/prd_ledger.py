@@ -4132,6 +4132,14 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_working_set.py::test_a_recorded_line_cannot_close_its_frame', 'tests/test_working_set.py::test_a_model_step_of_an_objective_from_read_material_has_nothing_binding', 'tests/test_working_set.py::test_the_sections_come_in_order_and_report_what_they_hold', 'tests/test_working_set.py::test_over_budget_the_least_needed_goes_first', 'tests/test_working_set.py::test_the_constraints_and_the_task_are_never_dropped', 'tests/test_working_set.py::test_an_unbudgeted_plain_call_is_what_compile_context_gives', 'tests/test_working_set.py::test_an_objectives_model_step_carries_its_facts_and_reports_its_context', 'tests/test_working_set.py::test_a_model_call_outside_any_objective_is_unchanged'],
         "files": ['friday/model_gateway.py:1392,1422,1426,1435,1455', 'friday/toolsets/model_gateway.py:50,76,99'],
     }),
+    ('RES-001', {
+        "status": VERIFIED,
+        "current_implementation": "Re-applied wip/res-001-1008 onto current code: a model the governor evicts under pressure is now really unloaded (gateway flags eviction, worker 'unload' sends Ollama keep_alive 0, loopback only). 8 new tests; 3 fail without the hook. (build run, commit 4c875e493)",
+        "next_action": '',
+        "evidence": 'Confirmed at efaec32f1: the build worker found the acceptance already met and changed nothing; tests/test_governor.py::test_real_memory_pressure_bounds_new_work, tests/test_governor.py::test_high_pressure_reduces_concurrency_to_one, tests/test_governor.py::test_critical_pressure_sheds_all_new_work pass at HEAD and an independent verifier judged the existing code to meet it. Worker: No source change needed. 69 governor tests pass; stress_low_ram.py re-run on this host and current code: demonstrated and as_policy_says both true (memory-driven ELEVATED at 147 MB, running optional helper stopped, level fell after the 30 s dwell).',
+        "tests": ['tests/test_governor.py::test_real_memory_pressure_bounds_new_work', 'tests/test_governor.py::test_high_pressure_reduces_concurrency_to_one', 'tests/test_governor.py::test_critical_pressure_sheds_all_new_work'],
+        "files": ['friday/governor.py:84,343,416,581', 'scripts/stress_low_ram.py', 'data/prd_v7_audit/res001_low_ram_2026-09-27.json', 'data/prd_v7_audit/res003_stress_2026-09-30.json'],
+    }),
 ]
 
 
