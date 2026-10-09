@@ -4560,6 +4560,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Audit: the packet's next_action is one sentence with no DESIGN or TESTS section, so I followed it as written. The gateway already starts each task at its class's default tier (budget_for(...).default_tier) and fails over through tiers. Failover was recorded in attempts and gateway_calls rows, but no (build run, commit 8cf39257e)",
         "next_action": "GAPS: Cause is the previous route's failure code, so a provider outage that forces a hop up a tier is recorded as an escalation with cause e.g. QUOTA_EXCEEDED. It is not a measured quality failure. The gateway has no quality-failure signal today.; Nothing reads GatewayTelemetry.escalations yet outside the tests. It is a method, so reachability did not flag it, and no MCP tool or observability surface exposes it.; Escalations are not set on the _blocked() result. That path means no route was dispatched, so there is none to record.",
     }),
+    ('ORCH-006', {
+        "status": PARTIAL,
+        "current_implementation": 'The ledger next_action was only "Audit...", with no DESIGN or TESTS section, so I designed the change myself. Audit result: two workers never share a checkout (distinct path, branch and git toplevel, and create() refuses a name already in use). FRIDAY integrates each result through WorktreeManager.p (build run, commit 820ed2dda)',
+        "next_action": "GAPS: The integration task is returned in the ActionResult output. It is not persisted as a durable objective or task row, because there is no existing seam for creating one from the executor layer and the packet did not specify one. The promotions table row records the REJECTED state and reason only, not the task.; A side's requirement is its commit subjects since the merge-base. The worker's formal requirement contract (e.g. the PRD row) is not attached, because worktrees.py has no access to the objective store.; Pre-existing quirk, not changed: promote() on a worktree whose work is already committed returns REJECTED 'nothing to promote', because promote commits first and finds no changes.; Concurrency was proven with two live worktrees on one repo, sequentially. There is no threaded race test of simultaneous git worktree add.",
+    }),
 ]
 
 
