@@ -153,14 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: c7a769f on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T09:17:23+00:00
+- HEAD: 950d39d on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T10:22:58+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 100, "PARKED_BY_OWNER": 1, "PARTIAL": 53, "VERIFIED": 58}
 - Unresolved P0: 11
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (263): BRAIN-001=SCOUT_DONE, BBOX-001=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), ACT-001 (integration refused), JIT-001 (cascade exhausted), MEM-003 (NOT_CONFIRMED), MEM-002 (NO_TEST), TRAJ-001 (cascade exhausted), SEC-005 (cascade exhausted), PKG-001 (stale worktree), BROW-004 (blocked)
-- Open escalations: 195
-  - DUR-001 resolved: controller unpark: controller re-ran integration 2026-10-09: CONFIRMED
+- Last wave (269): CAP-FORGE-003=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), ACT-001 (integration refused), JIT-001 (cascade exhausted), MEM-003 (NOT_CONFIRMED), MEM-002 (NO_TEST), TRAJ-001 (cascade exhausted), SEC-005 (cascade exhausted), PKG-001 (stale worktree), BROW-004 (blocked), BRAIN-001 (NOT_CONFIRMED)
+- Open escalations: 196
   - EVAL-001 resolved: controller unpark: controller re-ran integration 2026-10-09: CONFIRMED
   - MEM-003 integration: {"requirement": "MEM-003", "result": "NOT_CONFIRMED", "red_green": {}, "verifier": {"verdict": "FAIL
   - MEM-002 integration: {"requirement": "MEM-002", "result": "NO_TEST", "red_green": {"result": "NO_TEST", "tests": []}, "ve
@@ -170,5 +169,6 @@ That is the first implementation target of this program.
   - BRAIN-001 resolved: controller unpark: controller re-integrated the run a killed program had landed ungated: INTEGRATED
   - PKG-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\pkg-001 already exists
   - BROW-004 blocked: Needs the owner to run `python -m friday.browser_readiness` from the live .venv on REFERENCE-B and o
+  - BRAIN-001 integration: {"requirement": "BRAIN-001", "result": "NOT_CONFIRMED", "red_green": {}, "verifier": null, "integrat
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
