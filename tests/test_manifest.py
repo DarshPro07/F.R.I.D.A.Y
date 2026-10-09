@@ -296,3 +296,49 @@ def test_building_and_summarising_the_manifest_never_runs_a_probe():
     assert calls == []
     assert fabric.READY not in {m.state for m in _native_rows()}
     assert summary["by_state"].get(fabric.REGISTERED, 0) > 100
+
+
+def _only_installed(monkeypatch, XR, *ids):
+    """Pretend exactly `ids` are on this machine, whatever really is."""
+    monkeypatch.setattr(XR, "installed", lambda: tuple(ids))
+
+
+def test_an_installed_executor_is_registered_never_ready(monkeypatch):
+    from friday import executor_router as XR
+    _only_installed(monkeypatch, XR, "claude")
+    rows = {m.id: m for m in M.build()}
+    assert rows["executor:claude"].state == fabric.REGISTERED
+    assert rows["executor:claude"].detail == "installed; not probed"
+    # Absence needs no probe: nothing there is not working.
+    assert rows["executor:hermes"].state == fabric.UNAVAILABLE
+    assert rows["executor:hermes"].detail == "not installed"
+
+
+def test_describe_probes_an_executor_whose_binary_has_gone(monkeypatch, tmp_path):
+    from friday import executor_router as XR
+    _only_installed(monkeypatch, XR, "claude")
+    gone = tmp_path / "claude.exe"
+    monkeypatch.setattr(XR.Executor, "path", lambda self: str(gone))
+
+    row = M.describe("executor:claude")
+    assert row["state"] == fabric.UNAVAILABLE
+    assert "not a file" in row["detail"]
+    assert row["health_check"] == "executor_router.problem"
+    # The cheap listing still says only what it knows.
+    assert {m.id: m.state for m in M.build()}["executor:claude"] == fabric.REGISTERED
+
+    gone.write_text("", encoding="utf-8")
+    assert M.describe("executor:claude")["state"] == fabric.READY
+
+
+def test_describe_reports_an_installed_executor_with_no_builder_unavailable(
+        monkeypatch, tmp_path):
+    from friday import executor_router as XR
+    _only_installed(monkeypatch, XR, "opencode")
+    present = tmp_path / "opencode.exe"
+    present.write_text("", encoding="utf-8")
+    monkeypatch.setattr(XR.Executor, "path", lambda self: str(present))
+
+    row = M.describe("executor:opencode")
+    assert row["state"] == fabric.UNAVAILABLE
+    assert "no builder" in row["detail"]

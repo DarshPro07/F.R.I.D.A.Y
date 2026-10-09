@@ -242,11 +242,13 @@ def of_executor(executor_id: str, *, available: bool, detail: str = "") -> Manif
         latency_profile="minutes",
         supported_platforms=("windows",),
         default_state=fabric.REGISTERED,
-        state=fabric.READY if available else fabric.UNAVAILABLE,
+        # Installed is not healthy: a binary on disk is REGISTERED until
+        # `describe` probes it. Absent needs no probe to be UNAVAILABLE.
+        state=fabric.REGISTERED if available else fabric.UNAVAILABLE,
         family="coding",
         supported_actions=("execute",),
         executable=True,
-        detail=detail,
+        detail=detail or ("installed; not probed" if available else "not installed"),
     )
 
 
@@ -289,9 +291,22 @@ def summary() -> dict:
     }
 
 
+def _probe_executor(m: Manifest) -> None:
+    """Replace an executor row's "installed; not probed" with a probed answer."""
+    from friday import executor_router as XR
+    executor = XR.BY_ID.get(m.id.partition(":")[2])
+    if executor is None:
+        return  # the "unknown" row: build() already carries why the router failed
+    reason = executor.problem()
+    m.state = fabric.UNAVAILABLE if reason else fabric.READY
+    m.detail = reason or "located on disk and Friday has a builder for it"
+    m.health_check = "executor_router.problem"
+
+
 def describe(capability_id: str) -> dict | None:
-    """One capability's full row. A native tool is probed here, and only here:
-    `build()` stays cheap, so its rows say "installed; not probed"."""
+    """One capability's full row. A native tool or an executor is probed here,
+    and only here: `build()` stays cheap, so its rows say "installed; not
+    probed"."""
     from friday import capabilities as C
     for m in build():
         if m.id == capability_id:
@@ -302,6 +317,8 @@ def describe(capability_id: str) -> dict | None:
                 m.detail = health["detail"]
                 if m.state != fabric.REGISTERED:
                     m.health_check = "capabilities.health"
+            elif m.type == SPECIALIST_RUNTIME and capability_id.startswith("executor:"):
+                _probe_executor(m)
             return m.to_dict()
     return None
 

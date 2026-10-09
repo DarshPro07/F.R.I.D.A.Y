@@ -34,6 +34,7 @@ the shape of support.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from dataclasses import dataclass, field
 
@@ -91,6 +92,23 @@ class Executor:
 
     def usable(self) -> bool:
         return self.buildable and self.installed()
+
+    def problem(self) -> str | None:
+        """
+        Why this executor cannot run right now, or None when it can.
+
+        The probe behind the manifest's health report. Stronger than
+        `installed()`: a locator can hand back a path that has since gone, and
+        an executor with no builder is present but cannot be driven.
+        """
+        found = self.path()
+        if found is None:
+            return "not installed"
+        if not os.path.isfile(found):
+            return f"located at {found}, which is not a file"
+        if not self.buildable:
+            return "installed, but Friday has no builder for it"
+        return None
 
 
 #: Everything Friday knows about. Being here is not a promise it works.
