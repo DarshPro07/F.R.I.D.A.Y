@@ -284,6 +284,44 @@ def scoped_gateway_toolsets(profile: str = "") -> tuple[str, ...]:
     return tuple(seen)
 
 
+def native_tools_in_session_info(info) -> tuple[str, ...]:
+    """
+    Hermes' own file/terminal tools a freshly created session says it holds,
+    read from the `info` its `session.create` answers with - before any
+    prompt is sent, so a gateway that did not honour its toolsets is found
+    out while nothing has run on it. Empty when the session holds none *or
+    does not report its tools at all*: the answer is evidence of a breach,
+    never proof of its absence (`HermesSupervisor._deny_native_tool` still
+    catches the first native call of a gateway that does not say).
+
+    `tools` is read as a mapping of toolset -> tool names, or a plain list of
+    names (or of `{"name": ...}` entries). A native toolset that lists no
+    tool holds nothing; Friday's own bridge tools are MCP-prefixed, so none
+    is mistaken for one of Hermes'.
+    """
+    tools = info.get("tools") if isinstance(info, dict) else None
+    found: list[str] = []
+
+    def note(name) -> None:
+        name = name.get("name") if isinstance(name, dict) else name
+        if isinstance(name, str) and name in _NATIVE_FILE_TOOLS and name not in found:
+            found.append(name)
+
+    if isinstance(tools, dict):
+        for toolset, names in tools.items():
+            members = list(names) if isinstance(names, (list, tuple, set)) else []
+            for name in members:
+                note(name)
+            if str(toolset).lower() in _NATIVE_FILE_TOOLSETS and members:
+                label = f"{toolset} toolset"
+                if label not in found:
+                    found.append(label)
+    elif isinstance(tools, (list, tuple, set)):
+        for name in tools:
+            note(name)
+    return tuple(found)
+
+
 #: Hermes gateway event type → Friday event name. Anything absent is
 #: forwarded under its own name rather than dropped, so a new Hermes event
 #: is visible before it is understood.
@@ -1490,21 +1528,62 @@ class HermesSupervisor:
             self._scoped_gateway = None
         gateway.stop()
 
+    def _distrust_scoped_gateway(self, evidence: str) -> None:
+        """Record that a gateway started without Hermes' file and terminal
+        tools was caught holding or running them, so no further delegation
+        under an envelope gets a gateway (`_scoped_unsound`)."""
+        owner = self._owner
+        if owner is not None and not owner._scoped_unsound:
+            owner._scoped_unsound = (
+                f"a gateway started without Hermes' file and terminal tools "
+                f"{evidence}, so it does not honour {ENV_GATEWAY_TOOLSETS}")
+
+    def _refuse_native_session(self, work_run_id: str, sid: str,
+                               native: tuple[str, ...]) -> None:
+        """The session a delegation under an envelope was just given reports
+        holding Hermes' own file/terminal tools, which cannot be held to the
+        envelope. This is the preventive check: it runs between
+        `session.create` and `prompt.submit`, so the task is never sent and
+        nothing has run. The run is stopped and recorded as breached, the
+        gateway is distrusted, and the delegation is refused."""
+        from friday import contracts as c
+        held = ", ".join(native)
+        self._distrust_scoped_gateway(f"reports holding {held}")
+        logger.warning("hermes.envelope_breached work_run=%s tool=%s: "
+                       "refusing the task before it is sent", work_run_id, held)
+        # `interrupt` names the session by the id on the run's row, which
+        # `delegate` has not written yet: without it the stop would go to an
+        # empty session id and the session this run was given would live on.
+        self.log.update(work_run_id, hermes_session_id=sid,
+                        failure_kind=self.ENVELOPE_BREACHED)
+        try:
+            self.interrupt(work_run_id)
+        except Exception as exc:  # noqa: BLE001 - the refusal below is the answer; the run must still end and the lease be freed
+            logger.warning("hermes.envelope_breached work_run=%s: could not "
+                           "close its session: %s", work_run_id, exc)
+            # `interrupt` left the run CANCELLING and only a successful stop
+            # moves it on, so end it here or nothing ever will.
+            self.log.update(work_run_id, status=PARTIAL)
+            self._release_lease(work_run_id)
+        self._forget_session(sid)
+        raise c.OutsideEnvelope(
+            f"the gateway for this delegation reports holding Hermes' own "
+            f"{held}, which cannot be held to an envelope; nothing was sent")
+
     def _deny_native_tool(self, name: str) -> None:
-        """A run on a scoped gateway started one of Hermes' own file/terminal
-        tools. The gateway was started without them, so it is not honouring
-        its toolsets and nothing on it is held to an envelope: every run on
-        it is stopped and recorded as such, and no further delegation under
-        an envelope gets a gateway (`_scoped_unsound`) - the first call may
-        already have run, but nothing after it does. Called on the reader
-        thread, so the stops, which are RPCs, run on their own."""
+        """The backstop to `_refuse_native_session`, for a gateway that did
+        not say what it holds: a run on a scoped gateway started one of
+        Hermes' own file/terminal tools. The gateway was started without
+        them, so it is not honouring its toolsets and nothing on it is held
+        to an envelope: every run on it is stopped and recorded as such, and
+        no further delegation under an envelope gets a gateway
+        (`_scoped_unsound`) - the first call may already have run, but
+        nothing after it does. Called on the reader thread, so the stops,
+        which are RPCs, run on their own."""
         owner = self._owner
         if owner is None or name not in _NATIVE_FILE_TOOLS:
             return
-        if not owner._scoped_unsound:
-            owner._scoped_unsound = (
-                f"a gateway started without Hermes' file and terminal tools ran "
-                f"its own {name}, so it does not honour {ENV_GATEWAY_TOOLSETS}")
+        self._distrust_scoped_gateway(f"ran its own {name}")
         for work_run_id in list(self._leases):
             logger.warning("hermes.envelope_breached work_run=%s tool=%s: "
                            "stopping the run", work_run_id, name)
@@ -2167,6 +2246,14 @@ class HermesSupervisor:
         info = session.get("info") or {}
         self._session_runs[sid] = work_run_id
         self._turn_done[sid] = threading.Event()
+        if self._owner is not None:
+            native = native_tools_in_session_info(info)
+            if native:
+                self._refuse_native_session(work_run_id, sid, native)
+            if "tools" not in info:
+                logger.info("hermes.envelope_unverified work_run=%s: the session "
+                            "does not report its tools; only a native tool call "
+                            "would reveal an ignored toolset", work_run_id)
 
         # H0 route observability. The gateway's session info omits the
         # provider (measured: provider='' on every run) - so resolve the

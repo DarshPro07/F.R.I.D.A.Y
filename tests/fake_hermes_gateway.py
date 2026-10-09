@@ -20,6 +20,22 @@ Behaviour is scripted through env vars so one binary covers every test:
                             a gateway that does not honour HERMES_TUI_TOOLSETS:
                             its turn starts Hermes' own read_file and keeps
                             running it until interrupted
+    FAKE_HERMES_REPORT_TOOLS=1
+                            session.create answers with the tools the session
+                            holds (`info.tools`, toolset -> names), as Hermes'
+                            own session info does: Hermes' file/terminal
+                            tools unless HERMES_TUI_TOOLSETS is honoured
+    FAKE_HERMES_CALL_LOG=p  append each RPC method received to path p, one
+                            per line (so a test can see what was never sent)
+    FAKE_HERMES_REFUSE_INTERRUPT=1
+                            session.interrupt answers with a JSON-RPC error
+                            for every session, as a gateway that cannot stop
+                            a run does
+
+session.interrupt also answers with an error for a session id this gateway
+never created (an empty one included), so a test sees a stop that named no
+session. That a real Hermes rejects an unknown session is an assumption, not
+something measured.
 
 A gateway that honours HERMES_TUI_TOOLSETS has no native file tools, so with
 it set the turn reads through Friday's exec bridge (MCP-prefixed) instead.
@@ -47,6 +63,11 @@ def ok(rid, result):
     write({"jsonrpc": "2.0", "id": rid, "result": result})
 
 
+def fail(rid, code, message):
+    write({"jsonrpc": "2.0", "id": rid,
+           "error": {"code": code, "message": message}})
+
+
 def main():
     clarify = os.getenv("FAKE_HERMES_CLARIFY") == "1"
     hang = os.getenv("FAKE_HERMES_HANG") == "1"
@@ -58,6 +79,12 @@ def main():
     # exec bridge's are (what the friday profile registers as friday_exec).
     native = ignore_toolsets or not os.getenv("HERMES_TUI_TOOLSETS")
     read_tool = "read_file" if native else "mcp__friday_exec__bridge_read_file"
+    report_tools = os.getenv("FAKE_HERMES_REPORT_TOOLS") == "1"
+    call_log = os.getenv("FAKE_HERMES_CALL_LOG")
+    refuse_interrupt = os.getenv("FAKE_HERMES_REFUSE_INTERRUPT") == "1"
+    held = ({"file": ["read_file", "write_file", "patch", "search_files"],
+             "terminal": ["terminal"]} if native
+            else {"mcp-friday_exec": ["mcp__friday_exec__bridge_read_file"]})
 
     if env_dump:
         seen = {k: v for k, v in os.environ.items() if k.startswith("HERMES_")}
@@ -76,13 +103,19 @@ def main():
         method = frame.get("method", "")
         params = frame.get("params") or {}
         sid = params.get("session_id", "")
+        if call_log:
+            with open(call_log, "a", encoding="utf-8") as fh:
+                fh.write(method + "\n")
 
         if method == "session.create":
             sid = uuid.uuid4().hex[:8]
             sessions[sid] = {"steered": []}
+            info = {"model": "fake-model", "provider": "fake"}
+            if report_tools:
+                info["tools"] = held
             ok(rid, {"session_id": sid, "stored_session_id": f"stored-{sid}",
                      "message_count": 0, "messages": [],
-                     "info": {"model": "fake-model", "provider": "fake"}})
+                     "info": info})
 
         elif method == "prompt.submit":
             ok(rid, {"submitted": True})
@@ -132,9 +165,14 @@ def main():
             ok(rid, {"status": "queued", "text": params.get("text", "")})
 
         elif method == "session.interrupt":
-            ok(rid, {"status": "interrupted"})
-            event("message.complete", sid,
-                  {"text": "interrupted", "status": "error"})
+            if refuse_interrupt:
+                fail(rid, 5000, "this gateway cannot stop a session")
+            elif sid not in sessions:
+                fail(rid, 4001, f"session not found: {sid!r}")
+            else:
+                ok(rid, {"status": "interrupted"})
+                event("message.complete", sid,
+                      {"text": "interrupted", "status": "error"})
 
         elif method == "commands.catalog":
             ok(rid, {"pairs": [["/new", "new session"]]})

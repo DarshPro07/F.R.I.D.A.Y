@@ -826,6 +826,150 @@ def test_the_shared_gateway_may_use_hermes_file_tools(area, monkeypatch):
         supervisor.stop()
 
 
+# -- ... and, when it says what it holds, caught before the task is sent --------------------
+
+def _calls(log: Path) -> list[str]:
+    return log.read_text(encoding="utf-8").split() if log.exists() else []
+
+
+def test_a_gateway_that_reports_hermes_file_tools_is_refused_before_any_task_is_sent(area, tmp_path, monkeypatch, caplog):
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web]\n")
+    monkeypatch.setenv("FAKE_HERMES_IGNORE_TOOLSETS", "1")
+    monkeypatch.setenv("FAKE_HERMES_REPORT_TOOLS", "1")
+    calls = tmp_path / "calls.log"
+    monkeypatch.setenv("FAKE_HERMES_CALL_LOG", str(calls))
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        with caplog.at_level(logging.WARNING, logger=hb.logger.name):
+            with pytest.raises(c.OutsideEnvelope, match="nothing was sent"):
+                supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                    scope=_envelope(area), expires_in=3600)
+        assert "session.create" in _calls(calls)
+        assert "prompt.submit" not in _calls(calls)         # the task never reached Hermes
+        assert "session.interrupt" in _calls(calls)         # the session it was given was stopped
+        [run] = supervisor.log.recent(1)
+        assert run["hermes_session_id"]                     # ... by the id, which the stop reads
+        assert run["status"] == hb.PARTIAL
+        assert run["failure_kind"] == hb.HermesSupervisor.ENVELOPE_BREACHED
+        assert "hermes.envelope_breached" in caplog.text
+        assert S.active() == []                             # its hold on the bridge is released
+        assert supervisor._scoped_unsound
+        assert _until(lambda: supervisor._scoped_gateway is None)
+    finally:
+        supervisor.stop()
+
+
+def test_a_refused_session_that_the_gateway_cannot_stop_still_ends_the_run(area, tmp_path, monkeypatch):
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web]\n")
+    monkeypatch.setenv("FAKE_HERMES_IGNORE_TOOLSETS", "1")
+    monkeypatch.setenv("FAKE_HERMES_REPORT_TOOLS", "1")
+    monkeypatch.setenv("FAKE_HERMES_REFUSE_INTERRUPT", "1")
+    calls = tmp_path / "calls.log"
+    monkeypatch.setenv("FAKE_HERMES_CALL_LOG", str(calls))
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        with pytest.raises(c.OutsideEnvelope, match="nothing was sent"):
+            supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                scope=_envelope(area), expires_in=3600)
+        assert "session.interrupt" in _calls(calls)         # it was asked, and said no
+        assert "prompt.submit" not in _calls(calls)         # the task never reached Hermes
+        [run] = supervisor.log.recent(1)
+        assert run["status"] == hb.PARTIAL                  # not left CANCELLING for ever
+        assert run["failure_kind"] == hb.HermesSupervisor.ENVELOPE_BREACHED
+        assert S.active() == []
+        assert [d for d in supervisor.log.pending_deliveries()
+                if d["work_run_id"] == run["work_run_id"]] == []
+        assert _until(lambda: supervisor._scoped_gateway is None)
+    finally:
+        supervisor.stop()
+
+
+def test_no_delegation_under_an_envelope_gets_a_gateway_after_one_reported_hermes_file_tools(area, tmp_path, monkeypatch):
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web]\n")
+    monkeypatch.setenv("FAKE_HERMES_IGNORE_TOOLSETS", "1")
+    monkeypatch.setenv("FAKE_HERMES_REPORT_TOOLS", "1")
+    dump = tmp_path / "env.jsonl"
+    monkeypatch.setenv("FAKE_HERMES_ENV_DUMP", str(dump))
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        with pytest.raises(c.OutsideEnvelope, match="nothing was sent"):
+            supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                scope=_envelope(area), expires_in=3600)
+        with pytest.raises(c.OutsideEnvelope, match="does not honour HERMES_TUI_TOOLSETS"):
+            supervisor.delegate(hb.TaskBundle(goal="again"), workspace=str(area.workspace),
+                                scope=_envelope(area), expires_in=3600)
+        assert len(_gateway_envs(dump)) == 1                # no second gateway was started
+    finally:
+        supervisor.stop()
+
+
+def test_a_gateway_that_reports_only_the_exec_bridge_runs_the_task(area, tmp_path, monkeypatch):
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web]\n")
+    monkeypatch.setenv("FAKE_HERMES_REPORT_TOOLS", "1")     # it honours its toolsets
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        run = supervisor.delegate(hb.TaskBundle(goal="scoped"), workspace=str(area.workspace),
+                                  scope=_envelope(area), expires_in=3600, wait=True,
+                                  turn_timeout=30)["work_run_id"]
+        assert supervisor.log.get(run)["status"] == hb.COMPLETE
+        assert supervisor._scoped_unsound == ""
+    finally:
+        supervisor.stop()
+
+
+def test_the_shared_gateway_is_not_refused_for_reporting_hermes_file_tools(area, monkeypatch):
+    # No scope, so no envelope to hold it to: it keeps the profile's own toolsets.
+    monkeypatch.setenv("FAKE_HERMES_REPORT_TOOLS", "1")
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        run = supervisor.delegate(hb.TaskBundle(goal="shared"), wait=True,
+                                  turn_timeout=30)["work_run_id"]
+        assert supervisor.log.get(run)["status"] == hb.COMPLETE
+        assert supervisor._scoped_unsound == ""
+    finally:
+        supervisor.stop()
+
+
+@pytest.mark.parametrize("info, expected", [
+    ({"tools": {"file": ["read_file", "write_file"], "web": ["web_search"]}},
+     ("read_file", "write_file", "file toolset")),
+    ({"tools": {"terminal": ["terminal"]}}, ("terminal", "terminal toolset")),
+    ({"tools": {"File": ["patch"]}}, ("patch", "File toolset")),
+    ({"tools": {"web": ["search_files"]}}, ("search_files",)),
+    ({"tools": ["web_search", "patch"]}, ("patch",)),
+    ({"tools": [{"name": "write_file"}, {"name": "todo"}]}, ("write_file",)),
+])
+def test_the_native_tools_a_session_reports_are_found_in_any_shape_hermes_lists_them(info, expected):
+    assert hb.native_tools_in_session_info(info) == expected
+
+
+@pytest.mark.parametrize("info", [
+    {"tools": {"mcp-friday_exec": ["mcp__friday_exec__bridge_read_file", "bridge_run_command"],
+               "web": ["web_search"], "todo": ["todo"]}},
+    {"tools": {"file": [], "terminal": []}},            # a native toolset that holds nothing
+    {"tools": {}}, {"tools": []}, {"tools": None}, {"tools": "read_file"},
+    {"model": "m"}, {}, None, "read_file",
+])
+def test_a_session_that_reports_no_native_tool_is_not_called_a_breach(info):
+    assert hb.native_tools_in_session_info(info) == ()
+
+
+def test_a_gateway_that_does_not_report_its_tools_is_still_caught_by_its_first_native_call(area, tmp_path, monkeypatch):
+    # Nothing in the session info to refuse on, so the run starts; the
+    # tool.start backstop stops it (the same behaviour as before the check).
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web]\n")
+    monkeypatch.setenv("FAKE_HERMES_IGNORE_TOOLSETS", "1")
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        run = supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                  scope=_envelope(area), expires_in=3600)["work_run_id"]
+        assert _until(lambda: supervisor.log.get(run)["status"] in hb.TERMINAL)
+        assert supervisor.log.get(run)["failure_kind"] == hb.HermesSupervisor.ENVELOPE_BREACHED
+        assert supervisor._scoped_unsound
+    finally:
+        supervisor.stop()
+
+
 def test_a_delegation_under_an_envelope_is_refused_when_its_gateway_would_still_have_file_tools(area, monkeypatch):
     monkeypatch.setattr(hb, "scoped_gateway_toolsets", lambda profile="": ("web", "File"))
     supervisor = _supervisor(area.root, monkeypatch)
