@@ -23,11 +23,13 @@ on every turn to no effect.
 
 Actions. NOISY prunes (duplicates, stale and raw-dump lines). DEGRADED
 summarizes (the same, plus clipping and a per-section cap), or folds when one
-non-critical section holds most of the tokens. ROTTING hands off. Fold and
-hand-off name a seam that does not exist yet - there is no temporary-branch
-machinery (19.6) and no session-restart hook - so they stay advisory: the
-context is still shrunk in place with the summarize action, and a hand-off
-verdict carries the packet a fresh session would start from.
+non-critical section holds most of the tokens: the section's lines become one
+line that points at the original in the artifact vault, and the rest is
+summarized. ROTTING hands off. Hand-off names a seam that does not exist yet -
+there is no temporary-branch machinery (19.6) and no session-restart hook - so
+it stays advisory: the context is still shrunk in place with the summarize
+action, and a hand-off verdict carries the packet a fresh session would start
+from.
 
 Every change to a prompt is checked against `compaction.CriticalFactSet`
 (rules, preferences, open contradictions); a change that would drop one is
@@ -82,6 +84,9 @@ SUMMARY_LINE_CHARS = 96
 SUMMARY_SECTION_LINES = 4
 #: The name `summarize`'s line clipper is registered under with the coordinator.
 CLIP = "clip"
+
+#: `kind` of the one line a fold leaves behind; summarize keeps it as it is.
+FOLDED = "folded"
 #: One non-critical section holding this share of the tokens is folded, not summarized.
 FOLD_SHARE = 0.5
 #: Pruning a context that is over its budget trims it to this share of it.
@@ -330,6 +335,25 @@ def prune(layout, now: datetime | None = None, budget: int = 0,
     return _tidy(out)
 
 
+def fold(layout, bulk_tier, ledger: list | None = None) -> list:
+    """Collapse the non-critical lines of `bulk_tier` into one line that names
+    where the original block is kept, at the place the first of them stood. The
+    block goes through the compression coordinator, which keeps it in the vault
+    and records it in `ledger`. When the coordinator refuses (a critical fact in
+    the block, a vault that cannot keep it) the layout is returned as it was."""
+    idx = [i for i, e in enumerate(layout)
+           if e.get("tier") == bulk_tier and not _critical(e)]
+    if not bulk_tier or len(idx) < 2:
+        return list(layout)
+    block = "\n".join(dict.fromkeys(layout[i]["text"] for i in idx))
+    stub = _shorten(block, compression.FOLD_TO_ARTIFACT, critical_facts(layout), ledger)
+    if stub is None:
+        return list(layout)
+    first, gone = idx[0], set(idx[1:])
+    return [dict(e, text=stub, ts=None, kind=FOLDED) if i == first else e
+            for i, e in enumerate(layout) if i not in gone]
+
+
 def _clip(text: str, limit: int) -> str:
     flat = " ".join(text.split())
     return flat if len(flat) <= limit else flat[:limit - 1].rstrip() + "…"
@@ -352,14 +376,14 @@ def summarize(layout, now: datetime | None = None, budget: int = 0,
     cap = _env_number("FRIDAY_CTX_SUMMARY_SECTION_LINES", SUMMARY_SECTION_LINES, int)
     by_tier: dict = {}
     for i, e in enumerate(pruned):
-        if e.get("tier") and not _critical(e):
+        if e.get("tier") and not _critical(e) and e.get("kind") != FOLDED:
             by_tier.setdefault(e["tier"], []).append(i)
     keep = set()
     for tier, idxs in by_tier.items():
         keep.update(idxs[-cap:] if tier == RECENT_TIER else idxs[:cap])
     out = []
     for i, e in enumerate(pruned):
-        if not e.get("tier") or _critical(e):
+        if not e.get("tier") or _critical(e) or e.get("kind") == FOLDED:
             out.append(e)
         elif i in keep:
             clipped = _shorten(e["text"], compression.SUMMARIZE, facts, ledger, CLIP)
@@ -387,8 +411,13 @@ def remediate(agg: dict, now: datetime | None = None) -> tuple[dict, dict]:
         return agg, dict(verdict, applied=NONE)
     budget = agg.get("budget_tokens") or 0
     ledger: list = []
-    shrunk = (prune(layout, now, budget, ledger) if action == PRUNE
-              else summarize(layout, now, budget, ledger))
+    if action == PRUNE:
+        shrunk = prune(layout, now, budget, ledger)
+    elif action == FOLD:
+        shrunk = summarize(fold(layout, verdict["bulk_tier"], ledger), now, budget, ledger)
+    else:
+        shrunk = summarize(layout, now, budget, ledger)
+    folded = any(r.action == compression.FOLD_TO_ARTIFACT for r in ledger)
     facts = critical_facts(layout)
     try:
         compaction.validate(_packet(shrunk), facts)
@@ -399,7 +428,7 @@ def remediate(agg: dict, now: datetime | None = None) -> tuple[dict, dict]:
     after = dict(agg, layout=shrunk, prompt=_packet(shrunk),
                  tokens_used=sum(_tokens(e["text"]) for e in _entries(shrunk)))
     left = assess(after, now)
-    out = dict(verdict, applied=action if action == PRUNE else SUMMARIZE,
+    out = dict(verdict, applied=PRUNE if action == PRUNE else FOLD if folded else SUMMARIZE,
                after=left["state"], after_action=left["action"],
                transformations=[t.to_dict() for t in ledger])
     if action == HANDOFF:

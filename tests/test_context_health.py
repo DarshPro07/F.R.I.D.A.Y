@@ -123,6 +123,36 @@ def test_a_degraded_context_dominated_by_one_section_folds():
     assert (v["action"], v["advisory"], v["bulk_tier"]) == (H.FOLD, True, "specs")
 
 
+def test_a_folding_verdict_really_folds_the_bulk_section_into_one_recoverable_line(vault_dir):
+    bulky = [line("- [p%d] %s" % (i, "word " * 80), "specs") for i in range(8)]
+    layout = (critical_layout(contradiction=False) + [head("RELEVANT SPECS FROM THE VAULT:")]
+              + bulky + unique(8, "contacts") + [dict(bulky[0]) for _ in range(8)])
+    before = agg(layout, budget=5000)
+    assert H.assess(before, NOW)["action"] == H.FOLD
+    after, verdict = H.remediate(before, NOW)
+    assert verdict["applied"] == H.FOLD
+    assert after["tokens_used"] < before["tokens_used"]
+    specs = [e["text"] for e in after["layout"] if e.get("tier") == "specs"]
+    assert len(specs) == 1 and specs[0].startswith("[folded ") and compression.POINTER in specs[0]
+    assert "RELEVANT SPECS FROM THE VAULT:" in after["prompt"], "the folded line keeps its heading"
+    for fact in (PREF, RULE):
+        assert fact in after["prompt"]
+    folds = [r for r in verdict["transformations"] if r["action"] == compression.FOLD_TO_ARTIFACT]
+    assert len(folds) == 1
+    assert compression.recover(folds[0]["recovery"]).decode().splitlines() == [e["text"] for e in bulky]
+
+
+def test_a_fold_the_vault_refuses_leaves_the_section_summarized_not_folded(monkeypatch, tmp_path):
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file where the vault directory should be")
+    monkeypatch.setenv("FRIDAY_ARTIFACT_VAULT", str(blocked))
+    bulky = [line("- [p%d] %s" % (i, "word " * 80), "specs") for i in range(8)]
+    before = agg(bulky + unique(8, "contacts") + [dict(bulky[0]) for _ in range(8)], budget=5000)
+    after, verdict = H.remediate(before, NOW)
+    assert verdict["applied"] == H.SUMMARIZE
+    assert not any(e["text"].startswith("[folded ") for e in after["layout"])
+
+
 def test_stale_and_contradiction_and_raw_each_drive_the_state():
     stale = unique(10, "episodes", ts=OLD)
     assert H.assess(agg(stale), NOW)["drivers"]["stale_ratio"] == H.ROTTING
