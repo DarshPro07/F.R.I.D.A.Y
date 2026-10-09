@@ -36,7 +36,9 @@ import importlib
 import logging
 import os
 import pkgutil
+import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
 from friday import contracts as c
@@ -264,6 +266,101 @@ def _discover() -> dict[str, Provider]:
     return found
 
 
+# --- overlap (CAP-FORGE-011) -----------------------------------------------
+
+#: A repository whose every operation a registered provider already answers is
+#: not imported on its own say-so: it is recorded REFERENCE_ONLY with the
+#: overlap as evidence, unless a measurement shows it is better. The override
+#: is a line in `notes`: `BENCHMARK_IMPROVEMENT: <what was measured>`. Text is
+#: required after the colon, so the marker cannot be an empty claim - and
+#: "benchmarked, not promoted" is not a claim of improvement.
+_BENCHMARK_MARK = re.compile(r"BENCHMARK_IMPROVEMENT:\s*\S")
+
+#: Providers reviewed by a person and kept runnable although earlier providers
+#: already answer all their operations. Id -> why. Not an escape hatch for new
+#: imports: the improvement override above is that. This is the standing
+#: baseline from before the check existed, and `test_fabric_overlap` fails if
+#: an entry stops overlapping, so the list cannot go stale.
+ACCEPTED_OVERLAPS = {
+    "tool_embedder_base": (
+        "CTX-002 comparison pair: bge-base is pinned so "
+        "scripts/bench_tool_disclosure.py can reproduce its measurement "
+        "against bge-small, which it did not beat (docs/plans/ctx-002/PLAN.md)"),
+}
+
+
+def has_benchmark_improvement(provider: Provider) -> bool:
+    """Whether `notes` carries a stated benchmark improvement."""
+    return bool(_BENCHMARK_MARK.search(provider.notes))
+
+
+def find_overlaps(provider: Provider,
+                  existing: Iterable[Provider] | None = None,
+                  ) -> list[tuple[str, str]]:
+    """(existing provider id, operation) for each operation `provider` shares
+    with a runnable provider of the same family.
+
+    Operation names are the registry's only capability vocabulary, so this is
+    name equality within a family, not a judgement about what code does.
+    REFERENCE_ONLY providers never count: they run nothing, so they cover
+    nothing. `existing` defaults to every other provider in the registry; the
+    registry loader passes only the providers admitted before this one.
+    """
+    pool = registry().values() if existing is None else existing
+    mine = frozenset(provider.operations)
+    return [(other.id, op)
+            for other in pool
+            if other.id != provider.id
+            and other.family == provider.family
+            and other.integration_mode != REFERENCE_ONLY
+            for op in other.operations if op in mine]
+
+
+def _recorded_by_overlap(provider: Provider,
+                         overlaps: list[tuple[str, str]]) -> Provider:
+    """`provider` as REFERENCE_ONLY, with the overlap written into its notes."""
+    covering: dict[str, list[str]] = {}
+    for existing_id, op in overlaps:
+        covering.setdefault(existing_id, []).append(op)
+    evidence = "; ".join(
+        f"{existing_id} answers {', '.join(ops)}"
+        for existing_id, ops in covering.items())
+    note = (f"OVERLAP: recorded {REFERENCE_ONLY} (declared "
+            f"{provider.integration_mode}); every operation is already "
+            f"answered by a registered provider - {evidence}. Imported only "
+            f"with a 'BENCHMARK_IMPROVEMENT: <measurement>' line in notes.")
+    return replace(provider, integration_mode=REFERENCE_ONLY,
+                   notes=f"{provider.notes} {note}".strip())
+
+
+def _apply_overlap_policy(found: dict[str, Provider]) -> dict[str, Provider]:
+    """Record redundant repository imports as REFERENCE_ONLY.
+
+    Providers are judged in discovery order against those admitted before
+    them - "an existing registered capability" - so the first of two
+    equivalent providers stays and the later one is the one recorded. Only
+    providers that import an upstream repository are judged: one we wrote
+    ourselves (`upstream == ""`) is not an import. Operations covered by
+    several earlier providers together still count as covered.
+    """
+    admitted: list[Provider] = []
+    result: dict[str, Provider] = {}
+    for provider_id, provider in found.items():
+        if (provider.upstream
+                and provider.integration_mode != REFERENCE_ONLY
+                and provider_id not in ACCEPTED_OVERLAPS
+                and not has_benchmark_improvement(provider)):
+            overlaps = find_overlaps(provider, admitted)
+            if {op for _, op in overlaps} >= set(provider.operations):
+                provider = _recorded_by_overlap(provider, overlaps)
+                logger.warning(
+                    "fabric provider %s recorded %s: %s", provider_id,
+                    REFERENCE_ONLY, provider.notes.rsplit("OVERLAP: ", 1)[-1])
+        result[provider_id] = provider
+        admitted.append(provider)
+    return result
+
+
 def reap_orphans() -> list[int]:
     """Kill sidecars left holding a port by a previous, hard-killed Friday.
 
@@ -302,7 +399,7 @@ def registry() -> dict[str, Provider]:
                         f"{provider.id}: fallback {target!r} is not registered")
                 if target == provider.id:
                     raise FabricError(f"{provider.id}: names itself as fallback")
-        _REGISTRY = found
+        _REGISTRY = _apply_overlap_policy(found)
         # Once per process, after the registry exists so markers can be read.
         # Opt-out rather than opt-in: leaving a stale sidecar holding a port is
         # the failure, and an env var is for the rare debugging session where
