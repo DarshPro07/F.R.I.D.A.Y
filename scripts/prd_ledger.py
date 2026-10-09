@@ -4140,6 +4140,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_governor.py::test_real_memory_pressure_bounds_new_work', 'tests/test_governor.py::test_high_pressure_reduces_concurrency_to_one', 'tests/test_governor.py::test_critical_pressure_sheds_all_new_work'],
         "files": ['friday/governor.py:84,343,416,581', 'scripts/stress_low_ram.py', 'data/prd_v7_audit/res001_low_ram_2026-09-27.json', 'data/prd_v7_audit/res003_stress_2026-09-30.json'],
     }),
+    ('ORCH-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Objective tasks now run as dependency waves: friday/waves.py (shared with build_kernel) picks file-disjoint ready tasks, capped by governor.worker_capacity; unknown surface runs alone. Fixed three concurrency hazards: in-flight side-effect ceiling, governor refusal failing a task, requires preconditions. (build run, commit 51861950c)',
+        "next_action": 'GAPS: friday/planner.py does not yet emit a per-task `surface`, so graphs the planner builds declare none and run one task at a time (the safe default); only plans that declare surfaces (compile_objective task spec key `surface`) run in parallel. Making the planner predict surfaces needs a design decision on where they come from.; Not run against a live Hermes/Claude worker: the wave tests use a stub governor and an event-gated capability port. The real governor is covered only by test_worker_capacity_is_what_admit_would_let_run_at_once, and the real admit(WORKER) gate in hermes_bridge/claude_code is unchanged and was not exercised with concurrent tasks.; Conservative edge: with a max_side_effects ceiling, a side-effecting task beside one that later fails is refused (the ceiling counts in-flight changes) where a strictly serial run would have allowed it.; Runs whose contract has `requires` preconditions stay strictly serial rather than gating only the dependent steps.; Packet cites governor.py:581 (RAM pressure check) for concurrency; the admission code is governor.py:943-1040, as the scout noted.',
+    }),
 ]
 
 
