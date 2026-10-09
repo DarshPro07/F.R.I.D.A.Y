@@ -18,7 +18,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Callable
 
-from friday import fabric
+from friday import provider_states
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class DeviceProvider(ABC):
 
     @abstractmethod
     def health(self) -> dict:
-        """`{"state": fabric.READY | fabric.UNAVAILABLE | ...}` plus detail."""
+        """`{"state": provider_states.READY | provider_states.UNAVAILABLE | ...}` plus detail."""
 
     @abstractmethod
     def list_devices(self) -> list[dict]:
@@ -83,9 +83,9 @@ class HermesGadgetAdapter(DeviceProvider):
 
     def health(self) -> dict:
         if self._loader() is None:
-            return {"state": fabric.UNAVAILABLE,
+            return {"state": provider_states.UNAVAILABLE,
                     "detail": f"{SDK_MODULE} is not installed"}
-        return {"state": fabric.READY}
+        return {"state": provider_states.READY}
 
     def list_devices(self) -> list[dict]:
         return list(self._sdk().devices())
@@ -125,20 +125,20 @@ class DeviceHub:
         for provider in self._providers.values():
             health = provider.health()
             states[provider.id] = health
-            if health.get("state") not in (fabric.READY, fabric.DEGRADED):
+            if health.get("state") not in (provider_states.READY, provider_states.DEGRADED):
                 continue
             try:
                 for device in provider.list_devices():
                     found.append({**device, "provider": provider.id})
             except Exception as exc:                         # noqa: BLE001
                 logger.warning("device provider %s failed: %s", provider.id, exc)
-                states[provider.id] = {"state": fabric.FAILED, "error": str(exc)}
+                states[provider.id] = {"state": provider_states.FAILED, "error": str(exc)}
         return {"devices": found, "providers": states}
 
     def _ready(self, provider_id: str) -> DeviceProvider:
         provider = self._provider(provider_id)
         state = provider.health().get("state")
-        if state not in (fabric.READY, fabric.DEGRADED):
+        if state not in (provider_states.READY, provider_states.DEGRADED):
             raise DeviceUnavailable(f"{provider_id} is {state}")
         return provider
 

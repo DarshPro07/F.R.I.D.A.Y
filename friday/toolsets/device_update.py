@@ -39,7 +39,7 @@ import logging
 from dataclasses import dataclass
 from typing import Callable
 
-from friday import fabric
+from friday import provider_states
 from friday.toolsets.devices import DeviceProvider
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ ROLLED_OUT = "ROLLED_OUT"
 ROLLED_BACK = "ROLLED_BACK"
 ROLLBACK_FAILED = "ROLLBACK_FAILED"
 REJECTED = "REJECTED"
-UNAVAILABLE = fabric.UNAVAILABLE
+UNAVAILABLE = provider_states.UNAVAILABLE
 
 
 @dataclass(frozen=True)
@@ -106,7 +106,7 @@ def rollout(provider: DeviceProvider, release: Release, prior: Release,
         if problem:
             return {"status": REJECTED, "reason": problem}
     state = provider.health().get("state")
-    if state not in (fabric.READY, fabric.DEGRADED):
+    if state not in (provider_states.READY, provider_states.DEGRADED):
         return {"status": UNAVAILABLE, "reason": f"{provider.id} is {state}"}
 
     touched: list[str] = []

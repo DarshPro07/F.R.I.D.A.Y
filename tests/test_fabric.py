@@ -362,3 +362,15 @@ def test_process_singleton_reports_data_rather_than_guessing():
     result = fabric.processes()
     assert set(result) >= {"supported", "providers", "duplicates"}
     assert result["duplicates"] == []
+
+
+def test_the_fabric_vocabulary_has_one_spelling_and_no_call_surface():
+    # 2026-10-09: three toolsets imported friday.fabric only for its words (READY, UNAVAILABLE,
+    # ISOLATED_MODES) and so tripped SEC-005's guard against toolsets reaching the fabric. The
+    # words live in friday.provider_states; the fabric re-exports the very same objects.
+    from friday import fabric
+    from friday import provider_states as states
+    for name in ("READY", "DEGRADED", "UNAVAILABLE", "FAILED", "STATES", "INTEGRATION_MODES",
+                 "ISOLATED_MODES", "REFERENCE_ONLY", "LICENSE_MODES", "COPYLEFT"):
+        assert getattr(fabric, name) is getattr(states, name)
+    assert not any(callable(v) for k, v in vars(states).items() if not k.startswith("_"))

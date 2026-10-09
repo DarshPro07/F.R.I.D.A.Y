@@ -48,7 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from friday import fabric
+from friday import provider_states
 
 ARCHIVED = "ARCHIVED"
 REJECTED = "REJECTED"
@@ -78,14 +78,14 @@ class Candidate:
     #: Recorded, never weighed.
     stars: int = 0
     #: How it would be integrated if adopted (a `fabric` integration mode).
-    integration_mode: str = fabric.REFERENCE_ONLY
+    integration_mode: str = provider_states.REFERENCE_ONLY
 
     def __post_init__(self):
         if not self.name.strip() or not self.source.strip():
             raise ValueError("a candidate names itself and its source")
         if self.kind not in KINDS:
             raise ValueError(f"unknown kind {self.kind!r}; known: {list(KINDS)}")
-        if self.integration_mode not in fabric.INTEGRATION_MODES:
+        if self.integration_mode not in provider_states.INTEGRATION_MODES:
             raise ValueError(f"unknown integration mode {self.integration_mode!r}")
 
     @property
@@ -157,10 +157,10 @@ def review(candidate: Candidate) -> str:
     if licence in _PERMISSIVE:
         return ""
     if _COPYLEFT.match(licence):
-        if candidate.integration_mode in fabric.ISOLATED_MODES:
+        if candidate.integration_mode in provider_states.ISOLATED_MODES:
             return ""
         return (f"{candidate.licence} is copyleft and needs an isolated mode "
-                f"({sorted(fabric.ISOLATED_MODES)}), not {candidate.integration_mode}")
+                f"({sorted(provider_states.ISOLATED_MODES)}), not {candidate.integration_mode}")
     return f"unrecognised or missing licence {candidate.licence!r}"
 
 
