@@ -4399,6 +4399,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "A scoped Hermes gateway whose session.create reports Hermes' own file/terminal tools is refused before prompt.submit; the refusal now records the session id so the stop reaches it, and a refused stop still ends the run PARTIAL/ENVELOPE_BREACHED. (build run, commit acccdfab3)",
         "next_action": 'GAPS: Real-gateway proof still needs D:\\hermes: the fake gateway answers session.interrupt with an error for an unknown session; that a real Hermes does the same is an assumption.; A gateway that does not report its tools in session.create is still caught only by the tool.start backstop (the first native call may run).; _NATIVE_FILE_TOOLS is still hardcoded, not read from Hermes.; The one failure, tests/test_governor.py::test_real_memory_pressure_bounds_new_work, is a slow-marked host RAM stress test (held_s 26.6 < 30 dwell), excluded from the standard gate, and does not touch hermes_bridge.',
     }),
+    ('ACT-001', {
+        "status": PARTIAL,
+        "current_implementation": "Per-turn TurnLedger plus per-type proof shapes in honesty.audit; both voice paths refuse claims the ledger cannot back. Integration failure was test_mcp_firewall's ledger-citation check: the slice shifted agent_friday.py lines MCP-001 cites; citations re-pointed. (build run, commit 5c33f91be)",
+        "next_action": "GAPS: Other ledger rows still cite agent_friday.py lines (e.g. :867, :1105, :1111) that this slice moved; no test checks them, only MCP-001's are asserted, so they were left alone rather than guessed.; tests/test_voice_path.py TTS/STT tests fail on this machine with OpenAI 401 invalid_api_key (placeholder key); they need a real key and are unrelated to this change.; Generated data/prd_v7_requirements.json and docs/implementation/PRD_V7_LEDGER.md still show the old MCP-001 cite text; the effective row comes from PROGRESS_V7 and `prd_ledger.py --check` is clean. Regenerating them is left to the owner (data/ is off limits to agents).",
+    }),
 ]
 
 
