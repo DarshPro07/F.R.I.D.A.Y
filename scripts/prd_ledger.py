@@ -4689,6 +4689,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Design: new friday/sbom.py. build(lock, packages, pins, hermes, providers) is pure and collect() reads the real sources. It joins four sources into one component list, and every component has kind, name, source, version and scan_state. (1) UPSTREAM_LOCK.json rows become kind upstream or model. (2) E (build run, commit 9fb409e73)',
         "next_action": "GAPS: Python packages have no vulnerability scan, so all are UNSCANNED until a scanner is wired in.; The SBOM is generated on demand and not committed, because package versions depend on the venv. There is no drift check.; MCP servers are only those in data/mcp_pins.json (absent on this machine's tree) and the Hermes config; a Claude Code mcpServers JSON import is not read unless it was pinned through the firewall.; CLI components are only fabric CLI-mode providers; other executables on PATH are not enumerated.; Controller: integrated as PARTIAL - 'every active external component' is not yet met while Claude Code's own MCP servers and non-fabric CLIs on PATH are not enumerated.; implementer did not claim acceptance met",
     }),
+    ('RSCH-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Design: pure additions to friday/toolsets/research.py (after build_corpus). DEPTHS R0-R5 with DEPTH_BUDGETS (max_sources, max_chars). Frozen dataclass CanonicalInquiry (question + frozenset of content terms) with on_inquiry() as the drift guard (a branch must share >= 1/3 of the inquiry terms, at le (build run, commit d99f73c5a)',
+        "next_action": "GAPS: Not wired into the live path: web_deep_research does not yet call route_depth/CanonicalInquiry/explore, so a trivial question asked through the MCP tool is not yet capped (the row's behavioural acceptance is only met at module level). Next slice: have web_deep_research derive its depth and budget from route_depth and record explore()'s stop in its result.; Depth routing is keyword/length heuristic, not model-based; the drift guard is term-overlap, so paraphrased on-topic branches with no shared terms would be rejected.; Only the information-gain stop is a term-coverage proxy for expected information gain; no semantic estimator.; implementer did not claim acceptance met",
+    }),
 ]
 
 
