@@ -169,6 +169,10 @@ DECLARED = {
     "friday/resources": (INTENTIONALLY_INTERNAL, "data, not behaviour"),
     "friday/prompts": (PRODUCTION, "loaded as text by the agent"),
     "friday/audit_fixtures": (TEST_ONLY, "fixtures for the audit suite"),
+    "friday/intake": (FUTURE,
+                      "INTAKE-001 slice 1: the repository intake front door "
+                      "(URL parse, SHA pin, stage order), run by "
+                      "tests/test_intake_dossier.py"),
     "friday/reflex": (FUTURE,
                       "the local fast path, off by default and behind a "
                       "feature flag; reachable when enabled"),
