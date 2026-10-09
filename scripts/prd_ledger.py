@@ -4250,6 +4250,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_quarantine.py::test_planted_repo_reading_an_env_secret_is_denied_and_recorded', 'tests/test_quarantine.py::test_a_denial_that_the_repo_catches_is_still_recorded', 'tests/test_quarantine.py::test_environment_is_built_from_nothing_and_rebound_into_the_root', 'tests/test_quarantine.py::test_planted_repo_touching_a_user_file_is_denied_and_recorded', 'tests/test_quarantine.py::test_a_relative_traversal_out_of_the_root_is_denied', 'tests/test_quarantine.py::test_the_data_directory_and_sibling_quarantines_are_out_of_reach', 'tests/test_quarantine.py::test_the_guard_and_record_are_not_the_repos_to_touch', 'tests/test_quarantine.py::test_control_the_same_probe_reads_the_file_through_the_plain_job_object', 'tests/test_quarantine.py::test_planted_socket_is_denied_and_nothing_connects', 'tests/test_quarantine.py::test_name_resolution_is_denied_too', 'tests/test_quarantine.py::test_a_child_process_is_denied', 'tests/test_quarantine.py::test_without_the_hook_the_kernel_still_denies_every_file_route'],
         "files": ['friday/fabric.py'],
     }),
+    ('PKG-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Clean-machine validator: CLEAN-03 verdict extracted to doctor_verdict() matching the check name only (a detail mentioning credentials no longer excuses a FAIL); each run now prints BLOCKED_EXTERNAL when Windows Sandbox is absent. Real VM run still not possible here. (build run, commit 3061ccd06)',
+        "next_action": 'GAPS: No real Windows VM or Windows Sandbox run: WindowsSandbox.exe is absent on this host; validate_exe_clean.py remains the C:\\Windows\\Temp simulation.; validate_exe_clean.py was not re-run end to end against a rebuilt dist; only its new pure helpers are unit-tested.; EXE-06/07 voice-worker journeys still need --with-agent and a real .env beside the exe; they report BLOCKED_EXTERNAL or SKIP on a clean machine.; implementer did not claim acceptance met',
+    }),
 ]
 
 
