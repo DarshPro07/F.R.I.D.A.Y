@@ -6,6 +6,7 @@ data/e2e-*
 .venv/
 .venv-verify/
 .venv-build/
+.venv-skillspector/
 __pycache__/
 dist/
 build/

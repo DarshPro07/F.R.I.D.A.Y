@@ -1261,6 +1261,33 @@
       "skills/xlsx/LICENSE.txt is Anthropic-proprietary"
     ]
   },
+  "skillspector": {
+    "commit": "c7958a3268d9498644b22edb75d0f051bbc8cbfc",
+    "default_branch": "HEAD",
+    "describe": "v2.12.0",
+    "directory": "third_party/upstream/skillspector",
+    "has_mcp_reference": true,
+    "last_commit_date": "2026-09-23T15:27:53-07:00",
+    "latest_tag": "v2.12.0",
+    "license": "Apache-2.0",
+    "license_file": "LICENSE",
+    "manifests": [
+      "package.json",
+      "pyproject.toml",
+      "uv.lock"
+    ],
+    "nested_licenses": [],
+    "proposed_mode": "CLI",
+    "readme_bytes": 44492,
+    "reason": "Apache-2.0 (NVIDIA). The static security scanner behind friday/forge.py scan_import/scan_admits. Python >= 3.12, so it runs from a dedicated .venv-skillspector built from the clone's own uv.lock, never a shared Python. Pinned to the v2.12.0 tag commit; implemented as friday/fabric_adapters/skillspector.py (security family, scan only, --no-llm --fail-on-incomplete).",
+    "remote": "https://github.com/NVIDIA/SkillSpector.git",
+    "repository": "https://github.com/NVIDIA/SkillSpector",
+    "security_doc": true,
+    "separately_licensed_subtrees": [],
+    "status": "AUDITED_NOT_INTEGRATED",
+    "tracked_files": 391,
+    "vendoring_blockers": []
+  },
   "smartstore": {
     "commit": "3b7d986ecb6c8525b63f5243b686531511c285f9",
     "default_branch": "main",

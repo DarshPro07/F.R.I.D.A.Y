@@ -112,6 +112,9 @@ REQUESTED = (
     #                                    fabric_adapters/claude_subagents.py.
     "https://github.com/fadymondy/agents-team",
     "https://github.com/VoltAgent/awesome-claude-code-subagents",
+    # The owner's CAP-MKT-002 ruling (2026-10-09): NVIDIA SkillSpector v2.12.0,
+    # the pre-activation security scanner friday/forge.py already calls.
+    "https://github.com/NVIDIA/SkillSpector",
 )
 
 #: The build pack named two directories differently from their repositories.
@@ -124,8 +127,9 @@ ALIASES = {"anything-llm": "anythingllm", "postiz-app": "postiz",
 #: script asserts this rather than trusting the arithmetic.
 #: graphiti, mem0 and ultron were added after the build pack was written,
 #: so they are 'new to the pack' too -- 10 + 3 + 3 (firstmate, auto-company, openworker, then bolt.diy, open-lovable, onlook -- all added 2026-08-31),
-#: then + 2 (agents-team, awesome-claude-code-subagents -- 2026-09-03).
-EXPECTED_NEW = 25
+#: then + 2 (agents-team, awesome-claude-code-subagents -- 2026-09-03),
+#: then + 1 (SkillSpector -- 2026-10-09).
+EXPECTED_NEW = 26
 
 
 def slug(url: str) -> str:
@@ -401,6 +405,14 @@ DECISIONS = {
         "as role_recipes one upstream later. Implemented as "
         "friday/fabric_adapters/claude_subagents.py (roles family): "
         "catalogue/search/category are names, recipe reads one brief."),
+    "skillspector": (
+        "CLI",
+        "Apache-2.0 (NVIDIA). The static security scanner behind friday/"
+        "forge.py scan_import/scan_admits. Python >= 3.12, so it runs from a "
+        "dedicated .venv-skillspector built from the clone's own uv.lock, "
+        "never a shared Python. Pinned to the v2.12.0 tag commit; "
+        "implemented as friday/fabric_adapters/skillspector.py (security "
+        "family, scan only, --no-llm --fail-on-incomplete)."),
 }
 
 

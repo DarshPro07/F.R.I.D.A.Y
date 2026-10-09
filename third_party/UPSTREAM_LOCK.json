@@ -1369,6 +1369,26 @@
     "url": "https://github.com/D4Vinci/Scrapling",
     "version": "458e2a2"
   },
+  "skillspector": {
+    "added_by": "new_upstream_set.py",
+    "commit": "c7958a3268d9498644b22edb75d0f051bbc8cbfc",
+    "integration_mode": "CLI",
+    "integration_mode_proposed": "CLI",
+    "integration_mode_source": "descriptor",
+    "license": "Apache-2.0",
+    "license_declared": "Apache-2.0",
+    "license_file": "LICENSE",
+    "license_verified": "Apache-2.0",
+    "nested_licenses": [],
+    "patches": [],
+    "provider_id": "skillspector",
+    "role": "Apache-2.0 (NVIDIA). The static security scanner behind friday/forge.py scan_import/scan_admits. Python >= 3.12, so it r",
+    "status": "CLONED",
+    "upstream_tests": "NOT_RUN",
+    "url": "https://github.com/NVIDIA/SkillSpector",
+    "vendoring_blockers": [],
+    "version": "v2.12.0"
+  },
   "smartstore": {
     "added_by": "new_upstream_set.py",
     "commit": "3b7d986ecb6c8525b63f5243b686531511c285f9",
