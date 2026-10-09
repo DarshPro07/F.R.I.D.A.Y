@@ -4237,6 +4237,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Rebuilt FRIDAY.exe (c848a97, smoke ok); golden journeys 12/12 and clean-machine 6/6. EXE-12 first failed: harness ADA_DB leaked into validate_exe.py, moving the db off the scratch profile. Validator now drops state overrides. (build run, commit 507cc2949)',
         "next_action": 'GAPS: Clean-machine run is the validate_exe_clean.py simulation (bundle copied to C:\\Windows\\Temp, stripped PATH and profile); Windows Sandbox is not installed, so no real VM was used; EXE-06/07 voice-worker journeys skipped: they need --with-agent and a real .env beside the exe; CLEAN-03 doctor exits 2 with a livekit-credentials FAIL line; the journey treats missing credentials as expected on a machine with no .env',
     }),
+    ('CAP-003', {
+        "status": PARTIAL,
+        "current_implementation": "Executor.problem() now runs '<binary> --version' (10s cap), so a present-but-corrupt/hung executable reports UNAVAILABLE not READY. Added manifest.probe_all()/unhealthy() for one-pass bulk probing; summary()/build() stay unprobed. (build run, commit 2501a3366)",
+        "next_action": 'GAPS: No production code registers a capabilities.register_probe, so every native tool still reads REGISTERED until probes are written.; fabric.py providers still carry their own READY/state logic and are not tied to the capability health probe; probe_all()/unhealthy() report the state the fabric holds and never activate a provider.; Capability fields (version, backend, provenance, data_classes, latency/cost class, tests, last_verified) are not back-filled for existing records.; probe_all() does not fail fast; callers decide what an UNAVAILABLE row means.',
+    }),
 ]
 
 
