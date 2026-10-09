@@ -1128,6 +1128,44 @@ async def api_work(request):
     return JSONResponse(value)
 
 
+def _command_center_state():
+    """ACC-001: agent states derived only from durable worker records."""
+    from friday import command_center as cc
+    from friday import control
+    from friday import hermes_bridge as hb
+    from friday.governor import governor
+
+    def runs():
+        return hb.WorkRunLog().recent(50)
+
+    def tasks():
+        conn = _connect()
+        try:
+            return _rows(conn, "SELECT task_id, run_id, status, evidence_refs"
+                               " FROM run_tasks ORDER BY created_at DESC"
+                               " LIMIT 200")
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def queue():
+        # the governor exposes only its depth; entries are positional
+        return [("worker", "waiting for a governor lease", i)
+                for i in range(governor().queue_depth())]
+
+    # No ledger source yet: AGENT-001 is not wired into this slice.
+    out = cc.snapshot({"runs": runs, "tasks": tasks, "queue": queue,
+                       "gates": control.pending})
+    agents = [cc.AgentState(**a) for a in out["agents"]]
+    out["events"] = [_event_frame(f.type, f.payload, f.run_id)
+                     for f in cc.to_agui(None, agents)]
+    return out
+
+
+async def api_command_center_state(request):
+    return JSONResponse(await run_in_threadpool(_command_center_state))
+
+
 async def api_browser_open(request):
     from friday import ui_browser as B
     try:
@@ -1599,6 +1637,7 @@ def create_app():
         Route("/api/interrupted", api_interrupted, methods=["POST"]),
         Route("/api/hermes/progress", api_hermes_progress),
         Route("/api/work", api_work),
+        Route("/api/command_center/state", api_command_center_state),
         WebSocketRoute("/api/stt", api_stt),
         Route("/api/browser/open", api_browser_open, methods=["POST"]),
         Route("/api/browser/act", api_browser_act, methods=["POST"]),
