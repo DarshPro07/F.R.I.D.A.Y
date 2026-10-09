@@ -856,3 +856,117 @@ def test_a_long_run_that_was_resumed_forgives_the_drift_before_the_resume(
 
     assert found.verdict == T.ON_TRACK, found
     assert found.signals[shape] == 0
+
+
+# -- drift made of events that are common per run, spread over a long window -----------
+
+_REFUSED = "ENVELOPE: files_delete is outside this run's write roots"
+
+
+def _long_run_of(tmp_path, seed, count, name, *, detail=None, capability="system_get_info",
+                 resume_after=False):
+    """Like `_long_run_with`, for events that happen to a task and are not rare per
+    run (a refusal, a start): `count` of them against the run's first task, each
+    far enough from the next that the early ones fall out of the recent window."""
+    rng = random.Random(seed)
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile_under(store, c.ObjectiveContract(goal="tidy the folder"), capability, 3)
+    task = store.objective_tasks(run_id)[0]["task_id"]
+    for _ in range(count):
+        _pad(store, run_id, rng.randint(200, 300))
+        store.append_objective_event(run_id, name, task_id=task, detail=detail)
+    if resume_after:
+        store.append_objective_event(run_id, O.EVENT_RUN_RESUMED, detail={"reason": "carry on"})
+    _pad(store, run_id, rng.randint(200, 300))
+    return store, run_id, task
+
+
+def _refusal(reason=_REFUSED):
+    return {"kind": "POLICY", "reason": reason}
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_refusals_spread_over_a_long_run_are_flagged_though_they_are_not_recent(tmp_path, seed):
+    store, run_id, _ = _long_run_of(tmp_path, seed, T.NEAR_MISSES, O.EVENT_TASK_FAILED,
+                                    detail=_refusal())
+    recent = [e for e in store.recent_objective_events(run_id) if e["event"] == O.EVENT_TASK_FAILED]
+    assert len(recent) < T.NEAR_MISSES, "the benchmark must outlive the recent window"
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.DRIFTING, found
+    assert found.signals["refusals"] == T.NEAR_MISSES
+
+
+def test_a_long_run_one_refusal_short_of_the_threshold_is_not_flagged(tmp_path):
+    store, run_id, _ = _long_run_of(tmp_path, 0, T.NEAR_MISSES - 1, O.EVENT_TASK_FAILED,
+                                    detail=_refusal())
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.ON_TRACK, found
+    assert found.signals["refusals"] == T.NEAR_MISSES - 1
+
+
+def test_failures_that_only_look_like_refusals_are_not_counted_on_a_long_run(tmp_path):
+    store, run_id, _ = _long_run_of(tmp_path, 0, T.NEAR_MISSES, O.EVENT_TASK_FAILED,
+                                    detail=_refusal("UNBLOCKED: the service answered 503"))
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.ON_TRACK, found
+    assert found.signals["refusals"] == 0
+
+
+def test_a_long_run_that_was_resumed_forgives_the_refusals_before_the_resume(tmp_path):
+    store, run_id, _ = _long_run_of(tmp_path, 0, T.NEAR_MISSES, O.EVENT_TASK_FAILED,
+                                    detail=_refusal(), resume_after=True)
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.ON_TRACK, found
+    assert found.signals["refusals"] == 0
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_a_side_effecting_step_started_again_and_again_over_a_long_run_is_flagged(tmp_path, seed):
+    store, run_id, task = _long_run_of(tmp_path, seed, T.SIDE_EFFECT_STARTS, O.EVENT_TASK_STARTED,
+                                       capability="files_write")
+    recent = [e for e in store.recent_objective_events(run_id) if e["event"] == O.EVENT_TASK_STARTED]
+    assert len(recent) < T.SIDE_EFFECT_STARTS, "the benchmark must outlive the recent window"
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.DRIFTING, found
+    assert found.signals["repeated_side_effects"] == [task]
+
+
+def test_a_long_run_one_start_short_of_the_threshold_is_not_flagged(tmp_path):
+    store, run_id, _ = _long_run_of(tmp_path, 0, T.SIDE_EFFECT_STARTS - 1, O.EVENT_TASK_STARTED,
+                                    capability="files_write")
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.ON_TRACK, found
+    assert found.signals["repeated_side_effects"] == []
+
+
+def test_a_long_run_that_was_resumed_forgives_the_starts_before_the_resume(tmp_path):
+    store, run_id, _ = _long_run_of(tmp_path, 0, T.SIDE_EFFECT_STARTS, O.EVENT_TASK_STARTED,
+                                    capability="files_write", resume_after=True)
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.ON_TRACK, found
+
+
+def test_a_forbidden_step_started_long_ago_is_still_scope_creep():
+    """The starts counted over the whole window, not only the events handed in,
+    are what the contract is checked against."""
+    trace = _Trace(3, capability="files_delete")
+
+    found = T.assess(trace.events, trace.tasks, governance={"forbidden": ["delete"]},
+                     starts={"t0": 1})
+
+    assert found.verdict == T.DRIFTING, found
+    assert any("delete was forbidden" in r for r in found.reasons)

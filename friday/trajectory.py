@@ -74,7 +74,8 @@ _AMENDED = "graph_edited"
 #: objectives.EVENT_WATCHDOG_ORPHANED: the watchdog took the run over. Not
 #: lease.acquired, which every healthy wake records.
 _ORPHANED = "watchdog.orphaned"
-_REFUSAL = re.compile(r"\b(?:ENVELOPE|APPROVAL_REQUIRED|BLOCKED):")
+_REFUSAL_MARKS = ("ENVELOPE:", "APPROVAL_REQUIRED:", "BLOCKED:")
+_REFUSAL = re.compile(r"\b(?:" + "|".join(_REFUSAL_MARKS) + ")")
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,12 @@ class Assessment:
 def _detail(event: dict) -> dict:
     detail = event.get("detail")
     return detail if isinstance(detail, dict) else {}
+
+
+def _refused(event: dict) -> bool:
+    """A failed, retried or blocked attempt whose reason is a policy refusal."""
+    return (event.get("event") in (_FAILED, _RETRY, _BLOCKED)
+            and bool(_REFUSAL.search(str(_detail(event).get("reason") or ""))))
 
 
 def _side_effecting(capability: str) -> bool:
@@ -143,7 +150,8 @@ def _questions_waved_through(earlier: list[dict], open_questions: tuple) -> bool
 
 def assess(events: list[dict], tasks: list[dict], *, spend: float = 0.0,
            governance: dict | None = None, open_questions: tuple = (),
-           upcoming: tuple = ()) -> Assessment:
+           upcoming: tuple = (), refusals: int | None = None,
+           starts: dict | None = None) -> Assessment:
     """
     Where the run is going, from its events since the person last resumed it
     (all of them if never), its task rows, and the largest fraction of any
@@ -151,6 +159,9 @@ def assess(events: list[dict], tasks: list[dict], *, spend: float = 0.0,
     questions it also says whether the run has left what was asked. `upcoming`
     is the ids of the tasks the executor is about to dispatch: a side-effecting
     one under an open question is flagged before it starts, not after.
+    `refusals` and `starts` (task id -> times started) are those counts over the
+    whole window when `events` holds only the newest of a long run; left out,
+    they are counted from `events`.
     """
     governance = governance or {}
     start = max((i for i, e in enumerate(events) if e.get("event") == _RESUMED), default=-1)
@@ -174,13 +185,14 @@ def assess(events: list[dict], tasks: list[dict], *, spend: float = 0.0,
     for (kind, task), n in per_cause.items():
         if n >= SAME_CAUSE_REPEATS:
             causes[kind].add(task)
-    refusals = sum(1 for e in window if e.get("event") in (_FAILED, _RETRY, _BLOCKED)
-                   and _REFUSAL.search(str(_detail(e).get("reason") or "")))
+    if refusals is None:
+        refusals = sum(1 for e in window if _refused(e))
     amendments = sum(1 for e in window if e.get("event") == _AMENDED)
     takeovers = sum(1 for e in window if e.get("event") == _ORPHANED)
     capability_of = {t.get("task_id"): t.get("capability") for t in tasks}
     status_of = {t.get("task_id"): t.get("status") for t in tasks}
-    starts = Counter(e.get("task_id") for e in window if e.get("event") == _STARTED)
+    if starts is None:
+        starts = Counter(e.get("task_id") for e in window if e.get("event") == _STARTED)
     # A step that has succeeded is done and will not run again; only one still
     # being retried can repeat its side effect.
     repeated_effects = sorted(task for task, n in starts.items()
@@ -285,8 +297,17 @@ def for_run(store, run_id: str, upcoming: tuple = ()) -> Assessment:
         # An unreadable contract leaves the other signals; the executor logs it.
         contract = {}
     contract = contract if isinstance(contract, dict) else {}
-    return assess(_events_for(store, run_id), store.objective_tasks(run_id),
+    events = _events_for(store, run_id)
+    # Refusals and starts are common per run, so they cannot be fetched by name
+    # like the rest: the store counts them over the whole window, which opens at
+    # the last resume, rather than over the newest events only.
+    opened = max((e["id"] for e in events if e.get("event") == _RESUMED), default=0)
+    refusals = sum(1 for e in store.objective_events_named(
+        run_id, (_FAILED, _RETRY, _BLOCKED), after_id=opened, mentioning=_REFUSAL_MARKS)
+        if _refused(e))
+    return assess(events, store.objective_tasks(run_id),
                   spend=spend_fraction(store, run_id),
                   governance=dict(contract.get("governance") or {}),
                   open_questions=tuple(contract.get("open_questions") or ()),
-                  upcoming=tuple(upcoming))
+                  upcoming=tuple(upcoming), refusals=refusals,
+                  starts=store.objective_event_counts(run_id, _STARTED, after_id=opened))

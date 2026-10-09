@@ -85,6 +85,43 @@ def test_named_events_are_found_however_old_and_only_for_their_run(tmp_path):
     assert len(store.recent_objective_events("r1")) == 500
 
 
+def test_named_events_can_be_narrowed_to_a_window_and_to_what_they_mention(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    store.append_objective_event("r1", "task.failed", detail={"reason": "BLOCKED: no"})
+    cut = store.append_objective_event("r1", "run.resumed")
+    store.append_objective_event("r1", "task.failed", detail={"reason": "503 from the service"})
+    store.append_objective_event("r1", "task.failed")
+    store.append_objective_event("r1", "task.retry", detail={"reason": "ENVELOPE: outside"})
+    store.append_objective_event("r1", "task.failed", detail={"reason": "blocked: lower case"})
+
+    after = store.objective_events_named("r1", ("task.failed", "task.retry"), after_id=cut)
+    refused = store.objective_events_named("r1", ("task.failed", "task.retry"), after_id=cut,
+                                           mentioning=("ENVELOPE:", "BLOCKED:"))
+    anywhere = store.objective_events_named("r1", ("task.failed",), mentioning=("BLOCKED:",))
+
+    assert len(after) == 4
+    assert [e["detail"]["reason"] for e in refused] == ["ENVELOPE: outside"]
+    assert [e["detail"]["reason"] for e in anywhere] == ["BLOCKED: no"]
+
+
+def test_event_counts_are_per_task_over_the_whole_run_after_the_window_opens(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    for _ in range(2):
+        store.append_objective_event("r1", "task.started", task_id="t0")
+    cut = store.append_objective_event("r1", "run.resumed")
+    for _ in range(600):
+        store.append_objective_event("r1", "run.note")
+    store.append_objective_event("r1", "task.started", task_id="t0")
+    store.append_objective_event("r1", "task.started", task_id="t1")
+    store.append_objective_event("r1", "task.started")
+    store.append_objective_event("r1", "task.succeeded", task_id="t1")
+    store.append_objective_event("r2", "task.started", task_id="t0")
+
+    assert store.objective_event_counts("r1", "task.started") == {"t0": 3, "t1": 1}
+    assert store.objective_event_counts("r1", "task.started", after_id=cut) == {"t0": 1, "t1": 1}
+    assert store.objective_event_counts("r1", "task.vanished") == {}
+
+
 def test_critical_wording_sets_the_r3_floor():
     store = Store(":memory:")
     run_id = compile_(store, "delete all the old backups permanently",

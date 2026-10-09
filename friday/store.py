@@ -3444,18 +3444,27 @@ class Store:
             rows.append(got)
         return rows
 
-    def objective_events_named(self, run_id: str, names: tuple[str, ...]) -> list[dict]:
+    def objective_events_named(self, run_id: str, names: tuple[str, ...], *,
+                               after_id: int = 0,
+                               mentioning: tuple[str, ...] = ()) -> list[dict]:
         """Every event of a run whose name is in `names`, oldest first, however
         old. For the few events that outlive the `recent_objective_events`
         window (a flag the person answered, the resume after it); callers pass
-        names that are rare per run, so this is not capped."""
+        names that are rare per run, so this is not capped. `after_id` keeps
+        only the events after that id (where a window began). `mentioning`
+        keeps only those whose detail text contains one of the strings, a
+        coarse filter the caller refines, for a name that is common per run
+        when the kind of it wanted is rare (the refusals among the failures)."""
         if not names:
             return []
         marks = ",".join("?" * len(names))
+        where = f"run_id=? AND id>? AND event IN ({marks})"
+        if mentioning:
+            where += " AND (" + " OR ".join("instr(detail, ?) > 0" for _ in mentioning) + ")"
         rows = []
         for row in self._conn.execute(
-            f"SELECT * FROM objective_events WHERE run_id=? AND event IN ({marks}) "
-            "ORDER BY id", (run_id, *names),
+            f"SELECT * FROM objective_events WHERE {where} ORDER BY id",
+            (run_id, after_id, *names, *mentioning),
         ):
             got = dict(row)
             if got.get("detail"):
@@ -3465,6 +3474,17 @@ class Store:
                     pass
             rows.append(got)
         return rows
+
+    def objective_event_counts(self, run_id: str, event: str, after_id: int = 0) -> dict[str, int]:
+        """How many `event` rows each task of a run has after `after_id`, however
+        many events the run holds. The aggregate for an event too common per run
+        to fetch by name (every start of a task); `objective_events_named` is
+        for the rare ones."""
+        return {row["task_id"]: row["n"] for row in self._conn.execute(
+            "SELECT task_id, COUNT(*) AS n FROM objective_events "
+            "WHERE run_id=? AND id>? AND event=? AND task_id IS NOT NULL "
+            "GROUP BY task_id", (run_id, after_id, event),
+        )}
 
     def objective_events(self, run_id: str, limit: int = 1000, after_id: int = 0) -> list[dict]:
         """A run's events in order; `after_id` resumes after the last row of a prior page."""
