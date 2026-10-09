@@ -4694,6 +4694,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Design: pure additions to friday/toolsets/research.py (after build_corpus). DEPTHS R0-R5 with DEPTH_BUDGETS (max_sources, max_chars). Frozen dataclass CanonicalInquiry (question + frozenset of content terms) with on_inquiry() as the drift guard (a branch must share >= 1/3 of the inquiry terms, at le (build run, commit d99f73c5a)',
         "next_action": "GAPS: Not wired into the live path: web_deep_research does not yet call route_depth/CanonicalInquiry/explore, so a trivial question asked through the MCP tool is not yet capped (the row's behavioural acceptance is only met at module level). Next slice: have web_deep_research derive its depth and budget from route_depth and record explore()'s stop in its result.; Depth routing is keyword/length heuristic, not model-based; the drift guard is term-overlap, so paraphrased on-topic branches with no shared terms would be rejected.; Only the information-gain stop is a term-coverage proxy for expected information gain; no semantic estimator.; implementer did not claim acceptance met",
     }),
+    ('MODEL-004', {
+        "status": PARTIAL,
+        "current_implementation": 'Added friday/gateway_completer.py: gateway_completer(gw, provider, model, *, timeout_s=30.0, max_output_tokens=256) returns a model_profiling Completer that calls gw._infer (the one-route seam, no fallback). The request goes out as one user message. Tools go as {"type":"function","function":spec}. I (build run, commit bb239219b)',
+        "next_action": 'GAPS: Nothing calls gateway_completer in production yet; the onboarding trigger for a newly seen route is the next wiring step (recorded as FUTURE in reachability).; The image_url data-URI shape for vision is an assumption; I did not check that the worker accepts it. A route that does not will fail the vision probe, which is a valid measurement.; The slice packet said not to touch reachability.py, but the task instructions required the DECLARED entry, so I added it (one entry, no KNOWN entries). tests/test_reachability.py passes.; Controller: integrated as PARTIAL because the slice has no production caller yet; a confirm can follow.; implementer did not claim acceptance met',
+    }),
 ]
 
 
