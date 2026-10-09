@@ -207,6 +207,10 @@ DECLARED = {
     "friday/quarantine_guard": (FUTURE,
                                 "copied into a quarantine root and run as the "
                                 "child's entry script, never imported"),
+    "friday/experimental_local": (FUTURE,
+                                  "LAB-001 slice 1: the narrow-task fence for the "
+                                  "EXPERIMENTAL_LOCAL_MODEL route, run by "
+                                  "tests/test_experimental_local.py"),
     "friday/model_profiling": (FUTURE,
                                "MODEL-004: the open-set route profiler, built and "
                                "tested against mock routes; its caller is a real "
