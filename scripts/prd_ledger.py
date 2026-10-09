@@ -4255,6 +4255,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Clean-machine validator: CLEAN-03 verdict extracted to doctor_verdict() matching the check name only (a detail mentioning credentials no longer excuses a FAIL); each run now prints BLOCKED_EXTERNAL when Windows Sandbox is absent. Real VM run still not possible here. (build run, commit 3061ccd06)',
         "next_action": 'GAPS: No real Windows VM or Windows Sandbox run: WindowsSandbox.exe is absent on this host; validate_exe_clean.py remains the C:\\Windows\\Temp simulation.; validate_exe_clean.py was not re-run end to end against a rebuilt dist; only its new pure helpers are unit-tested.; EXE-06/07 voice-worker journeys still need --with-agent and a real .env beside the exe; they report BLOCKED_EXTERNAL or SKIP on a clean machine.; implementer did not claim acceptance met',
     }),
+    ('CAP-003', {
+        "status": PARTIAL,
+        "current_implementation": 'capability_manifest(probe=True) now runs every health probe once and returns by_state counts plus the unhealthy rows with reasons, giving probe_all()/unhealthy() their first production caller. Default listing stays unprobed. (build run, commit 1dd6762c7)',
+        "next_action": 'GAPS: No production code registers capabilities.register_probe: all 195 native capabilities still read REGISTERED, so probe=True only condemns executors and tools someone probes. A probe needs a per-tool meaning of working that was not available to read here.; fabric and capabilities ids are disjoint (38 providers vs 195 capabilities, no overlap), so the scouted plan to delegate fabric.health() to capabilities.health() has nothing to bridge; unification needs a declared link on Provider.; Native tool calls are not gated on health: the call path is policy.PolicyEngine.decide, and putting probes there is a policy-seam decision for the owner.; Fabric providers in probe=True report the state the fabric holds and are never activated; fabric.health() still reports READY for an adapter with no health probe.; Capability version/last_verified/tests are unset on all 195 records; back-filling without real verification evidence would be fabrication.; probe_all() does not fail fast and a hung native probe has no timeout (executors have a 10s cap).',
+    }),
 ]
 
 
