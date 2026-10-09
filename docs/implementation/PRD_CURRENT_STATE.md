@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: d233247 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T16:40:39+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 138, "PARKED_BY_OWNER": 1, "PARTIAL": 51, "VERIFIED": 64}
+- HEAD: fb1996f on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T16:59:53+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 127, "PARKED_BY_OWNER": 1, "PARTIAL": 62, "VERIFIED": 64}
 - Unresolved P0: 11
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (305): SEC-005=SCOUT_DONE
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), MEM-002 (NOT_CONFIRMED), MEM-003 (integration refused), ACT-001 (VERIFIER_FAIL)
-- Open escalations: 217
-  - MEM-002 resolved: controller unpark: P0 unpark triage wf_daa29142, 2026-10-09: slice packet written to the ledger
-  - MEM-002 integration: {"requirement": "MEM-002", "result": "NOT_CONFIRMED", "red_green": {}, "verifier": {"verdict": "FAIL
-  - CAP-003 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
-  - CTX-004 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
+- Last wave (308): MEM-003=SCOUT_DONE, JIT-001=BLOCKED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), MEM-002 (NOT_CONFIRMED), ACT-001 (VERIFIER_FAIL), SEC-005 (blocked), JIT-001 (blocked)
+- Open escalations: 221
   - COG-006 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
   - CAP-MKT-002 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
   - EXP-001 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
   - MEM-003 resolved: controller unpark: controller 2026-10-09 (owner approved): ACT-001 integrated at 20:08, the hold con
   - MEM-003 integration: merge queue: MEM-003 waited 1800s behind DEVICE-003
   - ACT-001 integration: {"requirement": "ACT-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tests
+  - MEM-003 resolved: controller unpark: controller re-ran the integration refused only because it waited 1800s in the mer
+  - DEVICE-003 resolved: controller unpark: controller re-integrated DEVICE-003 after declaring its table for workspace isola
+  - SEC-005 blocked: Question for the owner: does Hermes' gateway have an RPC, config key or event that names its registe
+  - JIT-001 blocked: Scout says browser_automate/browser_act 'lack real implementations'; the code has both, with 7 tests
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
