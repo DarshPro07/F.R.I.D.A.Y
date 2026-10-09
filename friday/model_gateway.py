@@ -57,6 +57,7 @@ from pathlib import Path
 from friday import cli_model_provider
 from friday import data_class
 from friday import domain_gate
+from friday import gateway_retry
 from friday import privacy
 from friday import provider_health
 
@@ -183,6 +184,9 @@ class ModelGatewayRequest:
     #: System text added when a tool-less route serves a request that carries
     #: `tools`, so the model says it cannot act instead of narrating that it did.
     no_tools_note: str = ""
+    #: Extra tries on the SAME route after a transient provider error or a stalled
+    #: worker call (UCW-001), spread inside `timeout_s`. 0 = none: fail over at once.
+    transient_retries: int = 0
 
     def input_tokens(self) -> int:
         return sum(approx_tokens(str(m.get("content", "")))
@@ -966,6 +970,9 @@ class ModelGateway:
     #: No CLI backends unless __init__ registers them. A class default (only ever read) keeps a
     #: gateway built without __init__ - as two test modules do - working (MODEL-012 regression).
     _cli: dict = {}
+    #: The clock and the wait a same-route retry uses (UCW-001); a test swaps them.
+    _retry_clock = staticmethod(time.monotonic)
+    _retry_sleep = staticmethod(time.sleep)
 
     def __init__(self, *, worker: ModelGatewayWorker | None = None,
                  telemetry: GatewayTelemetry | None = None,
@@ -1579,7 +1586,13 @@ class ModelGateway:
                 params["reasoning"] = {"effort": reasoning}
             started = time.monotonic()
             try:
-                reply = self._infer(provider, params, timeout=request.timeout_s)
+                if request.transient_retries > 0:
+                    reply = self._infer_retrying(
+                        request, provider, params, tier=tier, model=model, attempts=attempts,
+                        index=index, input_tokens=input_tokens, fingerprint=fingerprint,
+                        refusal_is_final=bool(verdict_domain.domain))
+                else:
+                    reply = self._infer(provider, params, timeout=request.timeout_s)
             except GatewayUnavailable as exc:
                 elapsed = int((time.monotonic() - started) * 1000)
                 attempts.append({"tier": tier, "provider": provider, "model": model,
@@ -1745,6 +1758,56 @@ class ModelGateway:
             data_class=content_class, escalations=escalations)
 
     # -- helpers ------------------------------------------------------------
+
+    def _infer_retrying(self, request: ModelGatewayRequest, provider: str, params: dict, *,
+                        tier: str, model: str, attempts: list[dict], index: int,
+                        input_tokens: int, fingerprint: str, refusal_is_final: bool) -> dict:
+        """UCW-001: one route's `_infer`, tried again after a transient provider error or
+        a stalled worker, at most `transient_retries` times with capped backoff and never
+        past `timeout_s` from the first try. Returns the last reply (or re-raises the last
+        stall) for `infer` to judge as it always has; a permanent failure comes back after
+        one try. Each failed try that is followed by another is one 'retried' attempt, one
+        telemetry row and one spend in the usage guard (under its own fingerprint, so a retry
+        is not counted as the context being submitted again)."""
+        policy = gateway_retry.RetryPolicy(max_retries=request.transient_retries)
+        deadline = self._retry_clock() + request.timeout_s
+        done = 0
+        while True:
+            started = time.monotonic()
+            timeout = policy.try_timeout(timeout_s=request.timeout_s, done=done,
+                                         remaining_s=deadline - self._retry_clock())
+            stall = None
+            try:
+                reply = self._infer(provider, params, timeout=timeout)
+            except GatewayUnavailable as exc:
+                reply, stall = None, exc
+            if stall is None and reply.get("ok"):
+                return reply
+            err = (reply or {}).get("error") or {}
+            code = "GATEWAY_UNAVAILABLE" if stall else str(err.get("code") or "PROVIDER_ERROR")
+            message = str(stall if stall else err.get("message") or "")[:500]
+            if stall is None and refusal_is_final and domain_gate.is_provider_refusal(message):
+                kind = gateway_retry.PERMANENT          # a safeguard speaking, not a sick route
+            else:
+                kind = gateway_retry.classify(code, stall)
+            wait = None if kind == gateway_retry.PERMANENT else policy.plan(
+                done=done, remaining_s=deadline - self._retry_clock())
+            if wait is None:
+                if stall:
+                    raise stall
+                return reply
+            elapsed = int((time.monotonic() - started) * 1000)
+            done += 1
+            attempts.append({"tier": tier, "provider": provider, "model": model,
+                             "status": "retried", "class": kind, "code": code, "try": done,
+                             "error": message, "latency_ms": elapsed, "wait_s": wait})
+            self._record(request, status="retried", provider=provider, model=model, tier=tier,
+                         error=f"{code}: {message}", latency_ms=elapsed,
+                         input_tokens=input_tokens, failover_count=index,
+                         fingerprint=fingerprint, entitlement_state=code)
+            self.guard.record(request.objective_id, input_tokens=input_tokens,
+                              output_tokens=0, fingerprint=f"{fingerprint}:retry")
+            self._retry_sleep(wait)
 
     def _record_escalation(self, request: ModelGatewayRequest, previous: dict, tier: str,
                            provider: str, model: str, cause: str, detail: str) -> dict:
