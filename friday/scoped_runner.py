@@ -671,4 +671,17 @@ class ScopedRunner:
             raise ScopedRunnerError("no command to run")
         if vector[0] == "python":
             vector[0] = self._python
-        return self._env.run(vector, timeout=timeout)
+        return self._env.run(vector, timeout=self._bounded(timeout))
+
+    def _bounded(self, timeout: float | None) -> float:
+        """The command's wall time, never past what the envelope allows: the
+        caller's timeout, the envelope's per-command limit and the time left
+        before it expires - whichever ends first. An envelope already over is
+        refused rather than given a moment of access."""
+        bounds = [self.limits.seconds] + ([timeout] if timeout is not None else [])
+        left = self.envelope.seconds_left()
+        if left is not None:
+            if left <= 0:
+                raise ScopedRunnerError("the envelope has expired; nothing runs under it")
+            bounds.append(left)
+        return min(bounds)

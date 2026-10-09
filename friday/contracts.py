@@ -542,8 +542,8 @@ ANY_CAPABILITY = "*"
 #: refuses what is outside it. ADVISORY: the worker is told, and something it
 #: may legitimately do (a test suite, a gateway's own tools) is not held to it.
 #: DISABLED: the worker is not given the capability at all, so there is nothing
-#: left to hold it to (a delegation's shell: a program is not confined by file
-#: roots, so under an envelope there is none).
+#: left to hold it to (a delegation's commands on a host with no OS sandbox:
+#: a program is not confined by file roots, so there they do not run).
 ENFORCED = "ENFORCED"
 ADVISORY = "ADVISORY"
 DISABLED = "DISABLED"

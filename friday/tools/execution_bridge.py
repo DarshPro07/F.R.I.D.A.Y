@@ -30,9 +30,13 @@ rest. Friday's PolicyEngine still governs what the Friday side exposes.
 
 from __future__ import annotations
 
+import atexit
+import json
+import logging
 import os
 import shlex
 import sys
+import threading
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -65,6 +69,64 @@ def _workspace() -> Path:
 
 
 _env = None
+
+
+_scoped = None            # the sandbox open for the delegations now held, or None
+_scoped_lock = threading.Lock()
+logger = logging.getLogger(__name__)
+
+
+class _Scoped:
+    """One ScopedRunner and the delegations (their command envelope) it serves."""
+
+    def __init__(self, envelope) -> None:
+        from friday import scoped_runner
+
+        self.key = json.dumps(envelope.to_dict(), sort_keys=True)
+        self.runner = scoped_runner.ScopedRunner(envelope).__enter__()
+
+    def close(self) -> None:
+        self.runner.__exit__(None, None, None)
+
+
+def _close_scoped() -> None:
+    """Take down the open sandbox: its grants, cut-offs and profile. Holds `_scoped_lock`."""
+    global _scoped
+    held, _scoped = _scoped, None
+    if held is None:
+        return
+    try:
+        held.close()
+    except Exception as exc:                                 # noqa: BLE001
+        # A failed restore stays in the runner's lease; the next sweep retries it.
+        logger.warning("execution_bridge.scoped_close_failed: %s", exc)
+
+
+def close_scoped_runner() -> None:
+    with _scoped_lock:
+        _close_scoped()
+
+
+atexit.register(close_scoped_runner)
+
+
+def _run_scoped(vector: list[str], timeout: float, envelope):
+    """Run in the sandbox for `envelope`, opening it if the held set changed."""
+    from friday.scoped_runner import ScopedRunnerError
+
+    global _scoped
+    with _scoped_lock:
+        key = json.dumps(envelope.to_dict(), sort_keys=True)
+        if _scoped is not None and _scoped.key != key:
+            _close_scoped()
+        try:
+            if _scoped is None:
+                _scoped = _Scoped(envelope)
+            return _scoped.runner.run(vector, timeout=timeout)
+        except ScopedRunnerError as exc:
+            _close_scoped()
+            delegation_scope.record_refusal(str(exc))
+            raise
 
 
 def _environment():
@@ -283,19 +345,14 @@ def bridge_run_command(command: str, timeout: int = 300) -> str:
     system-mutating executables are refused. Output is captured, truncated
     and credential-redacted by Friday's execution layer.
 
-    Refused outright while a delegation is held to an execution envelope: a
-    program is not confined by the envelope's file roots.
+    While a delegation is held to an execution envelope the program runs only
+    inside an OS sandbox (AppContainer) bounded by that envelope, with no
+    network; if no sandbox can be built it is refused, never run unsandboxed.
 
     Args:
         command: The program and its arguments, e.g. "git status --short".
         timeout: Seconds before the process is killed.
     """
-    # First, before the command is parsed: under an envelope no program runs,
-    # whatever it is, because only FRIDAY's file tools are held to the roots.
-    try:
-        delegation_scope.refuse_commands()
-    except JailError as exc:
-        return f"{REFUSED}: {exc}"
     try:
         vector = shlex.split(command, posix=False)
     except ValueError as exc:
@@ -312,7 +369,22 @@ def bridge_run_command(command: str, timeout: int = 300) -> str:
         return (f"{REFUSED}: {executable!r} is not allowed through the "
                 f"bridge. Run programs directly (git, python, pytest, "
                 f"node...) - no shells, no system mutation.")
-    result = _environment().run(vector, timeout=float(min(timeout, 600)))
+    seconds = float(min(timeout, 600))
+    try:
+        envelope = delegation_scope.command_envelope()
+    except JailError as exc:
+        close_scoped_runner()
+        return f"{REFUSED}: {exc}"
+    if envelope is None:
+        close_scoped_runner()            # the delegations that had a sandbox are gone
+        result = _environment().run(vector, timeout=seconds)
+    else:
+        from friday.scoped_runner import ScopedRunnerError
+
+        try:
+            result = _run_scoped(vector, seconds, envelope)
+        except ScopedRunnerError as exc:
+            return f"{REFUSED}: no command runs for this delegation without its sandbox: {exc}"
     head = (f"exit={result.exit_code} seconds={result.seconds:.1f}"
             f"{' TIMED_OUT' if result.timed_out else ''}")
     out = result.stdout[-20_000:]

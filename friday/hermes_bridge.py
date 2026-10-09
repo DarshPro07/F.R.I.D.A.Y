@@ -828,11 +828,14 @@ def bounded_by(bundle: TaskBundle, envelope) -> Bounded:
     and the refusal are FRIDAY's to hold. The roots are held too: `delegate`
     registers the envelope (`delegation_scope`) and the exec bridge, the only
     file access the delegation has, judges every path against it. A program
-    the worker ran would not be confined by file roots, so the bridge runs no
-    command for a delegation under an envelope (DISABLED, owner ruling
-    2026-10-03c). The network scope reaches Hermes as the task's constraints
-    only: ADVISORY here and reported as such.
+    the worker runs is not confined by file roots, so the bridge runs it only
+    inside an AppContainer bounded by the envelope's roots (ENFORCED: the OS
+    refuses every path outside them; owner ruling 2026-10-03c, EXEC-SBX-001)
+    and, on a host with no AppContainer, runs none (DISABLED). The network
+    scope reaches Hermes as the task's constraints only: ADVISORY here and
+    reported as such.
     """
+    from friday import appcontainer
     from friday import contracts as c
 
     if envelope.expired():
@@ -867,7 +870,8 @@ def bounded_by(bundle: TaskBundle, envelope) -> Bounded:
         expires_in=envelope.seconds_left(),
         envelope=envelope,
         strength={"capability": c.ENFORCED, "expiry": c.ENFORCED,
-                  "file_roots": c.ENFORCED, "commands": c.DISABLED,
+                  "file_roots": c.ENFORCED,
+                  "commands": c.ENFORCED if appcontainer.available() else c.DISABLED,
                   "network": c.ADVISORY, "tool_calls": c.ADVISORY})
 
 

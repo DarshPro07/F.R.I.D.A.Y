@@ -375,6 +375,44 @@ def test_run_outside_the_context_is_refused(world):
         world.runner().run(["python", "-c", "pass"], timeout=5)
 
 
+# === no command outlives its envelope ========================================
+
+def _stamp_in(seconds: float) -> str:
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+
+
+@needs_os_boundary
+def test_a_command_running_when_the_envelope_ends_is_stopped_then(world):
+    # The caller asks for 600 s; the envelope ends in 20. The command dies with the envelope.
+    import time
+    started = time.monotonic()
+    with world.runner(expires_at=_stamp_in(20)) as runner:
+        ran = runner.run(["python", "-c", "import time; time.sleep(120)"], timeout=600)
+    assert ran.timed_out, (ran.exit_code, ran.stdout, ran.stderr)
+    assert time.monotonic() - started < 60
+
+
+@needs_os_boundary
+def test_a_command_is_held_to_the_envelopes_per_command_limit(world):
+    import time
+    from friday.contracts import Limits
+    started = time.monotonic()
+    with world.runner(limits=Limits(seconds=3)) as runner:
+        ran = runner.run(["python", "-c", "import time; time.sleep(120)"], timeout=600)
+    assert ran.timed_out, (ran.exit_code, ran.stdout, ran.stderr)
+    assert time.monotonic() - started < 60
+
+
+@needs_os_boundary
+def test_an_envelope_already_over_runs_nothing(world, monkeypatch):
+    with world.runner() as runner:
+        monkeypatch.setattr(Envelope, "seconds_left", lambda self, now=None: -1.0)
+        with pytest.raises(scoped_runner.ScopedRunnerError, match="expired"):
+            runner.run(["python", "-c", "open('ran.txt', 'w').write('x')"], timeout=5)
+    assert not (world.root_w / "ran.txt").exists()
+
+
 # === slice 2: parity with the file jail, one profile per runner, a sweep ====
 
 import json

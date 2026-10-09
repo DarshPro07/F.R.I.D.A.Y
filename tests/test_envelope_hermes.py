@@ -59,8 +59,19 @@ def test_a_delegation_is_compiled_from_its_envelope(tmp_path):
     assert bounded.strength["expiry"] == c.ENFORCED
     assert bounded.strength["capability"] == c.ENFORCED
     assert bounded.strength["file_roots"] == c.ENFORCED
-    assert bounded.strength["commands"] == c.DISABLED
     assert bounded.strength["network"] == c.ADVISORY
+
+
+@pytest.mark.parametrize("sandbox, strength", [(True, c.ENFORCED), (False, c.DISABLED)],
+                         ids=["os-sandbox", "no-os-sandbox"])
+def test_command_strength_is_reported_from_the_host_not_assumed(tmp_path, monkeypatch,
+                                                                sandbox, strength):
+    # Commands for a delegation run only inside an AppContainer bounded by the
+    # envelope (EXEC-SBX-001); with no AppContainer the bridge runs none.
+    from friday import appcontainer
+    monkeypatch.setattr(appcontainer, "available", lambda: sandbox)
+    bounded = hb.bounded_by(hb.TaskBundle(goal="fix the parser"), _envelope(tmp_path, seconds=120))
+    assert bounded.strength["commands"] == strength
 
 
 def test_the_network_scope_is_stated_to_the_task(tmp_path):

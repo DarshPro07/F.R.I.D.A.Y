@@ -27,8 +27,10 @@ ordinary workspace jail it has always been.
 The registry lives in FRIDAY's own state directory, which the jail-backed file
 tools refuse (`fsjail._reject_own_state`). A program a worker runs is not
 confined by file roots - an interpreter opens any path its user can - so while
-a delegation holds the bridge no command runs at all (`refuse_commands`; owner
-ruling 2026-10-03c). Commands come back only behind an OS sandbox (EXEC-SBX-001).
+a delegation holds the bridge a command runs only inside the OS sandbox the
+bridge builds from `command_envelope` (owner ruling 2026-10-03c, EXEC-SBX-001);
+with no sandbox to run it in, it is refused and never run in the ordinary
+environment.
 """
 from __future__ import annotations
 
@@ -230,12 +232,37 @@ def resolve(raw: str, *, write: bool = False) -> Path | None:
         raise
 
 
-def refuse_commands() -> None:
+def _inside(path: str, root: str) -> bool:
+    """Whether `path` lies in `root`, on real paths and case-folded."""
+    here = os.path.normcase(os.path.realpath(path))
+    top = os.path.normcase(os.path.realpath(root))
+    try:
+        return os.path.commonpath([here, top]) == top
+    except ValueError:                      # another drive
+        return False
+
+
+def _kept(candidates: list[str], envelopes: list[c.Envelope], attr) -> list[str]:
+    """The candidate roots every envelope also covers, nested duplicates dropped."""
+    shared = [root for root in dict.fromkeys(candidates)
+              if root and all(any(_inside(root, own) for own in attr(envelope) if own)
+                              for envelope in envelopes)]
+    return [root for root in shared
+            if not any(other != root and _inside(root, other) for other in shared)]
+
+
+def command_envelope() -> c.Envelope | None:
     """
-    Raise `JailError` when a command may not run: a delegation holds the bridge
-    (expired or not), or the registry cannot be read. Returns when none does and
-    the ordinary workspace jail applies. Called before the command is parsed, so
-    nothing is launched and the refusal names no program that would get round it.
+    The one envelope a command runs under, or None when nothing is held (the
+    ordinary workspace jail applies). Raises `JailError` when a command may not
+    run at all: the registry cannot be read, a held envelope has expired or
+    names no expiry, held workspaces differ, or no write root survives.
+
+    Several delegations can hold the bridge and a command cannot be told
+    apart, so the envelope is the INTERSECTION: a root of any held envelope
+    stays only if every held envelope has a root containing it (read roots
+    count a write root too; write roots come from write roots only), and it
+    ends with the earliest of them.
     """
     try:
         held = active()
@@ -243,13 +270,51 @@ def refuse_commands() -> None:
         _refused([], "(command)", False, exc)
         raise
     if not held:
-        return
-    why = JailError(
-        "no command can be run while this delegation is held to an execution "
-        "envelope; its file access is the bridge's read, write, list and search "
-        "tools, held to the envelope's roots")
-    _refused(held, "(command)", False, why)
-    raise why
+        return None
+    try:
+        envelopes = [entry.envelope for entry in held]
+        if any(envelope.expired() for envelope in envelopes):
+            raise JailError("this delegation's envelope has expired")
+        if any(envelope.seconds_left() is None for envelope in envelopes):
+            raise JailError("a delegation's envelope names no expiry, so it is not one")
+        workspace = held[0].workspace
+        if any(not _same(entry.workspace, workspace) for entry in held):
+            raise JailError("delegations under different workspaces are live; "
+                            "the bridge cannot tell their commands apart")
+        writes = _kept([root for envelope in envelopes for root in envelope.write_roots],
+                       envelopes, lambda envelope: envelope.write_roots)
+        if not writes:
+            raise JailError("the held envelopes share no write root, so a command has "
+                            "nowhere to run")
+        reads = _kept([root for envelope in envelopes
+                       for root in envelope.read_roots + envelope.write_roots],
+                      envelopes, lambda envelope: envelope.read_roots + envelope.write_roots)
+        reads = [root for root in reads if not any(_inside(root, own) for own in writes)]
+        latest = min(envelopes, key=lambda envelope: envelope.seconds_left())
+        limits = c.Limits(**{name: min(getattr(envelope.limits, name) for envelope in envelopes)
+                             for name in ("memory_mb", "processes", "seconds", "artifact_bytes")})
+        return c.Envelope(
+            run_id="+".join(envelope.run_id for envelope in envelopes),
+            objective_id="+".join(dict.fromkeys(
+                envelope.objective_id for envelope in envelopes if envelope.objective_id)),
+            cwd=workspace, read_roots=tuple(reads), write_roots=tuple(writes),
+            # Lineage is the least trusted held: read material taints the command.
+            provenance=(c.READ_MATERIAL if any(envelope.provenance == c.READ_MATERIAL
+                                               for envelope in envelopes) else c.PERSON),
+            attended=all(envelope.attended for envelope in envelopes),
+            limits=limits, expires_at=latest.expires_at)
+    except JailError as exc:
+        _refused(held, "(command)", False, exc)
+        raise
+
+
+def record_refusal(reason: str) -> None:
+    """Log a refused command (path "(command)") against the delegations now held."""
+    try:
+        held = active()
+    except ScopeError:
+        held = []
+    _refused(held, "(command)", False, JailError(reason))
 
 
 def listing(directory: Path) -> list[str]:

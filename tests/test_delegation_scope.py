@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -24,9 +25,11 @@ from pathlib import Path
 
 import pytest
 
+from friday import appcontainer
 from friday import contracts as c
 from friday import delegation_scope as S
 from friday import hermes_bridge as hb
+from friday import quarantine, scoped_runner
 from friday.fsjail import FileJail, JailError
 from friday.toolsets import files as F
 from friday.tools import execution_bridge as bridge
@@ -58,8 +61,14 @@ def _envelope(area: Area, *, seconds=3600.0, read=None, write=None) -> c.Envelop
         allowed_capabilities=("hermes_delegate",), expires_at=_stamp(seconds))
 
 
+@pytest.fixture(scope="session")
+def sandbox_runtime(tmp_path_factory):
+    """The interpreter copy a sandbox reads is built once per session."""
+    return tmp_path_factory.mktemp("scoped-runtime") / "_runtime"
+
+
 @pytest.fixture
-def area(tmp_path, monkeypatch):
+def area(tmp_path, monkeypatch, sandbox_runtime):
     here = Area(tmp_path, tmp_path / "ws", tmp_path / "readable",
                 tmp_path / "elsewhere", tmp_path / "profile")
     for folder in (here.workspace, here.readable, here.elsewhere, here.profile):
@@ -71,10 +80,15 @@ def area(tmp_path, monkeypatch):
     F.reset_jail(FileJail(roots=(tmp_path,)))
     monkeypatch.setenv("FRIDAY_BRIDGE_WORKSPACE", str(here.profile))
     monkeypatch.setattr(bridge, "_env", None)
+    # raising=False: these tests also run against the bridge from before its
+    # sandbox existed, where only the behaviour under test may fail.
+    monkeypatch.setattr(bridge, "_scoped", None, raising=False)
+    monkeypatch.setattr(quarantine, "default_runtime_dir", lambda: sandbox_runtime)
     # A delegation under an envelope runs on a gateway started with the
     # profile's toolsets, so the profile has to name some.
     _profile(tmp_path, monkeypatch, "toolsets: [web]\n")
     yield here
+    getattr(bridge, "close_scoped_runner", lambda: None)()
     F.reset_jail(None)
     if bridge._env is not None:
         bridge._env.terminate()
@@ -348,61 +362,135 @@ def test_an_entry_left_by_a_dead_process_is_pruned_at_the_next_registration(area
     assert [e.key for e in S.active()] == ["lease-live"]
 
 
-# -- a program is not confined by file roots, so under an envelope none runs ----------------
-# (owner ruling 2026-10-03c: commands come back only behind an OS sandbox, EXEC-SBX-001)
+# -- a program runs for a delegation only inside the OS sandbox -----------------------------
+# (owner ruling 2026-10-03c: commands come back for a scoped delegation only through the
+# AppContainer runner, EXEC-SBX-001 slice 3; each denial counts only after a CONTROL of the
+# same command succeeded inside the roots)
 
-def _python_writes(target: Path) -> str:
-    return f'python -c "open(r\'{target}\', \'w\').write(\'x\')"'
-
-
-def _this_interpreter_writes(target: Path) -> str:
-    return f'"{sys.executable}" -c "open(r\'{target}\', \'w\').write(\'x\')"'
-
-
-def _node_writes(target: Path) -> str:
-    return f'node -e "require(\'fs\').writeFileSync(\'{target.as_posix()}\', \'x\')"'
+needs_boundary = pytest.mark.skipif(
+    not (WINDOWS and appcontainer.available()),
+    reason="needs a Windows AppContainer (the OS boundary)")
 
 
-@pytest.mark.parametrize("command_for", [_python_writes, _this_interpreter_writes, _node_writes],
-                         ids=["python", "this-interpreter", "node"])
-def test_an_interpreter_cannot_write_outside_the_envelope_through_the_bridge(held, command_for):
+def _python_writes(control: Path, target: Path) -> str:
+    return (f'python -c "open(r\'{control}\', \'w\').write(\'c\'); print(\'CONTROL_OK\'); '
+            f'open(r\'{target}\', \'w\').write(\'x\'); print(\'ESCAPED\')"')
+
+
+def _provisioned_interpreter_writes(control: Path, target: Path) -> str:
+    # an interpreter named by absolute path - the sandbox's own copy; the venv's
+    # sys.executable is a launcher the container is refused, which proves nothing
+    exe = appcontainer.provision_runtime(quarantine.default_runtime_dir())
+    return (f'"{exe}" -c "open(r\'{control}\', \'w\').write(\'c\'); '
+            f'print(\'CONTROL_OK\'); open(r\'{target}\', \'w\').write(\'x\'); print(\'ESCAPED\')"')
+
+
+def _node_writes(control: Path, target: Path) -> str:
+    return (f'node -e "const fs = require(\'fs\'); fs.writeFileSync(\'{control.as_posix()}\', \'c\'); '
+            f'console.log(\'CONTROL_OK\'); fs.writeFileSync(\'{target.as_posix()}\', \'x\'); '
+            f'console.log(\'ESCAPED\')"')
+
+
+@needs_boundary
+@pytest.mark.parametrize("command_for", [_python_writes, _provisioned_interpreter_writes, _node_writes],
+                         ids=["python", "interpreter-by-path", "node"])
+def test_an_interpreter_run_through_the_bridge_cannot_write_outside_the_envelope(held, command_for):
+    if command_for is _node_writes and not shutil.which("node"):
+        pytest.skip("node is not installed")
+    control = held.workspace / "control.txt"
     escaped = held.elsewhere / "escaped.txt"
-    text = bridge.bridge_run_command(command_for(escaped))
-    assert _refused(text), text
+    text = bridge.bridge_run_command(command_for(control, escaped))
+    assert not _refused(text), text
+    assert "CONTROL_OK" in text, text                       # the in-root write worked ...
+    assert control.read_text(encoding="utf-8") == "c"
+    assert "ESCAPED" not in text, text                      # ... and the outside one did not
     assert not escaped.exists()
-    assert bridge._env is None, "nothing was launched, not even a contained environment"
+    assert bridge._env is None, "the unsandboxed environment was never used"
 
 
-@pytest.mark.parametrize("command", [
-    "git status --short", "pytest -q", "python --version", "node --version",
-    "powershell -NoProfile -Command ls", "cmd /c dir"],
-    ids=["git", "pytest", "python", "node", "powershell", "cmd"])
-def test_no_program_at_all_runs_for_a_delegation_under_an_envelope(held, command):
-    assert _refused(bridge.bridge_run_command(command))
-    assert bridge._env is None
+@needs_boundary
+@pytest.mark.parametrize("command", ["python --version", "git status --short", "pytest -q"],
+                         ids=["python", "git", "pytest"])
+def test_a_program_runs_for_a_delegation_only_inside_the_sandbox(held, command):
+    text = bridge.bridge_run_command(command)
+    assert not _refused(text), text
+    assert text.startswith("exit="), text            # it ran, and its own result came back
+    if command == "python --version":
+        assert "exit=0" in text and "Python" in text, text
+    assert bridge._env is None, "the unsandboxed environment was never used"
+    assert bridge._scoped is not None
 
 
-def test_the_refusal_names_no_program_that_would_get_round_it(held):
-    # the forbidden-shell refusal ("run programs directly (git, python, node...)")
-    # is a different message; a delegation under an envelope must get this one
-    for command in ("powershell -c ls", "python -c pass", "git status"):
+@pytest.mark.parametrize("command", ["powershell -NoProfile -Command ls", "cmd /c dir"],
+                         ids=["powershell", "cmd"])
+def test_shells_stay_refused_for_a_delegation_by_the_executable_list(held, command):
+    text = bridge.bridge_run_command(command)
+    assert _refused(text) and "is not allowed through the bridge" in text, text
+    assert bridge._env is None and bridge._scoped is None
+
+
+def _expired(area):
+    path = Path(os.environ[S.ENV_DIR]) / "lease-1.json"
+    entry = json.loads(path.read_text())
+    entry["envelope"]["expires_at"] = _stamp(-1)
+    path.write_text(json.dumps(entry))
+
+
+def _unreadable(area):
+    (Path(os.environ[S.ENV_DIR]) / "broken.json").write_text("{not json", encoding="utf-8")
+
+
+def _no_os_boundary(area, monkeypatch):
+    monkeypatch.setattr(appcontainer, "available", lambda: False)
+
+
+def _no_write_root(area):
+    S.release("lease-1")
+    S.register("lease-1", _envelope(area, read=[area.workspace, area.readable], write=[]),
+               str(area.workspace))
+
+
+@pytest.mark.parametrize("break_it", ["expired", "unreadable", "no-os-boundary", "no-write-root"])
+def test_with_no_sandbox_to_run_in_nothing_runs_and_the_bridge_says_refused(
+        held, monkeypatch, break_it):
+    {"expired": lambda: _expired(held), "unreadable": lambda: _unreadable(held),
+     "no-os-boundary": lambda: _no_os_boundary(held, monkeypatch),
+     "no-write-root": lambda: _no_write_root(held)}[break_it]()
+    ran = held.workspace / "ran.txt"
+    text = bridge.bridge_run_command(f'python -c "open(r\'{ran}\', \'w\').write(\'x\')"')
+    assert _refused(text), text
+    assert not ran.exists()
+    assert bridge._env is None, "no fallback to the unsandboxed environment"
+    assert bridge._scoped is None, "no sandbox was opened either"
+
+
+@pytest.mark.parametrize("break_it", ["expired", "unreadable", "no-os-boundary"])
+def test_the_refusal_names_no_program_that_would_get_round_it(held, monkeypatch, break_it):
+    {"expired": lambda: _expired(held), "unreadable": lambda: _unreadable(held),
+     "no-os-boundary": lambda: _no_os_boundary(held, monkeypatch)}[break_it]()
+    for command in ("python -c pass", "git status"):
         text = bridge.bridge_run_command(command)
         assert _refused(text)
-        assert "envelope" in text
         assert not re.search(r"\b(python|node|pytest|git|interpreters?|programs? directly)\b",
                              text, re.IGNORECASE), text
+    # the refusal for a held delegation says why in the envelope's own terms
+    if break_it == "expired":
+        assert "envelope" in text
 
 
-def test_a_refused_command_is_logged_with_the_delegation_that_was_refused(held, caplog):
+def test_a_refused_command_is_logged_with_the_delegation_that_was_refused(
+        held, monkeypatch, caplog):
+    monkeypatch.setattr(appcontainer, "available", lambda: False)
     with caplog.at_level(logging.WARNING, logger="friday.delegation_scope"):
         assert _refused(bridge.bridge_run_command("python --version"))
     assert any("delegation_scope.refused" in r.getMessage() and "(command)" in r.getMessage()
                for r in caplog.records)
     line = json.loads((Path(os.environ[S.ENV_DIR]) / S.REFUSALS).read_text().splitlines()[-1])
     assert line["runs"] == "OBJ-S" and line["path"] == "(command)"
+    assert "OS boundary" in line["reason"]
 
 
-def test_files_stay_available_to_the_delegation_while_commands_are_off(held):
+def test_files_stay_available_to_the_delegation_beside_commands(held):
     assert bridge.bridge_write_file("made.txt", "by the file tool").startswith("wrote")
     assert (held.workspace / "made.txt").read_text(encoding="utf-8") == "by the file tool"
     assert "by the file tool" in bridge.bridge_read_file("made.txt")
@@ -412,14 +500,148 @@ def test_with_no_delegation_the_bridge_still_runs_commands_in_the_profile_worksp
     out = bridge.bridge_run_command('python -c "import os; print(os.getcwd())"')
     assert not _refused(out), out
     assert str(area.profile.resolve()).lower() in out.lower(), out
+    assert bridge._scoped is None
 
 
 def test_commands_come_back_when_the_delegation_is_released(area):
     S.register("lease-c", _envelope(area), str(area.workspace))
-    assert _refused(bridge.bridge_run_command("python --version"))
     S.release("lease-c")
     out = bridge.bridge_run_command("python --version")
     assert not _refused(out) and "exit=0" in out, out
+
+
+_PROBE = """
+import sys
+from pathlib import Path
+for label, kind, path in zip(sys.argv[1::3], sys.argv[2::3], sys.argv[3::3]):
+    try:
+        if kind == "write":
+            Path(path).write_text("x")
+        else:
+            Path(path).read_text()
+        print(label, "OK")
+    except OSError:
+        print(label, "DENIED")
+"""
+
+
+@needs_boundary
+def test_two_held_delegations_run_a_command_with_only_the_roots_both_allow(area):
+    inner = area.workspace / "inner"
+    inner.mkdir()
+    (area.workspace / "probe.py").write_text(_PROBE, encoding="utf-8")
+    S.register("lease-a", _envelope(area), str(area.workspace))
+    narrower = c.Envelope(
+        run_id="OBJ-N", objective_id="OBJ-N", provenance=c.PERSON, attended=True,
+        cwd=str(area.workspace), read_roots=(str(area.workspace),),
+        write_roots=(str(inner),),
+        allowed_capabilities=("hermes_delegate",), expires_at=_stamp(3600))
+    S.register("lease-b", narrower, str(area.workspace))
+    try:
+        text = bridge.bridge_run_command(
+            f'python probe.py INNER write "{inner / "i.txt"}" '
+            f'SIBLING write "{area.workspace / "mine2.txt"}" '
+            f'OWN read "{area.workspace / "mine.txt"}" '
+            f'ONLYA read "{area.readable / "notes.txt"}" '
+            f'ELSEWHERE read "{area.elsewhere / "other.txt"}"')
+    finally:
+        S.release("lease-a")
+        S.release("lease-b")
+    assert not _refused(text), text
+    assert "INNER OK" in text and (inner / "i.txt").exists()         # both write there
+    assert "OWN OK" in text                                           # both read there
+    assert "SIBLING DENIED" in text and not (area.workspace / "mine2.txt").exists()
+    assert "ONLYA DENIED" in text                                     # b cannot read it
+    assert "ELSEWHERE DENIED" in text
+    assert bridge._env is None
+
+
+def _acl(path: Path) -> str:
+    done = subprocess.run(["icacls", str(path)], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stdout + done.stderr
+    return done.stdout.replace(str(path), "<path>")
+
+
+@needs_boundary
+def test_the_sandbox_is_reused_across_calls_and_closed_when_the_delegation_is_released(area):
+    protected = area.workspace / ".env"
+    protected.write_text("TOKEN=not-a-real-secret", encoding="utf-8")
+    dir_before = scoped_runner._aces(scoped_runner._read_sddl(area.workspace))
+    file_before = _acl(protected)
+    S.register("lease-r", _envelope(area), str(area.workspace))
+    first = bridge.bridge_run_command("python --version")
+    runner = bridge._scoped.runner
+    second = bridge.bridge_run_command("python --version")
+    assert "exit=0" in first and "exit=0" in second, (first, second)
+    assert bridge._scoped.runner is runner, "one profile for the same delegations"
+    sid = runner.sid
+    assert sid and sid in scoped_runner._read_sddl(area.workspace)    # granted while held
+    S.release("lease-r")
+    after = bridge.bridge_run_command("python --version")             # the held set changed
+    assert "exit=0" in after, after
+    assert bridge._scoped is None
+    assert sid not in scoped_runner._read_sddl(area.workspace)
+    assert scoped_runner._aces(scoped_runner._read_sddl(area.workspace)) == dir_before
+    assert _acl(protected) == file_before
+
+
+@needs_boundary
+def test_a_delegation_that_expires_closes_its_sandbox_and_refuses(area):
+    S.register("lease-e", _envelope(area), str(area.workspace))
+    try:
+        assert "exit=0" in bridge.bridge_run_command("python --version")
+        assert bridge._scoped is not None
+        path = Path(os.environ[S.ENV_DIR]) / "lease-e.json"
+        entry = json.loads(path.read_text())
+        entry["envelope"]["expires_at"] = _stamp(-1)
+        path.write_text(json.dumps(entry))
+        assert _refused(bridge.bridge_run_command("python --version"))
+        assert bridge._scoped is None
+    finally:
+        S.release("lease-e")
+
+
+def test_the_command_envelope_is_the_intersection_of_what_every_held_delegation_allows(area):
+    inner = area.workspace / "inner"
+    inner.mkdir()
+    S.register("lease-a", _envelope(area), str(area.workspace))
+    narrower = c.Envelope(
+        run_id="OBJ-N", objective_id="OBJ-N", provenance=c.PERSON, attended=True,
+        cwd=str(area.workspace), read_roots=(str(area.workspace),),
+        write_roots=(str(inner),),
+        allowed_capabilities=("hermes_delegate",), expires_at=_stamp(1800))
+    S.register("lease-b", narrower, str(area.workspace))
+    try:
+        envelope = S.command_envelope()
+    finally:
+        S.release("lease-a")
+        S.release("lease-b")
+    assert envelope.run_id == "OBJ-S+OBJ-N"
+    assert envelope.cwd == str(area.workspace)
+    assert envelope.write_roots == (str(inner),)
+    assert envelope.read_roots == (str(area.workspace),)    # `readable` is only lease-a's
+    assert 0 < envelope.seconds_left() <= 1800               # the earlier expiry
+
+
+def test_the_command_envelope_carries_the_least_trusted_lineage_held(area):
+    S.register("lease-a", _envelope(area), str(area.workspace))
+    read = c.Envelope(
+        run_id="OBJ-R", objective_id="OBJ-R", provenance=c.READ_MATERIAL, attended=False,
+        cwd=str(area.workspace), read_roots=(str(area.workspace),),
+        write_roots=(str(area.workspace),),
+        allowed_capabilities=("hermes_delegate",), expires_at=_stamp(1800))
+    S.register("lease-r", read, str(area.workspace))
+    try:
+        envelope = S.command_envelope()
+    finally:
+        S.release("lease-a")
+        S.release("lease-r")
+    assert envelope.provenance == c.READ_MATERIAL
+    assert envelope.attended is False
+
+
+def test_there_is_no_command_envelope_when_nothing_is_held(area):
+    assert S.command_envelope() is None
 
 
 # -- the supervisor holds it for the life of the run ---------------------------------------
@@ -446,7 +668,12 @@ def test_a_delegation_holds_the_bridge_to_its_envelope_until_it_ends(area, monke
         assert entry.envelope.write_roots == (str(area.workspace),)
         assert _refused(bridge.bridge_read_file(str(area.elsewhere / "other.txt")))
         escaped = area.elsewhere / "escaped.txt"
-        assert _refused(bridge.bridge_run_command(_python_writes(escaped)))
+        text = bridge.bridge_run_command(
+            _python_writes(area.workspace / "control.txt", escaped))
+        if WINDOWS and appcontainer.available():
+            assert "CONTROL_OK" in text and "ESCAPED" not in text, text   # sandboxed
+        else:
+            assert _refused(text), text                                   # no sandbox, no run
         assert not escaped.exists()
         supervisor.interrupt(out["work_run_id"])
         deadline = time.time() + 15
