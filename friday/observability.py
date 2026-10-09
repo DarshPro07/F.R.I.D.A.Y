@@ -394,9 +394,14 @@ def reconstruct(run_id: str, *, store: Store | None = None, redacted: bool = Tru
     task_rows = db.objective_tasks(run_id)
     events = _all_events(db, run_id)
     tools = _tool_results(db, run_id, task_rows)
-    audit = [a for a in _audit_rows(run_id) if "at" in a]
+    audit_read = _audit_rows(run_id)
+    audit = [a for a in audit_read if "at" in a]
     chain = _audit_chain(audit)
     disagreements: list[str] = []
+    # Rows that could not be read are not rows that were never written: a
+    # run whose audit trail is unreadable is not a run the black box vouches for.
+    for unread in (a for a in audit_read if "error" in a):
+        disagreements.append(f"audit rows could not be read: {unread['error']}")
     if not chain["intact"]:
         disagreements.append("audit chain is broken at or before this run's records")
 

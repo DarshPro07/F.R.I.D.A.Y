@@ -151,6 +151,10 @@ def test_a_completed_run_is_reconstructed_from_its_black_box(store):
     # The audit side: the chain verifies and the decision made for the run is in it.
     assert box["audit"]["chain"]["ok"] and box["audit"]["chain"]["intact"]
     assert [d["action"] for d in box["audit"]["decisions"] if d["action"] == "files.delete"]
+    # Every decision carries its audit id, oldest first, so a reader can tell
+    # the rows apart and match them to the chain.
+    ids = [d["id"] for d in box["audit"]["decisions"]]
+    assert ids and all(isinstance(i, int) for i in ids) and ids == sorted(set(ids))
 
 
 def test_reconstruction_trusts_the_events_not_the_ledger_rows(store):
@@ -188,6 +192,24 @@ def test_an_edited_audit_row_makes_the_black_box_untrusted(store):
     box = OB.reconstruct(run_id, store=store)
     assert not box["audit"]["chain"]["intact"] and not box["consistent"]
     assert any("audit chain" in d for d in box["disagreements"])
+
+
+def test_an_unreadable_audit_trail_is_not_a_consistent_black_box(store, monkeypatch):
+    from friday import trust as T
+    run_id = _blackbox_run(store)
+    assert OB.reconstruct(run_id, store=store)["consistent"]
+
+    def unreadable(self, **kw):
+        raise OSError("audit store locked")
+
+    # The chain can still be walked, so only the read of this run's rows fails.
+    monkeypatch.setattr(T.AuditLog, "query", unreadable)
+    box = OB.reconstruct(run_id, store=store)
+    # No decisions came back, and that must not read as "none were made".
+    assert box["audit"]["decisions"] == [] and box["sources"]["audit_rows"] == 0
+    assert not box["consistent"]
+    assert any("audit rows could not be read" in d and "audit store locked" in d
+               for d in box["disagreements"])
 
 
 def test_unknown_run_has_no_black_box(store):
