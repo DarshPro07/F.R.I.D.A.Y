@@ -24,8 +24,10 @@ Two processes plus a manager/executor split:
 - **Voice agent** (`agent_friday.py`, `uv run friday_voice`) — a LiveKit
   `AgentSession` (Sarvam STT → Gemini LLM → OpenAI TTS) that connects to the
   MCP server as a tool source. `start.py` runs both.
-- **Friday is the manager**; **Hermes** (`friday/hermes_bridge.py`, external
-  gateway under `D:\hermes`) is the execution engine for serious coding work.
+- **Friday is the manager**; **Hermes** (`friday/hermes_bridge.py`, an external
+  gateway that `hermes_bridge.locate()` finds - `HERMES_DIR`/`HERMES_PYTHON`, else the
+  user's install, `%LOCALAPPDATA%\hermes\hermes-agent` on this machine) is the execution
+  engine for serious coding work.
   Do not replace either (NON_NEGOTIABLES 1, 2).
 
 ## Repository layout

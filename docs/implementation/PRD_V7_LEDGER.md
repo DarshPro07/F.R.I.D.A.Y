@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `3730d8f9e31f9f54480e753feb2f57f17cd74a7702e813001724e6ab0d673bbb`
 - PRD size: 8353 lines, 326432 bytes
-- Repository HEAD: `7b44fe46a71487b34c851cc4e9b290eb27e1ee49`
+- Repository HEAD: `85ee72ff9cfa3f2d9ca565abb6cd14c4bbf9c3f0`
 - Uncommitted paths at generation: 44
-- Generated: 2026-10-09T23:01:13+05:30
+- Generated: 2026-10-09T23:36:35+05:30
 
 ## Status vocabulary
 
@@ -28,14 +28,14 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 | state | count |
 |---|---:|
 | MISSING | 127 |
-| VERIFIED | 65 |
-| PARTIAL | 61 |
+| VERIFIED | 66 |
+| PARTIAL | 60 |
 | EXISTING_UNVERIFIED | 7 |
 | DEFERRED_BY_PRD | 2 |
 | PARKED_BY_OWNER | 1 |
 | **total** | **263** |
 
-Unresolved P0: 10 (CORE-001, TRAJ-001, CTX-002, MEM-002, MEM-003, SEC-005, ACT-001, RES-002, EXEC-SBX-001, MODEL-012)
+Unresolved P0: 9 (CORE-001, TRAJ-001, CTX-002, MEM-002, SEC-005, ACT-001, RES-002, EXEC-SBX-001, MODEL-012)
 
 Unresolved P1: 159 (INTENT-002, CTX-004, COG-002, COG-003, MODEL-003, MODEL-004, SKILL-002, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, SIGNAL-001, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008, ORCH-001, ORCH-002, ORCH-003, ORCH-004, ORCH-005, ORCH-006, ORCH-007, ORCH-008, ORCH-009, ORCH-010, ORCH-011, ORCH-012, ORCH-013, ORCH-014, CAP-FORGE-001, CAP-FORGE-004, CAP-FORGE-005, CAP-FORGE-006, CAP-FORGE-007, CAP-FORGE-008, CAP-FORGE-009, CAP-FORGE-010, CAP-FORGE-011, CAP-FORGE-013, CAP-FORGE-014, WF-001, WF-002, WF-003, WF-004, WF-005, WF-006, WF-007, WF-008, WF-009, WF-010, CAP-MKT-001, CAP-MKT-002, CAP-MKT-003, CAP-MKT-004, CAP-MKT-005, CAP-MKT-006, COG-005, COG-006, EVO-001, EVO-002, EVO-003, EVO-004, EVO-006, FAB-001, FAB-002, FAB-003, FAB-004, FAB-005, FAB-007, FAB-008, FAB-009, HARN-001, ULTRA-001, ULTRA-002, ULTRA-003, ULTRA-004, ULTRA-005, ULTRA-006, ULTRA-007, INTAKE-001, AGENT-001, AGENT-002, AGENT-003, INTAKE-002, INTAKE-003, INTAKE-004, INTAKE-005, ACC-001, ACC-002, ACC-003, ACC-004, EVOLAB-001, EVOLAB-002, EVOLAB-003, EVOLAB-004, AGENT-004, INTAKE-006, INTAKE-007, UCW-001, UCW-002, UCW-003, UCW-005, UCW-006, UCW-008, UCW-009, UCW-010, SKMKT-001, SKMKT-002, SKMKT-003, SKMKT-004, ACC-005, LAB-001, LAB-002, LAB-003, LAB-004, ACC-006, BIN-001, BIN-002, BIN-004, BIN-003, BIN-005)
 
@@ -173,7 +173,7 @@ Unresolved P1: 159 (INTENT-002, CTX-004, COG-002, COG-003, MODEL-003, MODEL-004,
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| MEM-003 | P0 | **PARTIAL** | Memory poisoning lifecycle tested. | Delayed-execution adversarial benchmark. | - | `friday/memory_promotion.py:97`, `friday/executors/brokers.py:458`, `friday/store.py:1656` | 2026-09-27: before the fix, a page fact promoted by the gate answered QuestionBroker's 'which push target should I use?' with source='fact' and the attacker's remote. The lifecycle test failed first; removing the broker's read-material skip turns it red again. The four-chunk suite over this tree (data/baseline_v7_slice3b): chunks 0-2 exit 0 (1,293, 1,011 and 1,311 passed); chunk 3 exit 1 with 959 passed and one failure, the soak harness building a Candidate without the now-required provenance, fixed and tests/test_soak.py re-run green (the candidate scan now covers scripts/ too). |
+| MEM-003 | P0 | **VERIFIED** | Memory poisoning lifecycle tested. | Delayed-execution adversarial benchmark. | - | `friday/memory_promotion.py:97`, `friday/executors/brokers.py:458`, `friday/store.py:1656` | Confirmed at ef729d5ab: the build worker found the acceptance already met and changed nothing; tests/test_memory_poisoning_benchmark.py::test_the_benchmark_covers_four_classes_with_three_cases_each, tests/test_memory_poisoning_benchmark.py::test_a_cases_question_reaches_only_its_own_row, tests/test_memory_poisoning_benchmark.py::test_delayed_hostile_memory_never_comes_back_as_a_fact, tests/test_memory_poisoning_benchmark.py::test_the_same_write_by_the_person_is_answered_as_a_fact, tests/test_memory_poisoning_benchmark.py::test_two_runs_produce_the_same_result, tests/test_memory_poisoning.py::test_a_read_fact_cannot_drive_a_later_action_and_is_repaired, tests/test_memory_poisoning.py::test_read_material_cannot_speak_for_the_person, tests/test_memory_trust.py::test_a_worker_cannot_plant_a_rule_by_naming_a_file, tests/test_invariants.py::test_memory_read_material_cannot_write_a_rule_directly pass at HEAD and an independent verifier judged the existing code to meet it. Worker: Controller: the BLOCKED worker asked whether more is needed; the delayed-execution benchmark is built (friday/memory_benchmark.py, 12 cases, 0 leaked, control answered). No change; the confirm path decides. |
 
 ## PRD section 35
 
