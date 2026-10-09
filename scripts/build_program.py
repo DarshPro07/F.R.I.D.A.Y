@@ -681,8 +681,12 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
     if tree_dirty(repo, runner):
         if dry_run:
             return {"stop_reason": "dirty tree", "waves": []}
-        with (checkout_turn or merge_queue_turn)(f"program:{os.getpid()}"):
-            recovered = recover_own_renders(repo, runner, out)
+        try:
+            with (checkout_turn or merge_queue_turn)(f"program:{os.getpid()}"):
+                recovered = recover_own_renders(repo, runner, out)
+        except build_integrate.MergeQueueBusy:
+            # An integration holds the checkout; the chain retries a busy stop shortly.
+            return {"stop_reason": BUSY, "waves": []}
         if not recovered:
             return {"stop_reason": "dirty tree", "waves": []}
     worktrees = worktrees or k._worktrees_root()
@@ -807,9 +811,19 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
     # The state doc, the ledger render and the docs commit write tracked files in the
     # shared checkout, so they take the same merge-queue turn as an integration: an
     # integrator checking for a clean tree must never see them half-written.
-    with (checkout_turn or merge_queue_turn)(f"program:{os.getpid()}"):
-        write_doc(state_doc, snap)
-        return finish(snap, state, repo, state_file, state_doc, runner)
+    try:
+        with (checkout_turn or merge_queue_turn)(f"program:{os.getpid()}"):
+            write_doc(state_doc, snap)
+            return finish(snap, state, repo, state_file, state_doc, runner)
+    except build_integrate.MergeQueueBusy as exc:
+        # The state file is written; the tracked doc and the ledger render are left for the
+        # next program, which re-renders both. A wide merge gate holding the queue past the
+        # wait must not crash the program and stop the chain (2026-10-10, 30 minutes).
+        state["escalations"].append({"req": "-", "kind": "docs_commit", "at": now(),
+                                     "detail": f"skipped: {exc}"[:300]})
+        write_state(state_file, snapshot(state, rows, next_ready(rows, state, integrated, cap, k),
+                                         stop, repo, runner))
+        return snap
 
 
 def next_ready(rows: list[dict], state: dict, integrated: set[str], cap: int, k=build_kernel) -> list[str]:

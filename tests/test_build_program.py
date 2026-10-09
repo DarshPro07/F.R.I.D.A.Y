@@ -1467,3 +1467,29 @@ def test_a_confirmed_row_is_progress_not_a_park(env):
     res, _ = go(env, k, bi=Confirms(k))
     assert "A" not in state_of(env)["parked"] and [x[0] for x in k.launches] == ["A"]
     assert res["stop_reason"] != "no progress"
+
+
+# ------------------------------------------------- a merge queue held past its wait
+
+def _busy_queue(label):
+    raise BP.build_integrate.MergeQueueBusy(f"merge queue: {label} waited 1800s behind EXEC-SBX-001")
+
+
+def test_a_busy_merge_queue_at_the_end_skips_the_tracked_docs_and_keeps_the_stop_reason(env):
+    # 2026-10-10: a 30-minute wide merge gate held the queue past the program's wait; the
+    # uncaught MergeQueueBusy exited the program 1 and the until-done chain stopped.
+    env.doc.write_bytes(b"# hand-written\n")
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+    res, _ = go(env, k, checkout_turn=_busy_queue)
+    assert res["stop_reason"] == "no ready work"
+    assert env.doc.read_bytes() == b"# hand-written\n"          # the next program renders it
+    esc = state_of(env)["escalations"]
+    assert esc and esc[-1]["kind"] == "docs_commit" and "merge queue" in esc[-1]["detail"]
+    assert len(state_of(env)["waves"]) == 1
+
+
+def test_a_busy_merge_queue_at_the_start_is_a_busy_stop_not_a_crash(env):
+    env.git.dirty = " M docs/implementation/PRD_CURRENT_STATE.md"
+    res, bi = go(env, FakeKernel(ids=("A",)), checkout_turn=_busy_queue)
+    assert res["stop_reason"] == BP.BUSY and bi.calls == []
