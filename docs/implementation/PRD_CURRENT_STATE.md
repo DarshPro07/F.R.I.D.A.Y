@@ -153,11 +153,11 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: a1a8cda on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T17:24:36+00:00
+- HEAD: 2db841d on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T18:02:10+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 127, "PARKED_BY_OWNER": 1, "PARTIAL": 62, "VERIFIED": 64}
 - Unresolved P0: 11
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (311): TRAJ-001=INTEGRATED
+- Last wave (313): TRAJ-001=INTEGRATED
 - Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), MEM-002 (NOT_CONFIRMED), ACT-001 (VERIFIER_FAIL), SEC-005 (blocked), JIT-001 (blocked), MEM-003 (blocked)
 - Open escalations: 222
   - CAP-MKT-002 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
