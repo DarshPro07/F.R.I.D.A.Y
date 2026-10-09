@@ -198,6 +198,10 @@ DECLARED = {
                              "objective-engine writers that reach it are a "
                              "later slice"),
     "friday/forge": (FUTURE, "skill authoring, frozen by the product rescue"),
+    "friday/dry_run": (FUTURE,
+                       "SIDE-002: dry-run stage and blast-radius escalation; the "
+                       "live caller (consequential tool dispatch) is the next "
+                       "wiring step, run by tests/test_dry_run.py"),
     "friday/forge_runtime": (FUTURE, "same"),
     "friday/evolution_lab": (FUTURE,
                              "EVOLAB-001 slice 1: the protected evaluation lab core; "
