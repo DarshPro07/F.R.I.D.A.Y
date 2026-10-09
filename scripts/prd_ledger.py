@@ -4145,6 +4145,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Objective tasks now run as dependency waves: friday/waves.py (shared with build_kernel) picks file-disjoint ready tasks, capped by governor.worker_capacity; unknown surface runs alone. Fixed three concurrency hazards: in-flight side-effect ceiling, governor refusal failing a task, requires preconditions. (build run, commit 51861950c)',
         "next_action": 'GAPS: friday/planner.py does not yet emit a per-task `surface`, so graphs the planner builds declare none and run one task at a time (the safe default); only plans that declare surfaces (compile_objective task spec key `surface`) run in parallel. Making the planner predict surfaces needs a design decision on where they come from.; Not run against a live Hermes/Claude worker: the wave tests use a stub governor and an event-gated capability port. The real governor is covered only by test_worker_capacity_is_what_admit_would_let_run_at_once, and the real admit(WORKER) gate in hermes_bridge/claude_code is unchanged and was not exercised with concurrent tasks.; Conservative edge: with a max_side_effects ceiling, a side-effecting task beside one that later fails is refused (the ceiling counts in-flight changes) where a strictly serial run would have allowed it.; Runs whose contract has `requires` preconditions stay strictly serial rather than gating only the dependent steps.; Packet cites governor.py:581 (RAM pressure check) for concurrency; the admission code is governor.py:943-1040, as the scout noted.',
     }),
+    ('PKG-001', {
+        "status": PARTIAL,
+        "current_implementation": 'server.py main() now calls launcher.register_skills_at_startup() before mcp.run and prints a non-empty note to stderr, so `friday` / `python server.py` outside the launcher registers on-disk skills. New test failed before (2 unregistered), passes after. (build run, commit cb13cbf07)',
+        "next_action": 'GAPS: Acceptance is a clean Windows VM ready-state; this slice covers only skill registration outside the launcher. VM run, exe rebuild and validate_exe were out of scope and not run.; implementer did not claim acceptance met',
+    }),
 ]
 
 
