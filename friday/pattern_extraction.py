@@ -204,10 +204,12 @@ def implement_natively(decision: PatternDecision, spec, source: str, *,
     """
     Submit and verify a FRIDAY-native build of a recorded pattern.
 
-    The build goes through the ordinary forge lifecycle, so it is statically
-    gated and run against its own declared cases in a credential-free process.
-    It ends VERIFIED (or REJECTED); enabling stays a separate decision made by
-    someone other than the forge. Nothing here takes a path to the repository:
+    The build goes through the ordinary forge lifecycle, so it is scanned by
+    SkillSpector, statically gated and run against its own declared cases in a
+    credential-free process. It ends VERIFIED (or REJECTED), or raises
+    ForgeError when no SkillSpector scan could be made; enabling stays a
+    separate decision made by someone other than the forge. Nothing here takes
+    a path to the repository:
     the description is the specification, and the clone may already be gone.
     """
     from friday import forge

@@ -38,6 +38,15 @@ def store(tmp_path):
     fresh.close()
 
 
+@pytest.fixture(autouse=True)
+def clean_scanner(monkeypatch):
+    """The SkillSpector gate has its own tests; these exercise the lifecycle."""
+    monkeypatch.setattr(
+        F, "run_skillspector",
+        lambda target, **_: F.ScanReport(status=F.SCAN_CLEAN,
+                                         scanned_at="2026-10-09T00:00:00Z"))
+
+
 @pytest.fixture
 def registry(tmp_path):
     return F.Registry(tmp_path / "skills")

@@ -45,6 +45,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -78,6 +79,12 @@ CLAIMS: dict[str, str] = {
         "A separate process with its own working directory. Bounds runtime "
         "and contains a crash. It is NOT a privilege boundary - the child "
         "runs as the same user."
+    ),
+    "skillspector": (
+        "A static scan of SKILL.md, code and declared dependencies by NVIDIA "
+        "SkillSpector. A high-severity finding rejects the candidate, and a "
+        "scan that could not run is never read as a clean one. A pass is one "
+        "layer, not a proof of runtime safety."
     ),
     "not_claimed": (
         "That hostile code which defeats the static gate cannot reach the "
@@ -400,6 +407,203 @@ def env_leaks(env: dict[str, str]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Gate 2b - SkillSpector, the mandatory pre-activation security scan
+# ---------------------------------------------------------------------------
+
+#: The scanner is NVIDIA SkillSpector, run as a CLI (its stdio MCP mode has a
+#: known initialisation problem). It is not pinned or installed by default, so
+#: the command is configurable: a JSON list of arguments in this variable, with
+#: "{target}" standing for the directory to scan. Assumed, not verified against
+#: a release: `skillspector scan --format json <dir>` printing JSON.
+SKILLSPECTOR_ENV = "FRIDAY_SKILLSPECTOR_CMD"
+DEFAULT_SKILLSPECTOR_CMD = ("skillspector", "scan", "--format", "json",
+                            "{target}")
+SCAN_TIMEOUT_SECONDS = 120.0
+
+SCAN_CLEAN = "CLEAN"
+SCAN_BLOCKED = "BLOCKED"
+#: Neither of these is a pass. The scan did not happen, so nothing is known.
+SCAN_UNAVAILABLE = "UNAVAILABLE"
+SCAN_ERROR = "ERROR"
+
+_SEVERITIES = ("info", "low", "medium", "high", "critical")
+_BLOCKING_SEVERITIES = frozenset({"high", "critical"})
+#: Prompt injection, exfiltration, privilege escalation, tool or memory
+#: poisoning, dangerous code and vulnerable dependencies are high severity by
+#: definition, whatever the scanner called them.
+_BLOCKING_CATEGORY_WORDS = ("injection", "exfiltrat", "privilege", "poison",
+                            "dangerous", "vulnerab")
+_FINDING_LISTS = ("findings", "issues", "results", "vulnerabilities")
+
+
+@dataclass
+class ScanReport:
+    status: str
+    findings: list[dict] = field(default_factory=list)
+    detail: str = ""
+    scanner_version: str = ""
+    scanned_at: str = ""
+    target_sha256: str = ""
+    report_sha256: str = ""
+
+    @property
+    def clean(self) -> bool:
+        return self.status == SCAN_CLEAN
+
+    def blocking(self) -> list[dict]:
+        return [f for f in self.findings if f["severity"] in _BLOCKING_SEVERITIES]
+
+    def to_dict(self) -> dict:
+        # What PRD v7 s47 says to keep: scan version, date, source, findings,
+        # report hash.
+        return {
+            "status": self.status, "scanner": "skillspector",
+            "scanner_version": self.scanner_version,
+            "scanned_at": self.scanned_at,
+            "target_sha256": self.target_sha256,
+            "report_sha256": self.report_sha256,
+            "detail": self.detail, "findings": self.findings,
+            "blocking": len(self.blocking()),
+        }
+
+
+def _normalise_finding(raw) -> dict:
+    """
+    One finding in a fixed shape. A severity that is missing or unreadable is
+    HIGH: a scanner whose output cannot be read is not evidence of anything.
+    """
+    if not isinstance(raw, dict):
+        return {"severity": "high", "category": "unparsed",
+                "message": str(raw)[:300], "file": "", "line": None}
+
+    def pick(*keys):
+        for key in keys:
+            if raw.get(key) not in (None, ""):
+                return raw[key]
+        return ""
+
+    category = re.sub(r"[^a-z0-9]+", "_", str(
+        pick("category", "type", "rule", "rule_id", "id")).lower()).strip("_")
+    severity = str(pick("severity", "level", "risk")).strip().lower()
+    if severity not in _SEVERITIES or any(
+            word in category for word in _BLOCKING_CATEGORY_WORDS):
+        severity = "high"
+    line = pick("line", "lineno")
+    return {"severity": severity, "category": category,
+            "message": str(pick("message", "title", "description"))[:300],
+            "file": str(pick("file", "path", "location"))[:200],
+            "line": line if isinstance(line, int) else None}
+
+
+def parse_skillspector(raw: str) -> tuple[list[dict], str]:
+    """Findings and scanner version from SkillSpector's JSON, or ValueError."""
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise ValueError("SkillSpector output is not JSON") from exc
+    version = ""
+    if isinstance(data, dict):
+        if data.get("error"):
+            raise ValueError(f"SkillSpector reported an error: {data['error']}")
+        version = str(data.get("version") or data.get("scanner_version") or "")
+        items = next((data[key] for key in _FINDING_LISTS
+                      if isinstance(data.get(key), list)), None)
+    else:
+        items = data
+    if not isinstance(items, list):
+        raise ValueError("SkillSpector output has no findings list")
+    return [_normalise_finding(item) for item in items], version
+
+
+def _skillspector_argv(target: Path, command) -> list[str]:
+    if command is None:
+        raw = os.environ.get(SKILLSPECTOR_ENV)
+        try:
+            command = json.loads(raw) if raw else list(DEFAULT_SKILLSPECTOR_CMD)
+        except ValueError:
+            command = None
+        if not (isinstance(command, list) and command
+                and all(isinstance(arg, str) for arg in command)):
+            raise ForgeError(
+                f"{SKILLSPECTOR_ENV} must be a JSON list of strings")
+    argv = [arg.replace("{target}", str(target)) for arg in command]
+    if not any("{target}" in arg for arg in command):
+        argv.append(str(target))
+    return argv
+
+
+def run_skillspector(target: Path, *, command=None,
+                     timeout: float = SCAN_TIMEOUT_SECONDS) -> ScanReport:
+    """
+    Scan a directory and report. Never raises, and never returns CLEAN unless
+    the scanner ran and its output was read as an empty or sub-high findings
+    list: a missing binary, a timeout, an exit with unreadable output are all
+    "not scanned".
+
+    The scanner gets the same credential-free environment as a verification
+    process; it reads files and has no use for Friday's keys.
+    """
+    from friday.contracts import now_iso
+
+    report = ScanReport(status=SCAN_ERROR, scanned_at=now_iso())
+    try:
+        argv = _skillspector_argv(Path(target), command)
+        completed = subprocess.run(
+            argv, capture_output=True, text=True, env=scrubbed_env(),
+            cwd=str(target), timeout=timeout)
+    except ForgeError as exc:
+        report.detail = str(exc)
+        return report
+    except FileNotFoundError:
+        report.status = SCAN_UNAVAILABLE
+        report.detail = "the SkillSpector CLI is not installed or not on PATH"
+        return report
+    except subprocess.TimeoutExpired:
+        report.detail = f"SkillSpector exceeded its {timeout:g}s budget"
+        return report
+    except OSError as exc:
+        report.detail = f"SkillSpector could not be started: {exc}"
+        return report
+
+    report.report_sha256 = digest(completed.stdout or "")
+    try:
+        report.findings, report.scanner_version = parse_skillspector(
+            completed.stdout)
+    except ValueError as exc:
+        report.detail = (f"{exc} (exit {completed.returncode}): "
+                         f"{(completed.stderr or '').strip()[-200:]}")
+        return report
+    report.status = SCAN_BLOCKED if report.blocking() else SCAN_CLEAN
+    return report
+
+
+def render_skill_md(spec: CapabilitySpec) -> str:
+    """The SKILL.md a forged candidate is scanned as: its stated intent."""
+    def listing(items) -> str:
+        return "\n".join(f"- {key}: {value}" if value else f"- {key}"
+                         for key, value in items) or "- none"
+
+    return (
+        f"---\nname: {spec.name}\ndescription: {json.dumps(spec.goal)}\n---\n\n"
+        f"# {spec.name}\n\n{spec.goal}\n\n"
+        f"## Inputs\n{listing(spec.inputs.items())}\n\n"
+        f"## Outputs\n{listing(spec.outputs.items())}\n\n"
+        f"## Side effects\n{listing((s, '') for s in spec.side_effects)}\n\n"
+        f"## Permissions\n{listing((p, '') for p in spec.permissions)}\n")
+
+
+def stage_for_scan(spec: CapabilitySpec, source: str, directory: Path) -> Path:
+    """Lay a candidate out as the skill directory SkillSpector scans."""
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "SKILL.md").write_text(render_skill_md(spec), encoding="utf-8")
+    (directory / "skill.py").write_text(source, encoding="utf-8")
+    if spec.dependencies:
+        (directory / "requirements.txt").write_text(
+            "\n".join(spec.dependencies) + "\n", encoding="utf-8")
+    return directory
+
+
+# ---------------------------------------------------------------------------
 # Gate 3 + 5 - verification, then a registry where passing is not promotion
 # ---------------------------------------------------------------------------
 
@@ -587,21 +791,12 @@ class Registry:
 
     # -- transitions -------------------------------------------------------
 
-    def _transition(self, name: str, to_state: str, *, reason: str,
-                    actor: str, **changes) -> dict:
-        record = store().get_forged_skill(name)
-        if record is None:
-            raise ForgeError(f"no forged skill named {name!r}")
-        allowed = PROMOTIONS[record["state"]]
-        if to_state not in allowed:
-            raise ForgeError(
-                f"{name!r} is {record['state']}; it may only move to "
-                f"{', '.join(allowed) or 'nowhere'}, not {to_state}")
-
+    @staticmethod
+    def _row(record: dict, **changes) -> dict:
         from friday.contracts import now_iso
 
         row = {
-            "name": record["name"], "state": to_state,
+            "name": record["name"], "state": record["state"],
             "version": record["version"],
             "spec": json.dumps(record["spec"]),
             "source_sha256": record["source_sha256"],
@@ -613,18 +808,41 @@ class Registry:
             "created_at": record["created_at"], "updated_at": now_iso(),
         }
         row.update(changes)
-        store().save_forged_skill(row)
+        return row
+
+    def _transition(self, name: str, to_state: str, *, reason: str,
+                    actor: str, **changes) -> dict:
+        record = store().get_forged_skill(name)
+        if record is None:
+            raise ForgeError(f"no forged skill named {name!r}")
+        allowed = PROMOTIONS[record["state"]]
+        if to_state not in allowed:
+            raise ForgeError(
+                f"{name!r} is {record['state']}; it may only move to "
+                f"{', '.join(allowed) or 'nowhere'}, not {to_state}")
+        # Activation needs a clean SkillSpector scan of this exact source, on
+        # top of whatever got the skill here. Demoting an ENABLED skill is a
+        # safety move and is never blocked by it.
+        if to_state in (REGISTERED, ENABLED) and record["state"] != ENABLED:
+            scan = record["verification"].get("security_scan") or {}
+            if (scan.get("status") != SCAN_CLEAN
+                    or scan.get("target_sha256") != record["source_sha256"]):
+                raise ForgeError(
+                    f"{name!r} has no clean SkillSpector scan of this exact "
+                    "source, so it is not activated")
+
+        store().save_forged_skill(self._row(record, state=to_state, **changes))
         store().record_forged_transition(
             name, record["state"], to_state, reason, actor)
         return self.get(name)
 
-    def verify(self, name: str, *, actor: str = "forge") -> dict:
+    def _load_source(self, name: str, actor: str) -> tuple[dict, str | None]:
         """
-        Run the skill's own criteria and record the outcome either way.
+        The candidate and its source, re-read from disk and re-hashed.
 
-        The source is re-read from disk and re-hashed first. A verification
-        that refers to code which has since changed is worse than none: it
-        carries the authority of a check that was never run on this code.
+        A check that refers to code which has since changed is worse than none:
+        it carries the authority of a check that was never run on this code.
+        The source comes back None when that mismatch has just rejected it.
         """
         record = store().get_forged_skill(name)
         if record is None:
@@ -633,22 +851,77 @@ class Registry:
         if digest(source) != record["source_sha256"]:
             return self._transition(
                 name, REJECTED, actor=actor,
-                reason="the file on disk is not what was submitted")
+                reason="the file on disk is not what was submitted"), None
+        return record, source
+
+    def _scan(self, record: dict, source: str, actor: str) -> dict:
+        name = record["name"]
+        spec = CapabilitySpec.from_dict(record["spec"])
+        with tempfile.TemporaryDirectory(prefix="forge-scan-") as staging:
+            report = run_skillspector(stage_for_scan(spec, source, Path(staging)))
+        report.target_sha256 = record["source_sha256"]
+        verification = json.dumps(
+            {**record["verification"], "security_scan": report.to_dict()})
+
+        if report.status == SCAN_BLOCKED:
+            kinds = sorted({f["category"] or f["severity"]
+                            for f in report.blocking()})
+            return self._transition(
+                name, REJECTED, actor=actor, verification=verification,
+                reason=(f"SkillSpector: {len(report.blocking())} high-severity "
+                        f"finding(s): {', '.join(kinds)}")[:300])
+        # Keep what the scan said even when it did not complete, then refuse
+        # to go on: a scan that did not run is not a scan that passed.
+        store().save_forged_skill(self._row(record, verification=verification))
+        if not report.clean:
+            raise ForgeError(
+                f"SkillSpector could not scan {name!r} ({report.detail}); it "
+                f"stays {record['state']} and cannot be verified or activated "
+                "until a scan completes")
+        return self.get(name)
+
+    def scan(self, name: str, *, actor: str = "forge") -> dict:
+        """
+        Scan the candidate with SkillSpector and keep the findings on it.
+
+        A high-severity finding rejects it. A scan that could not run raises
+        and changes nothing but the recorded scan outcome.
+        """
+        record, source = self._load_source(name, actor)
+        if source is None:
+            return record
+        return self._scan(record, source, actor)
+
+    def verify(self, name: str, *, actor: str = "forge") -> dict:
+        """
+        Scan the skill, then run its own criteria; record the outcome either way.
+
+        SkillSpector goes first because the scan is mandatory and static:
+        nothing is run that the scanner has already condemned.
+        """
+        record, source = self._load_source(name, actor)
+        if source is None:
+            return record
+        record = self._scan(record, source, actor)
+        if record["state"] == REJECTED:
+            return record
+        scan = record["verification"]["security_scan"]
 
         spec = CapabilitySpec.from_dict(record["spec"])
         report = verify(source, spec)
+        verification = {**report.to_dict(), "security_scan": scan}
         if not report.passed:
             return self._transition(
                 name, REJECTED, actor=actor,
                 reason="; ".join(report.findings)[:300] or "its own cases failed",
-                verification=json.dumps(report.to_dict()))
+                verification=json.dumps(verification))
 
         from friday.contracts import now_iso
 
         return self._transition(
             name, VERIFIED, actor=actor,
             reason=f"{len(report.cases)} declared case(s) passed",
-            verification=json.dumps(report.to_dict()), verified_at=now_iso())
+            verification=json.dumps(verification), verified_at=now_iso())
 
     def register(self, name: str, *, actor: str) -> dict:
         """Installed and addressable. Still not callable by anything."""

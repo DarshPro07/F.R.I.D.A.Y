@@ -63,7 +63,11 @@ def log(tmp_path):
 
 
 @pytest.fixture
-def registry(tmp_path):
+def registry(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        forge, "run_skillspector",
+        lambda target, **_: forge.ScanReport(status=forge.SCAN_CLEAN,
+                                             scanned_at="2026-10-09T00:00:00Z"))
     forge.reset_store(Store(tmp_path / "ada.sqlite3"))
     try:
         yield forge.Registry(tmp_path / "skills")
