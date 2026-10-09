@@ -927,3 +927,48 @@ def test_the_worker_boots_hermes_before_it_reads_a_request(monkeypatch):
     worker.serve()
     assert booted == [0]                                   # booted before a byte of stdin was read
     assert json.loads(out.getvalue())["id"] == 1
+
+
+# -- ORCH-005 escalation to a stronger model is recorded with its cause -------
+
+
+def test_a_task_the_first_model_answers_is_not_escalated(tmp_path, clean_env):
+    gw = make(tmp_path)
+    try:
+        res = gw.infer(request(objective="obj-noesc"))
+        assert res.status == "ok" and res.failover_count == 0
+        assert res.escalations == []
+        assert gw.telemetry.escalations("obj-noesc") == []
+    finally:
+        gw.close()
+
+
+def test_failing_over_to_a_stronger_tier_is_recorded_with_its_cause(tmp_path, clean_env):
+    clean_env.setenv("FAKE_GW_FAIL_PROVIDERS", "anthropic:QUOTA_EXCEEDED")
+    gw = make(tmp_path)
+    try:
+        res = gw.infer(request(objective="obj-esc"))
+        assert res.status == "ok" and res.provider == "openai-codex"
+        # fast failed -> standard, standard failed -> deep: two steps up, each with why.
+        steps = [(e["from_tier"], e["to_tier"], e["cause"]) for e in res.escalations]
+        assert steps == [(mg.TIER_FAST, mg.TIER_STANDARD, "QUOTA_EXCEEDED"),
+                         (mg.TIER_STANDARD, mg.TIER_DEEP, "QUOTA_EXCEEDED")]
+        assert res.escalations[-1]["to_route"] == "openai-codex/fake-deep"
+        stored = gw.telemetry.escalations("obj-esc")
+        assert [(e["from_tier"], e["to_tier"], e["cause"]) for e in stored] == steps
+        assert all(e["task_class"] == mg.SIMPLE for e in stored)
+    finally:
+        gw.close()
+
+
+def test_a_fallback_to_a_weaker_tier_is_not_an_escalation(tmp_path, clean_env):
+    clean_env.setenv("FAKE_GW_FAIL_PROVIDERS", "openai-codex:RATE_LIMITED")
+    gw = make(tmp_path)
+    try:
+        res = gw.infer(request(objective="obj-down", preferred_quality_tier=mg.TIER_DEEP))
+        assert res.status == "ok" and res.provider == "anthropic"
+        assert res.failover_count >= 1
+        assert res.escalations == []
+        assert gw.telemetry.escalations("obj-down") == []
+    finally:
+        gw.close()

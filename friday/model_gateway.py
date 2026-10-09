@@ -80,6 +80,9 @@ TIER_FAST = "fast"
 TIER_STANDARD = "standard"
 TIER_DEEP = "deep"
 TIERS = (TIER_FAST, TIER_STANDARD, TIER_DEEP)
+#: Cheapest to strongest. A request that lands on a higher rank than any route
+#: already tried has escalated (ORCH-005); landing on a lower one is a fallback.
+TIER_RANK = {t: i for i, t in enumerate(TIERS)}
 
 
 @dataclass(frozen=True)
@@ -219,6 +222,10 @@ class ModelGatewayResult:
     #: no route may serve it until scope is stated, BLOCKED no compatible route. "" is a
     #: plain transport failure, which is not a routing decision.
     dispatch: str = ""
+    #: Each step up to a stronger tier this call took, with the failure that forced it
+    #: (ORCH-005): {from_tier, to_tier, from_route, to_route, cause, detail}. Empty when
+    #: the first route answered, and for a fallback to an equal or weaker tier.
+    escalations: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -358,6 +365,21 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
     created_at        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_gateway_calls_obj ON gateway_calls(objective_id, created_at);
+
+CREATE TABLE IF NOT EXISTS gateway_escalations (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    objective_id TEXT NOT NULL,
+    worker       TEXT NOT NULL DEFAULT 'friday',
+    task_class   TEXT NOT NULL,
+    from_tier    TEXT NOT NULL,
+    to_tier      TEXT NOT NULL,
+    from_route   TEXT NOT NULL DEFAULT '',
+    to_route     TEXT NOT NULL DEFAULT '',
+    cause        TEXT NOT NULL,
+    detail       TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gateway_escalations_obj ON gateway_escalations(objective_id, id);
 """
 
 #: Columns added after the first release. `CREATE TABLE IF NOT EXISTS` does
@@ -421,6 +443,24 @@ class GatewayTelemetry:
         with self._connect() as conn:
             return [dict(r) for r in conn.execute(
                 "SELECT * FROM gateway_calls WHERE objective_id=? ORDER BY id",
+                (objective_id,))]
+
+    def record_escalation(self, **row) -> int:
+        """One step up to a stronger tier, with the failure that forced it (ORCH-005)."""
+        from datetime import datetime, timezone
+        row.setdefault("created_at", datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        cols = ", ".join(row)
+        marks = ", ".join("?" for _ in row)
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                f"INSERT INTO gateway_escalations ({cols}) VALUES ({marks})",
+                tuple(row.values()))
+            return int(cur.lastrowid)
+
+    def escalations(self, objective_id: str) -> list[dict]:
+        with self._connect() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT * FROM gateway_escalations WHERE objective_id=? ORDER BY id",
                 (objective_id,))]
 
     def recent(self, limit: int = 50) -> list[dict]:
@@ -1484,6 +1524,8 @@ class ModelGateway:
         last_error = ""
         last_state = ""
         safeguarded = False
+        escalations: list[dict] = []
+        tried_rank = -1                      # strongest tier actually sent a call so far
         for index, (tier, provider, model) in enumerate(routes):
             verdict = data_class.decision(content_class, backend=provider, mode=current_mode)
             if verdict.verdict == "REFUSE":
@@ -1496,6 +1538,12 @@ class ModelGateway:
                              input_tokens=input_tokens, failover_count=index,
                              fingerprint=fingerprint, entitlement_state="DATA_CLASS_REFUSED")
                 continue
+            # ORCH-005: a call that goes to a stronger tier than any already tried is an
+            # escalation, and the failure that sent it there is its recorded cause.
+            if attempts and TIER_RANK[tier] > tried_rank >= 0:
+                escalations.append(self._record_escalation(
+                    request, attempts[-1], tier, provider, model, last_state, last_error))
+            tried_rank = max(tried_rank, TIER_RANK[tier])
             messages = request.context_package
             redactions = 0
             if verdict.verdict == "REDACT":
@@ -1661,6 +1709,7 @@ class ModelGateway:
                     fingerprint=fingerprint, entitlement_state="OK", route_kind=kind,
                     cost_usd=result.cost_usd)
                 result.dispatch = self._dispatch_for(routes, index, barred)
+                result.escalations = escalations
                 return result
             err = reply.get("error") or {}
             code = str(err.get("code") or "PROVIDER_ERROR")
@@ -1693,9 +1742,24 @@ class ModelGateway:
             status="failed", entitlement_state=last_state or "PROVIDER_ERROR",
             warnings=[last_error] if last_error else [], attempts=attempts,
             failover_count=max(0, len(attempts) - 1), input_tokens=input_tokens,
-            data_class=content_class)
+            data_class=content_class, escalations=escalations)
 
     # -- helpers ------------------------------------------------------------
+
+    def _record_escalation(self, request: ModelGatewayRequest, previous: dict, tier: str,
+                           provider: str, model: str, cause: str, detail: str) -> dict:
+        """Persist one step up to a stronger tier. Never breaks inference."""
+        step = {"from_tier": previous["tier"], "to_tier": tier,
+                "from_route": f"{previous['provider']}/{previous['model']}",
+                "to_route": f"{provider}/{model}", "cause": cause or "UNKNOWN",
+                "detail": detail[:500]}
+        try:
+            self.telemetry.record_escalation(
+                objective_id=request.objective_id, worker=request.worker,
+                task_class=request.task_class, **step)
+        except Exception:  # noqa: BLE001 - telemetry must never break inference
+            logger.warning("gateway escalation write failed", exc_info=True)
+        return step
 
     def _safeguard_refused(self, request: ModelGatewayRequest,
                            verdict: domain_gate.DomainVerdict, tier: str, provider: str,
