@@ -256,13 +256,21 @@ def spend_fraction(store, run_id: str) -> float:
     return max(fractions, default=0.0)
 
 
+#: The events that outlive the recent window, each rare per run: a flag and the
+#: resume after it, and the amendments and takeovers a window is judged on.
+_KEPT_WHATEVER_THEIR_AGE = (EVENT_FLAGGED, _RESUMED, _AMENDED, _ORPHANED)
+
+
 def _events_for(store, run_id: str) -> list[dict]:
-    """The run's newest events, plus every flag and resume however old: a long
-    run pushes the flag the person answered, and the resume after it, out of the
-    recent window, and without them a "carry on" would be forgotten and the same
-    questions asked again."""
+    """The run's newest events, plus every flag, resume, amendment and takeover
+    however old. A long run pushes the flag the person answered, and the resume
+    after it, out of the recent window, and without them a "carry on" would be
+    forgotten and the same questions asked again; it pushes the early amendments
+    and takeovers of the current window out too, and without them a plan that
+    keeps changing, or a run that keeps losing its worker, would read as
+    steady for as long as it ran."""
     merged = {e["id"]: e for e in store.recent_objective_events(run_id)}
-    for e in store.objective_events_named(run_id, (EVENT_FLAGGED, _RESUMED)):
+    for e in store.objective_events_named(run_id, _KEPT_WHATEVER_THEIR_AGE):
         merged.setdefault(e["id"], e)
     return [merged[i] for i in sorted(merged)]
 

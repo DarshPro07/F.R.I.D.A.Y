@@ -98,17 +98,22 @@ def test_remote_policy_is_the_local_policy(server, tmp_path, monkeypatch):
     from friday import continuous as CT
     from friday import golden as G
     client, store, token = server
-    r = client.post("/api/objective",
-                    json={"objective": "create a file", **_fresh(),
-                          "tasks": json.dumps([{"capability": "files_create",
-                                                "arguments": {"path": str(tmp_path / "remote.txt"),
-                                                              "content": "hi"}}])},
-                    headers={"Cookie": f"friday_session={token}", "X-Friday-Channel": "signal"})
-    assert r.status_code == 200
-    run_id = r.json()["run_id"]
-    # Drive it with a GUARDED engine (the remote channel gets no more than local).
+    # The file belongs inside the bench's file jail: a path outside the permitted
+    # roots is refused outright (POLICY_BLOCK) and never reaches the approval
+    # tier this test is about.
     with G.Bench(tmp_path / "bench") as bench:
         monkeypatch.setattr("friday.toolsets.objectives.store", lambda: store)
+        target = bench.files / "remote.txt"
+        r = client.post("/api/objective",
+                        json={"objective": "create a file", **_fresh(),
+                              "tasks": json.dumps([{"capability": "files_create",
+                                                    "arguments": {"path": str(target),
+                                                                  "content": "hi"}}])},
+                        headers={"Cookie": f"friday_session={token}",
+                                 "X-Friday-Channel": "signal"})
+        assert r.status_code == 200
+        run_id = r.json()["run_id"]
+        # Drive it with a GUARDED engine (the remote channel gets no more than local).
         dispatch = G.golden_dispatch(bench, autonomy="guarded")
 
         async def drive():
@@ -117,7 +122,7 @@ def test_remote_policy_is_the_local_policy(server, tmp_path, monkeypatch):
             await ex.start(run_id)
         asyncio.run(drive())
     assert store.objective_run(run_id)["status"] == "WAITING_PERMISSION"
-    assert not (tmp_path / "remote.txt").exists()
+    assert not target.exists()
 
 
 # -- A-042: a recorded remote command cannot be replayed ------------------------

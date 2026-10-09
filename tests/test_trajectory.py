@@ -213,6 +213,60 @@ def test_a_resume_forgives_the_amendments_and_takeovers_before_it():
     assert trace.assess().verdict == T.ON_TRACK
 
 
+@pytest.mark.parametrize("seed", range(20))
+def test_a_long_steered_run_below_the_drift_thresholds_is_never_flagged(seed):
+    """Long-horizon benchmark, healthy side: over 60 tasks a person steers the plan
+    and a worker dies now and then, but each window (a resume starts a new one)
+    stays under the amendment and takeover thresholds, and every wake takes a
+    lease. Zero false positives at every step."""
+    rng = random.Random(seed)
+    trace = _Trace(60)
+    amended = taken_over = 0
+    for i in range(60):
+        if i and i % rng.choice([12, 15, 20]) == 0:
+            trace.events.append(_event(O.EVENT_RUN_RESUMED))
+            amended = taken_over = 0
+        trace.events.append(_event("lease.acquired"))
+        if rng.random() < 0.3 and amended < T.AMENDMENTS - 1:
+            trace.events.append(_event("graph_edited"))
+            amended += 1
+        if rng.random() < 0.15 and taken_over < T.TAKEOVERS - 1:
+            trace.events.append(_event(O.EVENT_WATCHDOG_ORPHANED))
+            taken_over += 1
+        trace.succeeded(f"t{i}")
+        found = trace.assess(spend=min(0.9, (i + 1) / 60))
+        assert found.verdict == T.ON_TRACK, (seed, i, found)
+        assert found.signals["amendments"] == amended
+        assert found.signals["takeovers"] == taken_over
+
+
+@pytest.mark.parametrize("shape,name,threshold", [
+    ("amendments", "graph_edited", T.AMENDMENTS),
+    ("takeovers", O.EVENT_WATCHDOG_ORPHANED, T.TAKEOVERS),
+])
+@pytest.mark.parametrize("seed", range(20))
+def test_a_long_run_drifting_while_tasks_still_succeed_is_flagged_at_its_threshold(
+        seed, shape, name, threshold):
+    """Long-horizon benchmark, drifting side: tasks keep succeeding (so nothing is
+    'stuck') while the plan keeps being amended, or the run keeps losing its
+    worker. It is flagged on the event that reaches the threshold, not before
+    and not after."""
+    rng = random.Random(seed)
+    trace = _Trace(60)
+    next_task = 0
+    for i in range(threshold):
+        for _ in range(rng.randint(0, 3)):
+            trace.succeeded(f"t{next_task}")
+            next_task += 1
+        trace.events.append(_event(name))
+        found = trace.assess()
+        assert found.signals[shape] == i + 1
+        if i + 1 < threshold:
+            assert found.verdict == T.ON_TRACK, (seed, shape, i, found)
+    assert found.verdict == T.DRIFTING, (seed, shape, found)
+    assert any(shape[:-1] in reason for reason in found.reasons), found.reasons
+
+
 def test_spend_far_ahead_of_progress_is_flagged():
     trace = _Trace(10)
     trace.succeeded("t0")
@@ -741,3 +795,64 @@ def test_a_long_run_never_asked_about_the_question_is_still_asked(tmp_path):
 
     assert found.verdict == T.DRIFTING, found
     assert found.signals["pending_side_effects"] == ["files_write"] * 3
+
+
+# -- drift that builds up over more events than the recent window holds ----------------
+
+_LONG_DRIFT = [
+    ("amendments", "graph_edited", T.AMENDMENTS),
+    ("takeovers", O.EVENT_WATCHDOG_ORPHANED, T.TAKEOVERS),
+]
+
+
+def _long_run_with(tmp_path, seed, name, count, *, resume_after=False):
+    """A real store run with `count` `name` events scattered among a few hundred
+    ordinary events, so the early ones fall out of `recent_objective_events`."""
+    rng = random.Random(seed)
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile_under(store, c.ObjectiveContract(goal="tidy the folder"),
+                            "system_get_info", 3)
+    for _ in range(count):
+        _pad(store, run_id, rng.randint(150, 250))
+        store.append_objective_event(run_id, name)
+    if resume_after:
+        store.append_objective_event(run_id, O.EVENT_RUN_RESUMED, detail={"reason": "carry on"})
+    _pad(store, run_id, rng.randint(150, 250))
+    return store, run_id
+
+
+@pytest.mark.parametrize("shape,name,threshold", _LONG_DRIFT)
+@pytest.mark.parametrize("seed", range(5))
+def test_drift_spread_over_a_long_run_is_flagged_though_its_events_are_not_recent(
+        tmp_path, seed, shape, name, threshold):
+    store, run_id = _long_run_with(tmp_path, seed, name, threshold)
+    recent = [e for e in store.recent_objective_events(run_id) if e["event"] == name]
+    assert len(recent) < threshold, "the benchmark must outlive the recent window"
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.DRIFTING, found
+    assert found.signals[shape] == threshold
+
+
+@pytest.mark.parametrize("shape,name,threshold", _LONG_DRIFT)
+@pytest.mark.parametrize("seed", range(5))
+def test_a_long_run_one_short_of_the_threshold_is_not_flagged(
+        tmp_path, seed, shape, name, threshold):
+    store, run_id = _long_run_with(tmp_path, seed, name, threshold - 1)
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.ON_TRACK, found
+    assert found.signals[shape] == threshold - 1
+
+
+@pytest.mark.parametrize("shape,name,threshold", _LONG_DRIFT)
+def test_a_long_run_that_was_resumed_forgives_the_drift_before_the_resume(
+        tmp_path, shape, name, threshold):
+    store, run_id = _long_run_with(tmp_path, 0, name, threshold, resume_after=True)
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.ON_TRACK, found
+    assert found.signals[shape] == 0
