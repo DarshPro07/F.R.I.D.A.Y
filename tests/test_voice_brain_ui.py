@@ -355,6 +355,32 @@ def test_whats_running_phrase_triggers_work_status_without_a_model(monkeypatch):
     assert "editing policy.py" in out["reply"]
 
 
+_NOT_READY = {"status": "unavailable", "verdict": "chromium build missing",
+              "readiness": "NOT_INSTALLED"}
+
+
+def test_open_speaks_why_the_browser_is_not_ready(monkeypatch):
+    from friday import ui_browser
+    monkeypatch.setattr(ui_browser, "open_url", lambda url: dict(_NOT_READY))
+    out = V._try_command("open https://example.com")
+    assert out is not None
+    assert out["action"] == "browser.open"
+    assert out["status"] == "unavailable"
+    assert "chromium build missing" in out["reply"]
+    assert "https://example.com" in out["reply"]
+
+
+def test_study_speaks_why_the_browser_is_not_ready(monkeypatch):
+    from friday import ui_browser
+    monkeypatch.setattr(ui_browser, "study_url", lambda url: dict(_NOT_READY))
+    out = V._try_command("study the design of https://example.com")
+    assert out is not None
+    assert out["action"] == "web.study"
+    assert out["status"] == "unavailable"
+    assert "chromium build missing" in out["reply"]
+    assert "https://example.com" in out["reply"]
+
+
 # ---------------------------------------------------------------------------
 # The completion gate: she may not say she did something she did not do.
 #

@@ -1251,6 +1251,10 @@ def _try_command(text):
             if st == "blocked":
                 return {"reply": "I won't study %s -- it's a banking or sensitive page." % url,
                         "action": "web.study", "status": "blocked"}
+            if st == "unavailable":
+                return {"reply": "I can't study %s: the browser isn't ready (%s)."
+                                 % (url, out.get("verdict") or out.get("readiness")),
+                        "action": "web.study", "status": "unavailable"}
             return {"reply": "I couldn't read %s to study it." % url,
                     "action": "web.study", "status": st}
 
@@ -1273,6 +1277,10 @@ def _try_command(text):
                 return {"reply": "%s is a login page -- I'll hand you the browser "
                                  "to sign in." % url,
                         "action": "browser.open", "status": "auth_handoff"}
+            if st == "unavailable":
+                return {"reply": "I can't open %s: the browser isn't ready (%s)."
+                                 % (url, out.get("verdict") or out.get("readiness")),
+                        "action": "browser.open", "status": "unavailable"}
             return {"reply": "I couldn't open %s." % url,
                     "action": "browser.open", "status": st}
 
