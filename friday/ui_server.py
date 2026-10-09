@@ -1166,6 +1166,23 @@ async def api_command_center_state(request):
     return JSONResponse(await run_in_threadpool(_command_center_state))
 
 
+async def api_observability(request):
+    """UX-001: one read-only report, shown in Normal or Developer mode.
+
+    The mode only trims the report (observability.for_mode); it is not an
+    authority. The route sits behind the same GateMiddleware as every other,
+    and a developer view is redacted exactly like the normal one.
+    """
+    from friday import observability as ob
+    mode = request.query_params.get("mode")
+    run_id = request.query_params.get("run_id", "").strip()
+    if run_id:
+        report, kind = await run_in_threadpool(ob.trace, run_id), "trace"
+    else:
+        report, kind = await run_in_threadpool(ob.diagnostics), "diagnostics"
+    return JSONResponse(ob.for_mode(report, mode, kind=kind))
+
+
 async def api_browser_open(request):
     from friday import ui_browser as B
     try:
@@ -1638,6 +1655,7 @@ def create_app():
         Route("/api/hermes/progress", api_hermes_progress),
         Route("/api/work", api_work),
         Route("/api/command_center/state", api_command_center_state),
+        Route("/api/observability", api_observability),
         WebSocketRoute("/api/stt", api_stt),
         Route("/api/browser/open", api_browser_open, methods=["POST"]),
         Route("/api/browser/act", api_browser_act, methods=["POST"]),

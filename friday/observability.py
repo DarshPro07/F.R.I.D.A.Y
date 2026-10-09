@@ -700,3 +700,38 @@ def diagnostics(*, store: Store | None = None, redacted: bool = True,
         report[n].get("status") == "ok" for n in wanted if n in report and n not in ("recent_failures",))
     report["unavailable"] = [n for n in wanted if n in report and report[n].get("status") != "ok"]
     return redact(report) if redacted else report
+
+
+
+# ---------------------------------------------------------------------------
+# Normal and Developer Mode (UX-001)
+# ---------------------------------------------------------------------------
+# A mode picks how much of a report is SHOWN. It is applied to an already
+# assembled (and redacted) report, after the fact: it grants nothing, so it
+# cannot change what any caller is allowed to do - that stays in policy.py and
+# the access gate. Anything but the exact word "developer" is Normal.
+
+NORMAL, DEVELOPER = "normal", "developer"
+
+
+def parse_mode(value) -> str:
+    return DEVELOPER if str(value or "").strip().lower() == DEVELOPER else NORMAL
+
+
+def for_mode(report: dict, mode, *, kind: str) -> dict:
+    """`report` is a trace() ("trace") or diagnostics() ("diagnostics") dict."""
+    mode = parse_mode(mode)
+    if mode == DEVELOPER:
+        return {"mode": mode, **report}
+    if kind == "diagnostics":
+        keep = ("at", "healthy", "unavailable")
+        return {"mode": mode, **{k: report[k] for k in keep if k in report}}
+    if not report.get("found"):
+        return {"mode": mode, **{k: report[k] for k in ("run_id", "found", "say") if k in report}}
+    keep = ("run_id", "found", "request", "status", "created_at", "finished_at",
+            "total_ms", "retries", "verification")
+    out = {"mode": mode, **{k: report[k] for k in keep if k in report}}
+    out["tasks"] = [{"capability": t.get("capability"), "status": t.get("status")}
+                    for t in report.get("tasks", [])]
+    out["error_count"] = len(report.get("errors", []))
+    return out

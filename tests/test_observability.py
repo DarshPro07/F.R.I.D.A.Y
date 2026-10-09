@@ -343,3 +343,81 @@ def test_toolset_faces_run(store, monkeypatch):
     run = c.Run.create("diag", capability="system")
     out = MG.system_diagnostics(run, sections="queue,memory_store")
     assert out.status == c.OBSERVED and set(out.output) >= {"queue", "memory_store", "healthy"}
+
+
+# ---------------------------------------------------------------------------
+# UX-001: Normal and Developer Mode - "Visibility differs, authority does not."
+# ---------------------------------------------------------------------------
+
+def _ui_client(store, monkeypatch, *, gate=False):
+    pytest.importorskip("httpx")
+    from starlette.testclient import TestClient
+    from friday import access
+    from friday import ui_server as u
+
+    monkeypatch.setattr(access, "GATE_ENABLED", gate)
+    monkeypatch.setenv("ADA_DB", str(store.path))
+    return TestClient(u.create_app())
+
+
+def test_normal_mode_hides_what_developer_mode_shows(store, monkeypatch):
+    run_id = asyncio.run(_run_objective(store, []))
+    with _ui_client(store, monkeypatch) as client:
+        default = client.get("/api/observability", params={"run_id": run_id}).json()
+        normal = client.get("/api/observability", params={"run_id": run_id, "mode": "normal"}).json()
+        dev = client.get("/api/observability", params={"run_id": run_id, "mode": "developer"}).json()
+    assert default == normal and normal["mode"] == "normal"
+    assert normal["status"] == "COMPLETED" and normal["retries"] >= 1
+    assert {t["capability"] for t in normal["tasks"]} == {"steady", "flaky"}
+    for hidden in ("timeline", "usage", "lease", "sources", "errors"):
+        assert hidden not in normal
+    assert all(set(t) == {"capability", "status"} for t in normal["tasks"])
+    assert dev["mode"] == "developer"
+    assert {"timeline", "usage", "lease", "sources"} <= dev.keys()
+    assert any(row["event"] == "task.retry" for row in dev["timeline"])
+
+
+def test_unknown_mode_falls_back_to_normal_never_to_developer(store, monkeypatch):
+    run_id = asyncio.run(_run_objective(store, []))
+    with _ui_client(store, monkeypatch) as client:
+        for odd in ("admin", "", "developer;normal", "1", "dev"):
+            body = client.get("/api/observability", params={"run_id": run_id, "mode": odd}).json()
+            assert body["mode"] == "normal" and "timeline" not in body, odd
+
+
+def test_developer_mode_is_still_redacted(store, monkeypatch):
+    run_id = asyncio.run(_run_objective(store, []))
+    from friday import trust as T
+    T.audit().record(actor="friday", action="files.delete", tier=T.R2, decision="ASK",
+                     target="C:/x", objective_id=run_id, detail={"api_key": FAKE_KEY})
+    with _ui_client(store, monkeypatch) as client:
+        raw = client.get("/api/observability", params={"run_id": run_id, "mode": "developer"}).text
+    assert FAKE_KEY not in raw and "policy.ASK" in raw
+
+
+def test_mode_does_not_change_authority(store, monkeypatch):
+    run_id = asyncio.run(_run_objective(store, []))
+    # The gate answers the same for every mode: a locked session gets 423 for
+    # normal, developer and unknown alike, and an unknown run is not-found in both.
+    with _ui_client(store, monkeypatch, gate=True) as locked:
+        codes = {m: locked.get("/api/observability", params={"run_id": run_id, "mode": m}).status_code
+                 for m in ("normal", "developer", "bogus")}
+    assert codes == {"normal": 423, "developer": 423, "bogus": 423}
+    with _ui_client(store, monkeypatch) as client:
+        miss = {m: client.get("/api/observability", params={"run_id": "RUN-none", "mode": m})
+                for m in ("normal", "developer")}
+    assert {r.status_code for r in miss.values()} == {200}
+    assert all(r.json()["found"] is False for r in miss.values())
+
+
+def test_diagnostics_normal_is_a_summary_developer_is_the_full_view(store, monkeypatch):
+    full = {"at": "2026-10-10T00:00:00", "redacted": True, "healthy": False,
+            "unavailable": ["hermes"], "hermes": {"status": "unavailable", "error": "x"},
+            "build": {"commit": "abc"}}
+    monkeypatch.setattr(OB, "diagnostics", lambda **k: dict(full))
+    with _ui_client(store, monkeypatch) as client:
+        normal = client.get("/api/observability").json()
+        dev = client.get("/api/observability", params={"mode": "developer"}).json()
+    assert normal == {"mode": "normal", "at": full["at"], "healthy": False,
+                      "unavailable": ["hermes"]}
+    assert dev["mode"] == "developer" and dev["hermes"] == full["hermes"] and dev["build"] == full["build"]
