@@ -12,7 +12,9 @@ it, and says whether it is still going somewhere:
 - spend running far ahead of progress;
 - a step with side effects being run again and again;
 - the run leaving its objective contract: a forbidden action class started,
-  more side-effecting steps than allowed, or acting while questions are open.
+  more side-effecting steps than allowed, or acting while questions are open;
+- the plan itself changing again and again (the person keeps amending it);
+- the run losing the worker driving it again and again (worker conflict).
 
 `assess` is pure, so the thresholds can be benchmarked on synthetic traces;
 `for_run` gathers the inputs from the store. The executor pauses a flagged
@@ -51,6 +53,15 @@ BURN_SPEND = 0.75
 BURN_PROGRESS = 0.25
 #: Starts of one task whose capability writes or acts outside FRIDAY.
 SIDE_EFFECT_STARTS = 3
+#: Plan amendments (a skip, amend or append, PRD §12 "user amendments") in the
+#: window. Fewer is a person steering the plan; this many is a plan that is not
+#: settling, and the trajectory the person approved may no longer be the one
+#: running.
+AMENDMENTS = 4
+#: Takeovers of the run (the watchdog seizing it from a worker that stopped
+#: driving it, PRD §12 "worker conflict") in the window. One is ordinary crash
+#: recovery; this many is the run thrashing between workers, not advancing.
+TAKEOVERS = 3
 
 _STARTED = "task.started"
 _SUCCEEDED = "task.succeeded"
@@ -58,6 +69,11 @@ _FAILED = "task.failed"
 _RETRY = "task.retry"
 _BLOCKED = "task.blocked"
 _RESUMED = "run.resumed"
+#: modification.GRAPH_EDIT: a skip, amend or append to the live plan.
+_AMENDED = "graph_edited"
+#: objectives.EVENT_WATCHDOG_ORPHANED: the watchdog took the run over. Not
+#: lease.acquired, which every healthy wake records.
+_ORPHANED = "watchdog.orphaned"
 _REFUSAL = re.compile(r"\b(?:ENVELOPE|APPROVAL_REQUIRED|BLOCKED):")
 
 
@@ -160,6 +176,8 @@ def assess(events: list[dict], tasks: list[dict], *, spend: float = 0.0,
             causes[kind].add(task)
     refusals = sum(1 for e in window if e.get("event") in (_FAILED, _RETRY, _BLOCKED)
                    and _REFUSAL.search(str(_detail(e).get("reason") or "")))
+    amendments = sum(1 for e in window if e.get("event") == _AMENDED)
+    takeovers = sum(1 for e in window if e.get("event") == _ORPHANED)
     capability_of = {t.get("task_id"): t.get("capability") for t in tasks}
     status_of = {t.get("task_id"): t.get("status") for t in tasks}
     starts = Counter(e.get("task_id") for e in window if e.get("event") == _STARTED)
@@ -180,7 +198,8 @@ def assess(events: list[dict], tasks: list[dict], *, spend: float = 0.0,
         open_questions, [task for task in upcoming if task not in starts], capability_of)
 
     signals = {"attempts_since_success": len(since), "failing_tasks": len(failing),
-               "refusals": refusals, "spend": round(spend, 3), "progress": round(progress, 3),
+               "refusals": refusals, "amendments": amendments, "takeovers": takeovers,
+               "spend": round(spend, 3), "progress": round(progress, 3),
                "repeated_side_effects": repeated_effects, "out_of_scope": out_of_scope,
                "unanswered_questions": len(open_questions) if unanswered or pending else 0,
                "pending_side_effects": pending}
@@ -194,6 +213,11 @@ def assess(events: list[dict], tasks: list[dict], *, spend: float = 0.0,
             stuck.append(f"the same failure ({kind}) across {len(affected)} tasks")
     if refusals >= NEAR_MISSES:
         drifting.append(f"{refusals} policy refusals: the plan keeps asking for what it may not do")
+    if amendments >= AMENDMENTS:
+        drifting.append(f"{amendments} plan amendments since the run started: the plan keeps changing")
+    if takeovers >= TAKEOVERS:
+        drifting.append(f"{takeovers} worker takeovers since the run started: "
+                        "the run keeps losing the worker driving it")
     # An early warning below the ceilings; a budget already spent is the
     # budget's to stop, with its own exact reason (objective_budget.check).
     if BURN_SPEND <= spend < 1.0 and progress <= BURN_PROGRESS:

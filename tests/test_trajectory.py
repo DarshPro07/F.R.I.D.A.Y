@@ -146,6 +146,73 @@ def test_repeated_policy_refusals_are_flagged():
     assert any("refus" in r for r in assessment.reasons)
 
 
+def _event(name):
+    return {"event": name, "task_id": None, "detail": {}}
+
+
+def test_repeated_plan_amendments_are_flagged():
+    """PRD §12 'user amendments': the plan not settling, not one correction."""
+    trace = _Trace(6)
+    for _ in range(T.AMENDMENTS - 1):
+        trace.events.append(_event("graph_edited"))
+    assert trace.assess().verdict == T.ON_TRACK
+    trace.events.append(_event("graph_edited"))
+    assessment = trace.assess()
+    assert assessment.verdict == T.DRIFTING
+    assert any("amendment" in r for r in assessment.reasons)
+    assert assessment.signals["amendments"] == T.AMENDMENTS
+
+
+def test_repeated_worker_takeovers_are_flagged():
+    """PRD §12 'worker conflict': the run keeps losing the worker driving it."""
+    trace = _Trace(6)
+    for _ in range(T.TAKEOVERS - 1):
+        trace.events.append(_event(O.EVENT_WATCHDOG_ORPHANED))
+    assert trace.assess().verdict == T.ON_TRACK
+    trace.events.append(_event(O.EVENT_WATCHDOG_ORPHANED))
+    assessment = trace.assess()
+    assert assessment.verdict == T.DRIFTING
+    assert any("takeover" in r for r in assessment.reasons)
+    assert assessment.signals["takeovers"] == T.TAKEOVERS
+
+
+def test_one_crash_recovered_and_a_few_amendments_are_not_drift():
+    """One takeover is ordinary crash recovery (OBJ-001) and a few amendments
+    are a person steering; neither alone, nor both together, ask the person."""
+    trace = _Trace(5)
+    trace.succeeded("t0")
+    trace.events.append(_event(O.EVENT_WATCHDOG_ORPHANED))
+    for _ in range(T.AMENDMENTS - 1):
+        trace.events.append(_event("graph_edited"))
+    for task in ("t1", "t2", "t3", "t4"):
+        trace.succeeded(task)
+    assessment = trace.assess()
+    assert assessment.verdict == T.ON_TRACK
+    assert assessment.signals["takeovers"] == 1
+
+
+def test_a_wake_is_not_a_takeover():
+    """Every wake takes a lease (lease.acquired); only the watchdog seizing an
+    orphaned run is a takeover, or a long healthy run would be flagged."""
+    trace = _Trace(8)
+    for task in ("t0", "t1", "t2", "t3", "t4"):
+        trace.events.append(_event("lease.acquired"))
+        trace.succeeded(task)
+    assert trace.assess().verdict == T.ON_TRACK
+    assert trace.assess().signals["takeovers"] == 0
+
+
+def test_a_resume_forgives_the_amendments_and_takeovers_before_it():
+    trace = _Trace(6)
+    for _ in range(T.AMENDMENTS):
+        trace.events.append(_event("graph_edited"))
+    for _ in range(T.TAKEOVERS):
+        trace.events.append(_event(O.EVENT_WATCHDOG_ORPHANED))
+    assert trace.assess().verdict == T.DRIFTING
+    trace.events.append(_event(O.EVENT_RUN_RESUMED))
+    assert trace.assess().verdict == T.ON_TRACK
+
+
 def test_spend_far_ahead_of_progress_is_flagged():
     trace = _Trace(10)
     trace.succeeded("t0")
@@ -255,6 +322,89 @@ def test_a_healthy_run_completes_unflagged(tmp_path):
 
     run = _drive(store, run_id, CR.build_dispatch(engine=PO.PolicyEngine(autonomy=PO.FULL)))
     assert run["status"] == O.RUN_COMPLETED, run
+    assert not [e for e in store.objective_events(run_id) if e["event"] == T.EVENT_FLAGGED]
+
+
+class _CountingDispatch:
+    def __init__(self):
+        self.calls = 0
+
+    async def __call__(self, capability, arguments, *, run=None):
+        self.calls += 1
+        return {"ok": True}
+
+
+def test_a_drifting_run_is_paused_by_the_single_round_the_watchdog_drives(tmp_path):
+    """`_drive_one_round` is the path RunWatchdog uses to recover an orphaned
+    run, not `_drive_until_done`; it must pause a run the trajectory check
+    flags instead of dispatching into it."""
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store, 4)
+    for task in ("t0", "t1", "t2", "t0", "t1", "t2"):
+        store.append_objective_event(run_id, O.EVENT_TASK_RETRY, task_id=task,
+                                     detail={"kind": "TRANSIENT", "reason": "503"})
+    assert T.for_run(store, run_id).verdict == T.NO_PROGRESS
+    dispatch = _CountingDispatch()
+
+    async def go():
+        from friday.continuous import ContinuousTaskExecutor
+        return await ContinuousTaskExecutor(store, call_capability=dispatch)._drive_one_round(run_id)
+
+    assert asyncio.run(go()) == 0
+    run = store.objective_run(run_id)
+    assert run["status"] == O.RUN_PAUSED, run
+    assert "trajectory" in (run.get("blocker") or "")
+    flagged = [e for e in store.objective_events(run_id) if e["event"] == T.EVENT_FLAGGED]
+    assert flagged and flagged[0]["detail"]["verdict"] == T.NO_PROGRESS
+    assert dispatch.calls == 0
+
+
+def test_a_run_orphaned_again_and_again_is_paused_by_the_watchdog(tmp_path):
+    """PRD §12 'worker conflict', end to end: the run was taken over twice
+    already, the watchdog takes it over a third time, and instead of driving
+    it again it pauses it and asks the person - no round, no wake, no
+    continuation left behind."""
+    from friday.continuous import ContinuousTaskExecutor, RunWatchdog
+
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store, 3)
+    for _ in range(T.TAKEOVERS - 1):
+        store.append_objective_event(run_id, O.EVENT_WATCHDOG_ORPHANED, detail={})
+    dispatch = _CountingDispatch()
+
+    async def go():
+        executor = ContinuousTaskExecutor(store, call_capability=dispatch)
+        watchdog = RunWatchdog(executor)
+        orphaned = await watchdog.sweep_once()
+        await asyncio.sleep(0.2)
+        return orphaned
+
+    assert asyncio.run(go()) == [run_id]
+    run = store.objective_run(run_id)
+    assert run["status"] == O.RUN_PAUSED, run
+    assert run["next_wake"] is None
+    events = store.objective_events(run_id)
+    flagged = [e for e in events if e["event"] == T.EVENT_FLAGGED]
+    assert flagged and any("takeover" in r for r in flagged[0]["detail"]["reasons"])
+    assert not [e for e in events if e["event"] == O.EVENT_CONTINUATION_SCHEDULED]
+    assert dispatch.calls == 0
+    assert all(t["status"] == "READY" for t in store.objective_tasks(run_id))
+
+
+def test_a_run_orphaned_once_is_still_recovered_by_the_watchdog(tmp_path):
+    """One takeover is ordinary crash recovery: the watchdog drives the run on."""
+    from friday.continuous import ContinuousTaskExecutor, RunWatchdog
+
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store, 3)
+    dispatch = _CountingDispatch()
+
+    async def go():
+        executor = ContinuousTaskExecutor(store, call_capability=dispatch)
+        return await RunWatchdog(executor).sweep_once()
+
+    assert asyncio.run(go()) == [run_id]
+    assert dispatch.calls >= 1
     assert not [e for e in store.objective_events(run_id) if e["event"] == T.EVENT_FLAGGED]
 
 

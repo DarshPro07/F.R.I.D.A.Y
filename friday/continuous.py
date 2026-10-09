@@ -600,7 +600,13 @@ class ContinuousTaskExecutor:
             self.release(run_id)
 
     async def _drive_one_round(self, run_id: str) -> int:
-        """One snapshot round, no scheduling. Used by the watchdog."""
+        """One snapshot round, no scheduling. Used by the watchdog.
+
+        The same trajectory check as the driver loop (TRAJ-001): a run the
+        watchdog took over from a dead owner is not driven past a pause its
+        own history calls for."""
+        if self._trajectory_pauses(run_id):
+            return 0
         ready = self._ready_snapshot(run_id)
         if not ready:
             return 0
@@ -2089,6 +2095,12 @@ class RunWatchdog:
         # continuation.
         self.executor.acquire(run_id)
         await self.executor._drive_one_round(run_id)
+        run = store.objective_run(run_id)
+        if run is not None and run["status"] == O.RUN_PAUSED:
+            # The trajectory check paused it and asked the person (TRAJ-001):
+            # no wake and no continuation, so nothing drives it before they
+            # answer.
+            return
         self.executor._schedule_wake(run_id)
         asyncio.get_event_loop().create_task(
             self._continue_after(run_id, delay=CONTINUATION_DELAY))
