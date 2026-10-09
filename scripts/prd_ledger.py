@@ -4555,6 +4555,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Audit: friday/objective_budget.py already enforced hard limits in code, with no model involved, on tokens, wall time, tool calls, worker delegations and replans. The engine parks a run as PAUSED before dispatch, and the check reads the ceiling from the run row, so raising it lets the run go on. Miss (build run, commit f0eb0effa)',
         "next_action": "GAPS: The ledger next_action was the one-line audit instruction, not a decision-bearing packet, so DESIGN and TESTS are mine rather than the controller's.; Budgets are per objective run. There is no separate per-worker budget entity, and a delegated worker's own turns and tool calls inside Hermes are not counted separately. Only its WorkRunLog tokens are.; The soft report is code-generated from recorded state and recorded as an event. It is not injected into the worker's prompt, since a worker that is a delegated process cannot be assumed to accept an extra argument.; Turns count gateway telemetry rows only, so a run with no gateway ledger reports 0 turns (the existing missing-ledger rule in spend.sources).; Soft limits are not defined for the worker-delegation and replan dimensions; those stay hard-only.",
     }),
+    ('ORCH-005', {
+        "status": PARTIAL,
+        "current_implementation": "Audit: the packet's next_action is one sentence with no DESIGN or TESTS section, so I followed it as written. The gateway already starts each task at its class's default tier (budget_for(...).default_tier) and fails over through tiers. Failover was recorded in attempts and gateway_calls rows, but no (build run, commit 8cf39257e)",
+        "next_action": "GAPS: Cause is the previous route's failure code, so a provider outage that forces a hop up a tier is recorded as an escalation with cause e.g. QUOTA_EXCEEDED. It is not a measured quality failure. The gateway has no quality-failure signal today.; Nothing reads GatewayTelemetry.escalations yet outside the tests. It is a method, so reachability did not flag it, and no MCP tool or observability surface exposes it.; Escalations are not set on the _blocked() result. That path means no route was dispatched, so there is none to record.",
+    }),
 ]
 
 
