@@ -24,6 +24,7 @@ from pathlib import Path
 
 from friday.skills import contracts as K
 from friday.skills import files as F
+from friday.skills import gc as G
 from friday.skills import hermes_link as HL
 from friday.skills import lint as L
 from friday.skills import publisher as P
@@ -225,6 +226,17 @@ def cmd_rescore(services: Services, args) -> int:
     return 0
 
 
+def cmd_gc(services: Services, args) -> int:
+    """Archive stale duplicate skills (DEPRECATED, kept for history)."""
+    report = G.collect(services.registry, apply=not args.dry_run, actor="cli")
+    verb = "would archive" if args.dry_run else "archived"
+    for item in report["archived"]:
+        print(f"  {verb} {item['name']:<40} duplicate of {item['duplicate_of']} (idle {item['idle_days']} days)")
+    if not report["archived"]:
+        print("  nothing to archive")
+    return 0
+
+
 def cmd_hints(services: Services, args) -> int:
     """The names Hermes should load for a request (TaskBundle.skill_hints)."""
     print(json.dumps(services.router.hints_for(args.query, limit=args.limit)))
@@ -377,6 +389,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("rescore", help="recompute quality; degrade and roll back below the floor")
     p.add_argument("name", nargs="?", default=""); p.add_argument("--no-rollback", action="store_true")
     p.set_defaults(func=cmd_rescore)
+    p = sub.add_parser("gc", help="archive stale duplicate skills")
+    p.add_argument("--dry-run", action="store_true"); p.set_defaults(func=cmd_gc)
     p = sub.add_parser("hints", help="skill names Hermes should load for a request")
     p.add_argument("query"); p.add_argument("--limit", type=int, default=3); p.set_defaults(func=cmd_hints)
     p = sub.add_parser("facts", help="promote a skill's ## Facts bullets into memory")
