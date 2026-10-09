@@ -4601,6 +4601,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added friday/intake.py: parse_repo_url (https://github.com/owner/repo[.git][/tree/ref] only; IntakeError.field names scheme/userinfo/port/host/query/fragment/path/url), a resolver-injected 40-hex SHA pin (a branch is never stored), a frozen IntakeDossier, scan_instructions (flags lines addressed to  (build run, commit 5b3e4bd1d)',
         "next_action": "GAPS: 'A stopped journey resumes at its last finished stage' is not met: IntakeRun exposes evidence and next_stage but nothing persists or restores a run (persistence is out of scope for slice 1).; No real git/ls-remote resolver, no scoring (CAP-FORGE-014), no overlap check (CAP-FORGE-011), no quarantine clone, and no real decider; those are injected seams. Irrelevant/duplicate REJECT is proven only with fake deciders.; forge.scan_import / fabric.find_overlaps are not wired in yet.; tests/test_reachability.py passes with the new DECLARED entry; no KNOWN entries were added.; implementer did not claim acceptance met",
     }),
+    ('LAB-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Slice 1 is done: friday/experimental_local.py is a pure-Python fence for the EXPERIMENTAL_LOCAL_MODEL route. It has NARROW_TASKS (the four packet tasks) and admit(narrow_task, data_class, *, local=True), which returns Verdict(admitted, reason, task) and never raises. Any other task, including approv (build run, commit a3d12b3c7)',
+        "next_action": 'GAPS: Not wired: the model gateway (model_gateway.py), the OpenAI-compatible local server, the deterministic-route fallback in the gateway, and the unhealthy/absent-route handling.; Not covered: any real MiniMind weights or stub server; the fake model is a plain callable.; Not covered: the policy-engine and confirmation check on approval; here approval is only refused as a narrow task.; Not covered: benchmark, training, UI, and the check that no second conversational loop exists.; implementer did not claim acceptance met',
+    }),
 ]
 
 
