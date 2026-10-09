@@ -417,6 +417,44 @@ def test_watch_kills_on_stall(tmp_path):
     assert rec["state"] == "STALLED"
 
 
+def _silent_then_done(tmp_path, first: dict, quiet_s: float):
+    """A worker that writes `first`, says nothing for `quiet_s`, then finishes with a result."""
+    final = {"type": "result", "subtype": "success", "num_turns": 9, "total_cost_usd": 0.2,
+             "is_error": False, "result": "built and validated", "uuid": "u-final"}
+    ev = {"requirement": "R-1", "status": "DONE", "summary": "ok"}
+    code = ("import json,time;f=open('.build/stream.jsonl','w');f.write(json.dumps(%r)+'\\n');f.flush();"
+            "time.sleep(%r);f.write(json.dumps(%r)+'\\n');f.close();"
+            "open('.build/evidence.json','w').write(json.dumps(%r))" % (first, quiet_s, final, ev))
+    return _fake_run(tmp_path, code)
+
+
+def _bash_call(timeout_ms: int) -> dict:
+    return {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "pytest", "timeout": timeout_ms}}]}}
+
+
+def test_watch_lets_a_worker_wait_for_its_background_work(tmp_path):
+    # 2026-10-09: PKG-001 backgrounded the exe build and ended its turn to wait for the
+    # completion notice; ten silent minutes later the watchdog killed it, build and all.
+    waiting = {"type": "result", "subtype": "success", "num_turns": 3, "total_cost_usd": 0.1,
+               "is_error": False, "result": "the build runs in the background; its notice brings me back",
+               "uuid": "u-wait"}
+    run = _silent_then_done(tmp_path, waiting, 1.0)
+    assert K.watch([run], stall_s=0.3, poll_s=0.05, runs_dir=tmp_path / "runs")[0]["state"] == "DONE"
+
+
+def test_watch_lets_a_running_tool_call_use_its_declared_timeout(tmp_path, monkeypatch):
+    monkeypatch.setattr(K, "TOOL_GRACE_S", 0.2)
+    run = _silent_then_done(tmp_path, _bash_call(1500), 1.0)
+    assert K.watch([run], stall_s=0.3, poll_s=0.05, runs_dir=tmp_path / "runs")[0]["state"] == "DONE"
+
+
+def test_watch_stalls_a_tool_call_silent_past_its_timeout(tmp_path, monkeypatch):
+    monkeypatch.setattr(K, "TOOL_GRACE_S", 0.1)
+    run = _silent_then_done(tmp_path, _bash_call(200), 60)
+    assert K.watch([run], stall_s=0.3, poll_s=0.05, runs_dir=tmp_path / "runs")[0]["state"] == "STALLED"
+
+
 def test_allowed_tools_are_narrow_and_bash_is_always_patterned():
     cmd = K.launch(row("REQ-1"), worktrees=Path("wts"), dry_run=True)["command"]
     tools = cmd[cmd.index("--allowedTools") + 1].split(",")

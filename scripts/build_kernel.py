@@ -93,6 +93,9 @@ CASCADE = ("REPAIR", "ADVISOR", "IMPLEMENTER")
 LOCALIZED_FAILING_TESTS = 3
 DEFAULT_WALL_S = 45 * 60
 DEFAULT_STALL_S = 10 * 60
+#: Silence a running tool call gets beyond its own declared timeout (Bash defaults to 2 min).
+TOOL_GRACE_S = 60.0
+TOOL_DEFAULT_TIMEOUT_S = 120.0
 ALLOWED_TOOLS = ",".join(("Read", "Edit", "Write", "Glob", "Grep",
                           "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
                           f"Bash({VENV_PY}:*)"))
@@ -2170,12 +2173,39 @@ def sample_rss(run: Running) -> None:
         run.peak_rss_mb = round(mb, 1)
 
 
+def _tool_timeout_s(call: dict) -> float:
+    try:
+        return float((call.get("input") or {}).get("timeout")) / 1000
+    except (TypeError, ValueError):  # not declared: the tool's own default
+        return TOOL_DEFAULT_TIMEOUT_S
+
+
+def silence_allowed(stream: Path, offset: int, stall_s: float) -> float:
+    """How long a live worker may be silent before it counts as stalled. One whose last word
+    is a result has ended its turn with background work running and waits for that work's
+    completion notice to resume it (2026-10-09: PKG-001 backgrounded the ~10 min exe build,
+    said so, and was killed as STALLED after ten silent minutes, the build with it): only
+    the wall limit applies. A tool call still running may use its declared timeout."""
+    events = _events(stream, offset)
+    last = events[-1] if events else {}
+    if last.get("type") == "result":
+        return float("inf")
+    content = (last.get("message") or {}).get("content") if last.get("type") == "assistant" else None
+    calls = [c for c in content if isinstance(c, dict) and c.get("type") == "tool_use"] \
+        if isinstance(content, list) else []
+    if calls:
+        return max(stall_s, max(_tool_timeout_s(c) for c in calls) + TOOL_GRACE_S)
+    return stall_s
+
+
 def watch(runs: list[Running], *, wall_s: float | None = None, stall_s: float = DEFAULT_STALL_S,
           poll_s: float = 5.0, runs_dir: Path = RUNS_DIR) -> list[dict]:
     """Poll to completion. Heartbeat = stream log growth. Zero model calls.
-    The wall limit is each run's own unless `wall_s` overrides it."""
+    The wall limit is each run's own unless `wall_s` overrides it; silence past
+    `stall_s` is a stall unless the worker is waiting on something (silence_allowed)."""
     live = {r.req: r for r in runs}
     last = {r.req: (-1, time.time()) for r in runs}
+    allowed: dict[str, tuple[int, float]] = {}  # req -> (stream size it was judged at, seconds)
     done: list[dict] = []
     while live:
         for req, run in list(live.items()):
@@ -2190,12 +2220,16 @@ def watch(runs: list[Running], *, wall_s: float | None = None, stall_s: float = 
                 if now - run.started > (run.wall_s if wall_s is None else wall_s):
                     reason = "TIMEOUT"
                 elif now - last[req][1] > stall_s:
-                    reason = "STALLED"
+                    if allowed.get(req, (None,))[0] != size:  # judged once per stream state
+                        allowed[req] = (size, silence_allowed(p, run.stream_offset, stall_s))
+                    if now - last[req][1] > allowed[req][1]:
+                        reason = "STALLED"
                 if reason is None:
                     continue
                 kill_tree(run.proc)
             elif continuation(run):
                 last[req] = (-1, time.time())
+                allowed.pop(req, None)
                 continue
             done.append(finalize(run, reason, runs_dir))
             del live[req]
