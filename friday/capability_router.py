@@ -154,7 +154,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "browser": (
         "browser_open", "browser_navigate", "browser_inspect", "browser_close",
-        "browser_automate", "browser_act",
+        "browser_automate", "browser_act", "browser_start_temporary_profile",
     ),
     "research": ("web_crawl", "web_deep_research"),
     "documents": ("documents_extract", "documents_inspect"),

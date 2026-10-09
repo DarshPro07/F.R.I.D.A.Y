@@ -510,6 +510,10 @@ TOOL_CATEGORIES: dict[str, str] = {
     # primitive inside (reads browser.inspect, writes browser.automate); the
     # bare id is what the approval channel and manifest see.
     'browser_act': BROWSER_AUTOMATION,
+    # BROW-003: starting a throwaway on-disk profile. Policy allows the call;
+    # the person's exact-action yes (friday.confirmation) is what starts it.
+    'browser.temporary_profile': BROWSER_AUTOMATION,
+    'browser_start_temporary_profile': BROWSER_AUTOMATION,
     'get_world_news': WEB_SEARCH,
     'get_world_finance_news': WEB_SEARCH,
     'search_web': WEB_SEARCH,

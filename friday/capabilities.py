@@ -850,6 +850,24 @@ _ALL = (
         ),
     ),
     Capability(
+        id='browser_start_temporary_profile',
+        description='Start the browser on a throwaway profile with its own cookies and no signed-in state, deleted when the session ends; asks the person first and launches nothing until they approve.',
+        execution_scope='user_device',
+        side_effect='external_action',
+        requires_edge=True,
+        requires_auth=True,
+        intent_examples=(
+            'start a temporary browser profile for this',
+            'browse in a throwaway profile so nothing is saved',
+            'use a disposable browser profile that is deleted afterwards',
+        ),
+        negative_examples=(
+            'open this url in the browser',
+            'use my signed in chrome profile',
+            'close the browser',
+        ),
+    ),
+    Capability(
         id='files_read',
         description='Read a text file inside the workspace roots.',
         execution_scope='user_device',

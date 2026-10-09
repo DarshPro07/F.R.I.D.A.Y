@@ -216,6 +216,10 @@ CARDS: dict[str, Card] = {
     "browser_act": _c("browser", "one browser primitive through the observe-plan-policy-act-verify loop",
                       "click this, scroll, type into the page, press a button on the page",
                       "click the sign-in button on the page", "pursue a whole goal alone", "browser_automate"),
+    "browser_start_temporary_profile": _c(
+        "browser", "start the browser on a throwaway profile with no signed-in state, with approval",
+        "temporary profile, throwaway browser, clean browser session, browse without saving cookies",
+        "start a temporary browser profile", "use the signed-in browser profile", "browser_open"),
     "browser_automate": _c("browser", "drive the browser toward a stated goal by clicking and typing, with approval",
                            "fill the form, book it, do this on the website, complete the checkout steps",
                            "fill in the form on that site", "one single click", "browser_act"),

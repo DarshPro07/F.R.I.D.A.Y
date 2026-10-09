@@ -705,6 +705,74 @@ async def browser_act(
                                     evidence=step.evidence)))
 
 
+async def browser_start_temporary_profile(
+    run: c.Run, args: dict | None = None, *, engine: PolicyEngine = default_engine,
+) -> c.ActionResult:
+    """
+    Start the browser on a throwaway on-disk profile (BROW-003): its own
+    cookies and storage, no access to the signed-in profile, deleted when the
+    session ends.
+
+    The first call asks through `friday.confirmation`, returns
+    APPROVAL_REQUIRED with a `confirm` nonce and launches nothing. Once the
+    person has approved that nonce, the same call with `args["nonce"]` spends
+    it on exactly this action, once, and starts the profile.
+
+    Authority never arrives in `args`: `confirmed` and `approved` are dropped,
+    and a nonce only names which question was answered - `Book.consume`
+    refuses one the person's answer did not approve. The profile choice is
+    made here, by trusted code; nothing in `args` can name a directory.
+    """
+    from friday import browser as B
+    from friday import confirmation
+
+    tool_id = "browser.temporary_profile"
+    target = "a throwaway browser profile"
+    blocked = _gate(run, tool_id, engine)
+    if blocked:
+        return blocked
+    started = c.started(run.run_id, tool_id)
+    nonce = str((args or {}).get("nonce") or "")
+
+    if not nonce:
+        pending = confirmation.book.ask(
+            run.run_id, tool_id, target,
+            "Allow a temporary browser profile? It starts with no cookies or "
+            "signed-in state, cannot see your own browser profile, and is "
+            "deleted when the browser session ends.")
+        return run.record(c.partial(
+            started, f"{APPROVAL_PREFIX}: a temporary browser profile needs your approval",
+            output=_scoped({"action": tool_id, "confirm": pending.to_dict()},
+                           BROWSER_SCOPE)))
+    spent = confirmation.book.consume(nonce, run_id=run.run_id, action=tool_id,
+                                      target=target)
+    if not spent.ok:
+        return run.record(started.finish(
+            status=c.CANCELLED, error=f"{APPROVAL_PREFIX}: {spent.reason}",
+            output=_scoped({"action": tool_id, "confirm": None}, BROWSER_SCOPE)))
+
+    choice = B.choose_profile(worker="friday", authorized_by_approval=False,
+                              temporary_by_approval=True)
+    try:
+        loop = await _loop_browser(profile=choice)
+    except browser_readiness.BrowserUnavailable as exc:
+        return _unavailable(run, started, exc)
+    except Exception as exc:  # noqa: BLE001
+        return run.record(c.failed(started, f"browser could not start: {exc}"))
+    profile = loop.profile
+    if profile is None or profile.kind != B.TEMPORARY:
+        return run.record(c.failed(
+            started, f"the browser is running with its "
+                     f"{profile.kind if profile else 'unknown'} profile, not a temporary one"))
+    return run.record(c.succeeded(
+        started,
+        output=_scoped({"profile": {"kind": profile.kind, "reason": profile.reason}},
+                       BROWSER_SCOPE),
+        side_effects=("browser temporary profile started",),
+        verification=c.Verification(method="browser_profile_launched",
+                                    evidence=f"{profile.kind} profile: {profile.reason}")))
+
+
 async def _page_state(page) -> dict:
     try:
         title = await page.title()

@@ -189,6 +189,29 @@ def register(mcp):
                               primitive, target, args, _run=run)
 
     @mcp.tool()
+    async def browser_start_temporary_profile(nonce: str = "") -> dict:
+        """
+        Start the browser on a temporary profile: its own cookies and
+        storage, none of the user's signed-in state, deleted when the browser
+        session ends. Needs the user's approval: the first call returns
+        APPROVAL_REQUIRED with a `confirm` nonce and starts nothing - ask the
+        user, and once they have approved it, call again with that nonce.
+        Only their answer approves a nonce. Close the browser first if one is
+        already running: a session keeps the profile it started with.
+        """
+        from friday import confirmation
+        # As browser_act: the call carrying the nonce rejoins the run that
+        # asked, or the person's yes could not be spent on it. Only this
+        # tool's own confirmation - another tool's run is never overwritten.
+        pending = confirmation.book.pending.get(nonce) if nonce else None
+        if pending is not None and pending.action != "browser.temporary_profile":
+            pending = None
+        run = (c.Run(run_id=pending.run_id, request="browser temporary profile",
+                     capability="web") if pending else None)
+        return await _execute("browser temporary profile", W.browser_start_temporary_profile,
+                              {"nonce": nonce}, _run=run)
+
+    @mcp.tool()
     async def browser_automate(task: str, start_url: str = "https://www.google.com",
                                max_turns: int = 6) -> dict:
         """
