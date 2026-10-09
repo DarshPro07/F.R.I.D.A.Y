@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `ed0642cee3bdb622d47ca9c12e2bc738963cd31cf2013e135d1a32037a983987`
 - PRD size: 8288 lines, 312308 bytes
-- Repository HEAD: `b204fb213da641efb546debfc44325f294b335b7`
+- Repository HEAD: `2b991b77f3a6d908100b239d95cb6bb29d51f374`
 - Uncommitted paths at generation: 45
-- Generated: 2026-10-09T07:57:17+05:30
+- Generated: 2026-10-09T09:24:06+05:30
 
 ## Status vocabulary
 
@@ -28,14 +28,14 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 | state | count |
 |---|---:|
 | MISSING | 101 |
-| VERIFIED | 56 |
-| PARTIAL | 53 |
+| VERIFIED | 57 |
+| PARTIAL | 52 |
 | EXISTING_UNVERIFIED | 8 |
 | DEFERRED_BY_PRD | 2 |
 | PARKED_BY_OWNER | 1 |
 | **total** | **221** |
 
-Unresolved P0: 12 (CORE-001, TRAJ-001, CTX-002, MEM-002, MEM-003, SEC-005, RES-001, ACT-001, JIT-001, RES-002, EXEC-SBX-001, MODEL-012)
+Unresolved P0: 11 (CORE-001, TRAJ-001, CTX-002, MEM-002, MEM-003, SEC-005, ACT-001, JIT-001, RES-002, EXEC-SBX-001, MODEL-012)
 
 Unresolved P1: 124 (INTENT-002, CTX-004, COG-002, COG-003, MODEL-003, MODEL-004, SKILL-002, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008, ORCH-001, ORCH-002, ORCH-003, ORCH-004, ORCH-005, ORCH-006, ORCH-007, ORCH-008, ORCH-009, ORCH-010, ORCH-011, ORCH-012, ORCH-013, ORCH-014, CAP-FORGE-001, CAP-FORGE-003, CAP-FORGE-004, CAP-FORGE-005, CAP-FORGE-006, CAP-FORGE-007, CAP-FORGE-008, CAP-FORGE-009, CAP-FORGE-010, CAP-FORGE-011, CAP-FORGE-012, CAP-FORGE-013, CAP-FORGE-014, WF-001, WF-002, WF-003, WF-004, WF-005, WF-006, WF-007, WF-008, WF-009, WF-010, CAP-MKT-001, CAP-MKT-002, CAP-MKT-003, CAP-MKT-004, CAP-MKT-005, CAP-MKT-006, COG-005, COG-006, EVO-001, EVO-002, EVO-003, EVO-004, EVO-006, FAB-001, FAB-002, FAB-003, FAB-004, FAB-005, FAB-007, FAB-008, FAB-009, HARN-001, ULTRA-001, ULTRA-002, ULTRA-003, ULTRA-004, ULTRA-005, ULTRA-006, ULTRA-007)
 
@@ -267,7 +267,7 @@ Unresolved P1: 124 (INTENT-002, CTX-004, COG-002, COG-003, MODEL-003, MODEL-004,
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| RES-001 | P0 | **PARTIAL** | Resource Governor bounds processes/models/workers. | Low-RAM stress test. | - | `friday/governor.py:84,343,416,581`, `scripts/stress_low_ram.py`, `data/prd_v7_audit/res001_low_ram_2026-09-27.json` | 2026-09-27, real memory on this 15.4 GB host (data/prd_v7_audit/res001_low_ram_2026-09-27.json), with the thresholds then set a few points above the load at the start: 300 MB moved the governor to ELEVATED, 600 MB to HIGH, 750 MB to CRITICAL; once released it admitted all three again; every decision matched the policy. 2026-09-30, rerun against the machine's own baseline with nothing moved (data/prd_v7_audit/res003_stress_2026-09-30.json): YELLOW then ORANGE on real memory before any fixed line, every decision as the policy says; the slow test passed on its own. The four-chunk suite over the Slice 7 tree (data/baseline_v7_slice7a), FRIDAY not running: all four chunks exit 0, 4,753 passed (1,280, 1,073, 1,338 and 1,062), none failed, live state unchanged. |
+| RES-001 | P0 | **VERIFIED** | Resource Governor bounds processes/models/workers. | Low-RAM stress test. | - | `friday/governor.py:84,343,416,581`, `scripts/stress_low_ram.py`, `data/prd_v7_audit/res001_low_ram_2026-09-27.json` | Confirmed at efaec32f1: the build worker found the acceptance already met and changed nothing; tests/test_governor.py::test_real_memory_pressure_bounds_new_work, tests/test_governor.py::test_high_pressure_reduces_concurrency_to_one, tests/test_governor.py::test_critical_pressure_sheds_all_new_work pass at HEAD and an independent verifier judged the existing code to meet it. Worker: No source change needed. 69 governor tests pass; stress_low_ram.py re-run on this host and current code: demonstrated and as_policy_says both true (memory-driven ELEVATED at 147 MB, running optional helper stopped, level fell after the 30 s dwell). |
 
 ## PRD section 56
 

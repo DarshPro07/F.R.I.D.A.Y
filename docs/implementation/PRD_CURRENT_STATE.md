@@ -153,11 +153,11 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: b204fb2 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T02:27:14+00:00
+- HEAD: 2b991b7 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T03:54:03+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 8, "MISSING": 101, "PARKED_BY_OWNER": 1, "PARTIAL": 53, "VERIFIED": 56}
 - Unresolved P0: 12
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (249): none
+- Last wave (251): RES-001=CONFIRMED
 - Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), ACT-001 (integration refused), JIT-001 (cascade exhausted), MEM-003 (NOT_CONFIRMED), MEM-002 (NO_TEST), TRAJ-001 (cascade exhausted), SEC-005 (cascade exhausted)
 - Open escalations: 191
   - DUR-001 integration: refusing DUR-001: run has no commit
