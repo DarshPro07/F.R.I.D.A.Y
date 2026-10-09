@@ -16,6 +16,7 @@ import random
 
 import pytest
 
+from friday import confirmation as CF
 from friday import governor as G
 from friday import local_experts as L
 
@@ -77,6 +78,13 @@ class Machine:
         return unload
 
 
+def approved_override(pool: L.ExpertPool, name: str, size_gb: float, reason: str) -> str:
+    """The owner's yes, as the person gives it: asked through the pool, answered on the book."""
+    asked = pool.request_override(name, size_gb, reason)
+    assert pool.book.approve(asked.nonce, answered_by="owner").ok
+    return asked.nonce
+
+
 def build(*, cap: int = 3, trend: bool = False, names=tuple(SIZES), total_gb: float = TOTAL_GB,
           os_gb: float = OS_IDLE_GB, sizes: dict[str, float] | None = None,
           kinds: dict[str, str] | None = None):
@@ -93,10 +101,12 @@ def build(*, cap: int = 3, trend: bool = False, names=tuple(SIZES), total_gb: fl
                           readings=12, provisional=False)
     gov = G.Governor(thresholds=G.Thresholds(max_resident_models=cap, **extra),
                      sampler=m, sample_ttl_s=0.0, baseline=baseline)
-    pool = L.ExpertPool(gov)
+    pool = L.ExpertPool(gov, book=CF.Book())
     for n in names:
+        nonce = (approved_override(pool, n, sizes[n], "test fixture: a heavy expert")
+                 if sizes[n] > pool.policy.artifact_cap_gb else None)
         pool.register(n, sizes[n], m.loader(n, sizes[n]), m.unloader(n),
-                      kind=(kinds or {}).get(n, "test"), owner_override=sizes[n] > pool.policy.artifact_cap_gb,
+                      kind=(kinds or {}).get(n, "test"), override_nonce=nonce,
                       override_reason="test fixture: a heavy expert")
     return m, gov, pool
 
@@ -303,7 +313,8 @@ def test_a_3_7_gb_artifact_is_refused_for_the_default_pack_and_accepted_only_on_
     assert pool.status()["registered"] == [] and pool.load("big").status == L.UNAVAILABLE
 
     verdict = pool.register("big", 3.7, m.loader("big", 3.7), m.unloader("big"), kind="general",
-                            owner_override=True, override_reason="owner wants the 3.7 GB model")
+                            override_nonce=approved_override(pool, "big", 3.7, "owner wants the 3.7 GB model"),
+                            override_reason="owner wants the 3.7 GB model")
     assert verdict.accepted and verdict.override
     assert "owner override" in verdict.reason and "owner wants the 3.7 GB model" in verdict.reason
     status = pool.status()
@@ -313,6 +324,71 @@ def test_a_3_7_gb_artifact_is_refused_for_the_default_pack_and_accepted_only_on_
     out = pool.load("big")                                   # the override shows on the outcome too
     assert out.loaded and "owner wants the 3.7 GB model" in out.override
     assert m.ooms == 0
+
+
+# -- the owner override is a confirmation (MODEL-007) ------------------------
+
+
+def _over_cap(pool, m, name="big", size=3.7, **kw):
+    return pool.register(name, size, m.loader(name, size), m.unloader(name), kind="general", **kw)
+
+
+def test_an_unconfirmed_over_cap_registration_is_refused_whatever_the_caller_claims():
+    m, _, pool = build(names=())
+    with pytest.raises(TypeError):                 # the bare owner_override flag no longer exists
+        _over_cap(pool, m, owner_override=True)
+    with pytest.raises(L.OnboardingRefused):       # no nonce at all
+        _over_cap(pool, m)
+    with pytest.raises(L.OnboardingRefused) as bogus:
+        _over_cap(pool, m, override_nonce="made-up")
+    assert "made-up" in str(bogus.value) and pool.status()["registered"] == []
+    asked = pool.request_override("big", 3.7, "wants it")          # asked, not yet answered
+    with pytest.raises(L.OnboardingRefused) as waiting:
+        _over_cap(pool, m, override_nonce=asked.nonce)
+    assert "not been approved" in str(waiting.value) and pool.status()["registered"] == []
+
+
+def test_a_refused_confirmation_never_onboards_the_artifact():
+    m, _, pool = build(names=())
+    asked = pool.request_override("big", 3.7, "wants it")
+    pool.book.refuse(asked.nonce)
+    with pytest.raises(L.OnboardingRefused):
+        _over_cap(pool, m, override_nonce=asked.nonce)
+    assert pool.status()["registered"] == []
+
+
+def test_the_owners_yes_covers_one_artifact_one_size_and_one_use():
+    m, _, pool = build(names=())
+    nonce = approved_override(pool, "big", 3.7, "wants it")
+    with pytest.raises(L.OnboardingRefused):                       # another model's name
+        _over_cap(pool, m, name="other", override_nonce=nonce)
+    with pytest.raises(L.OnboardingRefused):                       # the same name at a bigger size
+        _over_cap(pool, m, size=5.0, override_nonce=nonce)
+    # the two refusals above did not spend it
+    assert _over_cap(pool, m, override_nonce=nonce, override_reason="wants it").override
+    with pytest.raises(L.OnboardingRefused) as reused:             # spent: a yes is used once
+        _over_cap(pool, m, override_nonce=nonce)
+    assert "already been used" in str(reused.value)
+    assert pool.status()["registered"] == ["big"]
+
+
+def test_a_nonce_is_not_asked_for_or_spent_by_an_artifact_within_the_cap():
+    m, _, pool = build(names=())
+    nonce = approved_override(pool, "big", 3.7, "wants it")
+    pool.register("small", 1.0, m.loader("small", 1.0), m.unloader("small"), override_nonce=nonce)
+    assert pool.overrides() == []
+    assert pool.book.pending[nonce].state == CF.APPROVED           # untouched, still the owner's to use
+    with pytest.raises(ValueError):
+        pool.request_override("small", 1.0, "no need")             # nothing to override
+
+
+def test_the_pool_uses_the_process_confirmation_book_unless_given_one():
+    assert L.ExpertPool(book=CF.Book()).book is not CF.book
+    pool = L.ExpertPool()
+    try:
+        assert pool.book is CF.book
+    finally:
+        pool.close()
 
 
 def test_the_artifact_cap_is_inclusive_and_a_size_that_is_not_a_number_is_refused():

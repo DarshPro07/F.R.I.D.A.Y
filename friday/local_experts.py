@@ -35,10 +35,16 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
+from friday import confirmation
 from friday import governor as G
 from friday import local_model_policy as LMP
 
 logger = logging.getLogger(__name__)
+
+#: The action an owner's yes is bound to: onboarding one named artifact over
+#: the default-pack cap, at one size (`confirmation.fingerprint`).
+OVERRIDE_ACTION = "local_model.onboard_over_cap"
+OVERRIDE_RUN = "local-experts"
 
 LOADED = "LOADED"
 UNAVAILABLE = "UNAVAILABLE"
@@ -101,9 +107,11 @@ class ExpertPool:
     The governor calls `reconcile` from its pressure reading and skips the
     reading, not the caller, when the pool is busy."""
 
-    def __init__(self, gov: G.Governor | None = None, policy: LMP.LocalModelPolicy | None = None) -> None:
+    def __init__(self, gov: G.Governor | None = None, policy: LMP.LocalModelPolicy | None = None,
+                 book=None) -> None:
         self.gov = gov or G.governor()
         self.policy = policy or LMP.LocalModelPolicy()
+        self._book = book
         self._experts: dict[str, Expert] = {}
         self._resident: dict[str, _Resident] = {}
         self._lock = threading.RLock()
@@ -117,18 +125,48 @@ class ExpertPool:
         """Stop acting on the governor's readings; resident experts stay."""
         self.gov.remove_observer(self.reconcile)
 
+    @property
+    def book(self):
+        """The confirmation book the owner's override is asked and spent on:
+        the process-wide one unless the pool was given its own."""
+        return self._book if self._book is not None else confirmation.book
+
     # -- registration -------------------------------------------------------
+
+    def request_override(self, name: str, size_gb: float, reason: str = "") -> confirmation.Confirmation:
+        """Ask the owner to let `name` into the pool over the artifact cap. The
+        returned confirmation is answered by the person on the book; its nonce
+        goes to `register(override_nonce=...)`, which spends it for this
+        artifact at this size only."""
+        verdict = self.policy.check_onboarding(name, size_gb)
+        if verdict.accepted or verdict.size_gb <= 0:
+            raise ValueError(f"{name!r} needs no owner override: {verdict.reason}")
+        return self.book.ask(
+            OVERRIDE_RUN, OVERRIDE_ACTION, name,
+            f"Onboard {name} ({verdict.size_gb:g} GB) over the {verdict.cap_gb:g} GB default-pack cap?"
+            + (f" Reason: {reason.strip()}" if reason.strip() else ""),
+            arguments={"size_gb": verdict.size_gb})
 
     def register(self, name: str, size_gb: float, load: Callable[[], object],
                  unload: Callable[[], None], *, kind: str = "", ctx: int | None = None,
-                 owner_override: bool = False, override_reason: str = "") -> LMP.Verdict:
+                 override_nonce: str | None = None, override_reason: str = "") -> LMP.Verdict:
         """Onboard one expert. An artifact over the policy's cap raises
-        `OnboardingRefused` unless the owner overrode it; the override and its
-        reason are kept, and shown by `status()` and the load `Outcome`."""
+        `OnboardingRefused` unless `override_nonce` is the owner's approved
+        confirmation for this artifact (`request_override`); it is spent here.
+        The override and its reason are kept, and shown by `status()` and the
+        load `Outcome`."""
         if not name or size_gb <= 0 or not callable(load) or not callable(unload):
             raise ValueError("an expert needs a name, a positive size_gb, and load/unload callables")
         kind = (kind or "").strip().lower()
-        verdict = self.policy.check_onboarding(name, size_gb, kind, owner_override, override_reason)
+        verdict = self.policy.check_onboarding(name, size_gb, kind)
+        if not verdict.accepted and verdict.size_gb > 0 and override_nonce:
+            spent = self.book.consume(override_nonce, run_id=OVERRIDE_RUN, action=OVERRIDE_ACTION,
+                                      target=name, arguments={"size_gb": verdict.size_gb})
+            if spent.ok:
+                verdict = self.policy.check_onboarding(name, size_gb, kind, True, override_reason)
+            else:
+                verdict = dataclasses.replace(
+                    verdict, reason=f"{verdict.reason}; the override was not applied: {spent.reason}")
         if not verdict.accepted:
             logger.warning("onboarding of %s refused: %s", name, verdict.reason)
             raise OnboardingRefused(verdict)
