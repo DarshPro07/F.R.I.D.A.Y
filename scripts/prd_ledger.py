@@ -4291,6 +4291,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Forge scans every candidate with the SkillSpector CLI before verify; findings stored in verification.security_scan; high severity rejects; unscanned/stale-scan candidates cannot be registered or enabled. CLI not installed here, flags assumed. (build run, commit 00d32c693)',
         "next_action": 'GAPS: The SkillSpector CLI is not installed or pinned on this machine (shutil.which -> None); its flags and JSON shape are assumed (skillspector scan --format json <dir>), overridable via FRIDAY_SKILLSPECTOR_CMD. Tests use a stand-in CLI through the real subprocess path.; SkillSpector is not yet in third_party/UPSTREAM_LOCK.json / the fabric; pin it once a release is chosen.; Only forged candidates (spec + source) are staged; imported repos/MCP servers need a caller that passes their directory to run_skillspector.',
     }),
+    ('CAP-FORGE-011', {
+        "status": PARTIAL,
+        "current_implementation": "BENCHMARK_IMPROVEMENT override now needs an 'evidence: <path>' to a file inside the repo, else the overlapping import is recorded REFERENCE_ONLY with the reason. Adapter discovery sorted by module name explicitly. 7 new tests fail on old code. (build run, commit 53653cd2a)",
+        "next_action": "GAPS: Evidence check is existence only: a cited file inside the repo is accepted, nothing reads it to confirm the measurement shows an improvement; a reviewer follows the path.; Coverage is still operation-name equality within a family; behaviour is not compared (the registry's only capability vocabulary).; Only providers with an upstream are judged, and only when ALL operations are covered; partial overlap loads as declared.; Which of two equivalent providers is 'existing' is the adapter module-name order (now explicit and tested); renaming a module can swap them.; tool_embedder_base stays runnable via fabric.ACCEPTED_OVERLAPS (CTX-002 comparison pair); owner may prefer REFERENCE_ONLY.; Assumed the evidence format 'BENCHMARK_IMPROVEMENT: <measurement> evidence: <repo-relative path>' - no shipped provider uses the marker; revisit if the owner wants a different form.",
+    }),
 ]
 
 
