@@ -156,6 +156,19 @@ class RunManager:
             working_directory=bundle.workspace, project=bundle.project,
             task_bundle=json.dumps(asdict(bundle)),
             worktree_path=worktree_path, status=STARTING)
+        self._ledger("start", bundle.run_id, task=bundle.goal,
+                     workspace=bundle.workspace, executor_id=executor_type,
+                     role_id=bundle.role,
+                     evidence_refs=[f"executor_runs:{bundle.run_id}"])
+
+    def _ledger(self, action: str, run_id: str, **fields) -> None:
+        """Write through to the agent ledger. A ledger fault never stops a run."""
+        try:
+            from friday.agent_ledger import AgentLedger
+
+            getattr(AgentLedger(self.store), action)(run_id, **fields)
+        except Exception:
+            logger.exception("could not record %s in the agent ledger", action)
 
     def running(self, run_id: str, *, pid: int | None, session_id: str = "") -> None:
         # The start time goes down with the pid. A pid on its own is not an
@@ -166,6 +179,9 @@ class RunManager:
         if session_id:
             fields["session_id"] = session_id
         self.store.touch_executor_run(run_id, **fields)
+        self._ledger("event", run_id, kind="worker_started",
+                     message=f"worker started (pid {pid})",
+                     evidence_refs=[f"pid:{pid}" if pid else f"executor_runs:{run_id}"])
 
     @staticmethod
     def is_live(run: dict) -> bool:
@@ -181,6 +197,8 @@ class RunManager:
             self.store.touch_executor_run(run_id, **fields)
         except Exception:
             logger.exception("could not record executor progress")
+        self._ledger("event", run_id, kind="progress", message=event[:400],
+                     evidence_refs=[f"executor_runs:{run_id}"])
 
     def close(self, run_id: str, result) -> None:
         """
@@ -206,12 +224,17 @@ class RunManager:
             run_id, status=status, pid=None, ended_at=now_iso(),
             summary=str((result.output or {}).get("claude_says", ""))[:2000],
             completion_evidence=evidence[:1000] or (result.error or "")[:1000])
+        if status in (SUCCEEDED, FAILED, CANCELLED):
+            self._ledger("finish", run_id, status=status,
+                         evidence_refs=[f"executor_runs:{run_id}"])
 
     def cancelled(self, run_id: str) -> None:
         from friday.store import now_iso
 
         self.store.touch_executor_run(run_id, status=CANCELLED, pid=None,
                                       ended_at=now_iso())
+        self._ledger("finish", run_id, status=CANCELLED,
+                     evidence_refs=[f"executor_runs:{run_id}"])
 
     # -- recovery ----------------------------------------------------------
 

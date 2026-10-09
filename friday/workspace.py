@@ -274,6 +274,8 @@ UNSCOPED = {
     "automation_executions": "child rows of `automation_runs`",
     "schedule_runs": "child rows of `schedules`",
     "executor_runs": "child rows of an objective run",
+    "agent_runs": "the ledger twin of `executor_runs`; keyed by the same run id",
+    "agent_events": "child rows of `agent_runs`",
     "contradictions": "keyed by memory subject; resolved with the scoped row",
     "promotions": "FRIDAY's own self-development history, not a tenant's",
     "forged_skill_history": "child rows of `forged_skills`",

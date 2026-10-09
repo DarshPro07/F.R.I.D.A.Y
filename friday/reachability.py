@@ -181,6 +181,11 @@ DECLARED = {
                            "SIMPLE request, built and tested; its live caller (the "
                            "voice turn routing a SIMPLE class to it) is the next "
                            "wiring step"),
+    "friday/agent_ledger": (FUTURE,
+                            "AGENT-001 slice 1: the durable agent ledger, "
+                            "written through by RunManager; the composer, "
+                            "registry and team views that read it are later "
+                            "slices, run by tests/test_agent_ledger.py"),
     "friday/shadow": (PRODUCTION,
                       "observes every turn from watch_from_the_side"),
     "friday/project_brain": (FUTURE,

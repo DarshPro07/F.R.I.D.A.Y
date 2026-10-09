@@ -285,6 +285,35 @@ CREATE TABLE IF NOT EXISTS run_events (
     created_at     TEXT NOT NULL
 );
 
+-- AGENT-001: one row per agent FRIDAY spawns (run_id is the executor run id),
+-- and an append-only stream of action evidence behind it.
+CREATE TABLE IF NOT EXISTS agent_runs (
+    run_id         TEXT PRIMARY KEY,
+    parent_run_id  TEXT REFERENCES agent_runs(run_id),
+    role_id        TEXT NOT NULL DEFAULT '',
+    executor_id    TEXT NOT NULL,
+    model_route    TEXT NOT NULL DEFAULT '',
+    task           TEXT NOT NULL,
+    workspace      TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    started_at     TEXT NOT NULL,
+    ended_at       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_parent ON agent_runs(parent_run_id);
+
+CREATE TABLE IF NOT EXISTS agent_events (
+    event_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id         TEXT NOT NULL REFERENCES agent_runs(run_id),
+    kind           TEXT NOT NULL,
+    message        TEXT NOT NULL,
+    evidence_refs  TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS agent_events_no_update BEFORE UPDATE ON agent_events
+BEGIN SELECT RAISE(ABORT, 'agent_events is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS agent_events_no_delete BEFORE DELETE ON agent_events
+BEGIN SELECT RAISE(ABORT, 'agent_events is append-only'); END;
+
 CREATE TABLE IF NOT EXISTS run_narrations (
     run_id         TEXT NOT NULL REFERENCES runs(run_id),
     milestone_key  TEXT NOT NULL,
