@@ -190,6 +190,10 @@ DECLARED = {
                              "later slice"),
     "friday/forge": (FUTURE, "skill authoring, frozen by the product rescue"),
     "friday/forge_runtime": (FUTURE, "same"),
+    "friday/evolution_lab": (FUTURE,
+                             "EVOLAB-001 slice 1: the protected evaluation lab core; "
+                             "selfdev wiring is a later slice, run by "
+                             "tests/test_evolution_lab.py"),
     "friday/repo_classifier": (FUTURE,
                                "CAP-FORGE-002 classification only; the sandboxed "
                                "analysis (CAP-FORGE-003) and the integration "

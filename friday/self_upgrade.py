@@ -68,6 +68,7 @@ KERNEL_PATHS = (
     "friday/self_upgrade.py", "friday/selfdev.py", "friday/selfdev_benchmark.py",
     "friday/toolsets/selfdev.py", "friday/promotion.py", "friday/evaluation.py",
     "friday/honesty.py", "friday/adversarial.py", "friday/golden.py",
+    "friday/evolution_lab.py", "tests/test_evolution_lab.py",
     "friday/reachability.py",
     "docs/golden/", "scripts/golden_corpus.py", "scripts/perf_profile.py",
     # CI security gates
