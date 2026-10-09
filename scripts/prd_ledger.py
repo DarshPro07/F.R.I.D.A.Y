@@ -4155,6 +4155,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Slice done: the voice open and study handlers now speak the probe's typed reason when the browser is unavailable (verdict + readiness state) instead of the generic 'couldn't open'. Two new tests cover open and study. (build run, commit c0b434ca6)",
         "next_action": "GAPS: Slice only: speaking the typed reason. The acceptance's reference-machine BROWSER_READY run with launch time and memory recorded (REFERENCE-B probe, live test) is out of scope and not done here.; New tests were not run against the pre-change code; they fail there by construction (generic reply carries no verdict text).; implementer did not claim acceptance met",
     }),
+    ('BBOX-001', {
+        "status": PARTIAL,
+        "current_implementation": "AuditLog.query gains keyword-only before_id for paging; reconstruct() now reads the run's audit rows a page at a time (_AUDIT_PAGE=500) and lists them all, with ids in decisions. The 'more than' disagreement is gone. (build run, commit 6e980f99a)",
+        "next_action": "GAPS: Added 'id' to the audit decisions in the black box so a test (and a reader) can tell the paged rows apart; the packet asserted ids appear there but they were not exposed.; The full suite was not run (out of scope); only the 9 impacted test files.",
+    }),
 ]
 
 
