@@ -648,6 +648,71 @@ def test_runs_under_an_envelope_share_one_gateway_and_the_last_to_end_stops_it(a
         supervisor.stop()
 
 
+def test_health_reports_the_scoped_gateway_only_while_a_run_holds_it(area, monkeypatch):
+    supervisor = _supervisor(area.root, monkeypatch)
+    try:
+        assert "scoped" not in supervisor.health()
+        run = supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                  scope=_envelope(area), expires_in=3600)["work_run_id"]
+        gateway = supervisor._scoped_gateway
+        report = supervisor.health()
+        assert report["alive"] is False             # the shared gateway was never started
+        assert report["scoped"] == {"alive": True, "state": gateway.state, "runs": 1,
+                                    "responsive": True}
+        supervisor.interrupt(run)
+        assert _until(lambda: not gateway.alive())
+        assert _until(lambda: "scoped" not in supervisor.health())
+    finally:
+        supervisor.stop()
+
+
+def test_a_scoped_gateway_that_is_up_but_does_not_answer_is_not_reported_responsive(area, monkeypatch):
+    supervisor = _supervisor(area.root, monkeypatch)
+    try:
+        supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                            scope=_envelope(area), expires_in=3600)
+        gateway = supervisor._scoped_gateway
+
+        def silent(method, params, *, timeout=None):
+            raise TimeoutError(f"{method} unanswered after {timeout:.0f}s")
+        monkeypatch.setattr(gateway, "request", silent)
+        scoped = supervisor.health()["scoped"]
+        assert scoped["alive"] is True and scoped["responsive"] is False
+        assert "session.list unanswered" in scoped["error"]
+    finally:
+        supervisor.stop()
+
+
+def test_hermes_status_shows_the_scoped_gateway_when_it_is_the_only_one_up(area, monkeypatch):
+    from friday import policy as P
+    from friday.tools import hermes_control as hc
+
+    class FakeMCP:
+        tools: dict = {}
+
+        def tool(self):
+            def register(fn):
+                self.tools[fn.__name__] = fn
+                return fn
+            return register
+
+    supervisor = _supervisor(area.root, monkeypatch)
+    monkeypatch.setattr(hc, "_engine", P.PolicyEngine(autonomy=P.FULL))
+    monkeypatch.setattr(hb, "native_tools_healthy", lambda *a, **k: True)
+    mcp = FakeMCP()
+    hc.register(mcp)
+    hc.configure(supervisor)
+    try:
+        supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                            scope=_envelope(area), expires_in=3600)
+        gateway = mcp.tools["hermes_status"]()["gateway"]
+        assert gateway["alive"] is False
+        assert gateway["scoped"]["alive"] is True and gateway["scoped"]["runs"] == 1
+    finally:
+        hc.configure(None)
+        supervisor.stop()
+
+
 def test_a_run_under_an_envelope_is_stopped_at_its_end_without_its_timer(area, monkeypatch):
     supervisor = _supervisor(area.root, monkeypatch)
     try:
@@ -657,6 +722,106 @@ def test_a_run_under_an_envelope_is_stopped_at_its_end_without_its_timer(area, m
         supervisor.log.update(run, expires_at=past)
         assert supervisor.expire_overdue() == [run]
         assert _until(lambda: S.active() == [])
+    finally:
+        supervisor.stop()
+
+
+# -- a gateway that does not honour its toolsets is caught, not trusted ---------------------
+
+def test_a_gateway_that_honours_its_toolsets_is_not_mistaken_for_one_that_does_not(area, tmp_path, monkeypatch):
+    # The scoped run reads through the exec bridge (an MCP-prefixed name), the
+    # shared one through Hermes' own read_file: neither is a breach.
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web]\n")
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        scoped = supervisor.delegate(hb.TaskBundle(goal="scoped"), workspace=str(area.workspace),
+                                     scope=_envelope(area), expires_in=3600, wait=True,
+                                     turn_timeout=30)["work_run_id"]
+        shared = supervisor.delegate(hb.TaskBundle(goal="shared"), wait=True,
+                                     turn_timeout=30)["work_run_id"]
+        assert supervisor.log.get(scoped)["status"] == hb.COMPLETE
+        assert supervisor.log.get(shared)["status"] == hb.COMPLETE
+        assert supervisor._scoped_unsound == ""
+    finally:
+        supervisor.stop()
+
+
+def test_a_run_that_uses_hermes_file_tools_on_a_scoped_gateway_is_stopped_and_recorded(area, tmp_path, monkeypatch, caplog):
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web]\n")
+    monkeypatch.setenv("FAKE_HERMES_IGNORE_TOOLSETS", "1")
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        with caplog.at_level(logging.WARNING, logger=hb.logger.name):
+            run = supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                      scope=_envelope(area), expires_in=3600)["work_run_id"]
+            assert _until(lambda: supervisor.log.get(run)["status"] in hb.TERMINAL)
+        record = supervisor.log.get(run)
+        assert record["status"] == hb.PARTIAL           # stopped, never announced as done
+        assert record["failure_kind"] == hb.HermesSupervisor.ENVELOPE_BREACHED
+        assert "hermes.envelope_breached" in caplog.text and "read_file" in caplog.text
+        assert _until(lambda: S.active() == [])         # its hold on the bridge is released
+        assert _until(lambda: supervisor._scoped_gateway is None)   # and so is its gateway
+    finally:
+        supervisor.stop()
+
+
+def test_no_delegation_under_an_envelope_gets_a_gateway_after_one_ignored_its_toolsets(area, tmp_path, monkeypatch):
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web]\n")
+    monkeypatch.setenv("FAKE_HERMES_IGNORE_TOOLSETS", "1")
+    dump = tmp_path / "env.jsonl"
+    monkeypatch.setenv("FAKE_HERMES_ENV_DUMP", str(dump))
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        run = supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                  scope=_envelope(area), expires_in=3600)["work_run_id"]
+        assert _until(lambda: supervisor.log.get(run)["status"] in hb.TERMINAL)
+        with pytest.raises(c.OutsideEnvelope, match="does not honour HERMES_TUI_TOOLSETS"):
+            supervisor.delegate(hb.TaskBundle(goal="again"), workspace=str(area.workspace),
+                                scope=_envelope(area), expires_in=3600)
+        assert len(_gateway_envs(dump)) == 1            # no second gateway was started
+        assert S.active() == []
+    finally:
+        supervisor.stop()
+
+
+def test_every_run_on_a_gateway_that_ignored_its_toolsets_is_stopped(area, monkeypatch):
+    supervisor = _supervisor(area.root, monkeypatch)    # both runs hang, none has used a tool
+    try:
+        runs = [supervisor.delegate(hb.TaskBundle(goal=goal), workspace=str(area.workspace),
+                                    scope=_envelope(area), expires_in=3600)["work_run_id"]
+                for goal in ("first", "second")]
+        supervisor._scoped_gateway._deny_native_tool("terminal")
+        assert _until(lambda: all(supervisor.log.get(r)["status"] in hb.TERMINAL for r in runs))
+        assert {supervisor.log.get(r)["failure_kind"] for r in runs} == {
+            hb.HermesSupervisor.ENVELOPE_BREACHED}
+        assert supervisor._scoped_unsound
+    finally:
+        supervisor.stop()
+
+
+@pytest.mark.parametrize("name", ["mcp__friday_exec__bridge_read_file", "bridge_run_command",
+                                  "web_search", "todo", ""])
+def test_a_tool_that_is_not_one_of_hermes_file_or_terminal_tools_is_not_a_breach(area, monkeypatch, name):
+    supervisor = _supervisor(area.root, monkeypatch)
+    try:
+        run = supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                  scope=_envelope(area), expires_in=3600)["work_run_id"]
+        supervisor._scoped_gateway._deny_native_tool(name)
+        assert supervisor._scoped_unsound == ""
+        assert supervisor.log.get(run)["status"] not in hb.TERMINAL
+        assert supervisor.log.get(run)["failure_kind"] == ""
+    finally:
+        supervisor.stop()
+
+
+def test_the_shared_gateway_may_use_hermes_file_tools(area, monkeypatch):
+    # Only a gateway started for a delegation under an envelope is held to
+    # not having them; the shared one keeps the profile's own toolsets.
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        supervisor.start()
+        supervisor._deny_native_tool("read_file")
+        assert supervisor._scoped_unsound == ""
     finally:
         supervisor.stop()
 

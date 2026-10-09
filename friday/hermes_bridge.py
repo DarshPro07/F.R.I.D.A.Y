@@ -199,6 +199,11 @@ def native_tools_healthy(timeout: float = 20.0) -> bool:
 #: toolsets that read and change files or run commands outside FRIDAY's bridge.
 _TOOLSET_KEYS = ("toolsets", "platform_toolsets", "enabled_toolsets")
 _NATIVE_FILE_TOOLSETS = ("file", "terminal")
+#: The tools those toolsets register, as a `tool.start` event names them.
+#: Friday's own bridge tools reach Hermes MCP-prefixed
+#: (`mcp__friday_exec__bridge_*`), so a bare name here is Hermes' own.
+_NATIVE_FILE_TOOLS = frozenset({"read_file", "write_file", "patch",
+                                "search_files", "terminal"})
 #: The variable Hermes' gateway reads for the toolsets it enables; it replaces
 #: the profile's own for that process (`session.create` takes no toolsets).
 ENV_GATEWAY_TOOLSETS = "HERMES_TUI_TOOLSETS"
@@ -1397,6 +1402,11 @@ class HermesSupervisor:
         #: the run (`@_on_the_gateway_running_it`) and its terminal
         #: transition reach that gateway and not the shared one.
         self._scoped_runs: dict[str, HermesSupervisor] = {}
+        #: Why no delegation under an envelope gets a gateway any more: a
+        #: scoped gateway ran one of Hermes' own file/terminal tools, so the
+        #: toolsets it was started with were not honoured (`_deny_native_tool`).
+        #: Cleared only by a new process, once Hermes has been looked at.
+        self._scoped_unsound = ""
         if owner is None:
             self.log.on_terminal_hook = self._release_lease
 
@@ -1433,6 +1443,9 @@ class HermesSupervisor:
         Hermes' defaults could grant more than the profile intended.
         """
         from friday import contracts as c
+        if self._scoped_unsound:
+            raise c.OutsideEnvelope(
+                f"no gateway can be held to an envelope here: {self._scoped_unsound}")
         try:
             toolsets = scoped_gateway_toolsets(self.profile)
         except ValueError as exc:
@@ -1467,13 +1480,36 @@ class HermesSupervisor:
 
     def _retire_scoped_gateway_if_idle(self) -> None:
         """Stop the scoped gateway once nothing holds it: no delegation
-        starting on it and no run of its still holding a lease."""
+        starting on it and no run of its still holding a lease. An isolated
+        scoped delegation therefore pays a Hermes cold start (20-55s
+        measured); an idle linger would trade that for a held process."""
         with self._scoped_lock:
             gateway = self._scoped_gateway
             if gateway is None or self._scoped_holds or gateway._leases:
                 return
             self._scoped_gateway = None
         gateway.stop()
+
+    def _deny_native_tool(self, name: str) -> None:
+        """A run on a scoped gateway started one of Hermes' own file/terminal
+        tools. The gateway was started without them, so it is not honouring
+        its toolsets and nothing on it is held to an envelope: every run on
+        it is stopped and recorded as such, and no further delegation under
+        an envelope gets a gateway (`_scoped_unsound`) - the first call may
+        already have run, but nothing after it does. Called on the reader
+        thread, so the stops, which are RPCs, run on their own."""
+        owner = self._owner
+        if owner is None or name not in _NATIVE_FILE_TOOLS:
+            return
+        if not owner._scoped_unsound:
+            owner._scoped_unsound = (
+                f"a gateway started without Hermes' file and terminal tools ran "
+                f"its own {name}, so it does not honour {ENV_GATEWAY_TOOLSETS}")
+        for work_run_id in list(self._leases):
+            logger.warning("hermes.envelope_breached work_run=%s tool=%s: "
+                           "stopping the run", work_run_id, name)
+            self.log.update(work_run_id, failure_kind=self.ENVELOPE_BREACHED)
+            self._interrupt_async(work_run_id)
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -1574,7 +1610,36 @@ class HermesSupervisor:
     def alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
+    def scoped_status(self) -> dict | None:
+        """The scoped gateway's liveness and whether it answers, or None while
+        no delegation under an envelope holds one. The answer is the cheap
+        `session.list` of `_shared_health`; the catalog is not asked of a
+        gateway that lives for one delegation."""
+        with self._scoped_lock:
+            gateway = self._scoped_gateway
+        if gateway is None:
+            return None
+        report = {"alive": gateway.alive(), "state": gateway.state,
+                  "runs": len(gateway._leases), "responsive": False}
+        if report["alive"]:
+            try:
+                gateway.request("session.list", {}, timeout=5)
+                report["responsive"] = True
+            except Exception as exc:                         # noqa: BLE001
+                report["error"] = str(exc)
+        return report
+
     def health(self) -> dict:
+        """The shared gateway's probe, plus a `scoped` entry while a
+        delegation under an envelope has a gateway of its own - without it
+        the work running there would not show up as anything running."""
+        report = self._shared_health()
+        scoped = self.scoped_status()
+        if scoped is not None:
+            report["scoped"] = scoped
+        return report
+
+    def _shared_health(self) -> dict:
         """A cheap liveness probe: process up + a real RPC answered.
 
         `session.list` answers from memory in milliseconds; `commands.catalog`
@@ -1766,6 +1831,8 @@ class HermesSupervisor:
         if lease:
             from friday import governor as G
             G.governor().heartbeat(lease)
+        if kind == "tool.start" and self._owner is not None:
+            self._deny_native_tool(str(payload.get("name", "")))
 
         # Activity ledger for the stall classifier. Recorded for every
         # session event, from the structured stream itself.
@@ -2272,6 +2339,8 @@ class HermesSupervisor:
 
     #: The failure kind a task stopped at its envelope's expiry is recorded as.
     ENVELOPE_EXPIRED = "ENVELOPE_EXPIRED"
+    #: ... and one stopped for running a tool its gateway was started without.
+    ENVELOPE_BREACHED = "ENVELOPE_BREACHED"
 
     def _expire_after(self, work_run_id: str, seconds: float) -> None:
         """Keep the envelope's end on the run, and stop the task then.

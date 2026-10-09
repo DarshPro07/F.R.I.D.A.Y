@@ -316,8 +316,9 @@ def register(mcp):
             return {"status": "succeeded", "run": record,
                     "stall": sup.stall_state(work_run_id)}
         return {"status": "succeeded", "active": sup.log.active(),
-                "gateway": sup.health() if sup.alive()
-                else {"alive": False, "state": sup.state},
+                # health() answers a stopped shared gateway as {alive, state}
+                # and adds the scoped gateway's, which may be the only one up.
+                "gateway": sup.health(),
                 # Whether Hermes's OWN file/terminal tools would work if
                 # re-enabled. False = keep the friday-exec bridge routing
                 # (see hermes_bridge.native_tools_healthy for why True

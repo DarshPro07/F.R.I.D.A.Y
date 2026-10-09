@@ -16,6 +16,13 @@ Behaviour is scripted through env vars so one binary covers every test:
                             HERMES_* environment as one JSON line to path p
                             (so a test can see what the launching supervisor
                             actually put in each process's environment)
+    FAKE_HERMES_IGNORE_TOOLSETS=1
+                            a gateway that does not honour HERMES_TUI_TOOLSETS:
+                            its turn starts Hermes' own read_file and keeps
+                            running it until interrupted
+
+A gateway that honours HERMES_TUI_TOOLSETS has no native file tools, so with
+it set the turn reads through Friday's exec bridge (MCP-prefixed) instead.
 """
 import json
 import os
@@ -46,6 +53,11 @@ def main():
     die = os.getenv("FAKE_HERMES_DIE") == "1"
     capped = os.getenv("FAKE_HERMES_CAPPED") == "1"
     env_dump = os.getenv("FAKE_HERMES_ENV_DUMP")
+    ignore_toolsets = os.getenv("FAKE_HERMES_IGNORE_TOOLSETS") == "1"
+    # Honouring HERMES_TUI_TOOLSETS: the file tools are not registered, the
+    # exec bridge's are (what the friday profile registers as friday_exec).
+    native = ignore_toolsets or not os.getenv("HERMES_TUI_TOOLSETS")
+    read_tool = "read_file" if native else "mcp__friday_exec__bridge_read_file"
 
     if env_dump:
         seen = {k: v for k, v in os.environ.items() if k.startswith("HERMES_")}
@@ -80,9 +92,11 @@ def main():
                 continue
 
             def turn(sid=sid, text=params.get("text", "")):
-                event("tool.start", sid, {"name": "read_file",
+                event("tool.start", sid, {"name": read_tool,
                                           "args": {"path": "x"}})
-                event("tool.complete", sid, {"name": "read_file"})
+                if ignore_toolsets:
+                    return                    # still reading, until interrupted
+                event("tool.complete", sid, {"name": read_tool})
                 if capped:
                     event("message.complete", sid, {
                         "text": "rate limit reached, resets at 23:59",
