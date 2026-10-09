@@ -167,6 +167,12 @@ DECLARED = {
     "friday/platform": (PRODUCTION,
                         "OS-specific implementations chosen at runtime"),
     "friday/resources": (INTENTIONALLY_INTERNAL, "data, not behaviour"),
+    "friday/specialist": (FUTURE,
+                          "FAB-005: composes a temporary specialist (role + "
+                          "route + executor + skills + tools + workspace "
+                          "policy) and records it on the agent ledger; the "
+                          "dispatcher that calls it is a later slice, run by "
+                          "tests/test_specialist.py"),
     "friday/prompts": (PRODUCTION, "loaded as text by the agent"),
     "friday/audit_fixtures": (TEST_ONLY, "fixtures for the audit suite"),
     "friday/intake": (FUTURE,

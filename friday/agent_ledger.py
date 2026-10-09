@@ -173,6 +173,13 @@ class AgentLedger:
         return {"run": run,
                 "children": [self.tree(c["run_id"]) for c in self.children(run_id)]}
 
+    def by_role(self, role_id: str) -> list[dict]:
+        """Every run attributed to a role, whichever executor ran it (FAB-005)."""
+        self.reconcile()
+        return [dict(r) for r in self.store._conn.execute(
+            "SELECT * FROM agent_runs WHERE role_id=? ORDER BY started_at, run_id",
+            (role_id,))]
+
     def active(self) -> list[dict]:
         """Runs a worker started and whose process is still there."""
         self.reconcile()
