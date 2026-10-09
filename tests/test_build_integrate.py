@@ -290,7 +290,7 @@ def test_integrate_blocked_behind_an_earlier_candidate_does_not_cut_in(tmp_path)
     q = bi.MergeQueue(runs, wait_s=0.2, poll_s=0.05)
     q.enqueue("OTHER", 0.0)  # finished earlier than REQ-1
     before = head(repo)
-    with pytest.raises(KernelError, match="waited"):
+    with pytest.raises(bi.MergeQueueBusy, match="waited"):  # transient - a KernelError, distinguishable
         go(repo, runs, rows, queue=q)
     assert head(repo) == before
     assert [e["req"] for e in q.pending()] == ["OTHER"]

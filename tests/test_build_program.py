@@ -1089,7 +1089,17 @@ def _stranded(env, tmp_path, *, parked=None, integrated_after=False):
     return runs
 
 
-@pytest.mark.parametrize("parked", [None, "stale worktree"])
+def test_a_merge_queue_timeout_parks_the_run_as_busy_not_refused(env):
+    # 2026-10-09: MEM-003 waited 1800 s behind a 35-minute gate and was parked "integration
+    # refused", leaving a finished run for a controller to re-integrate by hand.
+    k = FakeKernel(ids=("A",))
+    k.script = {"A": [rec("A")]}
+    busy = BP.build_integrate.MergeQueueBusy("merge queue: A waited 1800s behind B")
+    go(env, k, bi=FakeIntegrator(k, {"A": busy}))
+    assert state_of(env)["parked"]["A"] == BP.QUEUE_BUSY
+
+
+@pytest.mark.parametrize("parked", [None, "stale worktree", "merge queue busy"])
 def test_a_finished_run_whose_integration_never_ended_is_integrated_at_start(env, tmp_path, parked):
     # 2026-10-09: the program integrating BRAIN-001 died with the tool call that launched it; the next
     # program found the worktree, could not resume a finished worker, and parked it "stale worktree"

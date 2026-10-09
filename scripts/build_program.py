@@ -44,6 +44,9 @@ MAX_ATTEMPTS = 2
 #: PARTIAL slices a row may integrate before the controller looks, while each one
 #: leaves different gaps (progress). Two in a row with the same gaps park at once.
 MAX_PARTIALS = 4
+#: Park reasons a finished run may carry and still be integrated when the next program starts.
+STALE = "stale worktree"
+QUEUE_BUSY = "merge queue busy"
 MAX_REPAIRS = len(build_kernel.CASCADE)  # repair, advisor, advised implementer
 # Rejections a worker can answer by editing its own change; CONFLICT is a merge
 # problem and an integrator refusal is a refusal, so neither is sent back.
@@ -321,7 +324,7 @@ def queue_for(rows: list[dict], state: dict, integrated: set[str], worktrees: Pa
                 out.append(row)
                 continue
             if record:
-                park(state, rid, "stale worktree", "stale_worktree",
+                park(state, rid, STALE, "stale_worktree",
                      f"{worktrees / rid.lower()} already exists")
             continue
         out.append(row)
@@ -515,7 +518,7 @@ def stranded_runs(state: dict, runs_dir: Path) -> list[dict]:
         if req != path.stem or rec.get("state") != "DONE" or not rec.get("commit") \
                 or rec.get("mode") != "SHIP" or rec.get("kind") == "ADVISOR":
             continue
-        if state["parked"].get(req, "stale worktree") != "stale worktree" or req in state["repair_queue"]:
+        if state["parked"].get(req, STALE) not in (STALE, QUEUE_BUSY) or req in state["repair_queue"]:
             continue
         if not Path(rec.get("worktree") or "").is_dir():
             continue
@@ -577,6 +580,9 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
             if res["result"] == "REBASE_REQUIRED" and k.rebase_run(req, repo=repo):
                 head = git_out(repo, "rev-parse", "HEAD", runner=runner)
                 res = bi.integrate(req)
+        except build_integrate.MergeQueueBusy as exc:  # transient: the next program integrates it
+            park(state, req, QUEUE_BUSY, "integration_queue", str(exc))
+            return "QUEUE_BUSY", spend, False
         except k.KernelError as exc:
             park(state, req, "integration refused", "integration", str(exc))
             return "REFUSED", spend, False

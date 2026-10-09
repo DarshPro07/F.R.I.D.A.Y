@@ -688,6 +688,11 @@ def remove_worker(run: dict, repo: Path = ROOT) -> None:
 
 # ---------------------------------------------------------------- driver
 
+class MergeQueueBusy(KernelError):
+    """The queue stayed busy past its wait: transient, nothing is wrong with the run (2026-10-09:
+    MEM-003 waited 1800 s behind a 35-minute gate and was parked as if its integration were refused)."""
+
+
 class MergeQueue:
     """Integrations run one at a time, first finished first, from an append-only
     log (runs_dir/merge_queue.jsonl). An entry whose process died drops out, so a
@@ -774,8 +779,8 @@ class MergeQueue:
             if head and head["req"] == req and self._take_lock():
                 break
             if time.monotonic() >= deadline:
-                raise KernelError(f"merge queue: {req} waited {self.wait_s:.0f}s behind "
-                                  f"{head['req'] if head else 'a held lock'}")
+                raise MergeQueueBusy(f"merge queue: {req} waited {self.wait_s:.0f}s behind "
+                                     f"{head['req'] if head else 'a held lock'}")
             time.sleep(self.poll_s)
         try:
             self.recover_landing()
