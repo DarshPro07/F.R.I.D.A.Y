@@ -1993,6 +1993,9 @@ class RunWatchdog:
         self.lease_timeout = lease_timeout if lease_timeout is not None \
             else DEFAULT_LEASE_TIMEOUT
         self._task: asyncio.Task | None = None
+        #: Continuations this watchdog started and that have not finished:
+        #: held so they cannot be collected mid-run and can be awaited.
+        self._continuations: set[asyncio.Task] = set()
 
     def start(self) -> asyncio.Task | None:
         if self._task is None or self._task.done():
@@ -2104,8 +2107,17 @@ class RunWatchdog:
             # answer.
             return
         self.executor._schedule_wake(run_id)
-        asyncio.get_event_loop().create_task(
+        task = asyncio.get_event_loop().create_task(
             self._continue_after(run_id, delay=CONTINUATION_DELAY))
+        self._continuations.add(task)
+        task.add_done_callback(self._continuations.discard)
+
+    async def drain(self) -> None:
+        """Wait until every continuation this watchdog started has finished.
+        A sweep returns while its continuation still runs, so whoever needs
+        the run's settled state waits here rather than on a fixed sleep."""
+        while self._continuations:
+            await asyncio.gather(*list(self._continuations), return_exceptions=True)
 
     async def _continue_after(self, run_id: str, *,
                               delay: float = CONTINUATION_DELAY) -> None:

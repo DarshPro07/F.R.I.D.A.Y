@@ -119,6 +119,30 @@ async def test_watchdog_reconciles_orphan_once(store, executor):
     # No double continuation: a second sweep finds nothing to do.
     again = await watchdog.sweep_once()
     assert run_id not in again
+    await watchdog.drain()
+    assert store.objective_run(run_id)["status"] == "COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_a_slow_continuation_is_awaited_not_raced(store, executor, monkeypatch):
+    """The sweep returns while the continuation it started still runs. Under
+    load that outlasted the sweep's short pause and the run read RUNNING
+    (2026-10-10, in wide merge gates); the run's settled state is waited for."""
+    import friday.continuous as continuous
+    monkeypatch.setattr(continuous, "CONTINUATION_DELAY", 0.3)
+    run = compile_small(store)
+    run_id = run["run_id"]
+    store.open_objective_run(
+        run_id, request=run["request"],
+        objective_summary=run["objective_summary"],
+        lease_executor_id="dead-exec", lease_generation=1,
+        lease_expiry=(datetime.now() - timedelta(seconds=5)).isoformat(),
+        next_wake=None, status="RUNNING",
+    )
+    watchdog = RunWatchdog(executor, lease_timeout=90.0)
+    assert run_id in await watchdog.sweep_once()
+    assert run_id not in await watchdog.sweep_once()
+    await watchdog.drain()
     assert store.objective_run(run_id)["status"] == "COMPLETED"
 
 
