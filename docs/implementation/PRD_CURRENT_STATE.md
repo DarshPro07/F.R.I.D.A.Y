@@ -153,15 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 27e0a2a on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T12:26:24+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 96, "PARKED_BY_OWNER": 1, "PARTIAL": 52, "VERIFIED": 63}
+- HEAD: 1c24738 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T12:58:25+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 96, "PARKED_BY_OWNER": 1, "PARTIAL": 51, "VERIFIED": 64}
 - Unresolved P0: 11
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (287): CAP-MKT-002=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), ACT-001 (integration refused), JIT-001 (cascade exhausted), MEM-003 (NOT_CONFIRMED), MEM-002 (NO_TEST), TRAJ-001 (cascade exhausted), SEC-005 (cascade exhausted), BROW-004 (blocked), CAP-003 (partial x4)
-- Open escalations: 201
-  - BRAIN-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\brain-001 already exists
-  - BRAIN-001 resolved: controller unpark: controller re-integrated the run a killed program had landed ungated: INTEGRATED
+- Last wave (293): CHAOS-001=FAILED, COG-002=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), ACT-001 (integration refused), JIT-001 (cascade exhausted), MEM-003 (NOT_CONFIRMED), MEM-002 (NO_TEST), TRAJ-001 (cascade exhausted), SEC-005 (cascade exhausted), BROW-004 (blocked), CAP-003 (partial x4), PKG-001 (partial x4), CAP-MKT-002 (blocked)
+- Open escalations: 203
   - PKG-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\pkg-001 already exists
   - BROW-004 blocked: Needs the owner to run `python -m friday.browser_readiness` from the live .venv on REFERENCE-B and o
   - BRAIN-001 integration: {"requirement": "BRAIN-001", "result": "NOT_CONFIRMED", "red_green": {}, "verifier": null, "integrat
@@ -170,5 +168,7 @@ That is the first implementation target of this program.
   - BRAIN-001 resolved: controller unpark: controller re-ran the confirm after 5885f11 (tests from its own build commits): C
   - CAP-003 partial: integrated without closing its gaps
   - BG-001 resolved: controller unpark: controller re-ran the confirm after 089f899 (its named test is @slow, never run b
+  - PKG-001 partial: integrated without closing its gaps
+  - CAP-MKT-002 blocked: Python >= 3.12 is needed to run the real SkillSpector; the build venv is 3.11.; git clone/add is den
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
