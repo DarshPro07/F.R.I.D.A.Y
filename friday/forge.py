@@ -410,14 +410,25 @@ def env_leaks(env: dict[str, str]) -> list[str]:
 # Gate 2b - SkillSpector, the mandatory pre-activation security scan
 # ---------------------------------------------------------------------------
 
-#: The scanner is NVIDIA SkillSpector, run as a CLI (its stdio MCP mode has a
-#: known initialisation problem). It is not pinned or installed by default, so
-#: the command is configurable: a JSON list of arguments in this variable, with
-#: "{target}" standing for the directory to scan. Assumed, not verified against
-#: a release: `skillspector scan --format json <dir>` printing JSON.
+#: The scanner is NVIDIA SkillSpector (Apache-2.0), run as a CLI because its
+#: stdio MCP mode has a known initialisation problem. The contract below is
+#: read from the pinned tag's README ("Integrating SkillSpector") and from
+#: src/skillspector/{cli,models}.py at that commit. It has not been run
+#: against an installed binary here: SkillSpector needs Python >= 3.12 and the
+#: build venv is 3.11. The command stays configurable: a JSON list of
+#: arguments in FRIDAY_SKILLSPECTOR_CMD, "{target}" standing for the directory.
+SKILLSPECTOR_REPO = "https://github.com/NVIDIA/SkillSpector"
+SKILLSPECTOR_RELEASE = "v2.12.0"
+SKILLSPECTOR_COMMIT = "c7958a3268d9498644b22edb75d0f051bbc8cbfc"
 SKILLSPECTOR_ENV = "FRIDAY_SKILLSPECTOR_CMD"
-DEFAULT_SKILLSPECTOR_CMD = ("skillspector", "scan", "--format", "json",
-                            "{target}")
+#: --no-llm keeps the scan static: no file content goes to a model provider and
+#: no key is needed. (Declared dependency names still go to OSV.dev for the
+#: CVE lookup, with or without it.)
+DEFAULT_SKILLSPECTOR_CMD = ("skillspector", "scan", "{target}", "--no-llm",
+                            "--format", "json")
+#: Exit 0 and 1 both print a report (1 means risk_score > 50). Anything else,
+#: 2 in particular, is an error, and whatever it printed is not a verdict.
+_REPORT_EXIT_CODES = (0, 1)
 SCAN_TIMEOUT_SECONDS = 120.0
 
 SCAN_CLEAN = "CLEAN"
@@ -433,7 +444,8 @@ _BLOCKING_SEVERITIES = frozenset({"high", "critical"})
 #: definition, whatever the scanner called them.
 _BLOCKING_CATEGORY_WORDS = ("injection", "exfiltrat", "privilege", "poison",
                             "dangerous", "vulnerab")
-_FINDING_LISTS = ("findings", "issues", "results", "vulnerabilities")
+#: risk_assessment.recommendation, mapped from severity by the scanner.
+_RECOMMENDATIONS = ("SAFE", "CAUTION", "DO_NOT_INSTALL")
 
 
 @dataclass
@@ -445,6 +457,8 @@ class ScanReport:
     scanned_at: str = ""
     target_sha256: str = ""
     report_sha256: str = ""
+    #: The scanner's own verdict: score, severity, recommendation.
+    risk: dict = field(default_factory=dict)
 
     @property
     def clean(self) -> bool:
@@ -459,12 +473,24 @@ class ScanReport:
         return {
             "status": self.status, "scanner": "skillspector",
             "scanner_version": self.scanner_version,
+            "pinned_release": SKILLSPECTOR_RELEASE,
+            "matches_pin": (self.scanner_version.lstrip("v")
+                            == SKILLSPECTOR_RELEASE.lstrip("v")),
             "scanned_at": self.scanned_at,
             "target_sha256": self.target_sha256,
             "report_sha256": self.report_sha256,
-            "detail": self.detail, "findings": self.findings,
-            "blocking": len(self.blocking()),
+            "detail": self.detail, "risk": self.risk,
+            "findings": self.findings, "blocking": len(self.blocking()),
         }
+
+
+@dataclass
+class ParsedScan:
+    findings: list[dict]
+    version: str
+    risk: dict
+    #: Why the analysis did not cover everything, or "" when it did.
+    incomplete: str = ""
 
 
 def _normalise_finding(raw) -> dict:
@@ -473,7 +499,7 @@ def _normalise_finding(raw) -> dict:
     HIGH: a scanner whose output cannot be read is not evidence of anything.
     """
     if not isinstance(raw, dict):
-        return {"severity": "high", "category": "unparsed",
+        return {"severity": "high", "category": "unparsed", "rule": "",
                 "message": str(raw)[:300], "file": "", "line": None}
 
     def pick(*keys):
@@ -482,37 +508,74 @@ def _normalise_finding(raw) -> dict:
                 return raw[key]
         return ""
 
+    location = raw.get("location") if isinstance(raw.get("location"), dict) else {}
     category = re.sub(r"[^a-z0-9]+", "_", str(
         pick("category", "type", "rule", "rule_id", "id")).lower()).strip("_")
     severity = str(pick("severity", "level", "risk")).strip().lower()
     if severity not in _SEVERITIES or any(
             word in category for word in _BLOCKING_CATEGORY_WORDS):
         severity = "high"
-    line = pick("line", "lineno")
+    line = pick("line", "lineno") or location.get("start_line")
     return {"severity": severity, "category": category,
-            "message": str(pick("message", "title", "description"))[:300],
-            "file": str(pick("file", "path", "location"))[:200],
+            "rule": str(pick("id", "rule_id", "rule"))[:60],
+            "message": str(pick("message", "explanation", "finding", "title",
+                                "description"))[:300],
+            "file": str(pick("file", "path") or location.get("file") or "")[:200],
             "line": line if isinstance(line, int) else None}
 
 
-def parse_skillspector(raw: str) -> tuple[list[dict], str]:
-    """Findings and scanner version from SkillSpector's JSON, or ValueError."""
+def parse_skillspector(raw: str) -> ParsedScan:
+    """
+    The findings, version and verdict in SkillSpector's JSON report, or
+    ValueError. The shape is the documented one: an `issues` list, a
+    `risk_assessment` verdict and `metadata.skillspector_version`. A report
+    missing either the list or the verdict is not readable, so it is not a pass.
+    """
     try:
         data = json.loads(raw)
     except ValueError as exc:
         raise ValueError("SkillSpector output is not JSON") from exc
-    version = ""
-    if isinstance(data, dict):
-        if data.get("error"):
-            raise ValueError(f"SkillSpector reported an error: {data['error']}")
-        version = str(data.get("version") or data.get("scanner_version") or "")
-        items = next((data[key] for key in _FINDING_LISTS
-                      if isinstance(data.get(key), list)), None)
-    else:
-        items = data
-    if not isinstance(items, list):
-        raise ValueError("SkillSpector output has no findings list")
-    return [_normalise_finding(item) for item in items], version
+    if not isinstance(data, dict):
+        raise ValueError("SkillSpector output is not a report object")
+    if data.get("error"):
+        raise ValueError(f"SkillSpector reported an error: {data['error']}")
+    issues = data.get("issues")
+    if not isinstance(issues, list):
+        raise ValueError("SkillSpector output has no issues list")
+    assessment = data.get("risk_assessment")
+    if not isinstance(assessment, dict):
+        raise ValueError("SkillSpector output has no risk_assessment")
+    recommendation = str(assessment.get("recommendation") or "").upper()
+    if recommendation not in _RECOMMENDATIONS:
+        raise ValueError(f"SkillSpector gave an unknown recommendation "
+                         f"{assessment.get('recommendation')!r}")
+    score = assessment.get("score")
+    risk = {"score": score if isinstance(score, (int, float))
+            and not isinstance(score, bool) else None,
+            "severity": str(assessment.get("severity") or "").lower(),
+            "recommendation": recommendation}
+
+    findings = [_normalise_finding(item) for item in issues]
+    # The verdict can condemn what no single issue does: the score sums them.
+    if ((recommendation == "DO_NOT_INSTALL"
+         or risk["severity"] in _BLOCKING_SEVERITIES)
+            and not any(f["severity"] in _BLOCKING_SEVERITIES for f in findings)):
+        findings.append({
+            "severity": "high", "category": "risk_assessment", "rule": "",
+            "message": (f"SkillSpector risk score {risk['score']} "
+                        f"({risk['severity'] or 'unrated'}): {recommendation}"),
+            "file": "", "line": None})
+
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    completeness = data.get("analysis_completeness")
+    incomplete = ""
+    if isinstance(completeness, dict) and (
+            completeness.get("is_complete") is False
+            or completeness.get("execution_successful") is False):
+        incomplete = (f"analysis was {completeness.get('status') or 'incomplete'}"
+                      f" ({completeness.get('coverage_percent', '?')}% covered)")
+    return ParsedScan(findings, str(metadata.get("skillspector_version") or ""),
+                      risk, incomplete)
 
 
 def _skillspector_argv(target: Path, command) -> list[str]:
@@ -546,8 +609,14 @@ def run_skillspector(target: Path, *, command=None,
     from friday.contracts import now_iso
 
     report = ScanReport(status=SCAN_ERROR, scanned_at=now_iso())
+    target = Path(target)
+    if not target.is_dir():
+        # Checked here because a missing cwd also raises FileNotFoundError,
+        # which would be misread below as "the scanner is not installed".
+        report.detail = f"the scan target {target} is not a directory"
+        return report
     try:
-        argv = _skillspector_argv(Path(target), command)
+        argv = _skillspector_argv(target, command)
         completed = subprocess.run(
             argv, capture_output=True, text=True, env=scrubbed_env(),
             cwd=str(target), timeout=timeout)
@@ -566,15 +635,74 @@ def run_skillspector(target: Path, *, command=None,
         return report
 
     report.report_sha256 = digest(completed.stdout or "")
+    if completed.returncode not in _REPORT_EXIT_CODES:
+        report.detail = (f"SkillSpector exited {completed.returncode}: "
+                         f"{(completed.stderr or '').strip()[-200:]}")
+        return report
     try:
-        report.findings, report.scanner_version = parse_skillspector(
-            completed.stdout)
+        parsed = parse_skillspector(completed.stdout)
     except ValueError as exc:
         report.detail = (f"{exc} (exit {completed.returncode}): "
                          f"{(completed.stderr or '').strip()[-200:]}")
         return report
-    report.status = SCAN_BLOCKED if report.blocking() else SCAN_CLEAN
+    report.findings, report.scanner_version = parsed.findings, parsed.version
+    report.risk = parsed.risk
+    if report.blocking():
+        # A condemning finding stands even when the rest was not inspected.
+        report.status = SCAN_BLOCKED
+    elif parsed.incomplete:
+        report.detail = f"SkillSpector {parsed.incomplete}"
+    else:
+        report.status = SCAN_CLEAN
     return report
+
+
+def tree_digest(directory: Path) -> str:
+    """
+    A digest of a directory's contents, so a scan can be bound to exactly what
+    it scanned: paths and file bytes, sorted, with symlinks recorded by their
+    target and never followed. `.git` is history, not what is installed.
+    """
+    root = Path(directory)
+    sha = hashlib.sha256()
+    for current, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = sorted(d for d in dirs if d != ".git")
+        for name in sorted(files):
+            path = Path(current) / name
+            sha.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
+            if path.is_symlink():
+                sha.update(b"->" + os.readlink(path).encode("utf-8", "replace"))
+                continue
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1 << 20), b""):
+                    sha.update(chunk)
+            sha.update(b"\0")
+    return sha.hexdigest()
+
+
+def scan_import(directory: Path, **kwargs) -> ScanReport:
+    """
+    The seam for anything that is not a forged candidate: an imported
+    repository, an MCP server, a package, a downloaded skill. Scan the
+    directory it will run from and bind the result to its exact contents. The
+    caller keeps `report.to_dict()` with the candidate and activates it only
+    through `scan_admits`.
+    """
+    report = run_skillspector(directory, **kwargs)
+    if Path(directory).is_dir():
+        report.target_sha256 = tree_digest(Path(directory))
+    return report
+
+
+def scan_admits(scan: dict, directory: Path) -> bool:
+    """
+    True only for a stored clean scan of this directory as it is now. Anything
+    else - no scan, a blocked or failed one, a tree changed since - is False.
+    """
+    return (isinstance(scan, dict) and scan.get("status") == SCAN_CLEAN
+            and Path(directory).is_dir()
+            and bool(scan.get("target_sha256"))
+            and scan["target_sha256"] == tree_digest(Path(directory)))
 
 
 def render_skill_md(spec: CapabilitySpec) -> str:
