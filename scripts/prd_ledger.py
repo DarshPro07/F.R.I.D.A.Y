@@ -4168,6 +4168,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_assumption_register.py::test_only_a_run_waiting_on_the_person_awaits_validation', 'tests/test_assumption_register.py::test_starting_a_held_objective_reports_what_it_awaits', 'tests/test_assumption_register.py::test_starting_an_unheld_objective_reports_nothing_to_await', 'tests/test_assumption_register.py::test_the_model_is_told_a_held_objective_has_not_started'],
         "files": ['friday/requirements.py:101', 'friday/requirements.py:354', 'friday/requirements.py:451', 'agent_friday.py', 'friday/objectives.py', 'friday/toolsets/objectives.py'],
     }),
+    ('CAP-003', {
+        "status": PARTIAL,
+        "current_implementation": "Native tools no longer report READY unprobed: manifest rows are REGISTERED ('installed; not probed'); describe(id) runs capabilities.health, so a failing probe shows UNAVAILABLE with its reason. build()/summary() never probe. (build run, commit 1f27fdc3f)",
+        "next_action": 'GAPS: No production code registers a capabilities probe, so every native tool still reads REGISTERED; nothing reports READY until probes are written.; fabric.py providers still carry their own READY/state logic and are not tied to the capability health probe (next slice).; executors: of_executor still sets state READY from installed() alone (manifest.py of_executor), no probe.; capability_manifest summary (by_state) is unprobed by design; only describe(id) probes, one id at a time.; Capability fields (version, backend, provenance, data_classes, latency/cost class, tests, last_verified) are not back-filled for existing records.',
+    }),
 ]
 
 
