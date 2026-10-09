@@ -11,9 +11,17 @@ The order adapts to measured reliability (§48): a path that has kept
 failing - at least `MIN_ATTEMPTS` tries, fewer than half succeeding - moves
 behind the ones that have not, keeping its place among the other failing
 ones.
+
+WebMCP (WEBMCP-001) is an experimental first tier: a page that offers
+structured browser-native tools is used before anything else, but only when
+the caller vouches that the tool is trusted. Nothing is trusted by default,
+so an absent or untrusted WebMCP tool leaves the route as it was.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+
+WEBMCP = "webmcp"
 NATIVE_API = "native_api"
 SCRIPTING = "scripting"
 STRUCTURED = "structured_tool"
@@ -22,11 +30,12 @@ VISION = "vision"
 COORDINATES = "coordinates"
 
 #: Most direct first.
-ORDER = (NATIVE_API, SCRIPTING, STRUCTURED, DOM, VISION, COORDINATES)
+ORDER = (WEBMCP, NATIVE_API, SCRIPTING, STRUCTURED, DOM, VISION, COORDINATES)
 
 #: What each family of capability acts through. Anything else is one of
 #: FRIDAY's own structured tools.
 _BY_PREFIX = (
+    ("webmcp_", WEBMCP),            # a page's own WebMCP tools (experimental)
     ("connector_", NATIVE_API),      # the provider's own API, via the connector plane
     ("web_", NATIVE_API),            # HTTP fetch and search APIs
     ("apps_", SCRIPTING),            # the operating system's process launch and focus
@@ -67,12 +76,17 @@ def combine(*tallies: dict) -> dict:
 
 
 def rank(candidates, *, reliability: dict | None = None,
-         down: frozenset[str] = frozenset()) -> list[str]:
+         down: frozenset[str] = frozenset(),
+         trusted: Callable[[str], bool] | None = None) -> list[str]:
     """`candidates` for one step, most direct path first. `reliability`
     maps a capability to (successes, attempts) for this kind of step; `down`
-    is the paths with no backend up (`computer_use.unavailable_paths`)."""
+    is the paths with no backend up (`computer_use.unavailable_paths`).
+    `trusted` says whether a WebMCP capability may be used; a WebMCP
+    candidate it does not vouch for (all of them, by default) is left out."""
     measured = reliability or {}
-    return sorted(candidates, key=lambda cap: order_key(cap, measured, down))
+    usable = [cap for cap in candidates
+              if path_of(cap) != WEBMCP or (trusted is not None and trusted(cap))]
+    return sorted(usable, key=lambda cap: order_key(cap, measured, down))
 
 
 def order_key(capability_id: str, reliability: dict | None = None,

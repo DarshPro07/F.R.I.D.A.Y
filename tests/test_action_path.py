@@ -16,8 +16,8 @@ from friday import capabilities
 
 
 def test_the_order_is_section_48s():
-    assert A.ORDER == (A.NATIVE_API, A.SCRIPTING, A.STRUCTURED, A.DOM, A.VISION,
-                       A.COORDINATES)
+    assert A.ORDER == (A.WEBMCP, A.NATIVE_API, A.SCRIPTING, A.STRUCTURED, A.DOM,
+                       A.VISION, A.COORDINATES)
 
 
 def test_each_path_is_what_the_capability_does():
@@ -56,6 +56,21 @@ def test_a_path_that_keeps_failing_moves_behind_the_others():
     # A path that mostly works keeps its place.
     assert A.rank(["web_fetch", "browser_act"], reliability={"web_fetch": (5, 6)}) == [
         "web_fetch", "browser_act"]
+
+
+def test_a_trusted_webmcp_tool_is_selected_first_and_without_one_the_next_tier_is():
+    """WEBMCP-001: WebMCP, when present and trusted, is the first tier of the
+    browser route; absent or untrusted, the route falls back to the next tier."""
+    assert A.path_of("webmcp_call") == A.WEBMCP
+    candidates = ["desktop_step", "browser_act", "web_fetch", "webmcp_call"]
+    trusted = lambda cap: cap == "webmcp_call"  # noqa: E731
+    assert A.rank(candidates, trusted=trusted)[0] == "webmcp_call"
+    # Present but not trusted (and the default trusts nothing): never selected.
+    assert A.rank(candidates, trusted=lambda cap: False) == [
+        "web_fetch", "browser_act", "desktop_step"]
+    assert A.rank(candidates) == ["web_fetch", "browser_act", "desktop_step"]
+    # Absent: the next tier is first.
+    assert A.rank(["browser_act", "web_fetch"], trusted=trusted)[0] == "web_fetch"
 
 
 @pytest.mark.live
