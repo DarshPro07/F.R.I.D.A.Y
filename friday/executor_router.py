@@ -36,9 +36,14 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("friday-agent")
+
+#: How long `--version` may take before the executable counts as hung. A
+#: working CLI answers in well under a second; this only bounds a wedged one.
+VERSION_TIMEOUT = 10.0
 
 #: Chosen when nothing else can be. Hermes is the mandatory execution engine
 #: (NON_NEGOTIABLE 2): it carries the shared-memory bundle, the route/effort
@@ -93,13 +98,44 @@ class Executor:
     def usable(self) -> bool:
         return self.buildable and self.installed()
 
+    def validate_binary(self, found: str | None = None, *,
+                        timeout: float = VERSION_TIMEOUT) -> str | None:
+        """
+        Why the file at `found` does not run, or None when it answers.
+
+        Runs `<binary> --version`, no shell. A file can exist and still be
+        truncated, the wrong architecture, or missing the runtime it needs;
+        only starting it shows that, and `os.path.isfile` cannot.
+        """
+        target = found or self.path()
+        if target is None:
+            return "not installed"
+        try:
+            ran = subprocess.run(
+                [target, "--version"], capture_output=True, text=True,
+                errors="replace", timeout=timeout, stdin=subprocess.DEVNULL,
+                creationflags=(subprocess.CREATE_NO_WINDOW
+                               if os.name == "nt" else 0))
+        except subprocess.TimeoutExpired:
+            return f"{target} --version did not answer within {timeout:.0f}s"
+        except OSError as exc:
+            return f"{target} is present but cannot be run: {exc}"
+        if ran.returncode != 0:
+            said = (ran.stderr or ran.stdout or "").strip()[-200:]
+            return (f"{target} --version exited {ran.returncode}"
+                    + (f": {said}" if said else ""))
+        return None
+
     def problem(self) -> str | None:
         """
         Why this executor cannot run right now, or None when it can.
 
         The probe behind the manifest's health report. Stronger than
-        `installed()`: a locator can hand back a path that has since gone, and
-        an executor with no builder is present but cannot be driven.
+        `installed()`: a locator can hand back a path that has since gone, an
+        executor with no builder is present but cannot be driven, and a file
+        that is there may still not start. The binary is only run once the
+        cheaper checks pass, so nothing is launched for an executor Friday
+        could not use anyway.
         """
         found = self.path()
         if found is None:
@@ -108,7 +144,7 @@ class Executor:
             return f"located at {found}, which is not a file"
         if not self.buildable:
             return "installed, but Friday has no builder for it"
-        return None
+        return self.validate_binary(found)
 
 
 #: Everything Friday knows about. Being here is not a promise it works.

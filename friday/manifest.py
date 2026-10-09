@@ -299,28 +299,56 @@ def _probe_executor(m: Manifest) -> None:
         return  # the "unknown" row: build() already carries why the router failed
     reason = executor.problem()
     m.state = fabric.UNAVAILABLE if reason else fabric.READY
-    m.detail = reason or "located on disk and Friday has a builder for it"
+    m.detail = reason or ("located on disk, answers --version, and Friday "
+                          "has a builder for it")
     m.health_check = "executor_router.problem"
+
+
+def _probe(m: Manifest) -> None:
+    """Run the probe a row's kind has, in place. A fabric provider has none
+    here: it is probed by activating it, which a listing must not do."""
+    from friday import capabilities as C
+    # BUILTIN fabric providers are also NATIVE, so key on the table.
+    if m.id in C.CAPABILITIES and m.id not in fabric.registry():
+        health = C.health(m.id)
+        m.state = health["state"]
+        m.detail = health["detail"]
+        if m.state != fabric.REGISTERED:
+            m.health_check = "capabilities.health"
+    elif m.type == SPECIALIST_RUNTIME and m.id.startswith("executor:"):
+        _probe_executor(m)
 
 
 def describe(capability_id: str) -> dict | None:
     """One capability's full row. A native tool or an executor is probed here,
     and only here: `build()` stays cheap, so its rows say "installed; not
     probed"."""
-    from friday import capabilities as C
     for m in build():
         if m.id == capability_id:
-            # BUILTIN fabric providers are also NATIVE, so key on the table.
-            if capability_id in C.CAPABILITIES and capability_id not in fabric.registry():
-                health = C.health(capability_id)
-                m.state = health["state"]
-                m.detail = health["detail"]
-                if m.state != fabric.REGISTERED:
-                    m.health_check = "capabilities.health"
-            elif m.type == SPECIALIST_RUNTIME and capability_id.startswith("executor:"):
-                _probe_executor(m)
+            _probe(m)
             return m.to_dict()
     return None
+
+
+def probe_all() -> list[dict]:
+    """Every row, probed. The bulk face of `describe`: one `build()` instead of
+    one per id, and it runs each executor's `--version`, so it is for an
+    explicit health check, never for `summary()` or a listing."""
+    rows = build()
+    for m in rows:
+        _probe(m)
+    return [m.to_dict() for m in rows]
+
+
+def unhealthy() -> list[dict]:
+    """The probed rows reporting a failure state. REGISTERED is excepted: a
+    capability nobody wrote a probe for is unproven, not failing, and listing
+    all of them would bury the ones a probe actually condemned. Fabric
+    providers appear with the state the fabric holds - they are not activated
+    to find out."""
+    return [row for row in probe_all()
+            if row["state"] in (fabric.UNAVAILABLE, fabric.DEGRADED,
+                                fabric.AUTH_REQUIRED, fabric.FAILED)]
 
 
 def export(path=None) -> str:

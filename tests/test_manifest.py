@@ -327,7 +327,14 @@ def test_describe_probes_an_executor_whose_binary_has_gone(monkeypatch, tmp_path
     # The cheap listing still says only what it knows.
     assert {m.id: m.state for m in M.build()}["executor:claude"] == fabric.REGISTERED
 
+    # Present is not enough: an empty file is not a program.
     gone.write_text("", encoding="utf-8")
+    corrupt = M.describe("executor:claude")
+    assert corrupt["state"] == fabric.UNAVAILABLE
+    assert "cannot be run" in corrupt["detail"]
+
+    # A binary that starts and answers `--version` is the only route to READY.
+    monkeypatch.setattr(XR.Executor, "path", lambda self: sys.executable)
     assert M.describe("executor:claude")["state"] == fabric.READY
 
 
@@ -342,3 +349,56 @@ def test_describe_reports_an_installed_executor_with_no_builder_unavailable(
     row = M.describe("executor:opencode")
     assert row["state"] == fabric.UNAVAILABLE
     assert "no builder" in row["detail"]
+
+
+def _executors_at(monkeypatch, XR, **paths):
+    """Pin where each executor is found; any not named is not installed."""
+    monkeypatch.setattr(XR.Executor, "path", lambda self: paths.get(self.id))
+    _only_installed(monkeypatch, XR, *paths)
+
+
+def test_probe_all_condemns_every_failing_row_in_one_pass(monkeypatch, tmp_path):
+    from friday import capabilities as C
+    from friday import executor_router as XR
+    corrupt = tmp_path / "claude.exe"
+    corrupt.write_text("not a program", encoding="utf-8")
+    _executors_at(monkeypatch, XR, claude=str(corrupt))
+
+    def broken():
+        raise RuntimeError("dead")
+
+    C.register_probe("files_read", broken)
+    try:
+        rows = {row["id"]: row for row in M.probe_all()}
+    finally:
+        C.unregister_probe("files_read")
+
+    assert rows["files_read"]["state"] == fabric.UNAVAILABLE
+    assert "dead" in rows["files_read"]["detail"]
+    assert rows["executor:claude"]["state"] == fabric.UNAVAILABLE
+    assert "cannot be run" in rows["executor:claude"]["detail"]
+    # Nobody wrote a probe for these, so nothing vouches for them either way.
+    others = [row for row in rows.values()
+              if row["id"] in C.CAPABILITIES and row["id"] != "files_read"
+              and row["id"] not in fabric.registry()]
+    assert others and {row["state"] for row in others} == {fabric.REGISTERED}
+
+
+def test_unhealthy_lists_failures_and_leaves_the_unprobed_alone(monkeypatch):
+    from friday import capabilities as C
+    from friday import executor_router as XR
+    _executors_at(monkeypatch, XR)
+
+    def broken():
+        raise RuntimeError("dead")
+
+    C.register_probe("files_read", broken)
+    try:
+        bad = {row["id"]: row for row in M.unhealthy()}
+    finally:
+        C.unregister_probe("files_read")
+
+    assert bad["files_read"]["state"] == fabric.UNAVAILABLE
+    assert bad["executor:hermes"]["detail"] == "not installed"
+    assert fabric.REGISTERED not in {row["state"] for row in bad.values()}
+    assert fabric.READY not in {row["state"] for row in bad.values()}

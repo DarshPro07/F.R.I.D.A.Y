@@ -5,6 +5,10 @@ The failure guarded here is a router that looks informed. Swinging on one
 lucky run is worse than a fixed default, because a fixed default is at least
 honest about being one.
 """
+import os
+import subprocess
+import sys
+
 import pytest
 from friday import evaluation as E
 from friday import executor_router as R
@@ -219,3 +223,76 @@ def test_every_declared_executor_says_why_it_is_or_is_not_buildable():
 
 def test_the_default_is_one_of_the_known():
     assert R.DEFAULT in R.BY_ID
+
+
+# -- CAP-003: a present executable must also run ----------------------------
+
+
+def _program_exiting(tmp_path, code):
+    """A real program that prints to stderr and exits `code`, on any OS."""
+    if os.name == "nt":
+        path = tmp_path / "tool.cmd"
+        path.write_text(f"@echo off\r\necho boom 1>&2\r\nexit /b {code}\r\n",
+                        encoding="utf-8")
+    else:
+        path = tmp_path / "tool.sh"
+        path.write_text(f"#!/bin/sh\necho boom >&2\nexit {code}\n",
+                        encoding="utf-8")
+        path.chmod(0o755)
+    return str(path)
+
+
+def _buildable():
+    return R.Executor(id="x", binary="x", buildable=True)
+
+
+def test_a_binary_that_answers_version_is_valid():
+    assert _buildable().validate_binary(sys.executable) is None
+
+
+def test_a_file_that_is_not_a_program_is_reported(tmp_path):
+    corrupt = tmp_path / "x.exe"
+    corrupt.write_text("not a program", encoding="utf-8")
+    reason = _buildable().validate_binary(str(corrupt))
+    assert reason and "present but cannot be run" in reason
+
+
+def test_a_binary_that_exits_nonzero_is_reported_with_what_it_said(tmp_path):
+    reason = _buildable().validate_binary(_program_exiting(tmp_path, 3))
+    assert reason and "exited 3" in reason and "boom" in reason
+
+
+def test_a_binary_that_hangs_is_reported(monkeypatch):
+    def hang(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(R.subprocess, "run", hang)
+    reason = _buildable().validate_binary("/opt/x", timeout=2)
+    assert reason and "did not answer within 2s" in reason
+
+
+def test_problem_reports_an_installed_executable_that_will_not_start(
+        monkeypatch, tmp_path):
+    corrupt = tmp_path / "x.exe"
+    corrupt.write_text("", encoding="utf-8")
+    monkeypatch.setattr(R.Executor, "path", lambda self: str(corrupt))
+    assert "cannot be run" in _buildable().problem()
+
+
+def test_problem_is_clear_for_an_executable_that_runs(monkeypatch):
+    monkeypatch.setattr(R.Executor, "path", lambda self: sys.executable)
+    assert _buildable().problem() is None
+
+
+def test_problem_does_not_launch_an_executor_friday_cannot_drive(
+        monkeypatch, tmp_path):
+    present = tmp_path / "x.exe"
+    present.write_text("", encoding="utf-8")
+    monkeypatch.setattr(R.Executor, "path", lambda self: str(present))
+
+    def launched(self, *args, **kwargs):
+        raise AssertionError("an unbuildable executor was launched")
+
+    monkeypatch.setattr(R.Executor, "validate_binary", launched)
+    unbuildable = R.Executor(id="x", binary="x", buildable=False)
+    assert "no builder" in unbuildable.problem()
