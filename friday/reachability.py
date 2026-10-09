@@ -234,6 +234,11 @@ DECLARED = {
                                "Completer adapter over the model gateway, the next "
                                "wiring step. Its output is already read live: "
                                "model_capabilities.get falls back to stored profiles"),
+    "friday/gateway_completer": (FUTURE,
+                                 "MODEL-004: the gateway-backed Completer for the open-set "
+                                 "profiler, built and tested against a scripted gateway; its "
+                                 "caller is the onboarding trigger for a newly seen route, "
+                                 "run by tests/test_gateway_completer.py"),
     "friday/model_scout": (FUTURE,
                            "FAB-006: the model scout, built and tested against scripted "
                            "routes; its callers are a gateway-backed probe completer and "
