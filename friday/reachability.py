@@ -188,6 +188,10 @@ DECLARED = {
                             "slices, run by tests/test_agent_ledger.py"),
     "friday/shadow": (PRODUCTION,
                       "observes every turn from watch_from_the_side"),
+    "friday/system_one": (FUTURE,
+                          "S1-001: the System One decision gateway and its "
+                          "mock backend; a Laya/Jev backend and a live caller "
+                          "are later slices, run by tests/test_system_one.py"),
     "friday/project_brain": (FUTURE,
                              "BRAIN-001: the Project Brain's storage and "
                              "Markdown export; the MCP tools and the "
