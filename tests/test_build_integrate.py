@@ -296,6 +296,65 @@ def test_integrate_blocked_behind_an_earlier_candidate_does_not_cut_in(tmp_path)
     assert [e["req"] for e in q.pending()] == ["OTHER"]
 
 
+def _killed_landing(tmp_path):
+    """main as a killed integrator leaves it: the run's pick on HEAD, marked by a dead process."""
+    repo, runs, run, rows = setup(tmp_path)
+    pre = head(repo)
+    sh(repo, "cherry-pick", run["commit"])
+    bi.mark_landing(runs, "REQ-1", pre, head(repo), pid=4242)
+    return repo, runs, pre
+
+
+def test_a_turn_takes_back_a_pick_a_killed_integrator_left_ungated(tmp_path, monkeypatch):
+    # 2026-10-09: the program landing BRAIN-001 was killed mid-gate; its pick (b71a2ee) stayed
+    # on main, un-gated and out of the ledger, under five later integrations.
+    repo, runs, pre = _killed_landing(tmp_path)
+    monkeypatch.setattr(bi.MergeQueue, "_alive", staticmethod(lambda pid: pid != 4242))
+    q = bi.MergeQueue(runs, repo=repo)
+    q.enqueue("NEXT", 1.0)
+    q.enqueue("REQ-1", 2.0)  # the killed run, queued again
+    with q.turn("NEXT"):
+        assert head(repo) == pre
+    assert not (runs / bi.LANDING_FILE).exists()
+    ev = [json.loads(ln) for ln in (runs / bi.QUEUE_FILE).read_text().splitlines()][-1]
+    assert ev["event"] == "LANDING_RECOVERED" and ev["outcome"] == "RESET" and ev["pre_head"] == pre
+    assert [e["req"] for e in q.pending()] == ["NEXT", "REQ-1"]  # the recovery drops no entry
+
+
+def test_a_landing_main_has_moved_past_is_left_and_dropped(tmp_path, monkeypatch):
+    repo, runs, pre = _killed_landing(tmp_path)
+    write(repo, "later.py", "x = 1\n")
+    sh(repo, "add", "later.py")
+    sh(repo, "commit", "-q", "-m", "built on top")
+    moved = head(repo)
+    monkeypatch.setattr(bi.MergeQueue, "_alive", staticmethod(lambda pid: pid != 4242))
+    assert bi.MergeQueue(runs, repo=repo).recover_landing() == "LEFT"
+    assert head(repo) == moved and not (runs / bi.LANDING_FILE).exists()
+
+
+def test_a_landing_whose_process_lives_is_not_touched(tmp_path, monkeypatch):
+    repo, runs, pre = _killed_landing(tmp_path)
+    pick = head(repo)
+    monkeypatch.setattr(bi.MergeQueue, "_alive", staticmethod(lambda pid: True))
+    assert bi.MergeQueue(runs, repo=repo).recover_landing() == ""
+    assert head(repo) == pick and (runs / bi.LANDING_FILE).exists()
+
+
+def test_the_pick_is_marked_while_its_gate_runs_and_cleared_once_ledgered(tmp_path, monkeypatch):
+    repo, runs, run, rows = setup(tmp_path)
+    pre, seen = head(repo), {}
+
+    def gate(python, cwd, tests):
+        seen.update(json.loads((runs / bi.LANDING_FILE).read_text()))
+        return 0, ["ok"]
+
+    monkeypatch.setattr(bi, "gate_run", gate)
+    out = go(repo, runs, rows, runner=pass_runner())
+    assert out["result"] == "INTEGRATED"
+    assert seen["req"] == "REQ-1" and seen["pre_head"] == pre and seen["commit"] == out["integrated_commit"]
+    assert not (runs / bi.LANDING_FILE).exists()
+
+
 # ---------------------------------------------------------------- wide impact
 
 def test_a_wide_affected_set_is_recorded_with_its_chunk_count(tmp_path, monkeypatch):
@@ -439,9 +498,10 @@ def test_reset_is_skipped_when_head_parent_is_not_pre_head(tmp_path, monkeypatch
             return subprocess.CompletedProcess(args, 0, stdout="deadbeef\n", stderr="")
         return real(r, *args, **kw)
     monkeypatch.setattr(bi, "git", fake)
-    out = bi.merge(run, bi.commit_test_files(run, repo), repo, sys.executable)
+    out = bi.merge(run, bi.commit_test_files(run, repo), repo, sys.executable, runs_dir=runs)
     assert out["result"] == "FAILED_INTEGRATION" and "NOT reset" in out["reset"]
     assert head(repo) != out["pre_head"]
+    assert not (runs / bi.LANDING_FILE).exists()  # reported for a person, not left for a turn to undo
 
 
 # ---------------------------------------------------------------- review economics
@@ -695,10 +755,10 @@ def test_merge_resets_the_pick_when_a_chunk_outlives_the_timeout(tmp_path, monke
     monkeypatch.setattr(bi, "PYTEST_BRIEF", slow)
     monkeypatch.setattr(bi, "TEST_S", 1)
     before = head(repo)
-    merged = bi.merge(run, ["tests/test_twice.py"], repo, sys.executable)
+    merged = bi.merge(run, ["tests/test_twice.py"], repo, sys.executable, runs_dir=runs)
     assert merged["result"] == "TEST_TIMEOUT" and merged["reset"] == "reset to pre_head"
     assert head(repo) == before and "chunk 1/1" in merged["detail"]
-    assert merged["affected"]
+    assert merged["affected"] and not (runs / bi.LANDING_FILE).exists()
 
 
 def test_integrate_records_a_test_timeout_with_detail_and_affected(tmp_path, monkeypatch):

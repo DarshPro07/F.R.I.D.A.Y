@@ -1415,7 +1415,9 @@ def rebase_run(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR) -> boo
     """Replay a finished run's commit onto the repository's HEAD in its own worktree
     when that is a clean rebase, and record the new commit and base. A conflict is
     aborted, leaving the run as it was (2026-10-03/04: SEC-005 and CTX-002 each sat
-    parked REBASE_REQUIRED until the controller did exactly this by hand)."""
+    parked REBASE_REQUIRED until the controller did exactly this by hand). So is a rebase
+    that drops the commit because HEAD already holds its patch: recorded, it read as a run
+    with commit == base and integrated as NO_TEST (BRAIN-001, 2026-10-09)."""
     rec_path = runs_dir / f"{req}.json"
     rec = _read_json(rec_path)
     wt = Path(rec.get("worktree") or "")
@@ -1427,7 +1429,11 @@ def rebase_run(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR) -> boo
     if r.returncode != 0:
         subprocess.run(["git", "rebase", "--abort"], cwd=wt, capture_output=True, timeout=60)
         return False
-    rec.update(commit=_git(["rev-parse", "HEAD"], wt), base_sha=head)
+    new = _git(["rev-parse", "HEAD"], wt)
+    if new == head:  # nothing of the run is left on top of HEAD
+        _git(["reset", "--hard", rec["commit"]], wt)
+        return False
+    rec.update(commit=new, base_sha=head)
     rec_path.write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8", newline="\n")
     meta = _run_meta(wt)
     if meta:

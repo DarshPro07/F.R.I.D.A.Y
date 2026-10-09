@@ -1812,6 +1812,21 @@ def test_rebase_run_aborts_a_conflict_and_leaves_the_worktree_clean(repo, tmp_pa
     assert json.loads((runs / "R-1.json").read_text())["commit"] == rec["commit"]
 
 
+def test_rebase_run_keeps_a_commit_whose_patch_head_already_holds(repo, tmp_path):
+    # 2026-10-09: main already held BRAIN-001's patch (a killed integrator's pick); the rebase
+    # dropped the run's commit and recorded commit == base, which integrated as NO_TEST.
+    run, wt = _done_run(repo, tmp_path)
+    (wt / "a.py").write_text("a = 1\n")
+    _evidence_done(wt)
+    runs = tmp_path / "runs"
+    rec = K.finalize(run, None, runs)
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t", "cherry-pick", rec["commit"])
+    assert K.rebase_run("R-1", repo=repo, runs_dir=runs) is False
+    assert _git(wt, "rev-parse", "HEAD") == rec["commit"]
+    after = json.loads((runs / "R-1.json").read_text())
+    assert after["commit"] == rec["commit"] and after["base_sha"] == rec["base_sha"]
+
+
 
 def test_a_turn_capped_failure_retries_one_budget_class_up(tmp_path):
     # 2026-10-04: BROW-004 (P1, one cited file) got MICRO's 12 turns, ran out, and would

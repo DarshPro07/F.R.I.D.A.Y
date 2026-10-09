@@ -64,6 +64,7 @@ GATE_CHUNK = 40
 WIDE_IMPACT_FILES = 60  # an affected set larger than this is its own, chunked job
 QUEUE_FILE = "merge_queue.jsonl"
 QUEUE_LOCK = "merge_queue.lock"
+LANDING_FILE = "merge_landing.json"  # a pick on HEAD the gate has not settled yet
 QUEUE_WAIT_S = 1800
 QUEUE_POLL_S = 1.0
 TIMEOUT = -999  # gate_run's rc when a chunk outlived TEST_S
@@ -384,14 +385,31 @@ def affected(run: dict, extra: list[str], repo: Path = ROOT) -> list[str]:
     return sorted(set(hit) | set(extra))
 
 
-def merge(run: dict, tests_extra: list[str], repo: Path = ROOT, python: str = VENV_PY) -> dict:
-    """Cherry-pick, run the affected tests, reset on failure (guarded)."""
+def mark_landing(runs_dir: Path, req: str, pre_head: str, commit: str, pid: int | None = None) -> None:
+    """Record a pick the gate has not settled. A process killed now leaves it on HEAD un-gated:
+    on 2026-10-09 BRAIN-001's b71a2ee sat under five integrations before anyone saw it.
+    The next merge-queue turn takes it back (MergeQueue.recover_landing)."""
+    Path(runs_dir).mkdir(parents=True, exist_ok=True)
+    (Path(runs_dir) / LANDING_FILE).write_text(
+        json.dumps({"req": req, "pid": pid or os.getpid(), "pre_head": pre_head, "commit": commit,
+                    "at": time.time()}), encoding="utf-8", newline="\n")
+
+
+def clear_landing(runs_dir: Path) -> None:
+    (Path(runs_dir) / LANDING_FILE).unlink(missing_ok=True)
+
+
+def merge(run: dict, tests_extra: list[str], repo: Path = ROOT, python: str = VENV_PY,
+          runs_dir: Path = RUNS_DIR) -> dict:
+    """Cherry-pick, run the affected tests, reset on failure (guarded). The pick stays marked
+    as landing until it is reset here or its ledger commit is made."""
     pre_head = rev(repo, "HEAD")
     pick = git(repo, *IDENTITY, "cherry-pick", run["commit"])
     if pick.returncode != 0:
         git(repo, "cherry-pick", "--abort")
         return {"result": "CONFLICT", "pre_head": pre_head, "detail": pick.stderr.strip()[-300:]}
     integrated = rev(repo, "HEAD")
+    mark_landing(runs_dir, run.get("requirement", ""), pre_head, integrated)
     tests = [t for t in affected(run, tests_extra, repo) if (repo / t).is_file()]
     chunks = -(-len(tests) // GATE_CHUNK)
     ok = {"result": "INTEGRATED", "pre_head": pre_head, "integrated_commit": integrated,
@@ -419,6 +437,7 @@ def merge(run: dict, tests_extra: list[str], repo: Path = ROOT, python: str = VE
         reset = "reset to pre_head"
     else:
         reset = "NOT reset: HEAD^ is not pre_head; inspect by hand"
+    clear_landing(runs_dir)  # settled here: taken back, or reported for a person to inspect
     return {"result": "TEST_TIMEOUT" if timed_out else "FAILED_INTEGRATION", "pre_head": pre_head,
             "integrated_commit": "", "affected": tests, "summary": lines[:12], "reset": reset,
             "impact": ok["impact"], "gate_chunks": chunks, "gate_workers": ok["gate_workers"],
@@ -620,10 +639,11 @@ class MergeQueue:
     """Integrations run one at a time, first finished first, from an append-only
     log (runs_dir/merge_queue.jsonl). An entry whose process died drops out, so a
     crashed integrator cannot hold the line. The lock is held while a candidate
-    is cherry-picked and gated."""
+    is cherry-picked and gated; a turn first takes back what a killed one left."""
 
-    def __init__(self, runs_dir: Path, wait_s: float = QUEUE_WAIT_S, poll_s: float = QUEUE_POLL_S):
-        self.dir, self.wait_s, self.poll_s = Path(runs_dir), wait_s, poll_s
+    def __init__(self, runs_dir: Path, wait_s: float = QUEUE_WAIT_S, poll_s: float = QUEUE_POLL_S,
+                 repo: Path = ROOT):
+        self.dir, self.wait_s, self.poll_s, self.repo = Path(runs_dir), wait_s, poll_s, Path(repo)
         self.log, self.lock = self.dir / QUEUE_FILE, self.dir / QUEUE_LOCK
 
     def _events(self) -> list[dict]:
@@ -705,12 +725,43 @@ class MergeQueue:
                                   f"{head['req'] if head else 'a held lock'}")
             time.sleep(self.poll_s)
         try:
+            self.recover_landing()
             yield
         finally:
             try:
                 self.lock.unlink()
             except FileNotFoundError:
                 pass
+
+    def recover_landing(self) -> str:
+        """Take back a pick whose integrator died before the gate settled it, when HEAD is
+        still exactly that pick on its pre_head. Runs under the lock, so no landing is in
+        progress; a marker whose process lives is left alone (a live integrator settles its
+        own, and a reused pid only delays this). Returns RESET, LEFT or '' (nothing to do)."""
+        path = self.dir / LANDING_FILE
+        try:
+            mark = json.loads(path.read_text(encoding="utf-8"))
+        except OSError:
+            return ""
+        except ValueError:
+            mark = None
+        # logged under its own key: an event for the run's id would drop a re-queued entry of it
+        key = f"landing:{mark.get('req') or '?'}" if isinstance(mark, dict) else "landing:?"
+        if not isinstance(mark, dict) or not mark.get("commit") or not mark.get("pre_head"):
+            self._append({"req": key, "event": "LANDING_UNREADABLE", "at": time.time()})
+            path.unlink(missing_ok=True)
+            return "LEFT"
+        if self._alive(int(mark.get("pid") or 0)):
+            return ""
+        head = rev(self.repo, "HEAD")
+        outcome = "LEFT"  # main moved past it: the landing finished, or something was built on it
+        if head == mark["commit"] and git(self.repo, "rev-parse", "HEAD^").stdout.strip() == mark["pre_head"]:
+            git(self.repo, "reset", "--hard", mark["pre_head"], check=True)
+            outcome = "RESET"
+        self._append({"req": key, "event": "LANDING_RECOVERED", "outcome": outcome, "commit": mark["commit"],
+                      "pre_head": mark["pre_head"], "head": head, "at": time.time()})
+        path.unlink(missing_ok=True)
+        return outcome
 
 
 def integrate(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR, ledger_path: Path = LEDGER,
@@ -721,7 +772,7 @@ def integrate(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR, ledger_
               runner=runner, dry_run=dry_run, no_ledger=no_ledger)
     if dry_run:
         return _integrate(req, **kw)
-    queue = queue or MergeQueue(Path(runs_dir))
+    queue = queue or MergeQueue(Path(runs_dir), repo=repo)
     try:
         completed = (Path(runs_dir) / f"{req}.json").stat().st_mtime
     except OSError:
@@ -867,7 +918,7 @@ def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, pytho
             return done("VERIFIER_FAIL")
     else:
         verifier = None
-    merged = merge(run, tests, repo, python)
+    merged = merge(run, tests, repo, python, runs_dir=runs_dir)
     out.update(impact=merged.get("impact", "NORMAL"), gate_chunks=merged.get("gate_chunks", 0),
                gate_workers=merged.get("gate_workers", 1))
     if merged["result"] != "INTEGRATED":
@@ -893,6 +944,7 @@ def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, pytho
         commit_ledger(Path(ledger_path), req, status, repo)
         out["ledger_status"] = status
         out["gaps"] = gaps
+    clear_landing(runs_dir)  # gated, and in the ledger: nothing left to take back
     remove_worker(run, repo)
     return done("INTEGRATED")
 
