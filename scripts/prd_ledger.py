@@ -4535,6 +4535,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Fixed the hole the verifier found: a verified files_delete or files_recycle could back state assertions such as "foo.txt is ready." or "Here it is." about the removed file. _usable in friday/honesty.py now follows the rule its docstring already stated. A removal\'s evidence counts only when every com (build run, commit 2800cbcaa)',
         "next_action": "GAPS: Only 'deleted', 'done' and 'all done' count as removal claims, since 'removed', 'erased' and 'gone' are not in COMPLETION_PATTERNS and never reach _usable as claims. Bare 'Finished.' and 'Ready.' are refused after a removal; the packet's phrase was 'a bare done'.; The ledger packet text was truncated mid-sentence at 'so the claim is re...', so the refusal wording is my own, reusing the existing 'what succeeded was a removal' message.; I briefly wrote a temp log to F:/F.R.I.D.A.Y/data (outside the worktree) and deleted it immediately; nothing else outside the worktree was touched.",
     }),
+    ('SEC-005', {
+        "status": PARTIAL,
+        "current_implementation": "Implemented the packet's design. (a) friday/hermes_bridge.py: new native_tools_in_tools_list() reads the enabled file/terminal toolsets from Hermes' tools.list RPC (session-scoped), and HermesSupervisor._listed_native_tools() asks it in delegate() right after session.create (only when session info n (build run, commit 38610bef7)",
+        "next_action": "GAPS: The hook is proven by running its script against the real delegation_scope registry, not by a live Hermes; Hermes' own spawn (split_command_line, build_subprocess_env) was read statically only. If build_subprocess_env scrubs FRIDAY_DELEGATION_SCOPE_DIR, the hook uses the default DATA_DIR registry (same as the bridge unless overridden).; The hook subprocess pays a friday/hermes_bridge import per call while a scope is held (to read _NATIVE_FILE_TOOLS); not measured.; The hook's block of Hermes-native tools is by the constant _NATIVE_FILE_TOOLS (the hook cannot call tools.list); a native tool outside that set is caught by the tools.list session check, and by the path-argument check if it takes a path.; No ledger/docs rows updated (orchestrator's job); the tools.list RPC is stubbed in the fake gateway, not run against Hermes.",
+    }),
 ]
 
 
