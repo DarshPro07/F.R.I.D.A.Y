@@ -20,6 +20,11 @@ path the boss can hear:
 The queue is bounded and drops the oldest turn when it fills. Learning that
 falls behind must never become back-pressure on speech.
 
+Learning is optional work, so it asks the resource governor first (BG-001): a
+turn waits, and is retried, while the person is active, the machine is on
+battery or it is under pressure, and an attempt already running is cancelled
+when the governor stops it. Without a governor it learns every turn, as before.
+
 Everything goes through the MCP tools rather than opening the SQLite store
 here: one writer, one policy gate, and it keeps working when the store moves
 behind the Edge Controller.
@@ -33,6 +38,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from friday.governor import OPTIONAL
+
 logger = logging.getLogger("friday-agent.autolearn")
 
 #: Turns this short are acknowledgements - "yes", "go on", "stop". Extraction
@@ -43,7 +50,36 @@ MIN_WORDS = 3
 #: dropped: falling behind is acceptable, blocking the voice path is not.
 MAX_PENDING = 16
 
+#: Seconds between asking the governor again for a turn it deferred.
+RETRY_S = 30.0
+
 Invoke = Callable[[str, dict], Awaitable[Any]]
+
+
+class _Attempt:
+    """
+    One governed try at learning a turn. The governor calls `stop` on whatever
+    thread reads the machine, so it only schedules the cancel onto the loop that
+    owns the task; both the stop and the task's creation run on that loop, so a
+    stop that lands before the task exists is seen as `stopped` and nothing is
+    started.
+    """
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self.task: asyncio.Task | None = None
+        self.stopped = False
+
+    def stop(self) -> None:
+        try:
+            self._loop.call_soon_threadsafe(self._cancel)
+        except RuntimeError:
+            pass  # the loop is closed: the work it would have stopped is already gone
+
+    def _cancel(self) -> None:
+        self.stopped = True
+        if self.task is not None:
+            self.task.cancel()
 
 
 def payload(raw: Any) -> dict:
@@ -75,11 +111,21 @@ class AutoLearner:
     Learns from turns in the background and keeps a briefing ready.
 
     `invoke(tool_name, arguments)` runs one MCP tool and returns its result.
+    `governor` is a zero-argument provider of the resource governor (a
+    provider, so the process-wide one is resolved when used, not at import);
+    None learns every turn ungated. A deferred turn is asked about again every
+    `retry_s`, and `deferred_reason` is why the last ask was refused ('' once
+    admitted).
     """
 
     def __init__(self, invoke: Invoke, *, min_words: int = MIN_WORDS,
-                 max_pending: int = MAX_PENDING, on_learned=None) -> None:
+                 max_pending: int = MAX_PENDING, on_learned=None,
+                 governor: Callable[[], Any] | None = None,
+                 retry_s: float = RETRY_S) -> None:
         self._invoke = invoke
+        self._governor = governor
+        self._retry_s = retry_s
+        self.deferred_reason = ""
         # Called when the briefing actually changes, so the agent can fold it
         # into its instructions. Only then - refreshing on every turn rewrites
         # the chat context and costs a regenerated reply.
@@ -145,9 +191,12 @@ class AutoLearner:
 
     async def _worker(self) -> None:
         while True:
-            user_text, assistant_text, from_read_material = await self._queue.get()
+            turn = await self._queue.get()
             try:
-                await self._learn(user_text, assistant_text, from_read_material)
+                if self._governor is None:
+                    await self._learn(*turn)
+                else:
+                    await self._learn_when_admitted(*turn)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -155,6 +204,59 @@ class AutoLearner:
                 logger.exception("could not learn from a turn")
             finally:
                 self._queue.task_done()
+
+    async def _learn_when_admitted(self, user_text: str, assistant_text: str,
+                                   from_read_material: bool) -> None:
+        """
+        Hold this turn until the governor admits optional work, learn it, and
+        give the lease back. If the governor stops the attempt part-way (the
+        person came back, the power went, pressure rose) the turn is held and
+        asked about again, so it is learned once the conditions allow - at
+        worst twice from the server's side, which reinforces rather than
+        duplicates what it already stored.
+        """
+        loop = asyncio.get_running_loop()
+        while True:
+            attempt = _Attempt(loop)
+            # The governor samples the machine: off the loop, not on it.
+            asking = asyncio.ensure_future(asyncio.to_thread(
+                lambda: self._governor().admit(OPTIONAL, label="autolearn",
+                                               cleanup=attempt.stop)))
+            try:
+                decision = await asyncio.shield(asking)
+            except asyncio.CancelledError:
+                # Closed mid-ask: the thread still finishes, and a lease it
+                # takes has no one left to give it back.
+                asking.add_done_callback(self._return_late_lease)
+                raise
+            if not decision.admitted:
+                self.deferred_reason = decision.reason
+                await asyncio.sleep(self._retry_s)
+                continue
+            self.deferred_reason = ""
+            try:
+                if attempt.stopped:
+                    continue                        # stopped before it began
+                attempt.task = asyncio.create_task(
+                    self._learn(user_text, assistant_text, from_read_material),
+                    name="ada-autolearn-turn")
+                # `wait` neither raises the attempt's cancellation nor cancels
+                # it when this worker is cancelled; the finally below does that.
+                await asyncio.wait({attempt.task})
+                if not attempt.task.cancelled():
+                    attempt.task.result()           # a failure goes to the worker's log
+                    return
+            finally:
+                if attempt.task is not None and not attempt.task.done():
+                    attempt.task.cancel()           # the worker itself was cancelled
+                self._governor().release(decision.lease)
+
+    def _return_late_lease(self, asked: asyncio.Future) -> None:
+        if asked.cancelled() or asked.exception() is not None:
+            return
+        decision = asked.result()
+        if decision.admitted:
+            self._governor().release(decision.lease)
 
     async def _learn(self, user_text: str, assistant_text: str,
                      from_read_material: bool = False) -> None:

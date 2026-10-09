@@ -14,8 +14,11 @@ Two properties matter more than any of the detail here:
 from __future__ import annotations
 import asyncio
 import json
+import time
 import pytest
 from friday import autolearn
+from friday import governor as G
+from test_governor import IDLE, Ctx, Dial, sample
 
 
 def test_payload_reads_a_plain_dict():
@@ -464,3 +467,182 @@ def test_the_learner_reports_only_real_changes(learner_factory):
 
     asyncio.run(go())
     assert len(fired) == 1, f"fired {len(fired)} times for one real change"
+
+
+# -- BG-001: learning waits for the person, the power and the headroom -------
+
+TURN = "I switched the whole rig over to Linux"
+
+
+def gated(ctx: Ctx) -> tuple[G.Governor, Dial]:
+    """A governor on injected readings: the real idle and battery probes are
+    never reached from a test."""
+    dial = Dial(sample())
+    gov = G.Governor(thresholds=G.Thresholds(), sampler=dial, sample_ttl_s=0.0,
+                     baseline=IDLE, context=ctx)
+    return gov, dial
+
+
+def calm(gov: G.Governor, dial: Dial) -> None:
+    """Settle the machine the way the governor trusts. CPU load is averaged over
+    `cpu_window_s`, and a pressure level is released only once a better reading
+    has lasted `dwell_s`, both on the readings' own clock - so the first calm
+    reading is taken past the window and the second past the dwell."""
+    t = gov.thresholds
+    first = time.time() + t.cpu_window_s + 1.0
+    for at in (first, first + t.dwell_s + 1.0):
+        dial.s = sample(at=at)
+        gov.pressure(fresh=True)
+
+
+async def until(predicate, timeout: float = 2.0) -> None:
+    """Wait, from outside the learner, for something to become true."""
+    async def poll():
+        while not predicate():
+            await asyncio.sleep(0.005)
+    await asyncio.wait_for(poll(), timeout)
+
+
+def learn_calls(mcp: FakeMCP) -> int:
+    return mcp.names().count("profile_learn_from_turn")
+
+
+def test_a_turn_waits_while_the_person_is_active_then_is_learned_once(learner_factory):
+    ctx = Ctx(idle_s=5.0)
+    gov, _ = gated(ctx)
+    mcp = FakeMCP(learned=[{"subject": "hardware.os", "value": "Linux"}])
+
+    async def go():
+        learner = learner_factory(mcp, governor=lambda: gov, retry_s=0.01)
+        await learner.start()
+        learner.observe(TURN)
+        await until(lambda: learner.deferred_reason)
+        waiting = learner.deferred_reason
+        await asyncio.sleep(0.1)                   # many retries, still nothing learned
+        calls_while_active = learn_calls(mcp)
+        ctx.idle_s = gov.thresholds.user_idle_s    # away once idle for the whole window
+        await drain(learner)
+        await learner.aclose()
+        return learner, waiting, calls_while_active
+
+    learner, waiting, calls_while_active = asyncio.run(go())
+    assert "person is active" in waiting, waiting
+    assert calls_while_active == 0
+    assert learn_calls(mcp) == 1 and learner.learned == 1
+    assert learner.deferred_reason == ""
+    assert gov.active(G.OPTIONAL) == 0, "the lease must be released once the turn is learned"
+
+
+@pytest.mark.parametrize("ctx, reading, why", [
+    (Ctx(on_battery=True), None, "battery"),
+    (Ctx(), sample(cpu=90), "pressure"),
+])
+def test_a_turn_waits_on_battery_or_under_pressure_and_runs_once_relieved(
+        learner_factory, ctx, reading, why):
+    gov, dial = gated(ctx)
+    if reading is not None:
+        dial.s = reading
+    mcp = FakeMCP(learned=[{"subject": "hardware.os", "value": "Linux"}])
+
+    async def go():
+        learner = learner_factory(mcp, governor=lambda: gov, retry_s=0.01)
+        await learner.start()
+        learner.observe(TURN)
+        await until(lambda: learner.deferred_reason)
+        waiting = learner.deferred_reason
+        await asyncio.sleep(0.1)
+        calls_while_deferred = learn_calls(mcp)
+        ctx.on_battery = False
+        calm(gov, dial)                            # plugged in, headroom back
+        await drain(learner)
+        await learner.aclose()
+        return learner, waiting, calls_while_deferred
+
+    learner, waiting, calls_while_deferred = asyncio.run(go())
+    assert why in waiting, waiting
+    assert calls_while_deferred == 0
+    assert learn_calls(mcp) == 1 and learner.learned == 1
+    assert gov.active(G.OPTIONAL) == 0
+
+
+class Interrupted(FakeMCP):
+    """The person comes back while the first attempt is being learned."""
+
+    def __init__(self, gov: G.Governor, ctx: Ctx, **kwargs):
+        super().__init__(**kwargs)
+        self.gov, self.ctx = gov, ctx
+        self.attempts = 0
+        self.completed = 0
+        self.leases_after_return = None
+
+    async def __call__(self, name: str, arguments: dict):
+        if name != "profile_learn_from_turn":
+            return await super().__call__(name, arguments)
+        self.attempts += 1
+        if self.attempts == 1:
+            self.ctx.idle_s = 5.0                       # the person returns...
+            self.gov.pressure(fresh=True)               # ...the governor sees it
+            self.leases_after_return = self.gov.active(G.OPTIONAL)
+            await asyncio.sleep(30)                     # still working when the stop lands
+        result = await super().__call__(name, arguments)
+        self.completed += 1
+        return result
+
+
+def test_the_person_returning_mid_learn_stops_it_and_the_turn_is_retried(learner_factory):
+    ctx = Ctx(idle_s=600.0)
+    gov, _ = gated(ctx)
+    mcp = Interrupted(gov, ctx, learned=[{"subject": "hardware.os", "value": "Linux"}])
+
+    async def go():
+        learner = learner_factory(mcp, governor=lambda: gov, retry_s=0.01)
+        await learner.start()
+        learner.observe(TURN)
+        await until(lambda: "person is active" in learner.deferred_reason)
+        stopped_at = (mcp.attempts, mcp.completed, gov.active(G.OPTIONAL))
+        await asyncio.sleep(0.05)
+        still_waiting = (mcp.attempts, mcp.completed)
+        ctx.idle_s = gov.thresholds.user_idle_s
+        await drain(learner)
+        await learner.aclose()
+        return learner, stopped_at, still_waiting
+
+    learner, stopped_at, still_waiting = asyncio.run(go())
+    assert mcp.leases_after_return == 0, "the governor released the lease it stopped"
+    assert stopped_at == (1, 0, 0), "the first attempt was cancelled before it finished"
+    assert still_waiting == (1, 0), "no second attempt while the person is active"
+    assert mcp.attempts == 2 and mcp.completed == 1 and learner.learned == 1, \
+        "the turn is learned exactly once, after the person goes away"
+    assert gov.active(G.OPTIONAL) == 0
+
+
+def test_closing_while_a_turn_is_deferred_neither_hangs_nor_leaks_a_lease(learner_factory):
+    ctx = Ctx(idle_s=5.0)
+    gov, _ = gated(ctx)
+    mcp = FakeMCP()
+
+    async def go():
+        learner = learner_factory(mcp, governor=lambda: gov, retry_s=0.01)
+        await learner.start()
+        learner.observe(TURN)
+        await until(lambda: learner.deferred_reason)
+        await asyncio.wait_for(learner.aclose(), 2.0)
+
+    asyncio.run(go())
+    assert learn_calls(mcp) == 0
+    assert gov.active(G.OPTIONAL) == 0
+
+
+def test_without_a_governor_learning_is_ungated_as_before(learner_factory):
+    mcp = FakeMCP(learned=[{"subject": "hardware.os", "value": "Linux"}])
+
+    async def go():
+        learner = learner_factory(mcp)
+        await learner.start()
+        learner.observe(TURN)
+        await drain(learner)
+        await learner.aclose()
+        return learner
+
+    learner = asyncio.run(go())
+    assert learner.learned == 1 and learner.deferred_reason == ""

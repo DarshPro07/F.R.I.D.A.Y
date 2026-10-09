@@ -35,7 +35,7 @@ try:
 except Exception:  # noqa: BLE001
     _turn_detector_plugin = None
 
-from friday import autolearn, capabilities, capability_router, mcp_firewall, objective_cli, ownership, providers, resilience, turn_timing, write_licence
+from friday import autolearn, capabilities, capability_router, governor, mcp_firewall, objective_cli, ownership, providers, resilience, turn_timing, write_licence
 from friday.continuous import ContinuousTaskExecutor
 
 
@@ -748,7 +748,7 @@ class FridayAgent(Agent):
         # The router owns which of the toolset's tools are live; the learner
         # observes the turns and feeds the briefing.
         self._router = capability_router.Router()
-        self._learner = autolearn.AutoLearner(self._call_capability)
+        self._learner = autolearn.AutoLearner(self._call_capability, governor=governor.governor)
         # Set when a reply actually went out on the current turn, so the
         # guard can tell a silent turn from a spoken one.
         self._spoke_this_turn = False
