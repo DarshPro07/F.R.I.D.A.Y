@@ -259,8 +259,20 @@ def validate_trigger(trigger) -> dict:
                 "interval trigger needs minutes between 5 and 1440; below five "
                 "minutes this is a polling loop wearing a scheduler's clothes")
         return {"kind": "interval", "minutes": minutes}
+    if kind == "device":
+        device_id = str(trigger.get("device_id", "")).strip()
+        event = str(trigger.get("event", "")).strip()
+        if not device_id or not event:
+            raise AutomationError(
+                "device trigger needs device_id and event; it fires only for "
+                "an ACTIVE device (friday.toolsets.device_events)")
+        out = {"kind": "device", "device_id": device_id, "event": event}
+        sensor = str(trigger.get("sensor", "")).strip()
+        if sensor:
+            out["sensor"] = sensor
+        return out
     raise AutomationError(
-        f"unknown trigger kind {kind!r}; known: manual, daily, interval")
+        f"unknown trigger kind {kind!r}; known: manual, daily, interval, device")
 
 
 def task_name_for(name: str) -> str:
@@ -562,7 +574,7 @@ def automations_create(
         _delete_task(existing["task_name"])       # replace, never accumulate
 
     task_name = None
-    if wanted["kind"] != "manual":
+    if wanted["kind"] not in ("manual", "device"):
         try:
             task_name = _register_task(name, wanted, description)
         except AutomationError as exc:
@@ -577,7 +589,7 @@ def automations_create(
             f"{len(ordered)} step(s)")
     else:
         method, evidence = "stored_definition", (
-            f"stored with {len(ordered)} step(s); trigger is manual so "
+            f"stored with {len(ordered)} step(s); trigger is {wanted['kind']} so "
             f"no scheduled task exists, and none is claimed")
     return run.record(c.succeeded(
         result,
