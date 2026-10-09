@@ -241,6 +241,9 @@ DECLARED = {
     "friday/prompt_compiler": (FUTURE,
                                "PROMPT-001 instruction compiler, not yet "
                                "called by the voice agent's prompt build"),
+    "friday/memory_benchmark": (TEST_ONLY,
+                                "MEM-003 delayed-execution poisoning benchmark, "
+                                "run by tests/test_memory_poisoning_benchmark.py"),
 }
 
 KNOWN: dict[str, tuple[str, str]] = {
