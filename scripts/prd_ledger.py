@@ -4646,6 +4646,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'NO_PROGRESS and same-cause were computed from the newest-500-event window, undercounting failures spread past it. for_run now fetches failures since the last success from the store (bounded by the retry cap), unbounded by recency. 6 new tests fail before, pass after. (build run, commit 1b1d568a9)',
         "next_action": 'GAPS: continuous.py:307 _committed_result still reads recent_objective_events(limit=2000); untouched, out of scope for this slice.; test_objective_watchdog.py::test_watchdog_reconciles_orphan_once failed once in a loaded batch run (status RUNNING, not COMPLETED after the second sweep) but passed in isolation and in two subsequent full-gate runs of the same batch; a pre-existing flake unrelated to this change (trajectory.py is not imported by the watchdog reconciliation path), not reproduced or root-caused here.',
     }),
+    ('SKILL-006', {
+        "status": PARTIAL,
+        "current_implementation": "Added the UPDATE_UNVERIFIED state in friday/skills/contracts.py, with ACTIVE -> UPDATE_UNVERIFIED and UPDATE_UNVERIFIED -> (QUARANTINED, DISABLED) transitions. It is not in SELECTABLE. In SkillLifecycle.register, when an ACTIVE skill's content hash differs from the verified one, it now moves ACTIVE  (build run, commit 38d547332)",
+        "next_action": "GAPS: The row's provenance fields (source, commit, signature, SBOM, scan) are not touched; this slice covers only the state and the quarantine transition, which is all the row's acceptance names.; propose_update() writes the version into frontmatter before register(), so a deliberate owner update now also passes through UPDATE_UNVERIFIED -> QUARANTINED -> DRAFT -> STAGED. Lint then clears it as before, but the history shows an extra quarantine step.",
+    }),
 ]
 
 
