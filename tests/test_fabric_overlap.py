@@ -117,17 +117,62 @@ def test_something_we_wrote_is_not_an_import(load):
 EVIDENCE = "scripts/bench_tool_disclosure.py"
 
 
+@pytest.fixture
+def bench_repo(monkeypatch, tmp_path):
+    """A stand-in repo root holding one measurement file, `bench/result.txt`."""
+    monkeypatch.setattr(fabric, "_REPO_ROOT", tmp_path.resolve())
+    (tmp_path / "bench").mkdir()
+
+    def _write(text: str) -> str:
+        (tmp_path / "bench" / "result.txt").write_text(text, encoding="utf-8")
+        return "bench/result.txt"
+    return _write
+
+
 @pytest.mark.parametrize("cite", [
-    f"evidence: {EVIDENCE}",
-    f"(evidence: {EVIDENCE}).",
+    "evidence: {path}",
+    "(evidence: {path}).",
 ])
-def test_stated_benchmark_improvement_keeps_the_import(load, cite):
+def test_stated_benchmark_improvement_keeps_the_import(load, bench_repo, cite):
+    path = bench_repo("better: 2.1x pages/s over old (bench_scrape 2026-10-01)")
     reg = load(_provider("old", ("fetch",)),
                _provider("better", ("fetch",),
                          notes=f"BENCHMARK_IMPROVEMENT: 2.1x pages/s, "
-                               f"bench_scrape 2026-10-01 {cite}"))
+                               f"bench_scrape 2026-10-01 "
+                               f"{cite.format(path=path)}"))
     assert reg["better"].integration_mode == fabric.ADAPTER
     assert "OVERLAP" not in reg["better"].notes
+
+
+def test_evidence_may_name_the_upstream_instead_of_the_provider_id(
+        load, bench_repo):
+    path = bench_repo("SomeOrg/Repo scraped 2.1x faster than old")
+    reg = load(_provider("old", ("fetch",)),
+               _provider("better", ("fetch",),
+                         notes=f"BENCHMARK_IMPROVEMENT: 2.1x pages/s "
+                               f"evidence: {path}"))
+    assert reg["better"].integration_mode == fabric.ADAPTER
+
+
+@pytest.mark.parametrize("text", ["", "old was measured at 40 pages/s"])
+def test_evidence_that_never_names_the_provider_is_not_honoured(
+        load, bench_repo, text):
+    path = bench_repo(text)
+    reg = load(_provider("old", ("fetch",)),
+               _provider("claimant", ("fetch",),
+                         notes=f"BENCHMARK_IMPROVEMENT: 2x evidence: {path}"))
+    claimant = reg["claimant"]
+    assert claimant.integration_mode == fabric.REFERENCE_ONLY
+    assert "not honoured" in claimant.notes
+    assert "never names 'claimant'" in claimant.notes
+
+
+def test_an_unrelated_file_in_the_repository_is_not_evidence(load):
+    assert (fabric._REPO_ROOT / EVIDENCE).is_file()
+    reg = load(_provider("old", ("fetch",)),
+               _provider("claimant", ("fetch",),
+                         notes=f"BENCHMARK_IMPROVEMENT: 2x evidence: {EVIDENCE}"))
+    assert reg["claimant"].integration_mode == fabric.REFERENCE_ONLY
 
 
 def test_a_benchmark_claim_without_evidence_is_not_honoured(load):

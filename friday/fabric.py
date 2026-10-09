@@ -279,11 +279,14 @@ def _discover() -> dict[str, Provider]:
 #: <repo-relative path>`. Text is required after the colon, so the marker
 #: cannot be an empty claim - and "benchmarked, not promoted" is not a claim of
 #: improvement. The path must be a file in this tree (the script, plan or
-#: result the measurement came from), so a claim nobody can follow does not
-#: count. That the file exists is all this checks: it cannot know whether the
-#: numbers in it show an improvement; a reviewer follows the path for that.
+#: result the measurement came from) and that file must name the provider (its
+#: id or its upstream), so a claim nobody can follow, or one that cites an
+#: unrelated file, does not count. That is all this checks: it cannot know
+#: whether the numbers in the file show an improvement; a reviewer follows the
+#: path for that.
 _BENCHMARK_MARK = re.compile(r"BENCHMARK_IMPROVEMENT:\s*\S")
 _BENCHMARK_EVIDENCE = re.compile(r"\bevidence:\s*(\S+)")
+_EVIDENCE_READ_LIMIT = 1 << 20
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: Providers reviewed by a person and kept runnable although earlier providers
@@ -305,26 +308,35 @@ def _benchmark_claim(provider: Provider) -> str | None:
     return provider.notes[marked.start():] if marked else None
 
 
-def _evidence_problem(claim: str) -> str:
+def _evidence_problem(claim: str, provider: Provider) -> str:
     """Why the claim's evidence cannot be followed; "" when it can."""
     cited = _BENCHMARK_EVIDENCE.search(claim)
     if cited is None:
         return "it cites no 'evidence: <repo-relative path>'"
     path = cited.group(1).rstrip(".,;)")
+    text = None
     try:
         target = (_REPO_ROOT / path).resolve()
-        followable = target.is_relative_to(_REPO_ROOT) and target.is_file()
+        if target.is_relative_to(_REPO_ROOT) and target.is_file():
+            with target.open("rb") as handle:
+                text = handle.read(_EVIDENCE_READ_LIMIT).decode(
+                    "utf-8", "replace").lower()
     except (OSError, ValueError):
-        followable = False
-    if followable:
+        text = None
+    if text is None:
+        return f"evidence {path!r} is not a file in this repository"
+    if any(name.lower() in text for name in (provider.id, provider.upstream)
+           if name):
         return ""
-    return f"evidence {path!r} is not a file in this repository"
+    return (f"evidence {path!r} never names {provider.id!r} or its upstream, "
+            f"so it is not a measurement of this provider")
 
 
 def has_benchmark_improvement(provider: Provider) -> bool:
-    """Whether `notes` states a benchmark improvement whose evidence exists."""
+    """Whether `notes` states a benchmark improvement whose evidence is a
+    file in this tree that names the provider."""
     claim = _benchmark_claim(provider)
-    return claim is not None and not _evidence_problem(claim)
+    return claim is not None and not _evidence_problem(claim, provider)
 
 
 def find_overlaps(provider: Provider,
@@ -360,7 +372,7 @@ def _recorded_by_overlap(provider: Provider,
         for existing_id, ops in covering.items())
     claim = _benchmark_claim(provider)
     rejected = (f" Its stated BENCHMARK_IMPROVEMENT was not honoured: "
-                f"{_evidence_problem(claim)}." if claim else "")
+                f"{_evidence_problem(claim, provider)}." if claim else "")
     note = (f"OVERLAP: recorded {REFERENCE_ONLY} (declared "
             f"{provider.integration_mode}); every operation is already "
             f"answered by a registered provider - {evidence}. Imported only "
