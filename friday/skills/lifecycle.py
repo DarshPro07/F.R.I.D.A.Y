@@ -107,9 +107,14 @@ class SkillLifecycle:
             record.last_verified = existing.last_verified
             self.registry.upsert(record)
             if existing.content_hash and existing.content_hash != record.content_hash and existing.state == K.ACTIVE:
-                self.registry.transition(skill.name, K.DRAFT, actor=actor,
+                # The verified evidence no longer describes this content:
+                # it is unverified for a moment, then quarantined until lint
+                # and tests clear it again (SKILL-006).
+                self.registry.transition(skill.name, K.UPDATE_UNVERIFIED, actor=actor,
                                          reason="content changed on disk since the verified version")
-                record.state = K.DRAFT
+                self.registry.transition(skill.name, K.QUARANTINED, actor=actor,
+                                         reason="unverified update: quarantined until lint and tests pass")
+                record.state = K.QUARANTINED
             return record
         record.state = K.DISCOVERED
         self.registry.upsert(record)

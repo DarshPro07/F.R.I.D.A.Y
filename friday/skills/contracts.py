@@ -63,9 +63,10 @@ BROKEN = "BROKEN"                  # revalidation failed
 QUARANTINED = "QUARANTINED"        # unsafe content, or untrusted origin not yet validated
 DEPRECATED = "DEPRECATED"          # superseded, kept for history
 DISABLED = "DISABLED"              # switched off by the owner
+UPDATE_UNVERIFIED = "UPDATE_UNVERIFIED"   # an ACTIVE skill's content changed; the new content has no evidence
 
 STATES = (DISCOVERED, DRAFT, STAGED, TESTING, ACTIVE, NEEDS_REVALIDATION, DEGRADED,
-          STALE, BROKEN, QUARANTINED, DEPRECATED, DISABLED)
+          STALE, BROKEN, QUARANTINED, DEPRECATED, DISABLED, UPDATE_UNVERIFIED)
 
 #: Which moves are legal. Everything else is refused with the reason; a
 #: state that is not in the table cannot be left (DEPRECATED is terminal
@@ -75,7 +76,9 @@ TRANSITIONS: dict[str, tuple[str, ...]] = {
     DRAFT: (STAGED, QUARANTINED, DEPRECATED, DISABLED),
     STAGED: (TESTING, ACTIVE, DRAFT, QUARANTINED, DISABLED),
     TESTING: (ACTIVE, DRAFT, BROKEN, QUARANTINED, DISABLED),
-    ACTIVE: (NEEDS_REVALIDATION, DEGRADED, DEPRECATED, QUARANTINED, DISABLED, DRAFT),
+    ACTIVE: (NEEDS_REVALIDATION, DEGRADED, DEPRECATED, QUARANTINED, DISABLED, DRAFT, UPDATE_UNVERIFIED),
+    # Never selectable; the lifecycle moves it straight on to QUARANTINED.
+    UPDATE_UNVERIFIED: (QUARANTINED, DISABLED),
     NEEDS_REVALIDATION: (ACTIVE, STALE, BROKEN, DRAFT, DISABLED, QUARANTINED),
     # DEGRADED / STALE / BROKEN -> ACTIVE is a rollback to a version that has
     # its own recorded evaluation; the lifecycle demands that evidence.
