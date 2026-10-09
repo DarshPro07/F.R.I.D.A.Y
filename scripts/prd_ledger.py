@@ -4150,6 +4150,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'server.py main() now calls launcher.register_skills_at_startup() before mcp.run and prints a non-empty note to stderr, so `friday` / `python server.py` outside the launcher registers on-disk skills. New test failed before (2 unregistered), passes after. (build run, commit cb13cbf07)',
         "next_action": 'GAPS: Acceptance is a clean Windows VM ready-state; this slice covers only skill registration outside the launcher. VM run, exe rebuild and validate_exe were out of scope and not run.; implementer did not claim acceptance met',
     }),
+    ('BROW-004', {
+        "status": PARTIAL,
+        "current_implementation": "Slice done: the voice open and study handlers now speak the probe's typed reason when the browser is unavailable (verdict + readiness state) instead of the generic 'couldn't open'. Two new tests cover open and study. (build run, commit c0b434ca6)",
+        "next_action": "GAPS: Slice only: speaking the typed reason. The acceptance's reference-machine BROWSER_READY run with launch time and memory recorded (REFERENCE-B probe, live test) is out of scope and not done here.; New tests were not run against the pre-change code; they fail there by construction (generic reply carries no verdict text).; implementer did not claim acceptance met",
+    }),
 ]
 
 
