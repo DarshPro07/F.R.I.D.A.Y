@@ -177,6 +177,33 @@ def test_an_answer_and_its_motive_do_not_combine_to_swallow_a_new_question(store
                    why="changes the build"), decided)
 
 
+def test_words_that_name_no_subject_cannot_settle_a_question_alone(store):
+    """
+    "system" and "run" are in nearly every operational question, so a decision
+    that shares only those with a question settled nothing about it. Two of the
+    five key words clears the proportion, and the nightly regression suite was
+    never decided - the question must still be asked.
+    """
+    store.record_decision(project="halo",
+                          decision="Which system should run the build? - Jenkins",
+                          rationale="already in use", source="the boss")
+
+    decided = R.recorded("halo", db=store)
+    assert not R.already_answered(
+        R.Question("Which system will run the nightly regression suite?",
+                   why="changes the schedule"), decided)
+
+
+def test_one_shared_word_does_not_settle_a_longer_question(store):
+    store.record_decision(project="halo", decision="engine: Godot",
+                          rationale="2D tooling", source="the boss")
+
+    decided = R.recorded("halo", db=store)
+    assert not R.already_answered(
+        R.Question("Which engine version should the nightly builds target?",
+                   why="changes the toolchain"), decided)
+
+
 def test_an_answer_recorded_during_a_run_is_found_by_its_question(store):
     """
     The development-run broker stores only the answer as the decision and the

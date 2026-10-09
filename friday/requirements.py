@@ -288,9 +288,21 @@ def already_answered(question: Question, decisions: list[dict]) -> bool:
             # "which engine?" carries one distinctive word, and requiring two
             # of it means the shortest, commonest questions are the ones that
             # get asked twice.
-            if said and len(wanted & said) / len(wanted) >= _ENOUGH_OVERLAP:
+            shared = wanted & said
+            # The words every operational question carries settle nothing on
+            # their own, so at least one shared word has to name the subject.
+            if (shared - _GENERIC
+                    and len(shared) / len(wanted) >= _ENOUGH_OVERLAP):
                 return True
     return False
+
+#: Words that survive `_NOISE` yet name no subject: "which system will run the
+#: nightly suite" and "which system should run the build" share both and are not
+#: the same question.
+_GENERIC = frozenset({
+    "system", "project", "thing", "tool", "app", "feature", "work", "run",
+    "build", "make", "change", "set", "get", "add", "start",
+})
 
 #: How much of a question's substance has to appear in a decision before it
 #: counts as settled. High enough that "audience" does not match "engine".
