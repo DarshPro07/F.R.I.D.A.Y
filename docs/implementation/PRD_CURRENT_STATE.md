@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: d819f2c on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T19:03:05+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 126, "PARKED_BY_OWNER": 1, "PARTIAL": 61, "VERIFIED": 66}
-- Unresolved P0: 9
+- HEAD: 69888b1 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T21:25:59+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 3, "MISSING": 126, "PARKED_BY_OWNER": 1, "PARTIAL": 63, "VERIFIED": 68}
+- Unresolved P0: 7
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (319): none
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), MEM-002 (NOT_CONFIRMED), SEC-005 (stale worktree), ACT-001 (cascade exhausted)
-- Open escalations: 228
-  - DEVICE-003 resolved: controller unpark: controller re-integrated DEVICE-003 after declaring its table for workspace isola
-  - SEC-005 blocked: Question for the owner: does Hermes' gateway have an RPC, config key or event that names its registe
-  - JIT-001 blocked: Scout says browser_automate/browser_act 'lack real implementations'; the code has both, with 7 tests
-  - MEM-003 blocked: Question for the owner: the scout's fix (pass from_read_material=read_this_turn at memory_benchmark.
-  - JIT-001 resolved: controller unpark: controller confirm 2026-10-09: CONFIRMED at d692fce05
-  - MEM-003 resolved: controller unpark: controller confirm with benchmark tests: CONFIRMED
+- Last wave (325): ACT-001=ADVISED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), EXEC-SBX-001 (stale worktree), TRAJ-001 (partial x4)
+- Open escalations: 234
   - ACT-001 resolved: controller unpark: controller build integrated: INTEGRATED
   - SEC-005 resolved: controller unpark: controller build integrated: INTEGRATED
   - SEC-005 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\sec-005 already exists
   - ACT-001 cascade: 3 repairs spent
+  - MEM-002 resolved: controller unpark: controller repaired the fallback bypass the verifier found (394df63): INTEGRATED
+  - MEM-002 resolved: controller unpark: controller confirm 2026-10-09: CONFIRMED at 93bf5d079
+  - SEC-005 resolved: controller unpark: controller confirm 2026-10-09: CONFIRMED at 9dad6dbf3
+  - ACT-001 resolved: controller unpark: controller build integrated: INTEGRATED
+  - EXEC-SBX-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\exec-sbx-001 already exists
+  - TRAJ-001 partial: integrated without closing its gaps
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
