@@ -4606,6 +4606,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Slice 1 is done: friday/experimental_local.py is a pure-Python fence for the EXPERIMENTAL_LOCAL_MODEL route. It has NARROW_TASKS (the four packet tasks) and admit(narrow_task, data_class, *, local=True), which returns Verdict(admitted, reason, task) and never raises. Any other task, including approv (build run, commit a3d12b3c7)',
         "next_action": 'GAPS: Not wired: the model gateway (model_gateway.py), the OpenAI-compatible local server, the deterministic-route fallback in the gateway, and the unhealthy/absent-route handling.; Not covered: any real MiniMind weights or stub server; the fake model is a plain callable.; Not covered: the policy-engine and confirmation check on approval; here approval is only refused as a narrow task.; Not covered: benchmark, training, UI, and the check that no second conversational loop exists.; implementer did not claim acceptance met',
     }),
+    ('BIN-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Slice 1 adds friday/knowledge_extract.py, a pure-Python core that builds three QUARANTINED skills from an explicit allowlist of .md tutorials. Without a pinned repo or a scan, extraction is fixture-driven only. extract(repo_dir, commit, selection, out_dir) refuses a non-Apache-2.0 or missing LICENSE (build run, commit 94b3880e3)',
+        "next_action": 'GAPS: Not built, as the packet scopes it out: the pinned clone and upstream lock (slice 2), the SkillSpector scan gating admission (forge.scan_admits exists but is not wired; skills are only returned as QUARANTINED), registry wiring, on-demand single-section loading, and the forge classification and EXTRACT_KNOWLEDGE decision.; The upstream tutorial paths are not known yet, so the caller supplies the selection mapping skill name to paths.; The symlink-escape test is skipped on this host because symlink creation is not permitted without privilege; the realpath containment check is in place but not exercised here.; knowledge_extract.lint is provenance-only and is separate from friday.skills.lint.; implementer did not claim acceptance met',
+    }),
 ]
 
 
