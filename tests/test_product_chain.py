@@ -29,12 +29,20 @@ def test_a_pressure_stop_without_a_wave_backs_off(monkeypatch, tmp_path):
     assert sleeps == [PC.PRESSURE_BACKOFF_S]
 
 
+def _default_day_budget(monkeypatch) -> None:
+    """These tests are about the chain's budget logic, not today's real budget: the owner's
+    standing entry in data/build_runs/day_budget.json (2026-10-05: no daily cap) must not
+    decide them, so the day's limits are the code's defaults here."""
+    monkeypatch.setattr(PC.K, "day_limits", lambda runs_dir=None: (PC.K.DAY_SOFT_USD, PC.K.DAY_HARD_USD))
+
+
 def _chain(monkeypatch, tmp_path, day_spent: float) -> list:
     state = tmp_path / "build_state.json"
     state.write_text('{"spend_usd_total": 0, "waves": []}', encoding="utf-8")
     monkeypatch.setattr(PC, "STATE", state)
     monkeypatch.setattr(PC, "wait_for_admission", lambda hours, start=None: True)
     monkeypatch.setattr(PC.K, "spend_committed", lambda runs_dir: (day_spent, 0.0))
+    _default_day_budget(monkeypatch)
     cmds = []
     monkeypatch.setattr(PC.subprocess, "run", lambda cmd, **kw: cmds.append(cmd)
                         or subprocess.CompletedProcess(cmd, 0, "stopped: no ready work\n", ""))
@@ -106,6 +114,7 @@ def _until_done(monkeypatch, tmp_path, outcomes, day_spent=(0.0,)):
         last[0] = next(days, last[0])
         return last[0], 0.0
     monkeypatch.setattr(PC.K, "spend_committed", committed)
+    _default_day_budget(monkeypatch)
     outs, cmds, sleeps = iter(outcomes), [], []
 
     def run(cmd, **kw):
