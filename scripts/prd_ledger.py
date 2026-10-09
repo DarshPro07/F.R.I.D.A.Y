@@ -4717,6 +4717,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Closed the first GAP: the owner override is now bound to friday/confirmation.py instead of being a trusted bool. Design: ExpertPool.request_override(name, size_gb, reason) asks on the confirmation book (action local_model.onboard_over_cap, target = the artifact name, arguments = its size). The perso (build run, commit 0ab7af611)',
         "next_action": "GAPS: ExpertPool still has no live caller (local_experts stays FUTURE in reachability); no production path calls request_override or asks the owner on a real surface (voice or control room), so the confirmation is bound but not yet reachable by the owner.; choose_model/fit_context are tested but no loader calls them yet; the pool stores the clamped ctx on Expert/Outcome but no loader reads it.; 'Residency reads the actual device's memory' is exercised only through a simulated Machine sampler plus the real Governor, not a real-device test.; Ledger row MODEL-007 is not edited (kernel docs(ledger) step owns it).; The red run for the earlier implementation was never recorded; this slice's red run covers only the override-binding change.; implementer did not claim acceptance met",
     }),
+    ('EVAL-005', {
+        "status": PARTIAL,
+        "current_implementation": "Re-applied friday/productivity.py and tests/test_productivity.py from wip/eval-005-1008 verbatim, only those two code files. I checked them against today's tree first: ledger_connection, RouteOutcomes.record/mark_rework, Store.open_objective_run/save_objective_task/update_objective_task, and the DEF (build run, commit 6dca2dfb8)",
+        "next_action": 'GAPS: No caller yet: nothing in the objective engine or an MCP tool invokes write_report at run completion; the module is declared FUTURE in reachability.; requirements_closed and defects_fixed (named in the PRD) have no data source in the tree and are reported as UNMEASURED.; The ledger row status (MISSING -> PARTIAL) and evidence fields were not updated; the packet says builds do not commit ledger files.; Controller: integrated as PARTIAL because the slice has no production caller yet; a confirm can follow.; implementer did not claim acceptance met',
+    }),
 ]
 
 
