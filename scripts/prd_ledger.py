@@ -4641,6 +4641,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added friday/agent_ledger.py (AgentLedger: start, event, finish, reconcile, run, events, children, tree, active) over new agent_runs and agent_events tables in store.py. agent_events is append-only, enforced by BEFORE UPDATE/DELETE triggers that abort. Every event requires non-empty evidence_refs. A (build run, commit 120922687)',
         "next_action": "GAPS: Row acceptance is not fully met, as expected for slice 1: no composer, registry, team or UI reads the ledger yet, and nothing in production passes parent_run_id or model_route (RunManager.open leaves model_route empty and role_id comes from TaskBundle.role).; close() writes the ledger only for SUCCEEDED/FAILED/CANCELLED. A PARTIAL result leaves the ledger RUNNING, so reconcile later reads it INTERRUPTED, which matches executor_runs.; saw() appends one 'progress' event per tool use, so agent_events grows with run length; no retention policy yet.; tests/test_reachability.py passes with the DECLARED entry; no KNOWN entry was needed.; implementer did not claim acceptance met",
     }),
+    ('TRAJ-001', {
+        "status": PARTIAL,
+        "current_implementation": 'NO_PROGRESS and same-cause were computed from the newest-500-event window, undercounting failures spread past it. for_run now fetches failures since the last success from the store (bounded by the retry cap), unbounded by recency. 6 new tests fail before, pass after. (build run, commit 1b1d568a9)',
+        "next_action": 'GAPS: continuous.py:307 _committed_result still reads recent_objective_events(limit=2000); untouched, out of scope for this slice.; test_objective_watchdog.py::test_watchdog_reconciles_orphan_once failed once in a loaded batch run (status RUNNING, not COMPLETED after the second sweep) but passed in isolation and in two subsequent full-gate runs of the same batch; a pre-existing flake unrelated to this change (trajectory.py is not imported by the watchdog reconciliation path), not reproduced or root-caused here.',
+    }),
 ]
 
 
