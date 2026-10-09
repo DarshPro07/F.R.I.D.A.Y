@@ -114,6 +114,16 @@ SECRET_READ = "SECRET_READ"
 #: asymmetry as POWER_CANCEL: hard to start, trivial to stop.
 OBJECTIVE_CONTROL = "OBJECTIVE_CONTROL"
 
+#: Physical-world actions (DEVICE-004). FRIDAY classifies them by the action
+#: it recognises, never by what the device says about itself.
+#: An indicator (an LED) is reversible and harms nobody.
+PHYSICAL_INDICATOR = "PHYSICAL_INDICATOR"
+#: Opening a barrier (door.unlock) lets a person in; a human says yes every time.
+PHYSICAL_ACCESS = "PHYSICAL_ACCESS"
+#: Moving or energising something (motor.start) can hurt someone. As strict as
+#: access, and in addition nothing Friday merely read may ever reach it.
+PHYSICAL_HAZARD = "PHYSICAL_HAZARD"
+
 DEFAULT_POLICY: dict[str, str] = {
     READ_LOCAL_SAFE: AUTO,
     MEMORY_READ: AUTO,
@@ -178,6 +188,9 @@ DEFAULT_POLICY: dict[str, str] = {
     # human says yes to a takeover, every time, whatever the autonomy setting.
     DESKTOP_CONTROL: CONFIRM,
     SECRET_READ: DENY,
+    PHYSICAL_INDICATOR: AUTO,
+    PHYSICAL_ACCESS: CONFIRM,
+    PHYSICAL_HAZARD: CONFIRM,
     # Typing a credential, card or bank detail. Never, and not grantable - the
     # boss types his own passwords. Prose in a prompt cannot hold this line,
     # because an instruction is a thing a model can decide differently about.
@@ -212,6 +225,8 @@ DESTRUCTIVE = frozenset({
     # his logins. No answer to that question could make it safe, so it never
     # becomes a question.
     DESKTOP_CONTROL, DESKTOP_CREDENTIAL_ENTRY,
+    # A message that says "start the motor" is text, not a request.
+    PHYSICAL_HAZARD,
 })
 
 #: Everything an objective that came from something Friday read may never
@@ -344,6 +359,8 @@ def resolve_policy(mode: str) -> dict[str, str]:
 IRREVERSIBLE_KEEP_CONFIRM = frozenset({
     SESSION_LOCK, SLEEP, HIBERNATE, SHUTDOWN, RESTART, FORCED_SHUTDOWN,
     POWER_ACTION, FORCE_PROCESS_TERMINATION,
+    # A door that opened or a motor that started cannot be taken back either.
+    PHYSICAL_ACCESS, PHYSICAL_HAZARD,
 })
 
 
@@ -369,6 +386,9 @@ def skip_permissions() -> bool:
 #: tool id -> category. A tool with no entry is ASK by default: unknown means
 #: unaudited, and unaudited must not mean allowed.
 TOOL_CATEGORIES: dict[str, str] = {
+    'device.led.set': PHYSICAL_INDICATOR,
+    'device.door.unlock': PHYSICAL_ACCESS,
+    'device.motor.start': PHYSICAL_HAZARD,
     'system.get_info': READ_LOCAL_SAFE,
     'system.list_processes': READ_LOCAL_SAFE,
     'system.resource_usage': READ_LOCAL_SAFE,
@@ -659,6 +679,7 @@ COMPOSITION_NEUTRAL = frozenset({
     OBJECTIVE_CONTROL, GRACEFUL_PROCESS_CLOSE, FORCE_PROCESS_TERMINATION,
     SESSION_LOCK, SLEEP, HIBERNATE, SHUTDOWN, RESTART, FORCED_SHUTDOWN,
     POWER_CANCEL, SYSTEM_CRITICAL_PROCESS_TERMINATION, POWER_ACTION,
+    PHYSICAL_INDICATOR, PHYSICAL_ACCESS, PHYSICAL_HAZARD,
 })
 #: READ_LOCAL_SAFE is mostly the machine describing itself. These tools in it
 #: read the person's own content, so they count as private reads.
