@@ -4659,6 +4659,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_skills_units.py::test_draft_skill_links_back_to_its_objective_in_frontmatter'],
         "files": ['friday/skill_ladder.py:33', 'friday/skills/candidates.py:54', 'friday/skills/candidates.py:95-127', 'friday/skills/candidates.py:172', 'tests/test_skills_units.py:286-293'],
     }),
+    ('SANDBOX-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Design: forge.verify() now seeds a per-run canary tree under workdir/canary_home with fake .aws/credentials, .ssh/id_rsa and .env. Each holds a unique token. The child\'s HOME and USERPROFILE point at that tree, so ctx.read_text("~/.aws/credentials") lands on a canary. Bait env values (AWS_SECRET_ACC (build run, commit 87b2a2ce1)',
+        "next_action": 'GAPS: Only file reads through ctx.read_text are observed. There is no process or network behaviour observation, because the skill sandbox has no process or network route today.; The new tests are not marked slow, so they run in the not-slow gate. They cost about 2s for 4 subprocess starts.',
+    }),
 ]
 
 
