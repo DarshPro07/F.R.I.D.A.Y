@@ -4201,6 +4201,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_trust.py::test_audit_chain_detects_edits_and_deletions'],
         "files": ['friday/trust.py:253', 'friday/trust.py:398'],
     }),
+    ('BG-001', {
+        "status": PARTIAL,
+        "current_implementation": "admit() already shed OPTIONAL work at any non-NORMAL pressure; the verdict was split across two places. Added Governor.background_wait() (headroom, then person, then power), used by admit() and reported as status()['background']. Checked on the live probes. (build run, commit dca1e01d9)",
+        "next_action": "GAPS: Live probes, this machine, 2026-10-09: person active (last input 85s ago, mains, NORMAL) -> SHED 'person is active'; after 124s idle, mains, NORMAL -> ADMIT; real sampler against an impossible RAM floor (CRITICAL, 2.68 GB free) -> SHED. The battery case was not live: this machine is on mains, so it rests on the injected Context tests and the psutil probe test.; The running agent was not queried; the check used Governor(context=sample_context) with the real sampler in .venv-build. status()['background'] is the field to read on the running agent.; Harness bug outside this worktree, unchanged: build_kernel.py _failing_tests reports red_green.tests as failing on INTEGRATED records; needs a controller fix.",
+    }),
 ]
 
 
