@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 2db841d on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T18:02:10+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 127, "PARKED_BY_OWNER": 1, "PARTIAL": 62, "VERIFIED": 64}
-- Unresolved P0: 11
+- HEAD: d819f2c on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T19:03:05+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 126, "PARKED_BY_OWNER": 1, "PARTIAL": 61, "VERIFIED": 66}
+- Unresolved P0: 9
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (313): TRAJ-001=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), MEM-002 (NOT_CONFIRMED), ACT-001 (VERIFIER_FAIL), SEC-005 (blocked), JIT-001 (blocked), MEM-003 (blocked)
-- Open escalations: 222
-  - CAP-MKT-002 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
-  - EXP-001 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
-  - MEM-003 resolved: controller unpark: controller 2026-10-09 (owner approved): ACT-001 integrated at 20:08, the hold con
-  - MEM-003 integration: merge queue: MEM-003 waited 1800s behind DEVICE-003
-  - ACT-001 integration: {"requirement": "ACT-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tests
-  - MEM-003 resolved: controller unpark: controller re-ran the integration refused only because it waited 1800s in the mer
+- Last wave (319): none
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), MEM-002 (NOT_CONFIRMED), SEC-005 (stale worktree), ACT-001 (cascade exhausted)
+- Open escalations: 228
   - DEVICE-003 resolved: controller unpark: controller re-integrated DEVICE-003 after declaring its table for workspace isola
   - SEC-005 blocked: Question for the owner: does Hermes' gateway have an RPC, config key or event that names its registe
   - JIT-001 blocked: Scout says browser_automate/browser_act 'lack real implementations'; the code has both, with 7 tests
   - MEM-003 blocked: Question for the owner: the scout's fix (pass from_read_material=read_this_turn at memory_benchmark.
+  - JIT-001 resolved: controller unpark: controller confirm 2026-10-09: CONFIRMED at d692fce05
+  - MEM-003 resolved: controller unpark: controller confirm with benchmark tests: CONFIRMED
+  - ACT-001 resolved: controller unpark: controller build integrated: INTEGRATED
+  - SEC-005 resolved: controller unpark: controller build integrated: INTEGRATED
+  - SEC-005 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\sec-005 already exists
+  - ACT-001 cascade: 3 repairs spent
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
