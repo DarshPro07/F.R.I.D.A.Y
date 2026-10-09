@@ -47,10 +47,35 @@ DROP_PREFIXES = ("FRIDAY_", "HERMES_", "PYTHON", "ADA_", "LIVEKIT_", "VIRTUAL_EN
                  "GROQ_", "SARVAM_", "OPENAI_", "GOOGLE_", "ANTHROPIC_", "DEEPGRAM_", "HF_")
 
 
+# Checks the doctor may FAIL on a machine that has no .env: the credentials
+# are the user's to supply, so their absence is the expected first-run state.
+EXPECTED_FAIL_CHECKS = ("livekit credentials",)
+
+
 def record(journey: str, ok: bool, detail: str) -> bool:
     RESULTS.append((journey, ok, detail))
     print(f"  {'PASS' if ok else 'FAIL'}  {journey}  {detail}", flush=True)
     return ok
+
+
+def doctor_verdict(returncode: int, stdout: str) -> tuple[bool, list[str]]:
+    """(journey ok, FAIL rows) for a doctor run on a machine with no developer
+    environment. Rows are `  <STATE> <check name>  <detail>`; only the check
+    name is matched, so a FAIL whose detail merely mentions credentials is
+    still a failure."""
+    rows = [line.strip() for line in stdout.splitlines()
+            if line.strip().startswith(("PASS", "DEGRADED", "FAIL"))]
+    failed = [row for row in rows if row.startswith("FAIL")]
+    unexpected = [row for row in failed if not row.partition(" ")[2].lstrip().startswith(EXPECTED_FAIL_CHECKS)]
+    imports_pass = any(row.startswith("PASS") and "core imports" in row for row in rows)
+    return returncode in (0, 1, 2) and not unexpected and imports_pass, failed
+
+
+def sandbox_available(system_root: str | None = None) -> bool:
+    """True when the Windows Sandbox feature is installed (WindowsSandbox.exe
+    exists under System32); it is what a real clean-VM run would need."""
+    root = Path(system_root or os.environ.get("SYSTEMROOT", r"C:\Windows"))
+    return (root / "System32" / "WindowsSandbox.exe").is_file()
 
 
 def port_open(port: int) -> bool:
@@ -154,12 +179,8 @@ def main() -> int:
                if found else f"no answer: {where.stderr.strip()[-200:]}")
 
         doctor = run("--doctor")
-        lines = [line for line in doctor.stdout.splitlines() if line.strip().startswith(("PASS", "DEGRADED", "FAIL"))]
-        failed = [line.strip() for line in lines if line.strip().startswith("FAIL")]
-        allowed_fail = [line for line in failed if "livekit credentials" in line]
-        record("CLEAN-03 --doctor without any developer environment",
-               doctor.returncode in (0, 1, 2) and not [line for line in failed if line not in allowed_fail]
-               and any("core imports" in line and line.strip().startswith("PASS") for line in lines),
+        doctor_ok, failed = doctor_verdict(doctor.returncode, doctor.stdout)
+        record("CLEAN-03 --doctor without any developer environment", doctor_ok,
                f"exit {doctor.returncode}; FAIL lines: {failed or 'none'}")
         (ROOT / "build" / "validate").mkdir(parents=True, exist_ok=True)
         (ROOT / "build" / "validate" / "CLEAN-03-doctor.log").write_text(doctor.stdout + doctor.stderr, encoding="utf-8")
@@ -197,6 +218,9 @@ def main() -> int:
         else:
             print(f"kept {base}", flush=True)
 
+    if not sandbox_available():
+        print("  BLOCKED_EXTERNAL  real clean-VM run  Windows Sandbox is not installed; "
+              "the journeys above are the C:\\Windows\\Temp simulation, not a VM", flush=True)
     failed = [j for j, ok, _ in RESULTS if not ok]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} clean-machine journeys passed"
           + (f"; failed: {', '.join(failed)}" if failed else ""), flush=True)
