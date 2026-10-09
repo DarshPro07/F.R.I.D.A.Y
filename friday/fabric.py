@@ -64,6 +64,8 @@ FAMILIES = (
     #: the desktop's coordinates. One interface (`friday.computer_use`), and the
     #: action-path router picks the backend by the path a step acts through.
     "computer_use",
+    #: Phone-side adapters (Android): scoped by per-call grants, never the brain.
+    "mobile",
 )
 
 #: How the upstream's license constrains the integration, not the license name.
