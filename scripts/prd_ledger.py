@@ -4183,6 +4183,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Re-applied the Project Brain slice (70ec74e): 13 record kinds in one Store table, ProjectBrain add/get/list/supersede/history, and a secret-redacting Markdown export. Golden files untouched; test_golden_suite now passes. (build run, commit 70ba483f9)',
         "next_action": 'GAPS: Not wired to MCP tools or the objective-engine writers; reachability.py declares friday/project_brain as FUTURE (packet: do not wire in this slice).; Only the targeted tests ran (51 new + 207 neighbours); the chunked gate and the verifier are still to run.',
     }),
+    ('BG-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Gated AutoLearner with the governor: each turn waits and retries while the person is active, on battery or under pressure; admit(OPTIONAL) grants a lease, a governor-stopped attempt is cancelled and the turn retried, the lease freed in finally. governor=None stays ungated. (build run, commit 38a285ecd)',
+        "next_action": "GAPS: Acceptance 'runs when idle, plugged in, with headroom' is shown only with injected Ctx/Dial readings; a live check of the idle/battery behaviour on the real probes needs the running agent.; Harness bug outside this worktree: build_kernel.py _failing_tests reports red_green.tests as failing on INTEGRATED records (falls back to red_green.tests when a record has no failures), needing a controller fix to build_kernel.py.; implementer did not claim acceptance met",
+    }),
 ]
 
 
