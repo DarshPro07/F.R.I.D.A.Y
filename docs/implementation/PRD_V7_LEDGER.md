@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `ed0642cee3bdb622d47ca9c12e2bc738963cd31cf2013e135d1a32037a983987`
 - PRD size: 8288 lines, 312308 bytes
-- Repository HEAD: `072a22fac3776cbf5b5d104ae2eea8f3e2e31a23`
+- Repository HEAD: `7af2e0061260ff21657daf432da58296a855f3ca`
 - Uncommitted paths at generation: 45
-- Generated: 2026-10-09T05:17:49+05:30
+- Generated: 2026-10-09T05:46:46+05:30
 
 ## Status vocabulary
 
@@ -28,14 +28,14 @@ Working (the program may not end on these): `PARTIAL`, `EXISTING_UNVERIFIED`,
 | state | count |
 |---|---:|
 | MISSING | 101 |
-| VERIFIED | 55 |
-| PARTIAL | 54 |
+| VERIFIED | 56 |
+| PARTIAL | 53 |
 | EXISTING_UNVERIFIED | 8 |
 | DEFERRED_BY_PRD | 2 |
 | PARKED_BY_OWNER | 1 |
 | **total** | **221** |
 
-Unresolved P0: 13 (CORE-001, TRAJ-001, CTX-001, CTX-002, MEM-002, MEM-003, SEC-005, RES-001, ACT-001, JIT-001, RES-002, EXEC-SBX-001, MODEL-012)
+Unresolved P0: 12 (CORE-001, TRAJ-001, CTX-002, MEM-002, MEM-003, SEC-005, RES-001, ACT-001, JIT-001, RES-002, EXEC-SBX-001, MODEL-012)
 
 Unresolved P1: 124 (INTENT-002, CTX-004, COG-002, COG-003, MODEL-003, MODEL-004, SKILL-002, VOICE-001, REMOTE-001, WORLD-001, EXP-001, EPI-001, FAIL-001, PRO-001, UX-001, ONB-001, PKG-001, S1-001, S1-002, RSCH-001, RSCH-002, RSCH-003, RSCH-004, BRAIN-001, ASSUME-001, BBOX-001, CAP-003, SKILL-004, SKILL-005, SKILL-006, SUPPLY-001, SANDBOX-001, PRIV-001, OBJ-004, SIDE-001, SIDE-002, CHAOS-001, CAPB-001, EVAL-004, EVAL-005, BROW-003, SIGNAL-001, OTEL-001, TRAJ-002, MODEL-007, RES-004, MODEL-009, MODEL-010, BG-001, BROW-004, CUA-001, CUA-002, CUA-003, CUA-004, CUA-005, CUA-006, CUA-007, CUA-008, ORCH-001, ORCH-002, ORCH-003, ORCH-004, ORCH-005, ORCH-006, ORCH-007, ORCH-008, ORCH-009, ORCH-010, ORCH-011, ORCH-012, ORCH-013, ORCH-014, CAP-FORGE-001, CAP-FORGE-003, CAP-FORGE-004, CAP-FORGE-005, CAP-FORGE-006, CAP-FORGE-007, CAP-FORGE-008, CAP-FORGE-009, CAP-FORGE-010, CAP-FORGE-011, CAP-FORGE-012, CAP-FORGE-013, CAP-FORGE-014, WF-001, WF-002, WF-003, WF-004, WF-005, WF-006, WF-007, WF-008, WF-009, WF-010, CAP-MKT-001, CAP-MKT-002, CAP-MKT-003, CAP-MKT-004, CAP-MKT-005, CAP-MKT-006, COG-005, COG-006, EVO-001, EVO-002, EVO-003, EVO-004, EVO-006, FAB-001, FAB-002, FAB-003, FAB-004, FAB-005, FAB-007, FAB-008, FAB-009, HARN-001, ULTRA-001, ULTRA-002, ULTRA-003, ULTRA-004, ULTRA-005, ULTRA-006, ULTRA-007)
 
@@ -95,7 +95,7 @@ Unresolved P1: 124 (INTENT-002, CTX-004, COG-002, COG-003, MODEL-003, MODEL-004,
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| CTX-001 | P0 | **PARTIAL** | Compile minimal working set per call. | Context telemetry. | FR-MEM-001 | `friday/model_gateway.py:1392,1422,1426,1435,1455`, `friday/toolsets/model_gateway.py:50,76,99` | 2026-09-27: five of the six tests failed before (the sixth pins the unchanged conversation path). An objective's model step now reaches the gateway with every critical fact of the objective and reports its sections. Six mutations each turn a test red: P2 dropped before P3, the P0 floor removed, the objective's record left out of the message, the facts not looked up, the telemetry emptied, and the record moved into the system role. The 12 gateway, provider, manifest, objective-MCP and compaction test files pass (184). The four-chunk suite over this tree (data/baseline_v7_slice5a): all four chunks exit 0, 4,693 passed (1,262, 1,042, 1,286 and 1,103), none failed. The independent review of Slices 5 and 6 found a bracket inside a fact could close the record's frame (V7-D50): every block now quotes its lines, the recorded state is its own block, and the two new tests failed before; mutations of the quoting, the split and the provenance rule each turn one red. The four-chunk suite over the tree with the Slice 6 work and the review fixes (data/baseline_v7_slice6b): all four chunks exit 0, 4,707 passed (1,273, 1,059, 1,355 and 1,020), none failed. |
+| CTX-001 | P0 | **VERIFIED** | Compile minimal working set per call. | Context telemetry. | FR-MEM-001 | `friday/model_gateway.py:1392,1422,1426,1435,1455`, `friday/toolsets/model_gateway.py:50,76,99` | Confirmed at 02c83ff7c: the build worker found the acceptance already met and changed nothing; tests/test_working_set.py::test_a_recorded_line_cannot_close_its_frame, tests/test_working_set.py::test_a_model_step_of_an_objective_from_read_material_has_nothing_binding, tests/test_working_set.py::test_the_sections_come_in_order_and_report_what_they_hold, tests/test_working_set.py::test_over_budget_the_least_needed_goes_first, tests/test_working_set.py::test_the_constraints_and_the_task_are_never_dropped, tests/test_working_set.py::test_an_unbudgeted_plain_call_is_what_compile_context_gives, tests/test_working_set.py::test_an_objectives_model_step_carries_its_facts_and_reports_its_context, tests/test_working_set.py::test_a_model_call_outside_any_objective_is_unchanged pass at HEAD and an independent verifier judged the existing code to meet it. Worker: Verification only, no edits this run. Per-section token telemetry is in 88e81db (TaskBundle.measure -> sections/total_tokens; WorkingSet.telemetry already did). Confirmed pre-change measure() has no 'sections' key, so the new test fails there. |
 | CTX-002 | P0 | **PARTIAL** | L0/L1/L2 progressive retrieval. | Large-catalog benchmark. | - | `friday/capability_router.py:300,346,390,407,576,590`, `scripts/bench_tool_disclosure.py`, `data/prd_v7_audit/ctx002_tool_disclosure_2026-09-27.json` | 2026-09-27, the full registered catalogue (190 tools, 105,164 schema characters): the starting surface is 83.9% smaller than showing every tool; every long-tail request costs at least 80% less - the worst 81.7% over the 123 intent examples and 81.5% over the development split's 965 long-tail requests - which meets section 82's 80% target. One search finds the needed capability for 123/123 intent examples (a regression set the router is tuned on, not evidence of generalisation) and 732/965 development requests (75.9%); the locked holdout was not read. The starting-surface test now holds section 82's bound (it allowed 55% before). Four mutations turn a test red: every tool made core, search returning the wrong results, the search result left out of a request's cost, the baseline inflated (the last two after the test was sharpened to check its own measure). The four-chunk suite over this tree (data/baseline_v7_slice5a): all four chunks exit 0, 4,693 passed (1,262, 1,042, 1,286 and 1,103), none failed. |
 | CTX-003 | P0 | **VERIFIED** | Compaction preserves CriticalFactSet. | Lossy-summary mutation rejected. | - | `friday/compaction.py:45,54,90,149,161,171`, `friday/tools/hermes_control.py:192-207`, `friday/hermes_bridge.py:269,365` | Controller, unpark triage wf_5253313a, 2026-10-08: the acceptance text is met by 67dc6b5 (INTEGRATED, RED/GREEN OK, verifier PASS); tests/test_compaction.py::test_dropping_any_one_fact_is_rejected pass at 9cb564d (211 passed, 1 skipped with the batch). The row stayed PARTIAL only on worker-listed caveats beyond the acceptance, recorded here and not built: None against the acceptance. Only the ledger row is stale: status should move from PARTIAL to VERIFIED with evidence tests/test_compaction.py::test_dropping_any_one_fact_is_rejected and ::test_a_development_packet_that_would_drop_a_critical_fact_is_not_sent. The development_run executor wiring is a separate concern gated on EXEC-SBX-001. |
 | CTX-004 | P1 | **PARTIAL** | Context health drives trim/fold/reset. | Long-run benchmark. | - | `friday/context_health.py`, `friday/memory_stack.py` | needs the PRD 19.6 temp branch and a session-restart seam (not built) |

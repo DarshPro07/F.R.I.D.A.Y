@@ -153,14 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 072a22f on prd-v7/slice-7-adaptive-hardware, updated 2026-10-08T23:47:44+00:00
+- HEAD: 7af2e00 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T00:16:43+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 8, "MISSING": 101, "PARKED_BY_OWNER": 1, "PARTIAL": 54, "VERIFIED": 55}
 - Unresolved P0: 13
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (233): TRAJ-001=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), ACT-001 (integration refused), JIT-001 (cascade exhausted), MEM-003 (NOT_CONFIRMED)
-- Open escalations: 188
-  - EVAL-001 integration: refusing EVAL-001: run has no commit
+- Last wave (239): TRAJ-001=SCOUT_DONE
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), ACT-001 (integration refused), JIT-001 (cascade exhausted), MEM-003 (NOT_CONFIRMED), MEM-002 (NO_TEST)
+- Open escalations: 189
   - BCON-001 integration: refusing BCON-001: run has no commit
   - CYBER-002 integration: refusing CYBER-002: run has no commit
   - DUR-001 integration: refusing DUR-001: run has no commit
@@ -170,5 +169,6 @@ That is the first implementation target of this program.
   - DUR-001 resolved: controller unpark: controller re-ran integration 2026-10-09: CONFIRMED
   - EVAL-001 resolved: controller unpark: controller re-ran integration 2026-10-09: CONFIRMED
   - MEM-003 integration: {"requirement": "MEM-003", "result": "NOT_CONFIRMED", "red_green": {}, "verifier": {"verdict": "FAIL
+  - MEM-002 integration: {"requirement": "MEM-002", "result": "NO_TEST", "red_green": {"result": "NO_TEST", "tests": []}, "ve
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
