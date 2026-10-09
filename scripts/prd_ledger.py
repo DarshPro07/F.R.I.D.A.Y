@@ -4193,6 +4193,14 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'reconstruct() dropped an unreadable audit read and still reported consistent. It now names the unread audit rows as a disagreement. New test fails without the fix (1 failed, 14 passed) and passes with it. (build run, commit 8745c9084)',
         "next_action": 'GAPS: Full suite not run; only tests/test_observability.py and tests/test_trust.py (test_impact.py lists only test_observability.py as directly affected by friday/observability.py).; Not addressed: a row deleted just before a chain break is reported intact when the break is in a later row (prev_hash break). Needs a design decision on how strict per-run completeness must be; left as is.',
     }),
+    ('BBOX-001', {
+        "status": VERIFIED,
+        "current_implementation": 'reconstruct() dropped an unreadable audit read and still reported consistent. It now names the unread audit rows as a disagreement. New test fails without the fix (1 failed, 14 passed) and passes with it. (build run, commit 8745c9084)',
+        "next_action": '',
+        "evidence": 'Confirmed at fc7622145: the build worker found the acceptance already met and changed nothing; tests/test_trust.py::test_audit_chain_detects_edits_and_deletions pass at HEAD and an independent verifier judged the existing code to meet it. Worker: Verified the merged fix (8745c90): reconstruct() names an unreadable audit read as a disagreement instead of reporting consistent. No new code needed; tests/test_observability.py and tests/test_trust.py pass (36). prev_hash-break strictness left as an open design question.',
+        "tests": ['tests/test_trust.py::test_audit_chain_detects_edits_and_deletions'],
+        "files": ['friday/trust.py:253', 'friday/trust.py:398'],
+    }),
 ]
 
 
