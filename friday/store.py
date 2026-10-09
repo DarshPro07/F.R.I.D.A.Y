@@ -1044,6 +1044,22 @@ CREATE TABLE IF NOT EXISTS confirmations (
     answered_at  TEXT,
     spent_at     TEXT
 );
+-- PRD v7 DEVICE-003: a device's persistent identity and where it is in the
+-- pairing and trust lifecycle. Only the hash of the pairing code is kept.
+CREATE TABLE IF NOT EXISTS devices (
+    device_id        TEXT PRIMARY KEY,
+    name             TEXT NOT NULL,
+    endpoint         TEXT NOT NULL,
+    state            TEXT NOT NULL,
+    code_hash        TEXT NOT NULL,
+    code_expires_at  TEXT NOT NULL,
+    inventory        TEXT,
+    policy           TEXT,
+    created_at       TEXT NOT NULL,
+    approved_by      TEXT,
+    approved_at      TEXT,
+    activated_at     TEXT
+);
 """
 
 
@@ -2608,6 +2624,41 @@ class Store:
                 "UPDATE network_grants SET revoked_at=?, revoked_reason=? "
                 "WHERE revoked_at IS NULL", (now, reason))
         return live
+
+    # -- devices (PRD v7 DEVICE-003) -------------------------------------------
+    # Each lifecycle step is one conditional UPDATE on the state the step
+    # expects, so two racing callers cannot both advance the same device.
+
+    def device_create(self, *, device_id: str, name: str, endpoint: str, state: str,
+                      code_hash: str, code_expires_at: str, created_at: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO devices (device_id, name, endpoint, state, code_hash, "
+                "code_expires_at, created_at) VALUES (?,?,?,?,?,?,?)",
+                (device_id, name, endpoint, state, code_hash, code_expires_at,
+                 created_at))
+
+    def device(self, device_id: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM devices WHERE device_id=?", (device_id,)).fetchone()
+        return dict(row) if row else None
+
+    def devices(self) -> list[dict]:
+        return [dict(row) for row in self._conn.execute(
+            "SELECT * FROM devices ORDER BY created_at, device_id")]
+
+    def device_advance(self, device_id: str, *, expect: str, state: str,
+                       **fields: str | None) -> bool:
+        """`expect` -> `state`, setting `fields` (column names the lifecycle
+        owns). True only for the call that changed the row."""
+        allowed = {"inventory", "policy", "approved_by", "approved_at", "activated_at"}
+        if not set(fields) <= allowed:
+            raise ValueError(f"not a device lifecycle field: {sorted(set(fields) - allowed)}")
+        sets = ", ".join(["state=?"] + [f"{name}=?" for name in fields])
+        with self._tx() as conn:
+            return conn.execute(
+                f"UPDATE devices SET {sets} WHERE device_id=? AND state=?",
+                (state, *fields.values(), device_id, expect)).rowcount == 1
 
     # -- confirmations (PRD v7, V7-D08) ---------------------------------------
     # Each state change is one conditional UPDATE, and the row count decides:

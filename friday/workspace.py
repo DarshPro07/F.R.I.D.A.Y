@@ -286,5 +286,8 @@ UNSCOPED = {
     "routing_corrections": "FRIDAY's own routing calibration",
     "fabric_outcomes": "provider health, a property of the install",
     "pending_power": "this machine's power state",
+    "devices": "paired physical devices: a property of this install, like fabric_outcomes; "
+               "a device's trust comes from the owner's pairing approval, and what it "
+               "senses lands in scoped tables",
     "workspaces": "the registry itself",
 }
