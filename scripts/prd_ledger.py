@@ -4732,6 +4732,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Slice 1 built as specified. friday/ultracode/spec.py: frozen dataclasses Stage/Spec, stdlib validator (JSON-Schema subset type/properties/required/enum/items), SpecError(field) naming fields like stages[1].tier, budget_tokens required, at most one deep stage and only on judge|synthesis|architecture, (build run, commit 6b8118312)',
         "next_action": "GAPS: Acceptance 'one spec loaded through both entry points compiles to equal plans' is only proven for three loaders in this module (path, JSON text, dict). The actual FRIDAY and Claude Code/Hermes harness entry points (HARN-001) do not exist yet, so the two-harness equality is not shown against real harness code.; Row says validated at load for a runnable workflow, but no objective/runner consumes the spec yet (out of scope: running agents, wiring, templates, UI).; Remaining ~95 test_impact-listed files not run; only the 13 closest plus reachability and workspace_isolation.; implementer did not claim acceptance met",
     }),
+    ('DEVICE-006', {
+        "status": PARTIAL,
+        "current_implementation": 'Design: a new trigger kind "device" ({device_id, event, optional sensor}) in the existing automations engine (validate_trigger; stored without a Windows scheduled task). New friday/toolsets/device_events.dispatch(hub, registry, provider_id, device_id) polls the hub, and routes events only if the Reg (build run, commit 8dc47c351)',
+        "next_action": "GAPS: Nothing calls dispatch yet: there is no poll loop or MCP tool wiring it to a running hub (no real backend; hermes-gadget-sdk not pinned).; Dropped events are logged but not persisted as a store row.; Pushed (non-polled) events and the device's assigned policy name are not consulted beyond the ACTIVE state; step-level policy still applies.",
+    }),
 ]
 
 
