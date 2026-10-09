@@ -498,6 +498,34 @@ def adopt_jobs(k=build_kernel, runs_dir: Path | None = None, repo: Path = ROOT) 
     return live, finished
 
 
+def stranded_runs(state: dict, runs_dir: Path) -> list[dict]:
+    """Finished runs whose integration never ended: the program was killed between the worker's
+    commit and the integrator's verdict (2026-10-09: BRAIN-001's program died with the tool call
+    that launched it). The worker's stream holds its result, so the worktree cannot resume, and
+    queue_for parked it "stale worktree" until a controller re-integrated it by hand. A finished
+    SHIP run with a commit, its worktree still there, and no integration record since the run,
+    is integrated at start instead; one parked for any other reason, or in repair, is left."""
+    out = []
+    for path in sorted(Path(runs_dir).glob("*.json")):
+        try:
+            rec = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        req = rec.get("requirement") if isinstance(rec, dict) else None
+        if req != path.stem or rec.get("state") != "DONE" or not rec.get("commit") \
+                or rec.get("mode") != "SHIP" or rec.get("kind") == "ADVISOR":
+            continue
+        if state["parked"].get(req, "stale worktree") != "stale worktree" or req in state["repair_queue"]:
+            continue
+        if not Path(rec.get("worktree") or "").is_dir():
+            continue
+        integration = path.with_name(f"{req}.integration.json")
+        if integration.exists() and integration.stat().st_mtime >= path.stat().st_mtime:
+            continue
+        out.append(rec)
+    return out
+
+
 def recover_crash(state: dict, req: str, head: str, exc: Exception, repo: Path, runner=sh) -> str:
     """The integrator died. If it left a commit on the branch (a cherry-pick not yet
     verified), put HEAD back; otherwise stop the run, because the branch holds
@@ -659,6 +687,10 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
         live, adopted = adopt_jobs(k, runs_dir, repo)
         adopted += k.watch(live, runs_dir=runs_dir or k.RUNS_DIR) if live else []
         for rec in adopted:
+            settle(rec, state, integrated, k, bi, repo, runner)
+        for rec in stranded_runs(state, runs_dir or k.RUNS_DIR):
+            out(f"stranded: {rec['requirement']} finished but its integration never ended; integrating it")
+            state["parked"].pop(rec["requirement"], None)
             settle(rec, state, integrated, k, bi, repo, runner)
     verifier_spent = 0.0  # verifier invocations are not in the worker ledger
     spent, idle, waves_run, stop = 0.0, 0, 0, None

@@ -1072,6 +1072,41 @@ def test_a_dead_job_with_a_finished_stream_is_finalized_not_relaunched(env, tmp_
     assert k.finalized == ["A"] and bi.calls == ["A"] and k.launches == []
 
 
+def _stranded(env, tmp_path, *, parked=None, integrated_after=False):
+    """A finished run with a commit and its worktree, as a program killed mid-integration leaves it."""
+    runs, wt = tmp_path / "runs", env.wt / "a"
+    runs.mkdir()
+    wt.mkdir()
+    path = runs / "A.json"
+    path.write_text(json.dumps(dict(rec("A"), commit="c0ffee", worktree=str(wt))), encoding="utf-8")
+    os.utime(path, (1000, 1000))
+    if integrated_after:
+        (runs / "A.integration.json").write_text("{}", encoding="utf-8")
+        os.utime(runs / "A.integration.json", (2000, 2000))
+    if parked:
+        env.state.parent.mkdir(parents=True, exist_ok=True)
+        env.state.write_text(json.dumps({"parked": {"A": parked}}), encoding="utf-8")
+    return runs
+
+
+@pytest.mark.parametrize("parked", [None, "stale worktree"])
+def test_a_finished_run_whose_integration_never_ended_is_integrated_at_start(env, tmp_path, parked):
+    # 2026-10-09: the program integrating BRAIN-001 died with the tool call that launched it; the next
+    # program found the worktree, could not resume a finished worker, and parked it "stale worktree"
+    # until a controller re-integrated it by hand.
+    k = FakeKernel(ids=("A",))
+    _, bi = go(env, k, runs_dir=_stranded(env, tmp_path, parked=parked), max_waves=0)
+    assert bi.calls == ["A"] and k.launches == [] and "A" not in state_of(env)["parked"]
+
+
+@pytest.mark.parametrize("parked, integrated_after", [(None, True), ("blocked", False)])
+def test_a_finished_run_already_integrated_or_parked_otherwise_is_left(env, tmp_path, parked, integrated_after):
+    k = FakeKernel(ids=("A",))
+    _, bi = go(env, k, runs_dir=_stranded(env, tmp_path, parked=parked, integrated_after=integrated_after),
+               max_waves=0)
+    assert bi.calls == []
+
+
 def test_a_dead_job_without_a_result_is_marked_failed_for_the_resume_path(env, tmp_path, monkeypatch):
     monkeypatch.setattr(BP, "pid_alive", lambda pid: False)
     k = FakeKernel(ids=("A",))
