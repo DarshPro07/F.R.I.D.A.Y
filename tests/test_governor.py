@@ -784,6 +784,65 @@ def test_status_reports_the_context():
     assert gov.status()["context"] == {"user_idle_s": 42.0, "on_battery": True}
 
 
+def test_background_wait_names_each_reason_and_is_empty_only_when_all_clear():
+    gov, _ = make_ctx(Ctx(idle_s=600.0, on_battery=False))
+    assert gov.background_wait() == ""
+    active, _ = make_ctx(Ctx(idle_s=5.0, on_battery=False))
+    assert "person is active" in active.background_wait()
+    unplugged, _ = make_ctx(Ctx(idle_s=600.0, on_battery=True))
+    assert "battery" in unplugged.background_wait()
+    pressured, _ = make_ctx(Ctx(idle_s=600.0, on_battery=False), sample(cpu=90))
+    wait = pressured.background_wait()
+    assert "no headroom" in wait and "pressure" in wait, wait
+
+
+def test_a_pressured_machine_does_not_spend_a_context_probe_on_background_work():
+    probes = []
+
+    def counting() -> G.Context:
+        probes.append(1)
+        return G.Context(user_idle_s=600.0, on_battery=False)
+
+    gov, _ = make_ctx(counting, sample(cpu=90))
+    assert "no headroom" in gov.background_wait()
+    assert probes == []
+
+
+def test_status_says_whether_background_work_runs_now_and_why_not():
+    ctx = Ctx(idle_s=600.0, on_battery=False)
+    gov, dial = make_ctx(ctx)
+    assert gov.status()["background"] == {"runs": True, "wait": ""}
+    ctx.idle_s = 3.0
+    background = gov.status()["background"]
+    assert background["runs"] is False and "person is active" in background["wait"]
+    ctx.idle_s, ctx.on_battery = 600.0, True
+    assert "battery" in gov.status()["background"]["wait"]
+    ctx.on_battery = False
+    dial.s = sample(cpu=90)
+    background = gov.status()["background"]
+    assert background["runs"] is False and "no headroom" in background["wait"]
+
+
+def test_the_background_verdict_agrees_with_what_admit_does():
+    for ctx, s in ((Ctx(), None), (Ctx(idle_s=1.0), None), (Ctx(on_battery=True), None),
+                   (Ctx(), sample(cpu=90))):
+        gov, _ = make_ctx(ctx, s)
+        verdict = gov.status()["background"]
+        assert verdict["runs"] == gov.admit(G.OPTIONAL, label="digest").admitted, verdict
+
+
+def test_real_probes_defer_background_work_when_the_machine_has_no_headroom():
+    """The live sampler against a floor no machine clears: headroom is the only
+    gate (the person is treated as always away), and it holds."""
+    gov = G.Governor(thresholds=G.Thresholds(ram_floor_gb=1e6, user_idle_s=0.0),
+                     context=G.sample_context)
+    background = gov.status()["background"]
+    assert background["runs"] is False and "no headroom" in background["wait"], background
+    d = gov.admit(G.OPTIONAL, label="digest")
+    assert d.decision == G.SHED and "pressure" in d.reason, d.reason
+    assert gov.admit(G.OPTIONAL, label="digest", priority=G.URGENT).decision == G.SHED
+
+
 def test_on_battery_reads_the_power_state(monkeypatch):
     import psutil
 

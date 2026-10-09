@@ -771,6 +771,18 @@ class Governor:
             logger.warning("governor context probe failed: %s", exc)
             return Context()
 
+    def background_wait(self, p: Pressure | None = None, ctx: Context | None = None) -> str:
+        """Why background work should not start now; empty when it may run:
+        the machine has no headroom to spare, the person is active, or it is
+        on battery. Headroom is judged first so a pressured machine does not
+        spend a context probe; a caller that already read `p` or `ctx` passes
+        it so one decision rests on one reading."""
+        p = self.pressure() if p is None else p
+        if p.level != NORMAL:
+            why = ", ".join(p.reasons) or "no headroom"
+            return f"the machine has no headroom to spare ({p.level} pressure: {why})"
+        return (self.context() if ctx is None else ctx).deferral(self.thresholds)
+
     def pressure(self, *, fresh: bool = False) -> Pressure:
         now = time.time()
         with self._lock:
@@ -972,7 +984,7 @@ class Governor:
         t = self.thresholds
         wait = ""
         if kind == OPTIONAL and priority == BACKGROUND:
-            wait = self.context().deferral(t)
+            wait = self.background_wait(p)
         with self._lock:
             workers = sum(1 for k, _, _ in self._leases.values() if k == WORKER)
             browsers = sum(1 for k, _, _ in self._leases.values() if k == BROWSER)
@@ -1055,9 +1067,12 @@ class Governor:
 
     def status(self) -> dict:
         p = self.pressure()
+        ctx = self.context()
+        wait = self.background_wait(p, ctx)
         return {
             "pressure": p.to_dict(),
-            "context": self.context().to_dict(),
+            "context": ctx.to_dict(),
+            "background": {"runs": not wait, "wait": wait},
             "active": self.active_leases(),
             "workers": self.active(WORKER),
             "browsers": self.active(BROWSER),
