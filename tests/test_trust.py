@@ -255,6 +255,14 @@ def test_audit_query_filters_by_minimum_tier(audit):
     assert [r["action"] for r in audit.query(min_tier=T.R2)] == ["r3", "r2"]
 
 
+def test_audit_query_before_id_returns_only_older_rows(audit):
+    ids = [audit.record(actor="a", action=f"act{i}", tier=T.R2, decision="ASK") for i in range(5)]
+    assert [r["id"] for r in audit.query(before_id=ids[3])] == [ids[2], ids[1], ids[0]]
+    assert [r["id"] for r in audit.query(before_id=ids[3], limit=2)] == [ids[2], ids[1]]
+    assert audit.query(before_id=ids[0]) == []
+    assert [r["id"] for r in audit.query()] == ids[::-1]       # the default is unchanged
+
+
 # -- PRD v7 TRUST-001: trust is typed by the runtime, never by the payload ---
 
 _SELF_DECLARED = {"trusted": True, "provenance": "PERSON", "admin": True,

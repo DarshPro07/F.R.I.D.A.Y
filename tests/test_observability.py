@@ -222,15 +222,22 @@ def test_a_long_event_log_is_replayed_whole_not_cut_off(store, monkeypatch):
     assert paged["outcome"]["replayed_tally"] == whole["outcome"]["replayed_tally"]
 
 
-def test_a_truncated_audit_listing_is_said_not_hidden(store, monkeypatch):
+def test_a_long_audit_log_is_paged_whole(store, monkeypatch):
     from friday import trust as T
     run_id = _blackbox_run(store)
-    T.audit().record(actor="friday", action="files.move", tier=T.R2, decision="ASK",
-                     target="C:/y", objective_id=run_id)
-    assert OB.reconstruct(run_id, store=store)["consistent"]
-    monkeypatch.setattr(OB, "_AUDIT_LIMIT", 1)
-    box = OB.reconstruct(run_id, store=store)
-    assert not box["consistent"] and any("audit log holds more" in d for d in box["disagreements"])
+    for i in range(3):
+        T.audit().record(actor="friday", action=f"files.move{i}", tier=T.R2, decision="ASK",
+                         target="C:/y", objective_id=run_id)
+    logged = sorted(r["id"] for r in T.audit().query(objective_id=run_id, limit=1000))
+    assert len(logged) > 4                         # the run's own decisions, plus these
+    whole = OB.reconstruct(run_id, store=store)
+    monkeypatch.setattr(OB, "_AUDIT_PAGE", 1)      # every row is a page of its own
+    paged = OB.reconstruct(run_id, store=store)
+    assert paged["consistent"], paged["disagreements"]
+    # Every row of the log, oldest first, none read twice.
+    assert [d["id"] for d in paged["audit"]["decisions"]] == logged
+    assert paged["sources"]["audit_rows"] == len(logged)
+    assert paged["audit"]["decisions"] == whole["audit"]["decisions"]
 
 
 def test_the_objective_trace_faces_describe_the_black_box_replay():

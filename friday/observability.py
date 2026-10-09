@@ -129,17 +129,27 @@ def _gateway_calls(run_id: str) -> list[dict]:
         return [{"error": f"gateway ledger unavailable: {exc}"}]
 
 
-_AUDIT_LIMIT = 500
+_AUDIT_PAGE = 500
 
 
 def _audit_rows(run_id: str) -> list[dict]:
     try:
         from friday import trust as T
-        # The log answers newest first; a trace is told oldest first. Audit
-        # times are to the second, and the timeline's sort keeps ties in the
-        # order given, so without this a grant revoked in the same second it
-        # was issued read as revoked before it existed.
-        return list(reversed(T.audit().query(objective_id=run_id, limit=_AUDIT_LIMIT)))
+        # The log answers newest first, a page at a time, each page starting
+        # below the smallest id already read; a short page is the last one.
+        rows: list[dict] = []
+        before_id = 0
+        while True:
+            page = T.audit().query(objective_id=run_id, limit=_AUDIT_PAGE, before_id=before_id)
+            rows.extend(page)
+            if len(page) < _AUDIT_PAGE:
+                break
+            before_id = int(page[-1]["id"])
+        # A trace is told oldest first. Audit times are to the second, and the
+        # timeline's sort keeps ties in the order given, so without this a
+        # grant revoked in the same second it was issued read as revoked
+        # before it existed.
+        return list(reversed(rows))
     except Exception as exc:  # noqa: BLE001
         return [{"error": f"audit log unavailable: {exc}"}]
 
@@ -387,9 +397,6 @@ def reconstruct(run_id: str, *, store: Store | None = None, redacted: bool = Tru
     audit = [a for a in _audit_rows(run_id) if "at" in a]
     chain = _audit_chain(audit)
     disagreements: list[str] = []
-    if len(audit) >= _AUDIT_LIMIT:
-        disagreements.append(f"audit log holds more than {_AUDIT_LIMIT} rows for this run; "
-                             "the decisions listed are the newest")
     if not chain["intact"]:
         disagreements.append("audit chain is broken at or before this run's records")
 
@@ -450,7 +457,7 @@ def reconstruct(run_id: str, *, store: Store | None = None, redacted: bool = Tru
         "tasks": tasks,
         "evidence": _verification(task_rows, tools),
         "audit": {"chain": chain,
-                  "decisions": [{k: a.get(k) for k in ("at", "actor", "action", "tier",
+                  "decisions": [{k: a.get(k) for k in ("id", "at", "actor", "action", "tier",
                                                        "decision", "target", "result")}
                                 for a in audit]},
         "consistent": not disagreements, "disagreements": disagreements,

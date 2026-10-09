@@ -325,13 +325,17 @@ class AuditLog:
             return int(cur.lastrowid)
 
     def query(self, *, objective_id: str = "", min_tier: str = R0,
-              limit: int = 100) -> list[dict]:
+              limit: int = 100, before_id: int = 0) -> list[dict]:
+        """Newest first. `before_id` > 0 pages: only rows with a smaller id."""
         wanted = TIERS[TIERS.index(min_tier):]
         sql = "SELECT * FROM audit_log WHERE tier IN (%s)" % ",".join("?" for _ in wanted)
         params: list = list(wanted)
         if objective_id:
             sql += " AND objective_id=?"
             params.append(objective_id)
+        if before_id > 0:
+            sql += " AND id < ?"
+            params.append(before_id)
         sql += " ORDER BY id DESC LIMIT ?"
         params.append(limit)
         with self._connect() as conn:
