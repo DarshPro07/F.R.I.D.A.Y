@@ -39,6 +39,7 @@ in, clean Markdown out. So it is supported, and it is not the default.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import os
 import re
@@ -354,6 +355,148 @@ def build_corpus(pages: list[dict], question: str, *, budget: int) -> tuple[list
         spent += len(body)
         kept.append(page)
     return kept, dropped
+
+
+# ---------------------------------------------------------------------------
+# RSCH-001: depth routing, the canonical inquiry, the drift guard, budgets
+# ---------------------------------------------------------------------------
+
+DEPTHS = ("R0", "R1", "R2", "R3", "R4", "R5")
+
+
+@dataclasses.dataclass(frozen=True)
+class DepthBudget:
+    max_sources: int
+    max_chars: int
+
+
+# R0 answers from what is already known; R1 is one source for one fact.
+DEPTH_BUDGETS: dict[str, DepthBudget] = {
+    "R0": DepthBudget(0, 0),
+    "R1": DepthBudget(1, 3000),
+    "R2": DepthBudget(3, 9000),
+    "R3": DepthBudget(6, DEFAULT_CORPUS_CHARS),
+    "R4": DepthBudget(12, 36000),
+    "R5": DepthBudget(24, 72000),
+}
+
+# Consecutive pages that add no inquiry term before the search stops.
+GAIN_PATIENCE = 2
+
+_FACT_OPENERS = ("who", "what", "when", "where", "which", "how many", "how much",
+                 "how old", "how long", "is", "are", "was", "were", "does", "did")
+_DEPTH_MARKERS = ("compare", "versus", " vs ", "trade-off", "tradeoff", "pros and cons",
+                  "analyze", "analyse", "in depth", "in-depth", "comprehensive",
+                  "literature", "state of the art", "survey", "systematic", "report",
+                  "evaluate", "benchmark", "landscape", "exhaustive", "why")
+_FACT_MAX_WORDS = 12
+_INSTRUCTION_WORDS = frozenset(
+    "the and for with from that this what who when where which how are was were does did "
+    "compare analyze analyse write report about into your their there than then them "
+    "comprehensive depth".split())
+
+
+def _terms(text: str) -> frozenset[str]:
+    return frozenset(t for t in re.split(r"[^a-z0-9]+", (text or "").lower())
+                     if len(t) > 2 and t not in _INSTRUCTION_WORDS)
+
+
+@dataclasses.dataclass(frozen=True)
+class CanonicalInquiry:
+    """The question as asked. Frozen: a branch may not rewrite what is being asked."""
+
+    question: str
+    terms: frozenset[str]
+
+    @classmethod
+    def from_question(cls, question: str) -> "CanonicalInquiry":
+        question = (question or "").strip()
+        return cls(question=question, terms=_terms(question))
+
+    def on_inquiry(self, text: str) -> bool:
+        """Drift guard: a branch must share a third of the inquiry's terms (at least one)."""
+        if not self.terms:
+            return False
+        need = max(1, -(-len(self.terms) // 3))
+        return len(self.terms & _terms(text)) >= need
+
+
+def route_depth(question: str, requested: str | None = None) -> str:
+    """
+    The depth a question deserves, R0-R5.
+
+    A one-fact question is capped at R1 whatever was requested; for anything
+    else a valid request is honoured.
+    """
+    text = (question or "").strip().lower()
+    if not text:
+        return "R0"
+    words = text.split()
+    padded = f" {text} "
+    markers = sum(1 for m in _DEPTH_MARKERS if m in padded)
+    is_fact = (len(words) <= _FACT_MAX_WORDS and markers == 0
+               and text.startswith(_FACT_OPENERS))
+    if is_fact:
+        return "R1"
+    if requested in DEPTHS:
+        return requested
+    score = markers + (1 if len(words) > 40 else 0)
+    if score == 0:
+        return "R2"
+    return DEPTHS[min(2 + score, 5)]
+
+
+def filter_branches(inquiry: CanonicalInquiry, branches: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(kept, rejected): rejected branches carry reason="off_inquiry"."""
+    kept: list[dict] = []
+    rejected: list[dict] = []
+    for branch in branches:
+        text = f"{branch.get('title', '')} {branch.get('snippet', '')} {branch.get('url', '')}"
+        if inquiry.on_inquiry(text):
+            kept.append(branch)
+        else:
+            rejected.append({**branch, "reason": "off_inquiry"})
+    return kept, rejected
+
+
+def explore(inquiry: CanonicalInquiry, depth: str, branches: list[dict], fetch) -> dict:
+    """
+    Walk on-inquiry branches under the depth's budget, recording why it stopped.
+
+    `fetch(branch)` returns a page dict (see `dedupe`). Stop reasons:
+    budget_sources, budget_chars, no_information_gain (GAIN_PATIENCE pages in a
+    row covered no new inquiry term), or exhausted (nothing left to read).
+    """
+    budget = DEPTH_BUDGETS[depth]
+    kept, rejected = filter_branches(inquiry, branches)
+    pages: list[dict] = []
+    failed: list[str] = []
+    covered: set[str] = set()
+    spent = 0
+    barren = 0
+    reason = "exhausted"
+    for index, branch in enumerate(kept):
+        if len(pages) >= budget.max_sources:
+            reason = "budget_sources"
+            break
+        page = fetch(branch)
+        if not page.get("ok"):
+            failed.append(branch.get("url", ""))
+            continue
+        pages.append(page)
+        spent += len(page.get("markdown") or "")
+        fresh = (inquiry.terms & _terms(f"{page.get('title', '')} {page.get('markdown', '')}")) - covered
+        covered |= fresh
+        barren = 0 if fresh else barren + 1
+        more = index + 1 < len(kept)
+        if spent >= budget.max_chars:
+            reason = "budget_chars" if more else "exhausted"
+            break
+        if more and barren >= GAIN_PATIENCE:
+            reason = "no_information_gain"
+            break
+    stop = {"reason": reason, "depth": depth, "sources": len(pages), "chars": spent}
+    return {"pages": pages, "rejected": rejected, "failed": failed, "stop": stop}
 
 
 # ---------------------------------------------------------------------------
