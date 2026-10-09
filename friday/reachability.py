@@ -231,6 +231,9 @@ DECLARED = {
                       "are dispatched by argparse (FRIDAY.exe -m friday.skills.cli), "
                       "which the reference walk cannot follow; the voice/objective "
                       "seams are tracked in docs/plans/skill-intelligence/00-status.md"),
+    "friday/prompt_compiler": (FUTURE,
+                               "PROMPT-001 instruction compiler, not yet "
+                               "called by the voice agent's prompt build"),
 }
 
 KNOWN: dict[str, tuple[str, str]] = {
