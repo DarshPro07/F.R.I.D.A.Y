@@ -183,9 +183,12 @@ def red_green(run: dict, tests: list[str], repo: Path = ROOT, python: str = VENV
     return {"result": "OK", "tests": tests, "red_kind": red_kind, "proving": named_tests(proving)}
 
 
-def collected_ids(python: str, cwd: Path, files: list[str]) -> list[str]:
+def collected_ids(python: str, cwd: Path, files: list[str], runnable: bool = False) -> list[str]:
+    """The test ids in `files`; with `runnable`, only those the gate runs (no live or slow)."""
+    marks = list(GATE[:2]) if runnable else []
     try:
-        res = subprocess.run([python, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", *files],
+        res = subprocess.run([python, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", *marks,
+                              *files],
                              cwd=cwd, capture_output=True, text=True, encoding="utf-8",
                              errors="replace", timeout=TEST_S)
     except subprocess.TimeoutExpired:
@@ -857,13 +860,23 @@ def _confirm_existing(req: str, run: dict, row: dict, out: dict, done, *, repo: 
         files = row_test_files(req, repo)
     if not tests and files:
         with temp_worktree(repo, head) as wt:
-            tests = named_tests(collected_ids(python, wt, files))
+            tests = named_tests(collected_ids(python, wt, files, runnable=True))
     if not tests:
         return done("NOT_CONFIRMED", detail="the row names no test to confirm the acceptance with")
     if dry_run:
         return done("DRY_RUN", tests=tests)
     with temp_worktree(repo, head) as wt:
         rc, output = run_pytest(python, wt, tests)
+        if rc == 5 and (own := row_test_files(req, repo)):
+            # The gate deselects live and slow tests: pytest ran none of the named ones (2026-10-09:
+            # BG-001 cites one @slow test, and exit 5 was reported as "the named tests fail at HEAD").
+            runnable = named_tests(collected_ids(python, wt, own, runnable=True))
+            if runnable:
+                tests = runnable
+                rc, output = run_pytest(python, wt, tests)
+    if rc == 5:
+        return done("NOT_CONFIRMED", detail="the gate ran none of the named tests (live or slow only)",
+                    tests=tests)
     if rc != 0:
         return done("NOT_CONFIRMED", detail="the named tests fail at HEAD", tests=tests,
                     tail=output.strip().splitlines()[-5:])

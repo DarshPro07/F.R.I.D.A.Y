@@ -906,6 +906,34 @@ def test_a_row_citing_no_test_is_confirmed_with_its_own_build_commits_tests(tmp_
     assert bi.row_test_files("REQ-10", repo) == []  # another row's id is no prefix match
 
 
+SLOW_TEST = "import pytest\n\n\n@pytest.mark.slow\ndef test_slow():\n    assert True\n"
+
+
+def test_named_tests_the_gate_never_runs_give_way_to_the_rows_build_tests(tmp_path):
+    # 2026-10-09: BG-001 cites one @slow test; the gate deselected it, pytest exited 5, and the
+    # confirm reported "the named tests fail at HEAD".
+    repo, runs, run, rows = setup(tmp_path, base_extra={"tests/test_slow.py": SLOW_TEST})
+    sh(repo, "cherry-pick", run["commit"])
+    sh(repo, "commit", "-q", "--amend", "-m", "build(REQ-1): twice\n\nBuild run: REQ-1")
+    run, rows = _no_change(runs, run, rows, ["tests/test_slow.py::test_slow"])
+    asked = []
+
+    def paid(cmd, prompt, cwd):
+        asked.append(prompt)
+        return json.dumps({"result": '{"verdict": "PASS", "requirement_ids": ["REQ-1"]}', "total_cost_usd": 0.2})
+
+    out = go(repo, runs, rows, runner=paid)
+    assert out["result"] == "CONFIRMED" and out["tests"] == ["tests/test_twice.py::test_twice"]
+    assert "tests/test_twice.py::test_twice" in asked[0]
+
+
+def test_named_tests_the_gate_never_runs_are_not_reported_as_failing(tmp_path):
+    repo, runs, run, rows = setup(tmp_path, base_extra={"tests/test_slow.py": SLOW_TEST})
+    run, rows = _no_change(runs, run, rows, ["tests/test_slow.py::test_slow"])
+    out = go(repo, runs, rows, runner=lambda *a: pytest.fail("no verifier when no test ran"))
+    assert out["result"] == "NOT_CONFIRMED" and "ran none of the named tests" in out["detail"]
+
+
 @pytest.mark.parametrize("tests, next_action, verdict, why", [
     (["tests/test_old.py::test_old"], "RULING: keep this extra scope inside the row", "PASS", "extra scope"),
     ([], "", "PASS", "names no test"),
