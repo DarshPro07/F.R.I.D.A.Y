@@ -4206,6 +4206,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "admit() already shed OPTIONAL work at any non-NORMAL pressure; the verdict was split across two places. Added Governor.background_wait() (headroom, then person, then power), used by admit() and reported as status()['background']. Checked on the live probes. (build run, commit dca1e01d9)",
         "next_action": "GAPS: Live probes, this machine, 2026-10-09: person active (last input 85s ago, mains, NORMAL) -> SHED 'person is active'; after 124s idle, mains, NORMAL -> ADMIT; real sampler against an impossible RAM floor (CRITICAL, 2.68 GB free) -> SHED. The battery case was not live: this machine is on mains, so it rests on the injected Context tests and the psutil probe test.; The running agent was not queried; the check used Governor(context=sample_context) with the real sampler in .venv-build. status()['background'] is the field to read on the running agent.; Harness bug outside this worktree, unchanged: build_kernel.py _failing_tests reports red_green.tests as failing on INTEGRATED records; needs a controller fix.",
     }),
+    ('CAP-003', {
+        "status": PARTIAL,
+        "current_implementation": "Executors no longer report READY from installed() alone: build() rows are REGISTERED ('installed; not probed'); describe('executor:<id>') probes Executor.problem() (path still a file, builder exists), so a missing or unbuildable executor shows UNAVAILABLE with its reason. (build run, commit 7f3b07709)",
+        "next_action": 'GAPS: No production code registers a capabilities probe, so every native tool still reads REGISTERED until probes are written.; fabric.py providers still carry their own READY/state logic and are not tied to the capability health probe (next slice).; The executor probe is filesystem and builder only; it does not run the binary (e.g. --version), so a corrupt-but-present executable still probes READY.; Bulk probing is not wired: summary()/build() stay unprobed by design and only describe(id) probes, one id at a time.; Capability fields (version, backend, provenance, data_classes, latency/cost class, tests, last_verified) are not back-filled for existing records.',
+    }),
 ]
 
 
