@@ -231,6 +231,10 @@ DECLARED = {
                              "artifact cap with owner override, one resident general "
                              "model, vision on demand); the policy's default context "
                              "is already read live by hardware_profile.derive_policy"),
+    "friday/knowledge_extract": (FUTURE,
+                                 "BIN-001 slice 1: the knowledge-extraction core, not yet "
+                                 "wired to the forge or registry, run by "
+                                 "tests/test_knowledge_extract.py"),
     "friday/onboarding": (PRODUCTION,
                           "the owner's interview console: friday.onboarding "
                           "subcommands are dispatched by argparse "
