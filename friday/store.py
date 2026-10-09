@@ -1089,6 +1089,15 @@ CREATE TABLE IF NOT EXISTS devices (
     approved_at      TEXT,
     activated_at     TEXT
 );
+-- PRD v7 ULTRA-002: a stage result keyed by what produced it. Private to the
+-- workspace that ran the stage, so the column is part of the key.
+CREATE TABLE IF NOT EXISTS ultracode_results (
+    workspace_id  TEXT NOT NULL DEFAULT 'default',
+    result_key    TEXT NOT NULL,
+    result        TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    PRIMARY KEY (workspace_id, result_key)
+);
 """
 
 
@@ -2255,6 +2264,21 @@ class Store:
             cur = conn.execute(
                 "DELETE FROM fabric_outcomes WHERE at < ?", (before_iso,))
             return int(cur.rowcount or 0)
+
+    # -- ultracode stage results (ULTRA-002) --------------------------------
+
+    def ultracode_result_get(self, workspace_id: str, key: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT result FROM ultracode_results WHERE workspace_id=? AND result_key=?",
+            (workspace_id, key)).fetchone()
+        return json.loads(row["result"]) if row else None
+
+    def ultracode_result_put(self, workspace_id: str, key: str, result: dict) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO ultracode_results "
+                "(workspace_id, result_key, result, created_at) VALUES (?,?,?,?)",
+                (workspace_id, key, json.dumps(result, sort_keys=True), now_iso()))
 
     # -- contacts -----------------------------------------------------------
 

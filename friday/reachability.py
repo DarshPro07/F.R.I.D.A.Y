@@ -211,6 +211,9 @@ DECLARED = {
                                "CAP-FORGE-002 classification only; the sandboxed "
                                "analysis (CAP-FORGE-003) and the integration "
                                "decision (CAP-FORGE-004/014) are its callers"),
+    "friday/ultracode": (FUTURE,
+                         "ULTRA-001/002: the workflow spec and stage result cache, "
+                         "run by tests/test_ultracode_spec.py"),
     "friday/pattern_extraction": (FUTURE,
                                   "CAP-FORGE-012 EXTRACT_PATTERN decision and its "
                                   "native build; the forge intake "

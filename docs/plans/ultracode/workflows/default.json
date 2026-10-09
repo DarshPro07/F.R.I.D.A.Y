@@ -1,0 +1,48 @@
+{
+  "id": "default",
+  "budget_tokens": 250000,
+  "stages": [
+    {
+      "id": "scan",
+      "template": "lookup",
+      "barrier": false,
+      "schema": {
+        "type": "object",
+        "properties": {"findings": {"type": "array", "items": {"type": "string"}}},
+        "required": ["findings"]
+      },
+      "tier": "economy",
+      "effort": "low",
+      "cap": 20000,
+      "dry_rounds": 1
+    },
+    {
+      "id": "build",
+      "template": "builder",
+      "barrier": false,
+      "schema": {
+        "type": "object",
+        "properties": {"files": {"type": "array", "items": {"type": "string"}}, "tests_pass": {"type": "boolean"}},
+        "required": ["files", "tests_pass"]
+      },
+      "tier": "standard",
+      "effort": "medium",
+      "cap": 80000,
+      "dry_rounds": 2
+    },
+    {
+      "id": "verdict",
+      "template": "judge",
+      "barrier": true,
+      "schema": {
+        "type": "object",
+        "properties": {"verdict": {"type": "string", "enum": ["accept", "reject"]}, "reasons": {"type": "array", "items": {"type": "string"}}},
+        "required": ["verdict"]
+      },
+      "tier": "deep",
+      "effort": "high",
+      "cap": 40000,
+      "dry_rounds": 0
+    }
+  ]
+}

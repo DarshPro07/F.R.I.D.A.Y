@@ -251,6 +251,7 @@ SCOPED = {
     "automations": "a workspace's standing automations",
     "schedules": "a workspace's schedule entries",
     "reminders": "a workspace's reminders",
+    "ultracode_results": "cached agent output, which can quote private material",
 }
 
 #: Deliberately global. Each entry is an argument, not an omission.
