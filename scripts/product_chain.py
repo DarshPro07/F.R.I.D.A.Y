@@ -73,12 +73,12 @@ def mark(status: str, detail: str) -> None:
     tmp.replace(STATE)
 
 
-def admits() -> tuple[bool, str]:
+def admits(priority: str = PRIORITIES[0]) -> tuple[bool, str]:
     """Would the program start a job now? Its own dry run answers, pricing each
     queued job by its own memory history (2026-10-03: a probe priced at a generic
     worker - the heaviest recent peak - held every light job back). Only a pressure
     stop waits; any other answer is the program's to give when it runs."""
-    r = subprocess.run([PY, "scripts/build_program.py", "--priority", "P0", "--dry-run"], cwd=ROOT,
+    r = subprocess.run([PY, "scripts/build_program.py", "--priority", priority, "--dry-run"], cwd=ROOT,
                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
     why = next((ln for ln in lines if ln.startswith("nothing to plan: ")), "")
@@ -87,14 +87,32 @@ def admits() -> tuple[bool, str]:
     return True, why or "; ".join(lines)[-300:] or r.stderr.strip()[-200:] or f"exit {r.returncode}"
 
 
-def wait_for_admission(hours: float) -> bool:
-    start, ok = time.time(), 0
+def admitted_priority(start: str = PRIORITIES[0]) -> tuple[str | None, str]:
+    """The first priority from `start` down whose ready work the program would start
+    now. A higher priority whose every ready job waits on memory does not hold lighter
+    work back: 2026-10-09 the chain idled five hours behind MODEL-012 (4.0 GB) and
+    CTX-002 (4.3 GB) with about 3 GB free while P1 work could have run. The run that
+    follows re-checks from the top, so the higher priority keeps first claim."""
+    whys = []
+    for priority in PRIORITIES[PRIORITIES.index(start):]:
+        yes, why = admits(priority)
+        if yes and not why.startswith("nothing to plan: no ready work"):
+            return priority, why
+        whys.append(f"{priority}: {why}")
+    return None, " | ".join(whys)
+
+
+def wait_for_admission(hours: float, start: str = PRIORITIES[0]):
+    """The priority to run once the same one is admitted twice in a row, or False
+    when `hours` pass without one."""
+    began, ok, last = time.time(), 0, None
     while True:
-        yes, why = admits()
-        ok = ok + 1 if yes else 0
+        priority, why = admitted_priority(start)
+        ok = ok + 1 if priority and priority == last else (1 if priority else 0)
+        last = priority
         if ok >= 2:
-            return True
-        if time.time() - start > hours * 3600:
+            return priority
+        if time.time() - began > hours * 3600:
             mark("WAITING_RESOURCES", f"MEMORY_ADMISSION_TIMEOUT after {hours} h: {why}")
             log(f"WAITING_RESOURCES (timeout): {why}")
             return False
@@ -150,10 +168,14 @@ def main(argv: list[str] | None = None) -> int:
             mark("STOPPED", why)
             log(f"STOP day spend ${today:.2f}")
             return 0
-        if not wait_for_admission(a.wait_hours):
+        admitted = wait_for_admission(a.wait_hours, priority)
+        if not admitted:
             if a.until_done:
                 continue  # waiting is WAITING_RESOURCES, never the end of the build
             return 0
+        if isinstance(admitted, str) and admitted != priority:
+            log(f"BACKFILL {admitted}: every ready {priority} job waits on memory")
+            priority = admitted
         budget_left = a.run_usd if a.until_done else a.total_usd - used
         run_usd = min(a.run_usd, budget_left, day_cap - today)
         waves_before = waves()

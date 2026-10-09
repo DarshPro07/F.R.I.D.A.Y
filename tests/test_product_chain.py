@@ -20,7 +20,7 @@ def test_a_pressure_stop_without_a_wave_backs_off(monkeypatch, tmp_path):
     state.write_text('{"spend_usd_total": 0, "waves": [{"n": 1}]}', encoding="utf-8")
     monkeypatch.setattr(PC, "STATE", state)
     monkeypatch.setattr(PC, "RUNS", tmp_path)
-    monkeypatch.setattr(PC, "wait_for_admission", lambda hours: True)
+    monkeypatch.setattr(PC, "wait_for_admission", lambda hours, start=None: True)
     runs = iter(["stopped: pressure", "stopped: no ready work"])
     monkeypatch.setattr(PC.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, next(runs) + "\n", ""))
     sleeps = []
@@ -33,7 +33,7 @@ def _chain(monkeypatch, tmp_path, day_spent: float) -> list:
     state = tmp_path / "build_state.json"
     state.write_text('{"spend_usd_total": 0, "waves": []}', encoding="utf-8")
     monkeypatch.setattr(PC, "STATE", state)
-    monkeypatch.setattr(PC, "wait_for_admission", lambda hours: True)
+    monkeypatch.setattr(PC, "wait_for_admission", lambda hours, start=None: True)
     monkeypatch.setattr(PC.K, "spend_committed", lambda runs_dir: (day_spent, 0.0))
     cmds = []
     monkeypatch.setattr(PC.subprocess, "run", lambda cmd, **kw: cmds.append(cmd)
@@ -98,7 +98,7 @@ def _until_done(monkeypatch, tmp_path, outcomes, day_spent=(0.0,)):
     state = tmp_path / "build_state.json"
     state.write_text('{"spend_usd_total": 0, "waves": []}', encoding="utf-8")
     monkeypatch.setattr(PC, "STATE", state)
-    monkeypatch.setattr(PC, "wait_for_admission", lambda hours: True)
+    monkeypatch.setattr(PC, "wait_for_admission", lambda hours, start=None: True)
     days = iter(day_spent)
     last = [0.0]
 
@@ -157,3 +157,38 @@ def test_until_done_rechecks_the_top_priority_after_every_real_run(monkeypatch, 
         "no ready work", "max waves", "max waves", "no ready work", "no ready work",
         "no ready work", "no ready work"])
     assert [c[c.index("--priority") + 1] for c in cmds] == ["P0", "P1", "P0", "P0", "P1", "P2", "P3"]
+
+
+def test_lighter_work_runs_while_every_ready_higher_job_waits_on_memory(monkeypatch):
+    # 2026-10-09: the chain idled five hours behind MODEL-012 (4.0 GB) and CTX-002 (4.3 GB)
+    # at about 3 GB free; the probe only ever asked about P0.
+    answers = {"P0": (False, "nothing to plan: pressure (MODEL-012 needs 4.0 GB)"),
+               "P1": (True, "BBOX-001 SHIP NORMAL"), "P2": (True, "x")}
+    asked = []
+    monkeypatch.setattr(PC, "admits", lambda p="P0": asked.append(p) or answers[p])
+    assert PC.admitted_priority("P0") == ("P1", "BBOX-001 SHIP NORMAL") and asked == ["P0", "P1"]
+    answers.update(P1=(True, "nothing to plan: no ready work"), P2=(False, "nothing to plan: pressure"),
+                   P3=(True, "nothing to plan: no ready work"))
+    priority, why = PC.admitted_priority("P0")
+    assert priority is None and "MODEL-012" in why
+
+
+def test_the_chain_runs_the_backfilled_priority_then_rechecks_from_the_top(monkeypatch, tmp_path):
+    state = tmp_path / "build_state.json"
+    state.write_text('{"spend_usd_total": 0, "waves": []}', encoding="utf-8")
+    monkeypatch.setattr(PC, "STATE", state)
+    monkeypatch.setattr(PC, "RUNS", tmp_path)
+    picks = iter(["P1"])
+    seen_start = []
+    monkeypatch.setattr(PC, "wait_for_admission",
+                        lambda hours, start="P0": seen_start.append(start) or next(picks, start))
+    monkeypatch.setattr(PC.K, "spend_committed", lambda runs_dir: (0.0, 0.0))
+    cmds = []
+    import itertools
+    outs = itertools.chain(["stopped: max waves"], itertools.repeat("stopped: no ready work"))
+    monkeypatch.setattr(PC.subprocess, "run", lambda cmd, **kw: cmds.append(cmd)
+                        or subprocess.CompletedProcess(cmd, 0, next(outs) + "\n", ""))
+    monkeypatch.setattr(PC.time, "sleep", lambda s: None)
+    PC.main(["--until-done"])
+    assert cmds[0][cmds[0].index("--priority") + 1] == "P1"      # backfilled while P0 waited
+    assert seen_start[1] == "P0"                                  # the next probe starts at the top again
