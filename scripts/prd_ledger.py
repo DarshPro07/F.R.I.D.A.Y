@@ -4684,6 +4684,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Appended to friday/simple_loop.py after run_simple, with no existing function changed. route_simple(request, dispatch, propose, *, run=None, bounds=LoopBounds()) returns None when task_class.classify says the request is not SIMPLE, without calling propose or dispatch. Otherwise it returns await run_ (build run, commit 70bb83dc0)',
         "next_action": 'GAPS: Acceptance is not fully met: there is still no live caller (voice-turn routing in agent_friday.py, out of scope per the packet).; There is no real model_gateway transport or spend source feeding complete(); the caller supplies it.; route_simple has no escalate parameter (the packet signature has none), so escalation inside it uses the default escalate_to_objective_os.; reachability verdict left FUTURE as instructed.; implementer did not claim acceptance met',
     }),
+    ('SUPPLY-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Design: new friday/sbom.py. build(lock, packages, pins, hermes, providers) is pure and collect() reads the real sources. It joins four sources into one component list, and every component has kind, name, source, version and scan_state. (1) UPSTREAM_LOCK.json rows become kind upstream or model. (2) E (build run, commit 9fb409e73)',
+        "next_action": "GAPS: Python packages have no vulnerability scan, so all are UNSCANNED until a scanner is wired in.; The SBOM is generated on demand and not committed, because package versions depend on the venv. There is no drift check.; MCP servers are only those in data/mcp_pins.json (absent on this machine's tree) and the Hermes config; a Claude Code mcpServers JSON import is not read unless it was pinned through the firewall.; CLI components are only fabric CLI-mode providers; other executables on PATH are not enumerated.; Controller: integrated as PARTIAL - 'every active external component' is not yet met while Claude Code's own MCP servers and non-fabric CLIs on PATH are not enumerated.; implementer did not claim acceptance met",
+    }),
 ]
 
 
