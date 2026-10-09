@@ -316,6 +316,14 @@ GetExitCodeProcess = _bind(
 CloseHandle = _bind(_kernel32, "CloseHandle", (wintypes.HANDLE,),
                     wintypes.BOOL)
 
+#: SetErrorMode flags: a bad image, a crash or a missing volume is reported to
+#: the caller instead of raising a modal system dialog.
+SEM_FAILCRITICALERRORS = 0x0001
+SEM_NOGPFAULTERRORBOX = 0x0002
+SEM_NOOPENFILEERRORBOX = 0x8000
+GetErrorMode = _bind(_kernel32, "GetErrorMode", (), wintypes.UINT)
+SetErrorMode = _bind(_kernel32, "SetErrorMode", (wintypes.UINT,), wintypes.UINT)
+
 
 # ---------------------------------------------------------------------------
 # The two helpers worth having here rather than at every call site

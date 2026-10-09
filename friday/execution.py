@@ -69,6 +69,26 @@ logger = logging.getLogger("friday-agent")
 
 WINDOWS = sys.platform == "win32"
 
+
+def quiet_error_mode() -> None:
+    """
+    Make a program that cannot start fail instead of prompting.
+
+    A headless FRIDAY process (started hidden, as a service, by the launcher)
+    has error mode 0, and there `CreateProcess` on a file that is not a valid
+    program raises a modal system dialog nobody can see and waits on it.
+    Measured 2026-10-10: still blocked after 40 s, while the same call with
+    SEM_FAILCRITICALERRORS fails at once with OSError 216. A subprocess
+    timeout does not help: it only starts counting once the process exists.
+    Process-wide, idempotent, and inherited by every child.
+    """
+    if not WINDOWS:
+        return
+    from friday.platform import windows as W
+
+    W.SetErrorMode(W.GetErrorMode() | W.SEM_FAILCRITICALERRORS
+                   | W.SEM_NOGPFAULTERRORBOX | W.SEM_NOOPENFILEERRORBOX)
+
 # Never crosses the boundary, even when a caller asks for the whole
 # environment. A denylist of the secrets somebody remembered - which is why
 # `environment()` works from `KEPT` and this only backs it up.
@@ -501,6 +521,7 @@ class NativeExecutionEnvironment:
         command = tuple(str(part) for part in command)
         limit = timeout if timeout is not None else self.limits.seconds
         started = time.monotonic()
+        quiet_error_mode()
 
         if self.container is not None:
             return self._run_contained(command, limit, stdin, started)

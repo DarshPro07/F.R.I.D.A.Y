@@ -14,6 +14,7 @@ in one screen and testable without importing FastMCP.
 from __future__ import annotations
 
 from collections.abc import Callable
+import threading
 from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timezone
 
@@ -2922,6 +2923,10 @@ def as_dicts() -> list[dict]:
 #: frozen record: a callable in `asdict()` output would break the JSON manifest.
 _PROBES: dict[str, Callable[[], object]] = {}
 
+#: Seconds a native probe may run before it is reported UNAVAILABLE. Read at
+#: call time so a test can shorten it.
+PROBE_TIMEOUT_S = 10.0
+
 
 def register_probe(tool_id: str, probe: Callable[[], object]) -> None:
     """
@@ -2945,18 +2950,34 @@ def health(tool_id: str) -> dict:
     Declared means installed, and installed is never reported healthy on its
     own: with no probe the state is REGISTERED and ``healthy`` is False. A
     probe that raises or answers falsy yields UNAVAILABLE, with the reason in
-    ``detail`` - the failure is reported, not swallowed.
+    ``detail`` - the failure is reported, not swallowed. A probe still running
+    after `PROBE_TIMEOUT_S` is UNAVAILABLE too: a hung probe must not hang the
+    caller (the abandoned daemon thread is left to finish on its own).
     """
     get(tool_id)
     probe = _PROBES.get(tool_id)
     if probe is None:
         return _health_report(tool_id, REGISTERED,
                               "installed; no health probe registered")
-    try:
-        result = probe()
-    except Exception as exc:                       # noqa: BLE001 - reported
+    outcome: dict = {}
+
+    def _run() -> None:
+        try:
+            outcome["result"] = probe()
+        except Exception as exc:                   # noqa: BLE001 - reported
+            outcome["error"] = exc
+
+    runner = threading.Thread(target=_run, name=f"health-probe-{tool_id}",
+                              daemon=True)
+    runner.start()
+    runner.join(PROBE_TIMEOUT_S)
+    if runner.is_alive():
         return _health_report(tool_id, UNAVAILABLE,
-                              f"health probe raised: {exc}")
+                              f"health probe timed out after {PROBE_TIMEOUT_S}s")
+    if "error" in outcome:
+        return _health_report(tool_id, UNAVAILABLE,
+                              f"health probe raised: {outcome['error']}")
+    result = outcome["result"]
     if isinstance(result, dict):
         state = result.get("state", READY)
         if state not in PROBE_STATES:

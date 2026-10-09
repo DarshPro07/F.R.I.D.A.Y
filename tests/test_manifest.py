@@ -279,6 +279,38 @@ def test_a_failing_probe_makes_an_installed_native_tool_unavailable():
     assert M.describe("files_read")["state"] == fabric.REGISTERED
 
 
+def test_a_hung_probe_times_out_as_unavailable_instead_of_blocking(monkeypatch):
+    import threading
+    import time
+
+    from friday import capabilities as C
+
+    monkeypatch.setattr(C, "PROBE_TIMEOUT_S", 0.2)
+    release = threading.Event()
+
+    def hung():
+        release.wait(3)
+        return True
+
+    C.register_probe("files_read", hung)
+    try:
+        started = time.monotonic()
+        report = C.health("files_read")
+        assert time.monotonic() - started < 2
+        assert report["state"] == fabric.UNAVAILABLE
+        assert report["healthy"] is False
+        assert "timed out" in report["detail"]
+
+        started = time.monotonic()
+        rows = {row["id"]: row for row in M.probe_all()}
+        assert time.monotonic() - started < 2
+        assert rows["files_read"]["state"] == fabric.UNAVAILABLE
+        assert "files_read" in {row["id"] for row in M.unhealthy()}
+    finally:
+        release.set()
+        C.unregister_probe("files_read")
+
+
 def test_building_and_summarising_the_manifest_never_runs_a_probe():
     from friday import capabilities as C
     calls = []

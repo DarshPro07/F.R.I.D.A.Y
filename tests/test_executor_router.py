@@ -296,3 +296,36 @@ def test_problem_does_not_launch_an_executor_friday_cannot_drive(
     monkeypatch.setattr(R.Executor, "validate_binary", launched)
     unbuildable = R.Executor(id="x", binary="x", buildable=False)
     assert "no builder" in unbuildable.problem()
+
+
+# -- a program that cannot start must fail, never prompt --------------------------------------
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _error_mode_after(code: str) -> int:
+    """Run `code` in a child that starts with error mode 0, as a headless FRIDAY
+    process does, and return the error mode it ends with."""
+    prelude = "import ctypes, sys; _k = ctypes.WinDLL('kernel32'); _k.SetErrorMode(0)\n"
+    done = subprocess.run([sys.executable, "-c", prelude + code + "\nprint(_k.GetErrorMode())"],
+                          cwd=_ROOT, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stdout + done.stderr
+    return int(done.stdout.strip().splitlines()[-1])
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows error modes")
+def test_checking_a_binary_first_makes_a_bad_image_fail_instead_of_prompting():
+    # With error mode 0, starting a file that is not a program waits on a modal
+    # dialog nobody sees (measured 2026-10-10: still blocked after 40 s), so the
+    # check must set the mode before it launches anything.
+    mode = _error_mode_after("from friday import executor_router as R\n"
+                             "assert R.BY_ID['claude'].validate_binary(sys.executable) is None")
+    assert mode & 0x0001 and mode & 0x8000, hex(mode)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows error modes")
+def test_running_a_program_first_makes_a_bad_image_fail_instead_of_prompting(tmp_path):
+    mode = _error_mode_after("from friday import execution as X\n"
+                             f"env = X.for_development({str(tmp_path)!r})\n"
+                             "assert env.run([sys.executable, '--version']).exit_code == 0")
+    assert mode & 0x0001 and mode & 0x8000, hex(mode)

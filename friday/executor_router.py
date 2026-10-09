@@ -110,6 +110,9 @@ class Executor:
         target = found or self.path()
         if target is None:
             return "not installed"
+        from friday.execution import quiet_error_mode
+
+        quiet_error_mode()                 # a bad image must fail here, not prompt
         try:
             ran = subprocess.run(
                 [target, "--version"], capture_output=True, text=True,

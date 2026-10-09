@@ -28,6 +28,18 @@ from pathlib import Path
 
 import pytest
 
+# A pytest run started hidden (the build harness's integrator, a service) has
+# Windows error mode 0, where starting a file that is not a program waits on a
+# modal dialog nobody can see (measured 2026-10-10). FRIDAY sets the mode before
+# it launches anything (execution.quiet_error_mode); the test process sets it
+# here as well, so a test that runs a deliberately corrupt binary fails instead
+# of hanging - even against a base commit that predates the product fix.
+if sys.platform == "win32":
+    import ctypes
+
+    _kernel32 = ctypes.WinDLL("kernel32")
+    _kernel32.SetErrorMode(_kernel32.GetErrorMode() | 0x0001 | 0x0002 | 0x8000)
+
 #: TEST-ISOLATION-001 (PRD v7): the session runs against its own state root,
 #: set here - before any test imports FRIDAY - so no test, and no process a
 #: test starts (it inherits the environment), writes the owner's live state
