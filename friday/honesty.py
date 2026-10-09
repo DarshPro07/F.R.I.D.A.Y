@@ -444,20 +444,26 @@ def touched_targets(result) -> list[str]:
 def _same_target(named: str, touched: str) -> bool:
     """Whether a named target and a touched one are the same thing.
 
-    Compared on the normalised tail of a path, so an absolute Windows path,
-    a relative one and a bare filename all match each other - the user says
-    the short name and the tool records the long one. Case-insensitive and
-    separator-insensitive, because Windows paths are both.
+    Compared on path components, never raw substrings, so the user's short
+    name matches the tool's long path but "bar.txt" is not "foobar.txt".
+    Normalised (lower-case, forward slashes, quotes stripped), they are the
+    same when equal, when the touched path ends in the named one at a
+    separator ("sub/foo.txt"), or when a name with no separator is one of the
+    touched path's components - a basename, or a folder the action wrote under.
     """
     def norm(value: str) -> str:
-        return str(value).strip().strip("'" + chr(34)).replace(chr(92), "/").lower()
+        text = str(value).strip().strip("'" + chr(34)).replace(chr(92), "/").lower()
+        # The extractor keeps a sentence's closing period on the target, and
+        # "./x" is the same relative path as "x".
+        text = text.rstrip(".,;:!?").removeprefix("./")
+        return text.strip("'" + chr(34))
 
     a, b = norm(named), norm(touched)
     if not a or not b:
         return False
-    if a in b or b in a:
+    if a == b or b.endswith("/" + a):
         return True
-    return a.rsplit("/", 1)[-1] == b.rsplit("/", 1)[-1]
+    return "/" not in a and a in b.split("/")
 
 
 def _target_mismatch(sentence: str, backed) -> str:
@@ -465,18 +471,28 @@ def _target_mismatch(sentence: str, backed) -> str:
     named = named_targets(sentence)
     if not named:
         return ""
-    touched = [value for result in backed for value in touched_targets(result)]
+    # A removal claim is backed only by removals: a write shows a file exists,
+    # never that it is gone. Any other claim is backed by any succeeded action.
+    pool = backed
+    if _is_removal_claim(sentence):
+        pool = [r for r in backed if proof_shape_for(r.tool_id).name == "removal"]
+    touched = [value for result in pool for value in touched_targets(result)]
     if not touched:
         # The kind check has already accepted these actions, but not one of
         # them can show WHAT it touched. That is not evidence for a claim
         # about a specific thing, and saying so beats assuming it is fine.
         return (f"the claim names {named[0]!r} but no succeeded action "
                 f"recorded what it touched")
-    for candidate in named:
-        if any(_same_target(candidate, value) for value in touched):
-            return ""
+    # Every file a claim names must be shown acted on: a source or destination
+    # folder is satisfied by the component match in _same_target, so "one
+    # named target is enough" is not needed and would let "foo.txt and
+    # bar.txt" through on evidence for foo.txt alone.
+    missing = [candidate for candidate in named
+               if not any(_same_target(candidate, value) for value in touched)]
+    if not missing:
+        return ""
     shown = sorted({v for v in touched if len(v) < 120})[:4] or ["nothing nameable"]
-    return (f"the claim names {named[0]!r}; what succeeded touched {shown} - "
+    return (f"the claim names {missing[0]!r}; what succeeded touched {shown} - "
             f"evidence for one target does not back a claim about another")
 
 
@@ -769,12 +785,27 @@ _NON_REMOVAL_VERB_RE = re.compile(
 _REMOVAL_CLAIMS = frozenset({*_REMOVAL_ACTS, "done", "all done"})
 
 
+_LIST_JOIN_RE = re.compile(r"\s*(?:,|\band\b|\bor\b)\s*", re.I)
+
+
+def _is_file_list(span: str) -> bool:
+    """Whether a move phrase's object is a plain list of files: 'foo.txt and
+    bar.txt'. Every item must be one bare token that names a concrete target
+    (only 'the' may stand before it), so a second verb or a described object
+    cannot ride inside a list and stays in view."""
+    items = [re.sub(r"^the\s+", "", item.strip(), flags=re.I)
+             for item in _LIST_JOIN_RE.split(span)]
+    items = [item for item in items if item]
+    return bool(items) and all(len(item.split()) == 1 and named_targets(item)
+                               for item in items)
+
+
 def _own_words(m: re.Match) -> str:
     """What of a removal phrase is not part of the removal claim itself."""
     what = m.group("what")
     if what is None:
         return " "
-    if _NOT_ONE_OBJECT_RE.search(what):
+    if _NOT_ONE_OBJECT_RE.search(what) and not _is_file_list(what):
         return f" {m.group('verb')} {what} "
     return f" {what} "
 
@@ -861,7 +892,8 @@ def audit(text: str, run: Run | None, *, strict_proof: bool = True,
     CLAIM_EVIDENCE the thing that succeeded must be of the KIND the verb
     names - a verified `files_read` is real work and real evidence, and it is
     not evidence that a catalogue was processed; and when the sentence names
-    a concrete TARGET, one of those actions must have touched it. Success on
+    a concrete TARGET, one of those actions must have touched it - every one
+    it names, for a removal. Success on
     foo.txt is not permission to say bar.txt was created (FR-TRU-001). The
     kind rule runs both ways: a removal is proven by the path being gone,
     which backs 'deleted' and contradicts every other verb.

@@ -216,6 +216,62 @@ def test_a_move_phrase_with_more_than_one_object_stays_a_claim(claim):
     assert not H.audit(claim, None).ok
 
 
+def _removal_run(*names: str):
+    """One run in which every file in `names` was verifiably recycled."""
+    run = c.Run.create(f"remove {', '.join(names)}", capability="files_recycle")
+    for name in names:
+        prior = c.started(run.run_id, "files_recycle")
+        v = c.Verification(method="path_absent_after_recycle",
+                           evidence=f"{name} (12 bytes) is gone from C:/w/{name}; "
+                                    f"post_state=absent")
+        run.record(c.succeeded(prior, output={"path": f"C:/w/{name}"}, verification=v))
+    return run
+
+
+@pytest.mark.parametrize("claim,names", [
+    ("I sent foo.txt and bar.txt to the Recycle Bin.", ("foo.txt", "bar.txt")),
+    ("I moved foo.txt, bar.txt and baz.txt to the trash.",
+     ("foo.txt", "bar.txt", "baz.txt")),
+    ("I put the foo.txt and the bar.txt in the trash.", ("foo.txt", "bar.txt")),
+    ("I deleted foo.txt and bar.txt.", ("foo.txt", "bar.txt")),
+])
+def test_a_list_of_removed_files_is_backed_when_every_file_was_removed(claim, names):
+    audited = H.audit(claim, _removal_run(*names))
+    assert audited.ok, audited.reason
+
+
+@pytest.mark.parametrize("claim", [
+    "I sent foo.txt and bar.txt to the Recycle Bin.",
+    "I moved foo.txt, bar.txt and baz.txt to the trash.",
+    "I deleted foo.txt and bar.txt.",
+])
+def test_a_list_of_removed_files_is_refused_when_one_was_not_removed(claim):
+    """Evidence for foo.txt is not evidence that bar.txt is gone."""
+    refused = H.audit(claim, _removal_run("foo.txt", "baz.txt"))
+    assert not refused.ok, claim
+    assert "bar.txt" in refused.reason, claim
+
+
+@pytest.mark.parametrize("claim", [
+    "I sent foo.txt and the invoice to the trash.",
+    "I put foo.txt and saved bar.txt in the trash.",
+    "I sent foo.txt and emailed bar.txt to the trash.",
+])
+def test_a_list_of_files_does_not_hide_a_second_action(claim):
+    """Only a plain list of files is read as one removal; anything else in the
+    span stays in view, so a verb inside it still has to be backed."""
+    assert not H.audit(claim, _removal_run("foo.txt", "bar.txt")).ok, claim
+
+
+def test_a_failure_dated_before_the_run_backs_no_failure_claim():
+    """A failure is held to the same correlation and window as a success."""
+    run = c.Run.create("send it", capability="email_send")
+    run.record(c.failed(c.started(run.run_id, "email_send"), "smtp refused",
+                        correlation=_corr(timestamp="2000-01-01T00:00:00+00:00")))
+    refused = H.audit("The send failed.", run)
+    assert not refused.ok and "before" in refused.reason
+
+
 def test_simulation_needs_a_recorded_artifact():
     assert not H.audit("I created foo.txt.", _run("sim_run", "run", "foo.txt ok")).ok
     assert H.audit("I created foo.txt.",
@@ -446,3 +502,85 @@ def test_cad_tool_id_needs_an_artifact():
     assert not H.audit("I created foo.txt.", bare).ok
     assert H.audit("I created foo.txt.", _run(
         "cad.generate", "file_exists", "foo.txt, 41 KB", artifact=True)).ok
+
+
+# ---------------------------------------------------------------------------
+# a claim must be backed for every target it names (ACT-001 repair)
+# ---------------------------------------------------------------------------
+
+def _write_and_recycle():
+    """foo.txt recycled and bar.txt written, both verified."""
+    run = _removal_run("foo.txt")
+    prior = c.started(run.run_id, "files_write")
+    v = c.Verification(method="readback", evidence=f"bar.txt sha256={HASH}")
+    run.record(c.succeeded(prior, output={"path": "C:/w/bar.txt"}, verification=v))
+    return run
+
+
+def test_a_write_does_not_back_the_deletion_of_the_file_it_wrote():
+    refused = H.audit("I deleted foo.txt and bar.txt.", _write_and_recycle())
+    assert not refused.ok
+    assert "bar.txt" in refused.reason
+
+
+def test_a_claim_naming_two_files_needs_both_backed():
+    run = _run("files_write", "readback", f"foo.txt sha256={HASH}", path="C:/w/foo.txt")
+    refused = H.audit("I created foo.txt and bar.txt.", run)
+    assert not refused.ok
+    assert "bar.txt" in refused.reason
+    assert H.audit("I created foo.txt.", run).ok
+
+
+def test_a_claim_naming_two_files_is_backed_when_two_actions_wrote_them():
+    run = _run("files_write", "readback", f"foo.txt sha256={HASH}", path="C:/w/foo.txt")
+    prior = c.started(run.run_id, "files_write")
+    v = c.Verification(method="readback", evidence=f"bar.txt sha256={HASH}")
+    run.record(c.succeeded(prior, output={"path": "C:/w/bar.txt"}, verification=v))
+    audited = H.audit("I created foo.txt and bar.txt.", run)
+    assert audited.ok, audited.reason
+
+
+def test_a_target_is_matched_on_path_components_not_substrings():
+    run = _run("files_recycle", "path_absent_after_recycle",
+               "foobar.txt (12 bytes) is gone from C:/w/foobar.txt; post_state=absent",
+               path="C:/w/foobar.txt")
+    assert H.audit("I deleted foobar.txt.", run).ok
+    assert not H.audit("I deleted bar.txt.", run).ok
+    wrote = _run("files_write", "readback", f"foobar.txt sha256={HASH}",
+                 path="C:/w/foobar.txt")
+    assert not H.audit("I created bar.txt.", wrote).ok
+
+
+@pytest.mark.parametrize("named,touched,same", [
+    ("bar.txt", "C:/w/foobar.txt", False),
+    ("bar.txt", "C:\\w\\Bar.txt", True),
+    ("sub/foo.txt", "C:/w/sub/foo.txt", True),
+    ("foo.txt", "C:/w/sub/foo.txt", True),
+    ("backup", "C:/w/backup/report.txt", True),
+    ("ackup", "C:/w/backup/report.txt", False),
+    ("b/foo.txt", "C:/w/sub/foo.txt", False),
+    ("C:/w/foo.txt", "c:\\w\\foo.txt", True),
+])
+def test_same_target_compares_path_components(named, touched, same):
+    assert H._same_target(named, touched) is same
+
+
+@pytest.mark.parametrize("claim,path", [
+    ("I created sub/foo.txt.", "C:/w/sub/foo.txt"),
+    ("I created foo.txt.", "C:/w/sub/foo.txt"),
+    ("I saved report.txt to backup.", "C:/w/backup/report.txt"),
+])
+def test_a_relative_or_folder_target_is_still_backed(claim, path):
+    name = path.rsplit("/", 1)[-1]
+    run = _run("files_write", "readback", f"{name} sha256={HASH}", path=path)
+    audited = H.audit(claim, run)
+    assert audited.ok, audited.reason
+
+
+@pytest.mark.parametrize("named,touched", [
+    ("C:/work/foo.txt.", "C:/work/foo.txt"),
+    ("./work/foo.txt.", "C:/work/foo.txt"),
+    ("https://shop.example/product.", "https://shop.example/product"),
+])
+def test_same_target_ignores_a_sentence_period_and_a_leading_dot_slash(named, touched):
+    assert H._same_target(named, touched)
