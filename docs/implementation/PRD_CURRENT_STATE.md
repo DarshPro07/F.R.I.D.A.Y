@@ -153,14 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: fb1996f on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T16:59:53+00:00
+- HEAD: a1a8cda on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T17:24:36+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 127, "PARKED_BY_OWNER": 1, "PARTIAL": 62, "VERIFIED": 64}
 - Unresolved P0: 11
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (308): MEM-003=SCOUT_DONE, JIT-001=BLOCKED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), MEM-002 (NOT_CONFIRMED), ACT-001 (VERIFIER_FAIL), SEC-005 (blocked), JIT-001 (blocked)
-- Open escalations: 221
-  - COG-006 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
+- Last wave (311): TRAJ-001=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), MEM-002 (NOT_CONFIRMED), ACT-001 (VERIFIER_FAIL), SEC-005 (blocked), JIT-001 (blocked), MEM-003 (blocked)
+- Open escalations: 222
   - CAP-MKT-002 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
   - EXP-001 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
   - MEM-003 resolved: controller unpark: controller 2026-10-09 (owner approved): ACT-001 integrated at 20:08, the hold con
@@ -170,5 +169,6 @@ That is the first implementation target of this program.
   - DEVICE-003 resolved: controller unpark: controller re-integrated DEVICE-003 after declaring its table for workspace isola
   - SEC-005 blocked: Question for the owner: does Hermes' gateway have an RPC, config key or event that names its registe
   - JIT-001 blocked: Scout says browser_automate/browser_act 'lack real implementations'; the code has both, with 7 tests
+  - MEM-003 blocked: Question for the owner: the scout's fix (pass from_read_material=read_this_turn at memory_benchmark.
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
