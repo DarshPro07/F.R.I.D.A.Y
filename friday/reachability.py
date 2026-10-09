@@ -209,6 +209,10 @@ DECLARED = {
                                "Completer adapter over the model gateway, the next "
                                "wiring step. Its output is already read live: "
                                "model_capabilities.get falls back to stored profiles"),
+    "friday/model_scout": (FUTURE,
+                           "FAB-006: the model scout, built and tested against scripted "
+                           "routes; its callers are a gateway-backed probe completer and "
+                           "case checker plus the listing event source, the next wiring step"),
     "friday/local_experts": (FUTURE,
                              "MODEL-005: the resident-expert pool, built and tested "
                              "against a simulated 8 GB machine on the real governor; "
