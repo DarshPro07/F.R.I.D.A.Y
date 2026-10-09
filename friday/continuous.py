@@ -825,6 +825,8 @@ class ContinuousTaskExecutor:
                 detail={"dimension": verdict.dimension, "reason": verdict.reason,
                         "limit": verdict.limit, "spend": vars(verdict.spend)})
             return
+        # ORCH-003: past the soft limit the run goes on, but reports once.
+        budget_module.record_soft_limits(self.store, run_id, verdict, task_id=task_id)
 
         attempt = int(task.get("attempts") or 0) + 1
         self.store.update_objective_task(

@@ -15,11 +15,20 @@ actually recorded, never estimated:
     tool calls  task attempts recorded in objective_tasks
     workers     delegations recorded as hermes_delegate / hermes_team tasks
     replans     strategy_changes across the run's tasks
+    turns       GatewayTelemetry rows for the objective (one per model call)
+    research    attempts of the research capabilities (ORCH-003)
     wall time   now - created_at
 
 A budget that is exhausted blocks the run with a `blocker` that names the
 dimension and the numbers, and records `run.budget_exhausted` in the
 ledger. It never silently trims work.
+
+ORCH-003: every ceiling also has a soft limit at SOFT_FRACTION of it. A run
+that crosses one is still allowed; the engine records `run.budget_soft_limit`
+once per dimension with a progress / blocker / why-more-budget report built
+from recorded task state, so no model has to notice or be asked. The hard
+limit is the ceiling above, enforced by `check` in code; raising the ceiling
+on the run row is the only way past it.
 """
 from __future__ import annotations
 
@@ -47,14 +56,22 @@ MAX_STRATEGY_CHANGES = 3
 #: cap governs replanning ACROSS tasks, which is the runaway the audit
 #: (A-022) was about.
 CLASS_LIMITS: dict[str, dict[str, int]] = {
-    #                 tool calls, worker delegations, replans (strategy changes)
-    "TRIVIAL":      {"max_tool_calls": 4,   "max_workers": 0, "max_replans": 1 * MAX_STRATEGY_CHANGES},
-    "SIMPLE":       {"max_tool_calls": 12,  "max_workers": 1, "max_replans": 1 * MAX_STRATEGY_CHANGES},
-    "STANDARD":     {"max_tool_calls": 40,  "max_workers": 2, "max_replans": 2 * MAX_STRATEGY_CHANGES},
-    "COMPLEX":      {"max_tool_calls": 120, "max_workers": 4, "max_replans": 3 * MAX_STRATEGY_CHANGES},
-    "LONG_RUNNING": {"max_tool_calls": 400, "max_workers": 6, "max_replans": 4 * MAX_STRATEGY_CHANGES},
-    "CRITICAL":     {"max_tool_calls": 160, "max_workers": 4, "max_replans": 2 * MAX_STRATEGY_CHANGES},
+    #                 tool calls, worker delegations, replans (strategy changes),
+    #                 turns (model calls; ~4 per tool call), research calls
+    "TRIVIAL":      {"max_tool_calls": 4,   "max_workers": 0, "max_replans": 1 * MAX_STRATEGY_CHANGES, "max_turns": 16, "max_research_calls": 1},
+    "SIMPLE":       {"max_tool_calls": 12,  "max_workers": 1, "max_replans": 1 * MAX_STRATEGY_CHANGES, "max_turns": 48, "max_research_calls": 2},
+    "STANDARD":     {"max_tool_calls": 40,  "max_workers": 2, "max_replans": 2 * MAX_STRATEGY_CHANGES, "max_turns": 160, "max_research_calls": 6},
+    "COMPLEX":      {"max_tool_calls": 120, "max_workers": 4, "max_replans": 3 * MAX_STRATEGY_CHANGES, "max_turns": 480, "max_research_calls": 16},
+    "LONG_RUNNING": {"max_tool_calls": 400, "max_workers": 6, "max_replans": 4 * MAX_STRATEGY_CHANGES, "max_turns": 1600, "max_research_calls": 40},
+    "CRITICAL":     {"max_tool_calls": 160, "max_workers": 4, "max_replans": 2 * MAX_STRATEGY_CHANGES, "max_turns": 640, "max_research_calls": 16},
 }
+#: ORCH-003: the fraction of a ceiling at which a run is asked to report.
+SOFT_FRACTION = 0.8
+
+#: Research capabilities: minutes and money per call (friday/audit_fixtures.py),
+#: so they get a call budget of their own.
+RESEARCH_CAPABILITIES = frozenset({"web_crawl", "web_deep_research"})
+
 _DEFAULT_LIMITS = CLASS_LIMITS["STANDARD"]
 
 #: Capabilities whose execution is a worker delegation.
@@ -64,6 +81,7 @@ WORKER_CAPABILITIES = frozenset({
 })
 
 EVENT_BUDGET_EXHAUSTED = "run.budget_exhausted"
+EVENT_BUDGET_SOFT = "run.budget_soft_limit"
 
 
 @dataclass
@@ -73,6 +91,8 @@ class Spend:
     workers: int = 0
     replans: int = 0
     wall_s: float = 0.0
+    turns: int = 0
+    research_calls: int = 0
     sources: dict = field(default_factory=dict)
 
 
@@ -83,6 +103,8 @@ class Verdict:
     reason: str = ""
     spend: Spend = field(default_factory=Spend)
     limit: int = 0
+    #: Soft limits crossed while still allowed: {dimension, spent, limit}.
+    soft: tuple = ()
 
 
 def _parse(ts: str) -> datetime | None:
@@ -109,6 +131,8 @@ def measure(store, run_id: str, *, telemetry=None, work_log=None,
     spend.workers = sum(1 for t in tasks
                         if t.get("capability") in WORKER_CAPABILITIES
                         and int(t.get("attempts") or 0) > 0)
+    spend.research_calls = sum(int(t.get("attempts") or 0) for t in tasks
+                               if t.get("capability") in RESEARCH_CAPABILITIES)
     spend.replans = sum(int(((t.get("detail") or {}).get("strategy_changes")) or 0)
                         for t in tasks)
     created = _parse(run.get("created_at") or "")
@@ -121,6 +145,7 @@ def measure(store, run_id: str, *, telemetry=None, work_log=None,
             rows = telemetry.for_objective(run_id)
             gateway_tokens = sum(int(r.get("input_tokens") or 0) + int(r.get("output_tokens") or 0)
                                  for r in rows)
+            spend.turns = len(rows)
             spend.sources["gateway_calls"] = len(rows)
         except Exception as exc:  # noqa: BLE001 - a missing ledger is not a free pass; recorded
             spend.sources["gateway_error"] = f"{type(exc).__name__}: {exc}"
@@ -187,6 +212,14 @@ def check(store, run_id: str, *, next_capability: str = "", next_task_id: str | 
     if spend.tool_calls >= max_calls:
         return Verdict(False, "tool_calls", f"{spend.tool_calls} tool calls of {max_calls} allowed",
                        spend, max_calls)
+    if spend.turns >= limits["max_turns"]:
+        return Verdict(False, "turns", f"{spend.turns} turns of {limits['max_turns']} allowed",
+                       spend, limits["max_turns"])
+    if (next_capability in RESEARCH_CAPABILITIES
+            and spend.research_calls >= limits["max_research_calls"]):
+        return Verdict(False, "research_calls",
+                       f"{spend.research_calls} research calls of {limits['max_research_calls']} allowed",
+                       spend, limits["max_research_calls"])
     if next_capability in WORKER_CAPABILITIES and spend.workers >= limits["max_workers"]:
         # The task about to run may itself be one of the counted workers
         # (a retry); only a NEW delegation is refused.
@@ -199,4 +232,48 @@ def check(store, run_id: str, *, next_capability: str = "", next_task_id: str | 
     if spend.replans > limits["max_replans"]:
         return Verdict(False, "replans", f"{spend.replans} strategy changes of {limits['max_replans']} allowed",
                        spend, limits["max_replans"])
-    return Verdict(True, spend=spend)
+    soft = tuple(
+        {"dimension": name, "spent": spent, "limit": limit}
+        for name, spent, limit in (
+            ("tokens", spend.tokens, ceiling), ("wall_time", spend.wall_s, wall),
+            ("tool_calls", spend.tool_calls, max_calls), ("turns", spend.turns, limits["max_turns"]),
+            ("research_calls", spend.research_calls, limits["max_research_calls"]))
+        if limit and spent >= limit * SOFT_FRACTION)
+    return Verdict(True, spend=spend, soft=soft)
+
+
+def soft_report(store, run_id: str, entry: dict) -> dict:
+    """What a run at a soft limit would say: progress, blocker, why more
+    budget helps. Built from recorded task state, not asked of a model."""
+    from friday import objectives as O
+
+    tasks = store.objective_tasks(run_id)
+    done = sum(1 for t in tasks if t["status"] == O.TaskStatus.SUCCEEDED)
+    open_states = (O.TaskStatus.QUEUED, O.TaskStatus.READY, O.TaskStatus.RUNNING,
+                   O.TaskStatus.WAITING, O.TaskStatus.INTERRUPTED)
+    remaining = sum(1 for t in tasks if t["status"] in open_states)
+    stuck = [t for t in tasks if t["status"] in (O.TaskStatus.FAILED, O.TaskStatus.BLOCKED)]
+    if stuck:
+        last = stuck[-1]
+        blocker = (f"{last['capability']} {str(last['status']).lower()} "
+                   f"({last.get('failure_kind') or 'no failure kind recorded'})")
+    else:
+        blocker = (store.objective_run(run_id) or {}).get("blocker") or "none"
+    left = max(entry["limit"] - entry["spent"], 0)
+    why = (f"{remaining} task{'s' if remaining != 1 else ''} still open; "
+           f"{left:.0f} of the {entry['limit']} {entry['dimension']} ceiling is left for them"
+           if remaining else "no tasks remain open, so more budget would not help")
+    return {**entry, "progress": f"{done} of {len(tasks)} tasks done",
+            "blocker": blocker, "why_more_budget": why}
+
+
+def record_soft_limits(store, run_id: str, verdict: Verdict, *, task_id: str | None = None) -> None:
+    """Record `run.budget_soft_limit` once per dimension the run has crossed."""
+    if not verdict.soft:
+        return
+    reported = {(e.get("detail") or {}).get("dimension")
+                for e in store.objective_events_named(run_id, (EVENT_BUDGET_SOFT,))}
+    for entry in verdict.soft:
+        if entry["dimension"] not in reported:
+            store.append_objective_event(run_id, EVENT_BUDGET_SOFT, task_id=task_id,
+                                         detail=soft_report(store, run_id, entry))

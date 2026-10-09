@@ -208,3 +208,108 @@ async def test_a_stuck_single_task_concludes_blocked_before_the_replans_cap(tmp_
     assert task["status"] == O.TaskStatus.BLOCKED
     assert task["detail"]["strategy_changes"] == B.MAX_STRATEGY_CHANGES + 1
     store.close()
+
+
+# ORCH-003: a turn and research-call budget, and a soft limit before the hard one.
+
+def _spend_tokens(tel, run_id, tokens):
+    tel.record(objective_id=run_id, worker="friday", task_class="SIMPLE",
+               provider="p", model="m", status="ok", latency_ms=1,
+               input_tokens=tokens, output_tokens=0)
+
+
+def test_turns_are_the_gateway_calls_and_are_capped_per_class(tmp_path):
+    store = Store(tmp_path / "b.sqlite3")
+    tel = GatewayTelemetry(tmp_path / "gw.sqlite3")
+    run_id = _run(store, [{"capability": "system_get_info", "arguments": {}}])
+    limit = B.CLASS_LIMITS[store.objective_run(run_id)["task_class"]]["max_turns"]
+    for _ in range(limit - 1):
+        _spend_tokens(tel, run_id, 1)
+    assert B.measure(store, run_id, telemetry=tel).turns == limit - 1
+    assert B.check(store, run_id, telemetry=tel).allowed
+    _spend_tokens(tel, run_id, 1)
+    verdict = B.check(store, run_id, telemetry=tel)
+    assert not verdict.allowed and verdict.dimension == "turns"
+    assert verdict.limit == limit and f"{limit} turns" in verdict.reason
+    store.close()
+
+
+def test_research_calls_are_capped_and_only_stop_research(tmp_path):
+    store = Store(tmp_path / "b.sqlite3")
+    run_id = _run(store, [{"capability": "system_get_info", "arguments": {}}] * 3)
+    limit = B.CLASS_LIMITS[store.objective_run(run_id)["task_class"]]["max_research_calls"]
+    with store._tx() as conn:
+        conn.execute("UPDATE objective_tasks SET capability='web_deep_research', attempts=? "
+                     "WHERE task_id=(SELECT task_id FROM objective_tasks WHERE run_id=? LIMIT 1)",
+                     (limit, run_id))
+    assert B.measure(store, run_id).research_calls == limit
+    verdict = B.check(store, run_id, next_capability="web_deep_research")
+    assert not verdict.allowed and verdict.dimension == "research_calls"
+    assert B.check(store, run_id, next_capability="system_get_info").allowed
+    store.close()
+
+
+def test_the_soft_limit_flags_a_run_still_allowed_and_the_hard_limit_stops_it(tmp_path):
+    store = Store(tmp_path / "b.sqlite3")
+    tel = GatewayTelemetry(tmp_path / "gw.sqlite3")
+    run_id = _run(store, [{"capability": "system_get_info", "arguments": {}}])
+    ceiling = int(store.objective_run(run_id)["cost_budget_tokens"])
+    _spend_tokens(tel, run_id, int(ceiling * B.SOFT_FRACTION) - 1)
+    assert B.check(store, run_id, telemetry=tel).soft == ()
+    _spend_tokens(tel, run_id, 1)
+    verdict = B.check(store, run_id, telemetry=tel)
+    assert verdict.allowed, "the soft limit asks for a report, it does not stop"
+    assert [s["dimension"] for s in verdict.soft] == ["tokens"]
+    assert verdict.soft[0]["limit"] == ceiling
+    _spend_tokens(tel, run_id, ceiling)
+    hard = B.check(store, run_id, telemetry=tel)
+    assert not hard.allowed and hard.dimension == "tokens"
+    store.close()
+
+
+def test_the_soft_report_names_progress_blocker_and_why_more_budget_helps(tmp_path):
+    store = Store(tmp_path / "b.sqlite3")
+    run_id = _run(store, [{"capability": "system_get_info", "arguments": {"n": i}} for i in range(4)])
+    first, second = store.objective_tasks(run_id)[:2]
+    store.update_objective_task(first["task_id"], status=O.TaskStatus.SUCCEEDED, attempts=1)
+    store.update_objective_task(second["task_id"], status=O.TaskStatus.FAILED, attempts=2,
+                                failure_kind="TRANSIENT")
+    report = B.soft_report(store, run_id, {"dimension": "tokens", "spent": 80, "limit": 100})
+    assert report["dimension"] == "tokens" and report["spent"] == 80 and report["limit"] == 100
+    assert report["progress"] == "1 of 4 tasks done"
+    assert "TRANSIENT" in report["blocker"]
+    assert "2 tasks" in report["why_more_budget"]
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_a_run_at_its_soft_limit_keeps_running_and_reports_once(tmp_path, monkeypatch):
+    store = Store(tmp_path / "b.sqlite3")
+    tel = GatewayTelemetry(tmp_path / "gw.sqlite3")
+    monkeypatch.setattr("friday.model_gateway.GatewayTelemetry", lambda *a, **k: tel)
+    caps = Caps()
+    run_id = _run(store, [{"capability": "system_get_info", "arguments": {"n": i}} for i in range(2)])
+    ceiling = int(store.objective_run(run_id)["cost_budget_tokens"])
+    _spend_tokens(tel, run_id, int(ceiling * B.SOFT_FRACTION))
+    row = await _drive(store, caps, run_id)
+    assert row["status"] != O.RUN_PAUSED, row
+    assert caps.calls == ["system_get_info", "system_get_info"]
+    soft = store.objective_events_named(run_id, (B.EVENT_BUDGET_SOFT,))
+    assert len(soft) == 1, "one report per dimension, not one per call"
+    assert soft[0]["detail"]["dimension"] == "tokens"
+    assert {"progress", "blocker", "why_more_budget"} <= set(soft[0]["detail"])
+    store.close()
+
+
+def test_raising_the_budget_lets_a_stopped_run_continue(tmp_path):
+    store = Store(tmp_path / "b.sqlite3")
+    tel = GatewayTelemetry(tmp_path / "gw.sqlite3")
+    run_id = _run(store, [{"capability": "system_get_info", "arguments": {}}])
+    ceiling = int(store.objective_run(run_id)["cost_budget_tokens"])
+    _spend_tokens(tel, run_id, ceiling)
+    assert not B.check(store, run_id, telemetry=tel).allowed
+    with store._tx() as conn:
+        conn.execute("UPDATE objective_runs SET cost_budget_tokens=? WHERE run_id=?",
+                     (ceiling * 2, run_id))
+    assert B.check(store, run_id, telemetry=tel).allowed
+    store.close()
