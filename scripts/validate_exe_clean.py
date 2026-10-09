@@ -23,8 +23,8 @@ dependency (DEGRADED for credentials/hermes/browser is the expected
 answer), CLEAN-04 the MCP server and control room start and answer
 (`--no-agent --no-browser`), CLEAN-05 --stop leaves nothing behind.
 A STALE_DIST line is printed when the build's commit stamp is not this
-checkout's HEAD (or the build came from a dirty tree); it does not change the
-exit code. Exit is non-zero when any journey fails; the copy is deleted
+checkout's HEAD (or the build came from a dirty tree), and the final verdict
+line repeats it; it does not change the exit code. Exit is non-zero when any journey fails; the copy is deleted
 afterwards.
 """
 
@@ -195,6 +195,7 @@ def main() -> int:
             return subprocess.CompletedProcess([str(exe), *args], 124, stdout="",
                                                stderr=f"timed out ({exc.timeout:.0f}s): the host may have suspended")
 
+    stale = None
     try:
         version = run("--version")
         record("CLEAN-01 --version", version.returncode == 0 and version.stdout.startswith("FRIDAY"),
@@ -260,7 +261,8 @@ def main() -> int:
               "the journeys above are the C:\\Windows\\Temp simulation, not a VM", flush=True)
     failed = [j for j, ok, _ in RESULTS if not ok]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} clean-machine journeys passed"
-          + (f"; failed: {', '.join(failed)}" if failed else ""), flush=True)
+          + (f"; failed: {', '.join(failed)}" if failed else "")
+          + (f"; STALE_DIST: {stale}" if stale else ""), flush=True)
     return 1 if failed else 0
 
 
