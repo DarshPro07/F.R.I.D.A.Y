@@ -4219,6 +4219,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_browser_capability.py::test_auth_pages_hand_off_to_user', 'tests/test_workspace_isolation.py::test_a_browser_profile_approved_by_one_workspace_is_refused_to_another'],
         "files": ['friday/browser_capability.py:46', 'friday/browser_capability.py:131'],
     }),
+    ('CAP-FORGE-003', {
+        "status": PARTIAL,
+        "current_implementation": 'Re-applied the kept AppContainer quarantine (wip tag) and merged the 9 env/user-file probe cases into 2 single-quarantine tests; count test fails before (4 vs 1). test_quarantine.py 39.9s -> 29.2s, 35 pass. (build run, commit 4c4e5ebb2)',
+        "next_action": "GAPS: Baseline on this host was already 39.9s (41 tests), under the 240s target; the earlier slower figure was not reproduced. Merging cut it to 29.2s (35 tests).; Remaining cost in test_quarantine.py: the 8.8s tcp/asyncio/udp kernel-denial test (the child waits out its own 3s timeouts) and a one-off ~9s interpreter copy; both left alone (provision_runtime is out of scope, shortening the timeouts would weaken the check).; Windows only: the OS tier needs an AppContainer; elsewhere the default refuses and isolation='tripwire' is an explicit weaker opt-in.; Fetching a repository by URL is a follow-up; acquire() takes a local checkout.; friday/forge.py still refuses arbitrary code; relaxing it is the CAP-FORGE-004/014 decision.; The branch had none of the earlier attempt, so the wip files were re-created from the tag by hand (git restore was not permitted); they match the tag byte for byte, ignoring line endings.",
+    }),
 ]
 
 
