@@ -4545,6 +4545,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'The ledger next_action for DEVICE-002 was NOT a DESIGN/TESTS packet (it is the old "clone and pin hermes-gadget-sdk when DEVICE-001 starts" text), so I designed from the acceptance sentence and the DEVICE-001/003/004 code. New friday/toolsets/device_capabilities.py: DeviceCapabilityRegistry.register (build run, commit ce6fbf0c3)',
         "next_action": "GAPS: Nothing in production calls DeviceCapabilityRegistry yet: no hub instance, MCP wrapper in friday/tools/ or boot-time registration of real actions exists (toolsets is PRODUCTION in reachability, so no KNOWN entry was needed; test_reachability is green).; Non-AUTO verdicts (CONFIRM/ASK) are refused with PolicyError; binding a human confirmation via friday.confirmation (needed to run door.unlock-class actions) is still the DEVICE-004 follow-up.; Registry is in-memory; registration mutates the process-wide policy.TOOL_CATEGORIES (tests isolate via monkeypatch). No durable store table.; DeviceHub.act itself is still ungated; callers must go through the registry's act.; hermes-gadget-sdk remains unpinned; advertised-action shape ({'actions': [{'name': ...}]}) is an assumption matching tests/test_device_risk.py LyingDevice.",
     }),
+    ('MEM-002', {
+        "status": PARTIAL,
+        "current_implementation": "The profile path no longer files read material under the person's scopes, and the briefing tier no longer shows read-material rows already stored there. profile.learn now imports PERSON_SCOPES from friday.memory_promotion (no cycle, no second copy). For a read-material candidate whose dimension is p (build run, commit f89ad1a62)",
+        "next_action": "GAPS: The next_action packet was truncated after design item (2), so its remaining design items and the full test list were not visible. I implemented items (1) and (2) as written and did not guess at anything beyond them.; The legacy fallback query in memory_stack.preferences (for a database that predates project_scope) has no trust_class filter. That schema also predates trust_class, so it holds no read-material rows.; The briefing items still carry no trust marker (memory_stack.py:107-109). I excluded read-material rows rather than labelling them, which is the packet's stated design.",
+    }),
 ]
 
 
