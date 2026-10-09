@@ -4651,6 +4651,14 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Added the UPDATE_UNVERIFIED state in friday/skills/contracts.py, with ACTIVE -> UPDATE_UNVERIFIED and UPDATE_UNVERIFIED -> (QUARANTINED, DISABLED) transitions. It is not in SELECTABLE. In SkillLifecycle.register, when an ACTIVE skill's content hash differs from the verified one, it now moves ACTIVE  (build run, commit 38d547332)",
         "next_action": "GAPS: The row's provenance fields (source, commit, signature, SBOM, scan) are not touched; this slice covers only the state and the quarantine transition, which is all the row's acceptance names.; propose_update() writes the version into frontmatter before register(), so a deliberate owner update now also passes through UPDATE_UNVERIFIED -> QUARANTINED -> DRAFT -> STAGED. Lint then clears it as before, but the history shows an extra quarantine step.",
     }),
+    ('SKILL-002', {
+        "status": VERIFIED,
+        "current_implementation": "Design: in draft_skill_md (friday/skills/candidates.py), when trace.objective_id is set, write it to the generated skill's frontmatter at metadata.friday.objective_id. This follows the packet's EXTEND instruction and reuses data already on ObjectiveTrace; no new mechanism, table or module. Anonymous (build run, commit 7d721c6de)",
+        "next_action": '',
+        "evidence": 'build run SKILL-002, commit 7d721c6de; RED (assertion) at a12593420 and GREEN at the commit for tests/test_skills_units.py; affected tests 44 passed in 11.03s',
+        "tests": ['tests/test_skills_units.py::test_draft_skill_links_back_to_its_objective_in_frontmatter'],
+        "files": ['friday/skill_ladder.py:33', 'friday/skills/candidates.py:54', 'friday/skills/candidates.py:95-127', 'friday/skills/candidates.py:172', 'tests/test_skills_units.py:286-293'],
+    }),
 ]
 
 
