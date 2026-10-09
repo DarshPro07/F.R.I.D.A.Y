@@ -4722,6 +4722,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Re-applied friday/productivity.py and tests/test_productivity.py from wip/eval-005-1008 verbatim, only those two code files. I checked them against today's tree first: ledger_connection, RouteOutcomes.record/mark_rework, Store.open_objective_run/save_objective_task/update_objective_task, and the DEF (build run, commit 6dca2dfb8)",
         "next_action": 'GAPS: No caller yet: nothing in the objective engine or an MCP tool invokes write_report at run completion; the module is declared FUTURE in reachability.; requirements_closed and defects_fixed (named in the PRD) have no data source in the tree and are reported as UNMEASURED.; The ledger row status (MISSING -> PARTIAL) and evidence fields were not updated; the packet says builds do not commit ledger files.; Controller: integrated as PARTIAL because the slice has no production caller yet; a confirm can follow.; implementer did not claim acceptance met',
     }),
+    ('SIDE-002', {
+        "status": PARTIAL,
+        "current_implementation": 'Design (next_action was a one-line instruction): new friday/dry_run.py is a pure read of the capability record. dry_run(tool_id, args) returns a frozen DryRun with acted=False, expected_effects (derived from side_effect, requires_edge, reversibility, data_classes), a blast radius in execution_econom (build run, commit dbf155e8d)',
+        "next_action": 'GAPS: No live caller: MCP/tool dispatch does not yet call dry_run.propose before executing a consequential capability, so the dry run is not enforced in the real path.; No per-capability bespoke effect descriptions or per-argument targets; effects come from registry metadata only (no path or recipient detail).; Real-run step (consume the approved yes, then run) is not wired; only plan -> dry run -> approval request exists.; implementer did not claim acceptance met',
+    }),
 ]
 
 
