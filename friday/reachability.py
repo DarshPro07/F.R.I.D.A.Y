@@ -231,6 +231,9 @@ DECLARED = {
                       "are dispatched by argparse (FRIDAY.exe -m friday.skills.cli), "
                       "which the reference walk cannot follow; the voice/objective "
                       "seams are tracked in docs/plans/skill-intelligence/00-status.md"),
+    "friday/federation": (FUTURE,
+                          "FED-001 inbound-peer gate, not yet fed by an A2A "
+                          "transport adapter"),
     "friday/prompt_compiler": (FUTURE,
                                "PROMPT-001 instruction compiler, not yet "
                                "called by the voice agent's prompt build"),
