@@ -50,10 +50,21 @@ RESULTS: list[tuple[str, bool, str]] = []
 
 #: Environment every launched FRIDAY.exe gets: LOCALAPPDATA redirected to a
 #: scratch profile so the owner's real %LOCALAPPDATA%\FRIDAY is never
-#: touched, FRIDAY_HOME and PORTABLE_MODE cleared so the default path -
-#: including the migration of an older build's state - is what gets tested.
+#: touched, and every variable that relocates state cleared so the default
+#: path - including the migration of an older build's state - is what gets
+#: tested. ADA_DB / ADA_AUDIT_DB matter as much as FRIDAY_HOME: a shell that
+#: sets them (the build harness does, to keep data/ada.sqlite3 out of reach)
+#: would otherwise send the database, and so the journeys, somewhere else.
+STATE_OVERRIDES = ("FRIDAY_HOME", "PORTABLE_MODE", "ADA_DB", "ADA_AUDIT_DB")
 VALIDATOR_ENV: dict[str, str] = dict(os.environ)
 SCRATCH = ROOT / "build" / "validate" / "profile"
+
+
+def isolate_state(env: dict[str, str], scratch: Path) -> None:
+    """Point `env` at `scratch` as LOCALAPPDATA and drop every state override."""
+    env["LOCALAPPDATA"] = str(scratch)
+    for name in STATE_OVERRIDES:
+        env.pop(name, None)
 
 
 def prepare_scratch_profile(exe: Path) -> Path:
@@ -73,9 +84,7 @@ def prepare_scratch_profile(exe: Path) -> Path:
         if source.is_file():
             shutil.copy2(source, config_dir / ".env")
             break
-    VALIDATOR_ENV["LOCALAPPDATA"] = str(SCRATCH)
-    VALIDATOR_ENV.pop("FRIDAY_HOME", None)
-    VALIDATOR_ENV.pop("PORTABLE_MODE", None)
+    isolate_state(VALIDATOR_ENV, SCRATCH)
     return SCRATCH / "FRIDAY"
 
 
