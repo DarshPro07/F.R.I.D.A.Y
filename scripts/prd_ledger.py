@@ -4404,6 +4404,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Per-turn TurnLedger plus per-type proof shapes in honesty.audit; both voice paths refuse claims the ledger cannot back. Integration failure was test_mcp_firewall's ledger-citation check: the slice shifted agent_friday.py lines MCP-001 cites; citations re-pointed. (build run, commit 5c33f91be)",
         "next_action": "GAPS: Other ledger rows still cite agent_friday.py lines (e.g. :867, :1105, :1111) that this slice moved; no test checks them, only MCP-001's are asserted, so they were left alone rather than guessed.; tests/test_voice_path.py TTS/STT tests fail on this machine with OpenAI 401 invalid_api_key (placeholder key); they need a real key and are unrelated to this change.; Generated data/prd_v7_requirements.json and docs/implementation/PRD_V7_LEDGER.md still show the old MCP-001 cite text; the effective row comes from PROGRESS_V7 and `prd_ledger.py --check` is clean. Regenerating them is left to the owner (data/ is off limits to agents).",
     }),
+    ('JIT-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Re-applied files_create/write destination probes; moved resolution.load() ahead of the JIT check so first calls meet module-registered probes; added browser_act (session running) and browser_automate (credential, start URL) probes. (build run, commit 26ecc8f82)',
+        "next_action": "GAPS: tests/test_phase1b.py::test_live_browser_opens_and_closes (@live, excluded from the gate) fails: example.com's page text no longer contains 'Example Domain'. Network-dependent, not touched by this change.; Live Playwright, nonce checks and old envelopes are out of scope per the packet. | RULING 2026-10-08e (owner, docs/plans/build-harness/00-owner-directive-2026-10-08e.md): after this slice the browser_* approval/session probe stays in this row's scope; the row closes only when browser_automate and browser_act have a real probe.",
+    }),
 ]
 
 
