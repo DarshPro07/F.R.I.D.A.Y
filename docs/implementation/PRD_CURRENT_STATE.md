@@ -153,15 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 51a5aab on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T11:05:56+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 99, "PARKED_BY_OWNER": 1, "PARTIAL": 52, "VERIFIED": 60}
+- HEAD: c6b15a3 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T11:40:15+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 99, "PARKED_BY_OWNER": 1, "PARTIAL": 50, "VERIFIED": 62}
 - Unresolved P0: 11
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (275): CAP-FORGE-003=CONFIRMED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), ACT-001 (integration refused), JIT-001 (cascade exhausted), MEM-003 (NOT_CONFIRMED), MEM-002 (NO_TEST), TRAJ-001 (cascade exhausted), SEC-005 (cascade exhausted), BROW-004 (blocked), BRAIN-001 (NOT_CONFIRMED), BG-001 (NOT_CONFIRMED)
-- Open escalations: 198
-  - MEM-002 integration: {"requirement": "MEM-002", "result": "NO_TEST", "red_green": {"result": "NO_TEST", "tests": []}, "ve
-  - TRAJ-001 cascade: 3 repairs spent
+- Last wave (281): CAP-MKT-002=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), ACT-001 (integration refused), JIT-001 (cascade exhausted), MEM-003 (NOT_CONFIRMED), MEM-002 (NO_TEST), TRAJ-001 (cascade exhausted), SEC-005 (cascade exhausted), BROW-004 (blocked), BG-001 (NOT_CONFIRMED), CAP-003 (partial x4)
+- Open escalations: 200
   - SEC-005 cascade: 3 repairs spent
   - BRAIN-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\brain-001 already exists
   - BRAIN-001 resolved: controller unpark: controller re-integrated the run a killed program had landed ungated: INTEGRATED
@@ -170,5 +168,7 @@ That is the first implementation target of this program.
   - BRAIN-001 integration: {"requirement": "BRAIN-001", "result": "NOT_CONFIRMED", "red_green": {}, "verifier": null, "integrat
   - PKG-001 resolved: controller unpark: controller: its STALLED run was a worker waiting on its background exe build, kil
   - BG-001 integration: {"requirement": "BG-001", "result": "NOT_CONFIRMED", "red_green": {}, "verifier": null, "integrated_
+  - BRAIN-001 resolved: controller unpark: controller re-ran the confirm after 5885f11 (tests from its own build commits): C
+  - CAP-003 partial: integrated without closing its gaps
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
