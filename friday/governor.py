@@ -938,6 +938,20 @@ class Governor:
         with self._lock:
             self._parallel_justified.add(objective_id)
 
+    def worker_capacity(self, objective_id: str = "") -> int:
+        """How many workers `admit(WORKER, objective_id=...)` would let run at
+        once right now: the cap (one more once `justify_parallel` was called
+        for this objective), one under HIGH pressure, none under CRITICAL.
+        A scheduler bounds how many tasks it starts together by this; `admit`
+        stays the gate on each worker that really starts."""
+        level = self.pressure().level
+        if level == CRITICAL:
+            return 0
+        with self._lock:
+            cap = self.thresholds.max_workers + (
+                1 if objective_id in self._parallel_justified else 0)
+        return min(cap, 1) if level == HIGH else cap
+
     # -- admission ----------------------------------------------------------
 
     def admit(self, kind: str, *, label: str = "", objective_id: str = "",

@@ -305,6 +305,23 @@ def test_parallel_justification_lifts_the_cap_by_one_for_that_objective():
     assert gov.admit(G.WORKER, objective_id="fanout").decision == G.QUEUE
 
 
+def test_worker_capacity_is_what_admit_would_let_run_at_once():
+    gov, dial = make()
+    assert gov.worker_capacity("fanout") == 2
+    gov.justify_parallel("fanout")
+    assert gov.worker_capacity("fanout") == 3
+    assert gov.worker_capacity("serial") == 2, "the lift is for that objective only"
+    admitted = 0
+    while gov.admit(G.WORKER, objective_id="fanout").admitted:
+        admitted += 1
+        assert admitted <= 3
+    assert admitted == gov.worker_capacity("fanout")
+    dial.s = sample(cpu=90)
+    assert gov.worker_capacity("fanout") == 1, "HIGH pressure reduces it to one"
+    dial.s = sample(ram=99)
+    assert gov.worker_capacity("fanout") == 0, "CRITICAL admits no new worker"
+
+
 def test_high_pressure_reduces_concurrency_to_one():
     gov, dial = make()
     dial.s = sample(cpu=90)

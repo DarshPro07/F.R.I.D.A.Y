@@ -41,6 +41,7 @@ sys.path.insert(0, str(ROOT))
 
 import code_capsule  # noqa: E402
 import prd_ledger as PL  # noqa: E402
+from friday import waves as W  # noqa: E402
 
 try:
     import psutil
@@ -307,7 +308,7 @@ def surface(row: dict) -> frozenset[str]:
     (the controller edits them at integration), data/ and docs/ do not."""
     out = set()
     for f in row.get("files", ()):
-        path = f.strip().split(":", 1)[0].replace(chr(92), "/")
+        path = W.normalize_path(f)
         if path in _LEDGER_FILES:
             continue
         if path.startswith(_CODE_DIRS) or ("/" not in path and path.endswith(".py")):
@@ -317,24 +318,9 @@ def surface(row: dict) -> frozenset[str]:
 
 def waves(rows: list[dict], cap: int = DEFAULT_CAP) -> list[list[dict]]:
     """Greedy, in priority order: a row joins a wave if its surface is known
-    and disjoint from the wave's. Unknown-surface rows run alone."""
-    cap = max(1, cap)
-    pending = list(rows)
-    out: list[list[dict]] = []
-    while pending:
-        first = pending.pop(0)
-        wave, used = [first], set(surface(first))
-        if used:
-            for row in list(pending):
-                if len(wave) >= cap:
-                    break
-                s = surface(row)
-                if s and not (s & used):
-                    wave.append(row)
-                    used |= s
-                    pending.remove(row)
-        out.append(wave)
-    return out
+    and disjoint from the wave's. Unknown-surface rows run alone. The rule is
+    friday/waves.py's, shared with the objective executor (ORCH-001)."""
+    return W.pack_waves(rows, surface, cap)
 
 
 def host_governor(path: Path = HOST_PROFILE):

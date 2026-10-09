@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 from friday import contracts, dag
 from friday import requirements as REQ
+from friday import waves
 from friday.contracts import new_run_id, now_iso
 from friday.store import Store
 
@@ -392,6 +393,9 @@ class CompiledTask:
     dependencies: tuple[str, ...] = ()
     max_attempts: int = 3
     children: tuple['CompiledChild', ...] = ()
+    #: ORCH-001: paths this task will touch, as the plan declared them. Empty
+    #: is unknown, and the executor runs an unknown task alone.
+    surface: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -400,6 +404,7 @@ class CompiledTask:
             "dependencies": list(self.dependencies),
             "max_attempts": self.max_attempts,
             "children": [child.to_dict() for child in self.children],
+            **({"surface": list(self.surface)} if self.surface else {}),
         }
 
 
@@ -834,6 +839,7 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
                     max_attempts=int(child.get("max_attempts", 3)),
                 )
                 for child in spec.get("children") or ()),
+            surface=tuple(sorted(waves.surface_of(spec.get("surface")))),
         ))
 
     task_ids = [f"t{index}" for index in range(1, len(compiled) + 1)]
@@ -1000,6 +1006,9 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
                     else TASK_QUEUED),
             attempts=0,
         )
+        if task.surface:
+            store.update_objective_task(
+                task_id, detail={"surface": list(task.surface)})
     store.touch_objective_run(run_id)
     return store.objective_run(run_id) or {"run_id": run_id}
 

@@ -42,6 +42,7 @@ from friday import objective_budget as budget_module
 from friday.contracts import now_iso
 from friday import objectives as O
 from friday import trajectory
+from friday import waves
 from friday.store import Store
 
 logger = logging.getLogger("friday-continuous")
@@ -129,6 +130,11 @@ def _takes(port, name: str) -> bool:
 #: model asked again immediately is asked again for nothing, and the attempt
 #: budget is spent inside a few seconds of an outage that lasts minutes.
 PROVIDER_BACKOFF_SECONDS = float(os.getenv("ADA_PROVIDER_BACKOFF", "20"))
+
+#: How long a task the governor would not admit a worker for is left alone.
+#: Each refusal queues an entry in the governor, so asking again at once only
+#: fills its queue; the machine frees a worker in seconds, not milliseconds.
+ADMISSION_BACKOFF_SECONDS = 5.0
 
 #: How many times a task may change strategy (re-plan, different role,
 #: reduce scope) before a recurring failure gives up and goes BLOCKED
@@ -287,6 +293,14 @@ def _pending_worker_id(task: dict) -> str:
             if isinstance(result, dict) else "")
 
 
+def _task_surface(task: dict) -> frozenset[str]:
+    """The files a task declared it touches (compile keeps them in its detail,
+    ORCH-001). Empty means unknown, and an unknown task runs alone."""
+    detail = task.get("detail")
+    return waves.surface_of(
+        detail.get("surface") if isinstance(detail, dict) else None)
+
+
 def _committed_result(store, run_id: str, task_id: str):
     """The result a side-effecting call on this task's latest attempt
     committed (DUR-001), or None if that attempt committed nothing."""
@@ -367,7 +381,8 @@ class ContinuousTaskExecutor:
 
     def __init__(self, store: Store, call_capability: CapabilityPort,
                  executor_id: str | None = None,
-                 health_probe=None, health_recover=None) -> None:
+                 health_probe=None, health_recover=None,
+                 governor=None) -> None:
         self.store = store
         self.call_capability = call_capability
         #: Whether the port can carry each task's Run (lineage and envelope,
@@ -390,6 +405,9 @@ class ContinuousTaskExecutor:
         #: CLI need no health stack.
         self.health_probe = health_probe
         self.health_recover = health_recover
+        #: ORCH-001: returns the governor that bounds how many of a run's
+        #: tasks start together; None is the process-wide governor.
+        self._governor_source = governor
         #: run_ids this process is currently driving; guards against the
         #: driver loop and an explicit start() double-driving one run.
         self._driving: set[str] = set()
@@ -630,31 +648,120 @@ class ContinuousTaskExecutor:
 
     async def _execute_tasks(self, run_id: str, ready: list[dict],
                              limit: int) -> int:
-        """Execute up to `limit` of the snapshot, re-checking each task."""
+        """
+        Execute up to `limit` of the snapshot as dependency waves (ORCH-001).
+
+        A task starts when its dependencies succeeded and its declared file
+        surface is disjoint from every running task's, as many together as
+        the governor admits for this run. A task that shares a file with a
+        running one waits for it, and one with no declared surface runs alone,
+        so a graph that declares nothing runs one task at a time in snapshot
+        order, as it always has. Each task is re-checked as it starts; the
+        per-task gates (stop latch, envelope, budget) stay in `_execute_task`.
+        """
+        pending = list(ready)
+        flying: dict[asyncio.Task, tuple[str, frozenset[str]]] = {}
         executed = 0
-        for task in ready:
-            if executed >= limit:
-                break
-            run_now = self.store.objective_run(run_id)
-            if run_now is None or run_now["status"] in O.RUN_TERMINAL:
-                break
-            if run_now["status"] in O.RUN_WAITING_STATUSES:
-                # Paused mid-snapshot: stop executing; the run stays exactly
-                # as it is until the control plane resumes it.
-                break
-            current = self.store.objective_task(task["task_id"])
+        failure: BaseException | None = None
+        try:
+            while True:
+                if failure is None and executed < limit:
+                    for task in self._wave_starts(run_id, pending, flying,
+                                                  limit - executed):
+                        running = asyncio.ensure_future(
+                            self._execute_task(run_id, task))
+                        flying[running] = (task["task_id"], _task_surface(task))
+                        executed += 1
+                if not flying:
+                    break
+                finished, _ = await asyncio.wait(
+                    flying, return_when=asyncio.FIRST_COMPLETED)
+                for one in finished:
+                    del flying[one]
+                    # Every finished task's outcome is read, so none goes
+                    # unretrieved; the first failure ends the wave, and is
+                    # raised once what is already running has settled.
+                    problem = (asyncio.CancelledError() if one.cancelled()
+                               else one.exception())
+                    if problem is not None and failure is None:
+                        failure = problem
+                if flying:
+                    self._heartbeat(run_id)
+        finally:
+            for one in flying:
+                one.cancel()
+            if flying:
+                await asyncio.gather(*flying, return_exceptions=True)
+        if failure is not None:
+            raise failure
+        return executed
+
+    def _wave_starts(self, run_id: str, pending: list[dict],
+                     flying: dict, limit: int) -> list[dict]:
+        """The pending tasks to start now; `pending` keeps what must wait.
+
+        `flying` maps each running task to (task id, surface). Paused, stopped
+        or finished runs start nothing more - what is running still settles."""
+        run_now = self.store.objective_run(run_id)
+        if run_now is None or run_now["status"] in O.RUN_TERMINAL \
+                or run_now["status"] in O.RUN_WAITING_STATUSES:
+            # Paused mid-snapshot: stop executing; the run stays exactly
+            # as it is until the control plane resumes it.
+            pending.clear()
+            return []
+        rows = {t["task_id"]: t for t in self.store.objective_tasks(run_id)}
+        # A state precondition reads the results of FINISHED steps, so a step
+        # that may establish one must finish before the next starts: a run
+        # with preconditions declares no usable surface and runs one at a time.
+        surface_of = (lambda _task: frozenset()) \
+            if self._governance(run_id).get("requires") else _task_surface
+        eligible: list[dict] = []
+        for task in pending:
+            current = rows.get(task["task_id"])
             if current is None or current["status"] in O.TASK_TERMINAL:
                 continue
-            deps = current.get("dependencies") or []
-            if deps:
-                rows = {t["task_id"]: t
-                        for t in self.store.objective_tasks(run_id)}
-                if any(rows.get(dep, {}).get("status")
-                       != O.TaskStatus.SUCCEEDED for dep in deps):
-                    continue
-            await self._execute_task(run_id, current)
-            executed += 1
-        return executed
+            if any(rows.get(dep, {}).get("status") != O.TaskStatus.SUCCEEDED
+                   for dep in current.get("dependencies") or []):
+                continue
+            eligible.append(current)
+        pending[:] = eligible
+        if not eligible:
+            return []
+
+        own = {task_id for task_id, _ in flying.values()}
+        waiting_on = {t["task_id"] for t in eligible}
+        # What earlier rounds left running or waiting on a worker still
+        # holds its files; one that declared none holds nothing we can name.
+        running = [surface for _, surface in flying.values()]
+        running += [s for t in rows.values()
+                    if t["status"] in (O.TaskStatus.RUNNING,
+                                       O.TaskStatus.WAITING)
+                    and t["task_id"] not in own
+                    and t["task_id"] not in waiting_on
+                    for s in (surface_of(t),) if s]
+        together = waves.pick_starts(eligible, surface_of, running=running,
+                                     room=len(eligible))
+        gov = self._governor()
+        if len(flying) + len(together) >= 2:
+            gov.justify_parallel(run_id)
+        from friday import governor as G
+        capacity = max(1, gov.worker_capacity(run_id))
+        # Workers held by anyone, other objectives included, count against
+        # the same ceiling; a task of ours not yet holding one counts too.
+        # Idle, one task always starts - `admit` still gates its worker.
+        room = capacity - max(len(flying), gov.active(G.WORKER))
+        starts = waves.pick_starts(
+            eligible, surface_of, running=running,
+            room=min(max(room, 0 if flying else 1), limit))
+        started = {id(t) for t in starts}
+        pending[:] = [t for t in eligible if id(t) not in started]
+        return starts
+
+    def _governor(self):
+        if self._governor_source is not None:
+            return self._governor_source()
+        from friday import governor as G
+        return G.governor()
 
     async def _execute_task(self, run_id: str, task: dict) -> None:
         task_id = task["task_id"]
@@ -759,6 +866,14 @@ class ContinuousTaskExecutor:
             result = await self._dispatch(task["capability"], arguments, task_run,
                                           task_id)
         except Exception as exc:
+            from friday import governor as G
+
+            if isinstance(exc, G.Refused):
+                # ORCH-001: the governor would not admit a worker now. That is
+                # an answer about the machine, not a failure of the task: no
+                # work was done, so no attempt is spent, and the task waits.
+                self._defer_refused(run_id, task_id, attempt, exc)
+                return
             kind = FailureClassifier.classify(exc)
             max_attempts = self._max_attempts_for(task)
 
@@ -911,6 +1026,23 @@ class ContinuousTaskExecutor:
         self._ledger_evidence(run_id, task_id, task, result, passed=True)
         self._cascade_skips(run_id)
         self._check_invariant(run_id)
+
+    def _defer_refused(self, run_id: str, task_id: str, attempt: int,
+                       refused: BaseException) -> None:
+        """Park a task whose worker the governor refused (QUEUE or SHED). It
+        keeps its attempts, and the run keeps a future."""
+        reason = str(refused)
+        self.store.update_objective_task(
+            task_id, status=O.TaskStatus.WAITING,
+            failure_kind=O.FailureKind.TRANSIENT, evidence=reason,
+            attempts=attempt - 1,
+            next_wake=_in_seconds(ADMISSION_BACKOFF_SECONDS))
+        self.store.append_objective_event(
+            run_id, O.EVENT_TASK_RETRY, task_id=task_id,
+            detail={"kind": "admission", "reason": reason, "attempt": attempt,
+                    "delay_s": ADMISSION_BACKOFF_SECONDS})
+        self._schedule_wake(
+            run_id, seconds=max(ADMISSION_BACKOFF_SECONDS, WAKE_SECONDS))
 
     def _governance(self, run_id: str) -> dict:
         """The governance of the objective's stored contract; empty when it has
@@ -1145,8 +1277,13 @@ class ContinuousTaskExecutor:
         # it is being made.
         ceiling = envelope.max_side_effects
         if ceiling and trajectory._side_effecting(capability_id):
+            # A task running beside this one (ORCH-001) is a change being made
+            # too: waves start tasks together, so it has not finished here.
             made = sum(1 for task in self.store.objective_tasks(envelope.objective_id)
-                       if (task["status"] == O.TaskStatus.SUCCEEDED or _pending_worker_id(task))
+                       if (task["status"] == O.TaskStatus.SUCCEEDED
+                           or _pending_worker_id(task)
+                           or (task["status"] == O.TaskStatus.RUNNING
+                               and task["task_id"] != task_id))
                        and trajectory._side_effecting(str(task.get("capability") or "")))
             if made >= ceiling:
                 return run.record(c.started(run.run_id, capability_id).finish(
