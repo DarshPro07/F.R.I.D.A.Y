@@ -4550,6 +4550,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "The profile path no longer files read material under the person's scopes, and the briefing tier no longer shows read-material rows already stored there. profile.learn now imports PERSON_SCOPES from friday.memory_promotion (no cycle, no second copy). For a read-material candidate whose dimension is p (build run, commit f89ad1a62)",
         "next_action": "GAPS: The next_action packet was truncated after design item (2), so its remaining design items and the full test list were not visible. I implemented items (1) and (2) as written and did not guess at anything beyond them.; The legacy fallback query in memory_stack.preferences (for a database that predates project_scope) has no trust_class filter. That schema also predates trust_class, so it holds no read-material rows.; The briefing items still carry no trust marker (memory_stack.py:107-109). I excluded read-material rows rather than labelling them, which is the packet's stated design.",
     }),
+    ('ORCH-003', {
+        "status": PARTIAL,
+        "current_implementation": 'Audit: friday/objective_budget.py already enforced hard limits in code, with no model involved, on tokens, wall time, tool calls, worker delegations and replans. The engine parks a run as PAUSED before dispatch, and the check reads the ceiling from the run row, so raising it lets the run go on. Miss (build run, commit f0eb0effa)',
+        "next_action": "GAPS: The ledger next_action was the one-line audit instruction, not a decision-bearing packet, so DESIGN and TESTS are mine rather than the controller's.; Budgets are per objective run. There is no separate per-worker budget entity, and a delegated worker's own turns and tool calls inside Hermes are not counted separately. Only its WorkRunLog tokens are.; The soft report is code-generated from recorded state and recorded as an event. It is not injected into the worker's prompt, since a worker that is a delegated process cannot be assumed to accept an extra argument.; Turns count gateway telemetry rows only, so a run with no gateway ledger reports 0 turns (the existing missing-ledger rule in spend.sources).; Soft limits are not defined for the worker-delegation and replan dimensions; those stay hard-only.",
+    }),
 ]
 
 
