@@ -201,9 +201,16 @@ def apply_inbox(state: dict, runs_dir: Path, archive: bool = True) -> list[str]:
         return []
     applied = []
     for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.lstrip("﻿")  # a Windows writer's byte-order mark, at the file's or a line's start
+        if not line.strip():
+            continue
         try:
             cmd = json.loads(line)
         except ValueError:
+            # 2026-10-09: an unpark with a byte-order mark failed here and was archived unapplied,
+            # silently - the row stayed parked. An unreadable command is reported, not dropped.
+            state["escalations"].append({"req": "?", "kind": "inbox_unreadable", "at": now(),
+                                         "detail": line[:300]})
             continue
         req, action = cmd.get("req") if isinstance(cmd, dict) else None, (cmd or {}).get("action")
         if not req or action not in ("unpark", "requeue"):
