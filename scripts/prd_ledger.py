@@ -4286,6 +4286,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_governor.py::test_background_wait_names_each_reason_and_is_empty_only_when_all_clear', 'tests/test_governor.py::test_a_pressured_machine_does_not_spend_a_context_probe_on_background_work', 'tests/test_governor.py::test_status_says_whether_background_work_runs_now_and_why_not', 'tests/test_governor.py::test_the_background_verdict_agrees_with_what_admit_does', 'tests/test_governor.py::test_real_probes_defer_background_work_when_the_machine_has_no_headroom', 'tests/test_autolearn.py::test_a_turn_waits_while_the_person_is_active_then_is_learned_once', 'tests/test_autolearn.py::test_a_turn_waits_on_battery_or_under_pressure_and_runs_once_relieved', 'tests/test_autolearn.py::test_the_person_returning_mid_learn_stops_it_and_the_turn_is_retried', 'tests/test_autolearn.py::test_closing_while_a_turn_is_deferred_neither_hangs_nor_leaks_a_lease', 'tests/test_autolearn.py::test_without_a_governor_learning_is_ungated_as_before', 'tests/test_governor.py::test_running_background_work_stops_when_the_person_returns', 'tests/test_governor.py::test_running_background_work_stops_when_the_machine_is_unplugged'],
         "files": ['friday/governor.py:261'],
     }),
+    ('CAP-MKT-002', {
+        "status": PARTIAL,
+        "current_implementation": 'Forge scans every candidate with the SkillSpector CLI before verify; findings stored in verification.security_scan; high severity rejects; unscanned/stale-scan candidates cannot be registered or enabled. CLI not installed here, flags assumed. (build run, commit 00d32c693)',
+        "next_action": 'GAPS: The SkillSpector CLI is not installed or pinned on this machine (shutil.which -> None); its flags and JSON shape are assumed (skillspector scan --format json <dir>), overridable via FRIDAY_SKILLSPECTOR_CMD. Tests use a stand-in CLI through the real subprocess path.; SkillSpector is not yet in third_party/UPSTREAM_LOCK.json / the fabric; pin it once a release is chosen.; Only forged candidates (spec + source) are staged; imported repos/MCP servers need a caller that passes their directory to run_skillspector.',
+    }),
 ]
 
 
