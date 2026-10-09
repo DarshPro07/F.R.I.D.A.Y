@@ -1013,6 +1013,25 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
     return store.objective_run(run_id) or {"run_id": run_id}
 
 
+def awaiting_validation(store: Store, run_id: str) -> list[dict]:
+    """
+    What a held run is waiting for the person to confirm.
+
+    Empty unless the run is waiting on the person, so a caller can say "held"
+    only when it is: a run that compiled straight to RUNNING, or was released
+    by `resolve_assumption`, awaits nothing. Worst first, as the due rule
+    orders them.
+    """
+    run = store.objective_run(run_id)
+    if run is None or run["status"] != RUN_WAITING_QUESTION:
+        return []
+    register = [REQ.Assumption.from_dict(row)
+                for row in store.list_assumptions(run_id)]
+    return [{"key": entry.key, "statement": entry.statement,
+             "validation": entry.validation}
+            for entry in REQ.due_for_validation(register)]
+
+
 def resolve_assumption(store: Store, run_id: str, key: str, state: str) -> bool:
     """
     Record what became of an assumption, and release the run if it was the

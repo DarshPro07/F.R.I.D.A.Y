@@ -475,6 +475,11 @@ def objective_start(run: c.Run, objective: str, *, tasks: str = "",
             "dependencies": list(spec.get("dependencies", ())),
         } for spec in specs],
     }
+    # A run held for the person to confirm an assumption has not started;
+    # the caller must be able to say so rather than "under way".
+    held = O.awaiting_validation(db, created["run_id"])
+    if held:
+        payload["awaiting_validation"] = held
     return run.record(c.succeeded(
         started, output=_scoped(payload),
         verification=c.Verification(

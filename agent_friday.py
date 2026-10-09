@@ -2284,21 +2284,46 @@ def say_the_objective_owns_this(turn_ctx, run_id: str) -> None:
     the model doing the whole job a second time.
     """
     try:
+        from friday import objectives as O
         from friday.toolsets import objectives as OT
 
         tasks = OT.store().objective_tasks(run_id)
-        turn_ctx.add_message(
-            role="system",
-            content=(
+        # ASSUME-001: a run held for an unconfirmed high-impact assumption has
+        # not started, and saying it is under way would be false.
+        held = O.awaiting_validation(OT.store(), run_id)
+        if held:
+            lines = [
+                f"That request has been admitted as durable objective "
+                f"{run_id} with {len(tasks)} task(s), but it is HELD, not "
+                f"started: it rests on an assumption nobody has confirmed, "
+                f"and nothing runs until the boss answers. You must NOT carry "
+                f"out that work yourself - not with domain tools, not through "
+                f"use_capability. Tell the boss in your own voice that it has "
+                f"not started, and ask once, in one short question, whether "
+                f"to go ahead on:"]
+            for item in held:
+                lines.append(f"  - {item['statement']}"
+                             + (f"  (to confirm: {item['validation']})"
+                                if item["validation"] else "")
+                             + f"  [key: {item['key']}]")
+            lines.append(
+                f"When they answer, call objective_resume(run_id={run_id!r}, "
+                f"assumption=<that key>, state=VALIDATED, WAIVED to go ahead "
+                f"anyway, or REFUTED if it is wrong). Do not say it is under "
+                f"way until it is released.")
+            content = "\n".join(lines)
+        else:
+            content = (
                 f"That request has been admitted as durable objective "
                 f"{run_id} with {len(tasks)} task(s), and the objective "
                 f"executor is running it now. You must NOT carry out that "
                 f"work yourself - not with domain tools, not through "
                 f"use_capability. Acknowledge briefly in your own voice "
                 f"and say it is under way. If the boss wants detail, "
-                f"objective_status and objective_list report on it."))
-        logger.info("objective.owns_turn run_id=%s tasks=%d",
-                    run_id, len(tasks))
+                f"objective_status and objective_list report on it.")
+        turn_ctx.add_message(role="system", content=content)
+        logger.info("objective.owns_turn run_id=%s tasks=%d held=%d",
+                    run_id, len(tasks), len(held))
     except Exception:
         logger.exception(
             "could not tell the model the objective owns this")

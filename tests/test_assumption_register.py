@@ -174,6 +174,122 @@ def test_a_validated_or_low_impact_assumption_schedules_nothing(store):
                     if e["event"] == O.EVENT_ASSUMPTION_DUE]
 
 
+class _Ctx:
+    """A chat context that records what the agent adds to it."""
+
+    def __init__(self):
+        self.said = []
+
+    def add_message(self, *, role, content):
+        self.said.append(content)
+
+
+@pytest.fixture
+def wired(store):
+    """The store the objective and memory tools read, closed after the test."""
+    from friday.toolsets import memory as M
+    from friday.toolsets import objectives as OT
+
+    M.reset_store(store)
+    OT.reset_store(store)
+    yield store
+    OT.reset_store(None)
+    M.reset_store(None)
+
+
+def _start_from_words(monkeypatch, question):
+    """objective_start on a request whose reader made `question` a decision."""
+    from friday import policy as PO
+    from friday.toolsets import objectives as OT
+
+    monkeypatch.setattr(R, "is_an_idea", lambda t: True)
+    monkeypatch.setattr(R, "understand", lambda t, project="", db=None: R.Understanding(
+        assumptions=[question]))
+    result = OT.objective_start(c.Run.create(TEXT), objective=TEXT,
+                                engine=PO.PolicyEngine(autonomy=PO.FULL))
+    assert result.status == c.SUCCEEDED, result.error
+    return result.output
+
+
+def test_starting_a_held_objective_reports_what_it_awaits(wired, monkeypatch):
+    store = wired
+    output = _start_from_words(monkeypatch, R.Question(
+        "Save format?", why="the reader opens one", materiality=R.SMALL,
+        proposed="markdown", confidence=R.LOW, consequence=R.HIGH,
+        validation="ask which format the reader opens"))
+
+    (row,) = store.objective_runs(limit=5)
+    assert row["status"] == O.RUN_WAITING_QUESTION
+    assert output["status"] == O.RUN_WAITING_QUESTION
+    assert {t["status"] for t in store.objective_tasks(row["run_id"])} == {O.TASK_QUEUED}
+    (held,) = output["awaiting_validation"]
+    statement = "Save format? -> markdown"
+    assert held == {"key": R.Assumption(statement=statement, origin="request").key,
+                    "statement": statement,
+                    "validation": "ask which format the reader opens"}
+
+
+def test_starting_an_unheld_objective_reports_nothing_to_await(wired, monkeypatch):
+    store = wired
+    output = _start_from_words(monkeypatch, R.Question(
+        "Save format?", why="the reader opens one", materiality=R.SMALL,
+        proposed="markdown", confidence=R.HIGH, consequence=R.LOW))
+
+    (row,) = store.objective_runs(limit=5)
+    assert row["status"] == O.RUN_RUNNING
+    assert "awaiting_validation" not in output
+    assert O.awaiting_validation(store, row["run_id"]) == []
+
+
+def test_only_a_run_waiting_on_the_person_awaits_validation(store):
+    entry = _entry()
+    run_id = _compile(store, [entry])["run_id"]
+    assert [row["key"] for row in O.awaiting_validation(store, run_id)] == [entry.key]
+
+    O.resolve_assumption(store, run_id, entry.key, R.VALIDATED)
+
+    assert O.awaiting_validation(store, run_id) == []
+    assert O.awaiting_validation(store, "no-such-run") == []
+
+
+def test_the_model_is_told_a_held_objective_has_not_started(store):
+    import agent_friday
+    from friday.toolsets import objectives as OT
+
+    entry = _entry()
+    run_id = _compile(store, [entry])["run_id"]
+    OT.reset_store(store)
+    try:
+        ctx = _Ctx()
+        agent_friday.say_the_objective_owns_this(ctx, run_id)
+    finally:
+        OT.reset_store(None)
+
+    (said,) = ctx.said
+    assert run_id in said
+    assert "HELD" in said and "running it now" not in said
+    assert entry.statement in said and entry.validation in said
+    assert "objective_resume" in said and entry.key in said
+    assert "NOT carry out that work yourself" in said and "use_capability" in said
+
+
+def test_the_model_is_still_told_an_unheld_objective_is_running(store):
+    import agent_friday
+    from friday.toolsets import objectives as OT
+
+    run_id = _compile(store, [_entry(consequence=R.LOW)])["run_id"]
+    OT.reset_store(store)
+    try:
+        ctx = _Ctx()
+        agent_friday.say_the_objective_owns_this(ctx, run_id)
+    finally:
+        OT.reset_store(None)
+
+    (said,) = ctx.said
+    assert "running it now" in said and run_id in said
+    assert "HELD" not in said and "objective_resume" not in said
+
+
 def test_a_reader_failure_leaves_the_objective_compiling(monkeypatch):
     monkeypatch.setattr(R, "is_an_idea", lambda text: True)
 
