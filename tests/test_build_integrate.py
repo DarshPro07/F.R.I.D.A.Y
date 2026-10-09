@@ -903,7 +903,24 @@ def test_a_row_citing_no_test_is_confirmed_with_its_own_build_commits_tests(tmp_
     out = go(repo, runs, rows, runner=paid)
     assert out["result"] == "CONFIRMED" and out["ledger_status"] == "VERIFIED"
     assert "tests/test_twice.py::test_twice" in asked[0]
-    assert bi.row_test_files("REQ-10", repo) == []  # another row's id is no prefix match
+    assert bi.row_build_tests("REQ-10", sys.executable, repo, repo) == []  # no prefix match
+
+
+def test_a_confirm_cites_only_the_tests_the_rows_build_commits_touched(tmp_path):
+    # 2026-10-09: BG-001 was confirmed citing the first twelve tests of tests/test_autolearn.py -
+    # payload parsing - because one of its commits had touched that file.
+    base = "def test_edited():\n    assert True\n\n\ndef test_left_alone():\n    assert True\n"
+    work = ("def test_edited():\n    assert 1 + 1 == 2\n\n\ndef test_left_alone():\n    assert True\n\n\n"
+            "def test_added():\n    from calc import twice\n    assert twice(twice(1)) == 4\n")
+    repo, runs, run, rows = setup(tmp_path, dict(GOOD, **{"tests/test_mixed.py": work}),
+                                  base_extra={"tests/test_mixed.py": base})
+    sh(repo, "cherry-pick", run["commit"])
+    sh(repo, "commit", "-q", "--amend", "-m", "build(REQ-1): twice\n\nBuild run: REQ-1")
+    run, rows = _no_change(runs, run, rows, [])
+    verdict = json.dumps({"result": '{"verdict": "PASS", "requirement_ids": ["REQ-1"]}', "total_cost_usd": 0.2})
+    out = go(repo, runs, rows, runner=lambda cmd, prompt, cwd: verdict)
+    assert out["result"] == "CONFIRMED" and out["tests"] == [
+        "tests/test_mixed.py::test_edited", "tests/test_mixed.py::test_added", "tests/test_twice.py::test_twice"]
 
 
 SLOW_TEST = "import pytest\n\n\n@pytest.mark.slow\ndef test_slow():\n    assert True\n"

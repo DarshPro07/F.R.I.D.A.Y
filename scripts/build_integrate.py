@@ -126,14 +126,54 @@ def commit_test_files(run: dict, repo: Path = ROOT) -> list[str]:
             and Path(f).name.startswith("test_")]
 
 
-def row_test_files(req: str, repo: Path = ROOT) -> list[str]:
-    """Test files the row's own build commits on HEAD added or changed - each passed RED/GREEN
-    when it was integrated - that HEAD still has. A PARTIAL row cites no tests in the ledger."""
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def touched_tests(sha: str, repo: Path = ROOT) -> list[str]:
+    """`file::test` for each test function whose lines commit `sha` added or changed."""
+    spans: dict[str, list[tuple[int, int]]] = {}
+    path = ""
+    for ln in git(repo, "show", "--format=", "-U0", sha, "--", "tests/", check=True).stdout.splitlines():
+        if ln.startswith("+++ "):
+            path = ln[6:] if ln.startswith("+++ b/") and ln.endswith(".py") else ""
+        elif path and (m := _HUNK.match(ln)) and m.group(2) != "0":
+            start = int(m.group(1))
+            spans.setdefault(path, []).append((start, start + int(m.group(2) or 1) - 1))
+    out = []
+    for path, changed in spans.items():
+        try:
+            tree = ast.parse(git(repo, "show", f"{sha}:{path}", check=True).stdout)
+        except (SyntaxError, ValueError):  # a file that does not parse names no test
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
+                first = min([d.lineno for d in node.decorator_list] + [node.lineno])
+                if any(a <= node.end_lineno and first <= b for a, b in changed):
+                    out.append(f"{path}::{node.name}")
+    return out
+
+
+def row_build_tests(req: str, python: str, cwd: Path, repo: Path = ROOT) -> list[str]:
+    """Gate-runnable tests the row's own build commits on HEAD added or changed, newest first -
+    each passed RED/GREEN when it was integrated. A PARTIAL row cites no tests in the ledger.
+    Only those tests, not their files: 2026-10-09 BG-001 was confirmed citing twelve
+    tests/test_autolearn.py payload tests because one of its commits had touched that file."""
     if not re.fullmatch(r"[A-Za-z0-9-]+", req):  # ids are plain; anything else is no git pattern
         return []
     shas = lines(git(repo, "log", "--format=%H", f"--grep=^Build run: {req}$", "HEAD", check=True).stdout)
-    found = {f for sha in shas for f in commit_test_files({"commit": sha}, repo)}
-    return sorted(f for f in found if (repo / f).is_file())
+    order: dict[str, int] = {}
+    for sha in shas:  # newest first
+        for key in touched_tests(sha, repo):
+            order.setdefault(key, len(order))
+    files = sorted({k.split("::")[0] for k in order if (repo / k.split("::")[0]).is_file()})
+    if not files:
+        return []
+
+    def key(test_id: str) -> str:  # file::function, whatever class or parameters it sits in
+        return f"{test_id.split('::')[0]}::{test_id.split('[')[0].split('::')[-1]}"
+
+    picked = [t for t in collected_ids(python, cwd, files, runnable=True) if key(t) in order]
+    return named_tests(sorted(picked, key=lambda t: order[key(t)]))
 
 
 @contextlib.contextmanager
@@ -856,24 +896,23 @@ def _confirm_existing(req: str, run: dict, row: dict, out: dict, done, *, repo: 
     head = git(repo, "rev-parse", "HEAD", check=True).stdout.strip()
     tests = named_tests(row.get("tests"))
     files = sorted({str(t).split("::")[0] for t in row.get("tests") or [] if str(t).split("::")[0].endswith(".py")})
-    if not tests and not files:  # PARTIAL so far (2026-10-09: BRAIN-001 refused "names no test")
-        files = row_test_files(req, repo)
     if not tests and files:
         with temp_worktree(repo, head) as wt:
             tests = named_tests(collected_ids(python, wt, files, runnable=True))
+    if not tests:  # PARTIAL so far (2026-10-09: BRAIN-001 refused "names no test")
+        with temp_worktree(repo, head) as wt:
+            tests = row_build_tests(req, python, wt, repo)
     if not tests:
         return done("NOT_CONFIRMED", detail="the row names no test to confirm the acceptance with")
     if dry_run:
         return done("DRY_RUN", tests=tests)
     with temp_worktree(repo, head) as wt:
         rc, output = run_pytest(python, wt, tests)
-        if rc == 5 and (own := row_test_files(req, repo)):
+        if rc == 5 and (own := row_build_tests(req, python, wt, repo)):
             # The gate deselects live and slow tests: pytest ran none of the named ones (2026-10-09:
             # BG-001 cites one @slow test, and exit 5 was reported as "the named tests fail at HEAD").
-            runnable = named_tests(collected_ids(python, wt, own, runnable=True))
-            if runnable:
-                tests = runnable
-                rc, output = run_pytest(python, wt, tests)
+            tests = own
+            rc, output = run_pytest(python, wt, tests)
     if rc == 5:
         return done("NOT_CONFIRMED", detail="the gate ran none of the named tests (live or slow only)",
                     tests=tests)
