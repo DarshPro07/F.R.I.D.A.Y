@@ -190,6 +190,15 @@ DECLARED = {
                                "CAP-FORGE-002 classification only; the sandboxed "
                                "analysis (CAP-FORGE-003) and the integration "
                                "decision (CAP-FORGE-004/014) are its callers"),
+    "friday/quarantine": (FUTURE,
+                          "CAP-FORGE-003 repository quarantine; its callers are "
+                          "the forge intake (CAP-FORGE-004/014)"),
+    "friday/appcontainer": (FUTURE,
+                            "the OS boundary under friday.quarantine; reachable "
+                            "once the quarantine has a caller (CAP-FORGE-004/014)"),
+    "friday/quarantine_guard": (FUTURE,
+                                "copied into a quarantine root and run as the "
+                                "child's entry script, never imported"),
     "friday/model_profiling": (FUTURE,
                                "MODEL-004: the open-set route profiler, built and "
                                "tested against mock routes; its caller is a real "

@@ -380,13 +380,27 @@ class NativeExecutionEnvironment:
 
     def __init__(self, workspace: str | Path, *, name: str = "",
                  limits: Limits | None = None, egress: Egress | None = None,
-                 credentials: dict[str, str] | None = None) -> None:
+                 credentials: dict[str, str] | None = None,
+                 profile: dict[str, str] | None = None,
+                 guard: str = "", container=None) -> None:
         self.workspace = Path(workspace).resolve()
         if not self.workspace.is_dir():
             raise ExecutionError(f"no such workspace: {self.workspace}")
         self.name = name or self.workspace.name
         self.limits = limits or Limits()
         self.egress = egress or Egress()
+        # `profile` is an environment built from nothing that REPLACES the
+        # host allowlist (`worker_environment`), which still lets the user's
+        # profile paths cross. `guard` names the in-process control the caller
+        # layers on top (quarantine's tripwire), so `strength()` says so.
+        self._profile = dict(profile) if profile is not None else None
+        self.guard = guard
+        # An `appcontainer.AppContainer`: every command then runs under its
+        # token, so file and network refusal is the kernel's. It has no
+        # capability, hence no network to allow by host.
+        self.container = container
+        if container is not None and self.egress.mode != DENY_ALL:
+            raise ExecutionError("a container has no network capability; only DENY_ALL is possible")
         # Copied, so the caller's dict is not what a later `terminate`
         # clears; and cleared on terminate, so a secret lives as long as the run.
         self._credentials = dict(credentials or {})
@@ -426,9 +440,10 @@ class NativeExecutionEnvironment:
         "the kernel enforces this" and "we asked nicely" is the difference
         between a boundary and a comment.
         """
-        if self.job.available:
-            return "JOB_OBJECT"
-        return "PROCESS_ONLY"
+        base = "JOB_OBJECT" if self.job.available else "PROCESS_ONLY"
+        if self.container is not None:
+            base = f"APPCONTAINER+{base}"
+        return f"{base}+{self.guard}" if self.guard else base
 
     # -- environment -------------------------------------------------------
 
@@ -441,7 +456,11 @@ class NativeExecutionEnvironment:
         anyone updates such a list - so the default is that a variable does
         not cross the boundary, and `KEPT` names the few that must.
         """
-        env = worker_environment(self.name)
+        if self._profile is not None:
+            env = dict(self._profile)
+            env["FRIDAY_EXECUTION_ENV"] = self.name
+        else:
+            env = worker_environment(self.name)
         env["FRIDAY_EXECUTION_EGRESS"] = self.egress.mode
         if self.egress.mode == DENY_ALL:
             # No firewall rule is written here (that needs an administrator);
@@ -483,6 +502,9 @@ class NativeExecutionEnvironment:
         limit = timeout if timeout is not None else self.limits.seconds
         started = time.monotonic()
 
+        if self.container is not None:
+            return self._run_contained(command, limit, stdin, started)
+
         try:
             process = subprocess.Popen(
                 command, cwd=str(self.workspace), env=self.environment(),
@@ -508,6 +530,21 @@ class NativeExecutionEnvironment:
         return self._record(Execution(
             command, process.returncode if not timed_out else 124,
             self.redacted(out or ""), self.redacted(err or ""),
+            time.monotonic() - started, timed_out))
+
+    def _run_contained(self, command: tuple[str, ...], limit: float,
+                       stdin: str | None, started: float) -> Execution:
+        """The container path of `run`. A container that cannot start the
+        command is a refusal, never a fall back to an uncontained process."""
+        try:
+            code, out, err, timed_out = self.container.run(
+                command, cwd=self.workspace, env=self.environment(), timeout=limit,
+                stdin=stdin, adopt=self.job.adopt if self.job.available else None)
+        except RuntimeError as exc:
+            return self._record(Execution(command, 127, "", f"could not start: {exc}",
+                                          time.monotonic() - started))
+        return self._record(Execution(
+            command, code, self.redacted(out), self.redacted(err),
             time.monotonic() - started, timed_out))
 
     def _record(self, execution: Execution) -> Execution:
@@ -587,7 +624,7 @@ class NativeExecutionEnvironment:
 
     def report(self) -> dict:
         """What happened, in a shape that can be stored beside the run."""
-        return {
+        report = {
             "environment": self.name,
             "workspace": str(self.workspace),
             "strength": self.strength(),
@@ -600,6 +637,9 @@ class NativeExecutionEnvironment:
                          for e in self.executions],
             "credentials_injected": sorted(self._credentials),
         }
+        if self._profile is not None:
+            report["profile"] = sorted(self._profile)
+        return report
 
 
 def for_development(workspace: str | Path, *, name: str = "", network: bool = False,
