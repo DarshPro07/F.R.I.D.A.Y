@@ -100,6 +100,12 @@ def test_routing_agreement_is_at_least_95_percent():
         + "\n  ".join(f"{t!r}: expected {e}, got {g}" for t, e, g in wrong))
 
 
+def test_an_update_request_is_not_simple():
+    got = TC.classify("update the retry limit")
+    assert got.task_class != TC.SIMPLE, got
+    assert got.economics.kind == "code_change", got
+
+
 def test_trivial_and_simple_never_reach_a_coding_executor():
     """FR-002 acceptance clause two, and PRD 1.5 'unnecessary specialist
     invocations < 10% of simple tasks' - here it is zero by construction."""

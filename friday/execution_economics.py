@@ -54,10 +54,14 @@ _CLAUSE_START = (r"(?:^|[,;:]\s+|\b(?:then|and)\s+)(?:please\s+)?"
 #: Imperative work verbs. Matched only at a clause start: "make" and "stop"
 #: are ordinary words in questions ("what makes a good key", "how do I stop
 #: a thread") that must stay direct answers, and "stop" is a device command
-#: ("stop the music") unless it is "stop X from <doing>".
+#: ("stop the music") unless it is "stop X from <doing>". "rename"/"move" are
+#: also the literal mechanical commands "rename file"/"move file", so they are
+#: work verbs only when not followed by "file(s)". Destructive verbs (delete,
+#: drop) are deliberately absent: task_class._CRITICAL owns those.
 _WORK_VERB = re.compile(
     _CLAUSE_START + r"(?:change|fix|implement|refactor|build|write|create|add|"
-    r"make|prevent|stop\b(?=.*\bfrom\b))\b", re.I)
+    r"make|prevent|update|remove|replace|migrate|extend|"
+    r"(?:rename|move)\b(?!\s+files?\b)|stop\b(?=.*\bfrom\b))\b", re.I)
 _RESEARCH = (
     "research", "investigate", "compare", "evaluate", "survey",
     "find out", "what are the options",
@@ -72,7 +76,8 @@ _DEEP_REASONING = (
     "failure timeline",
 )
 _TINY_CHANGE = (
-    "import path", "rename variable", "typo", "comment", "docstring",
+    "import path", "rename variable", "rename the variable",
+    "rename a variable", "typo", "comment", "docstring",
     "one line", "single line", "constant", "bump version",
 )
 

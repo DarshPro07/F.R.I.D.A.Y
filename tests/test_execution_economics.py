@@ -85,6 +85,43 @@ def test_make_and_stop_inside_a_question_stay_direct_answers():
         assert route.level == ee.FRIDAY_DIRECT, text
 
 
+def test_update_remove_replace_requests_are_work_not_questions():
+    """'update/remove/replace/...' at a clause start are edits to something,
+    not questions: they carried no verb the classifier listed, so they fell
+    through to 'question' and were answered with no worker."""
+    for text in ('update the retry limit in the weather tool',
+                 'replace the stale cache key',
+                 'remove the unused import',
+                 'Rename the helper to something clearer.',
+                 'Extend the digest loop to cover weekends.',
+                 'Migrate the retry helper to the shared client.',
+                 'Move the retry helper into the shared module.',
+                 'Can you please update the retry limit?'):
+        assert ee.wants_a_change(text), text
+        econ, route = classify_and_route(text)
+        assert econ.kind == 'code_change', text
+        assert route.level != ee.FRIDAY_DIRECT, text
+
+
+def test_update_remove_replace_inside_a_question_stay_direct_answers():
+    for text in ('what does update do',
+                 'how do I remove a file',
+                 'Why does replace return a copy?'):
+        assert not ee.wants_a_change(text), text
+        econ, route = classify_and_route(text)
+        assert econ.kind == 'question', text
+        assert route.level == ee.FRIDAY_DIRECT, text
+
+
+def test_a_literal_rename_or_move_file_command_stays_mechanical():
+    """'rename file' / 'move file' are in the mechanical table as commands;
+    the work verbs 'rename'/'move' must not swallow them."""
+    for text in ('rename file notes.txt', 'move file notes.txt'):
+        econ, route = classify_and_route(text)
+        assert econ.kind == 'mechanical', text
+        assert route.level == ee.DETERMINISTIC, text
+
+
 def test_a_work_verb_beats_a_mechanical_phrase():
     """'count' is a mechanical command only when it is the request; as part
     of what is being fixed it is a code change, not a zero-model count."""
