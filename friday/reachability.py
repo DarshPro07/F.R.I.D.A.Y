@@ -190,6 +190,10 @@ DECLARED = {
                                "CAP-FORGE-002 classification only; the sandboxed "
                                "analysis (CAP-FORGE-003) and the integration "
                                "decision (CAP-FORGE-004/014) are its callers"),
+    "friday/pattern_extraction": (FUTURE,
+                                  "CAP-FORGE-012 EXTRACT_PATTERN decision and its "
+                                  "native build; the forge intake "
+                                  "(CAP-FORGE-004/014) is its caller"),
     "friday/quarantine": (FUTURE,
                           "CAP-FORGE-003 repository quarantine; its callers are "
                           "the forge intake (CAP-FORGE-004/014)"),
