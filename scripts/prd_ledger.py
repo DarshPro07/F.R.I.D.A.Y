@@ -4232,6 +4232,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_project_brain.py::test_every_kind_has_a_fixture_body', 'tests/test_project_brain.py::test_schema_check_constraint_lists_exactly_the_python_kinds', 'tests/test_project_brain.py::test_round_trip_per_record_type', 'tests/test_project_brain.py::test_round_trip_survives_reopening_the_database', 'tests/test_project_brain.py::test_unknown_kind_and_malformed_body_rejected', 'tests/test_project_brain.py::test_store_refuses_an_unknown_kind_below_the_validation_layer', 'tests/test_project_brain.py::test_duplicate_active_key_is_refused_and_points_at_supersede', 'tests/test_project_brain.py::test_supersede_keeps_history', 'tests/test_project_brain.py::test_supersede_without_an_active_record_is_refused', 'tests/test_project_brain.py::test_supersede_validates_the_new_body_and_leaves_the_old_record_live', 'tests/test_project_brain.py::test_ref_must_name_an_existing_store_row', 'tests/test_project_brain.py::test_secret_shaped_content_is_refused_on_write'],
         "files": [],
     }),
+    ('PKG-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Rebuilt FRIDAY.exe (c848a97, smoke ok); golden journeys 12/12 and clean-machine 6/6. EXE-12 first failed: harness ADA_DB leaked into validate_exe.py, moving the db off the scratch profile. Validator now drops state overrides. (build run, commit 507cc2949)',
+        "next_action": 'GAPS: Clean-machine run is the validate_exe_clean.py simulation (bundle copied to C:\\Windows\\Temp, stripped PATH and profile); Windows Sandbox is not installed, so no real VM was used; EXE-06/07 voice-worker journeys skipped: they need --with-agent and a real .env beside the exe; CLEAN-03 doctor exits 2 with a livekit-credentials FAIL line; the journey treats missing credentials as expected on a machine with no .env',
+    }),
 ]
 
 
