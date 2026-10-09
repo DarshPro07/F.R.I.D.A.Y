@@ -4434,6 +4434,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added friday/prompt_compiler.py. compile_instructions(layers, tool_schemas, used_tools, min_health) sorts Layer(name, rank, text) by rank and works line by line. A line that repeats a kept line is dropped and counted in duplicates_removed. A lower-ranked line that has the opposite polarity to a kept (build run, commit b26d848dd)',
         "next_action": 'GAPS: Not wired into agent_friday.py: SYSTEM_PROMPT is still a fixed string and nothing calls compile_instructions yet. The module is classified FUTURE in reachability.DECLARED.; Contradiction detection is lexical only: it needs opposite polarity (never/do not/must not vs always or a plain imperative) and at least 0.8 Jaccard overlap of content words. Semantic contradictions are not detected.; Conflicts are returned in the result but are not logged or stored by memory_stack.log_result.; The caller supplies used_tools. Nothing yet derives which tools a call actually used.',
     }),
+    ('SKILL-007', {
+        "status": PARTIAL,
+        "current_implementation": 'Added friday/skills/gc.py with collect(registry, now=, apply=, actor=). It walks skills in ACTIVE, NEEDS_REVALIDATION, DEGRADED, STALE and BROKEN states, best first (selectable, then usage_count, quality, updated_at). A skill idle for 90 days or more whose fingerprint overlaps an already-kept better (build run, commit bc329377d)',
+        "next_action": 'GAPS: Idle ACTIVE skills with no duplicate are never archived. The PRD also lists unused, degraded and unhealthy skills as archive candidates, and the idle-unhealthy case is not implemented.; Capabilities (fabric providers) are not covered; only skills are.; SKILL-007 also wants performance dimensions for token impact, time and affected app version. Not added; GC ranks only on usage_count, quality_score and updated_at.; Ordering rule not built: GC does not move skills between ACTIVE/DEGRADED/NEEDS_REVALIDATION; that remains lifecycle.degrade_if_needed and revalidate.; NEEDS_REVALIDATION skills are compared but not archived, because the transition table has no NEEDS_REVALIDATION to DEPRECATED move.; Nothing schedules gc; it runs only via `friday skills gc` or a direct call. It is not an MCP tool or a voice action.; STALE_DAYS (90) is a module constant, not owner-configurable.',
+    }),
 ]
 
 
