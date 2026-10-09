@@ -40,6 +40,7 @@ import re
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from friday import contracts as c
 
@@ -242,7 +243,10 @@ def _discover() -> dict[str, Provider]:
     except ModuleNotFoundError:
         return found
 
-    for info in pkgutil.iter_modules(package.__path__):
+    # Module-name order is part of the contract, not a pkgutil accident: the
+    # overlap policy keeps the first of two equivalent providers.
+    for info in sorted(pkgutil.iter_modules(package.__path__),
+                       key=lambda mod: mod.name):
         if info.name.startswith("_"):
             continue
         name = f"{ADAPTER_PACKAGE}.{info.name}"
@@ -271,10 +275,16 @@ def _discover() -> dict[str, Provider]:
 #: A repository whose every operation a registered provider already answers is
 #: not imported on its own say-so: it is recorded REFERENCE_ONLY with the
 #: overlap as evidence, unless a measurement shows it is better. The override
-#: is a line in `notes`: `BENCHMARK_IMPROVEMENT: <what was measured>`. Text is
-#: required after the colon, so the marker cannot be an empty claim - and
-#: "benchmarked, not promoted" is not a claim of improvement.
+#: is a line in `notes`: `BENCHMARK_IMPROVEMENT: <what was measured> evidence:
+#: <repo-relative path>`. Text is required after the colon, so the marker
+#: cannot be an empty claim - and "benchmarked, not promoted" is not a claim of
+#: improvement. The path must be a file in this tree (the script, plan or
+#: result the measurement came from), so a claim nobody can follow does not
+#: count. That the file exists is all this checks: it cannot know whether the
+#: numbers in it show an improvement; a reviewer follows the path for that.
 _BENCHMARK_MARK = re.compile(r"BENCHMARK_IMPROVEMENT:\s*\S")
+_BENCHMARK_EVIDENCE = re.compile(r"\bevidence:\s*(\S+)")
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: Providers reviewed by a person and kept runnable although earlier providers
 #: already answer all their operations. Id -> why. Not an escape hatch for new
@@ -289,9 +299,32 @@ ACCEPTED_OVERLAPS = {
 }
 
 
+def _benchmark_claim(provider: Provider) -> str | None:
+    """`notes` from the BENCHMARK_IMPROVEMENT marker on, or None if absent."""
+    marked = _BENCHMARK_MARK.search(provider.notes)
+    return provider.notes[marked.start():] if marked else None
+
+
+def _evidence_problem(claim: str) -> str:
+    """Why the claim's evidence cannot be followed; "" when it can."""
+    cited = _BENCHMARK_EVIDENCE.search(claim)
+    if cited is None:
+        return "it cites no 'evidence: <repo-relative path>'"
+    path = cited.group(1).rstrip(".,;)")
+    try:
+        target = (_REPO_ROOT / path).resolve()
+        followable = target.is_relative_to(_REPO_ROOT) and target.is_file()
+    except (OSError, ValueError):
+        followable = False
+    if followable:
+        return ""
+    return f"evidence {path!r} is not a file in this repository"
+
+
 def has_benchmark_improvement(provider: Provider) -> bool:
-    """Whether `notes` carries a stated benchmark improvement."""
-    return bool(_BENCHMARK_MARK.search(provider.notes))
+    """Whether `notes` states a benchmark improvement whose evidence exists."""
+    claim = _benchmark_claim(provider)
+    return claim is not None and not _evidence_problem(claim)
 
 
 def find_overlaps(provider: Provider,
@@ -325,10 +358,14 @@ def _recorded_by_overlap(provider: Provider,
     evidence = "; ".join(
         f"{existing_id} answers {', '.join(ops)}"
         for existing_id, ops in covering.items())
+    claim = _benchmark_claim(provider)
+    rejected = (f" Its stated BENCHMARK_IMPROVEMENT was not honoured: "
+                f"{_evidence_problem(claim)}." if claim else "")
     note = (f"OVERLAP: recorded {REFERENCE_ONLY} (declared "
             f"{provider.integration_mode}); every operation is already "
             f"answered by a registered provider - {evidence}. Imported only "
-            f"with a 'BENCHMARK_IMPROVEMENT: <measurement>' line in notes.")
+            f"when notes state `BENCHMARK_IMPROVEMENT` with the measurement "
+            f"and its `evidence:` path.{rejected}")
     return replace(provider, integration_mode=REFERENCE_ONLY,
                    notes=f"{provider.notes} {note}".strip())
 
@@ -336,9 +373,11 @@ def _recorded_by_overlap(provider: Provider,
 def _apply_overlap_policy(found: dict[str, Provider]) -> dict[str, Provider]:
     """Record redundant repository imports as REFERENCE_ONLY.
 
-    Providers are judged in discovery order against those admitted before
-    them - "an existing registered capability" - so the first of two
-    equivalent providers stays and the later one is the one recorded. Only
+    Providers are judged in discovery order (adapter module name, fixed by
+    `_discover`) against those admitted before them - "an existing registered
+    capability" - so the first of two equivalent providers stays and the later
+    one is the one recorded. Renaming an adapter module can therefore change
+    which of two equivalent providers is recorded. Only
     providers that import an upstream repository are judged: one we wrote
     ourselves (`upstream == ""`) is not an import. Operations covered by
     several earlier providers together still count as covered.

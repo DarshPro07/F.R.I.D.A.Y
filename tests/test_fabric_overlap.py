@@ -114,13 +114,65 @@ def test_something_we_wrote_is_not_an_import(load):
     assert reg["ours"].integration_mode == fabric.BUILTIN
 
 
-def test_stated_benchmark_improvement_keeps_the_import(load):
+EVIDENCE = "scripts/bench_tool_disclosure.py"
+
+
+@pytest.mark.parametrize("cite", [
+    f"evidence: {EVIDENCE}",
+    f"(evidence: {EVIDENCE}).",
+])
+def test_stated_benchmark_improvement_keeps_the_import(load, cite):
     reg = load(_provider("old", ("fetch",)),
                _provider("better", ("fetch",),
-                         notes="BENCHMARK_IMPROVEMENT: 2.1x pages/s, "
-                               "bench_scrape 2026-10-01"))
+                         notes=f"BENCHMARK_IMPROVEMENT: 2.1x pages/s, "
+                               f"bench_scrape 2026-10-01 {cite}"))
     assert reg["better"].integration_mode == fabric.ADAPTER
     assert "OVERLAP" not in reg["better"].notes
+
+
+def test_a_benchmark_claim_without_evidence_is_not_honoured(load):
+    reg = load(_provider("old", ("fetch",)),
+               _provider("claimant", ("fetch",),
+                         notes="BENCHMARK_IMPROVEMENT: 2.1x pages/s"))
+    claimant = reg["claimant"]
+    assert claimant.integration_mode == fabric.REFERENCE_ONLY
+    assert "not honoured" in claimant.notes
+    assert "cites no 'evidence:" in claimant.notes
+
+
+def test_a_benchmark_claim_whose_evidence_file_is_missing_is_not_honoured(load):
+    reg = load(_provider("old", ("fetch",)),
+               _provider("claimant", ("fetch",),
+                         notes="BENCHMARK_IMPROVEMENT: 2.1x pages/s "
+                               "evidence: scripts/no_such_benchmark.py"))
+    claimant = reg["claimant"]
+    assert claimant.integration_mode == fabric.REFERENCE_ONLY
+    assert "'scripts/no_such_benchmark.py' is not a file" in claimant.notes
+
+
+@pytest.mark.parametrize("cite", ["scripts", "docs/plans/ctx-002/../../.."])
+def test_benchmark_evidence_must_be_a_file_inside_the_repository(load, cite):
+    reg = load(_provider("old", ("fetch",)),
+               _provider("claimant", ("fetch",),
+                         notes=f"BENCHMARK_IMPROVEMENT: 2x evidence: {cite}"))
+    assert reg["claimant"].integration_mode == fabric.REFERENCE_ONLY
+
+
+def test_benchmark_evidence_outside_the_repository_is_not_followed(
+        load, tmp_path):
+    outside = tmp_path / "bench.txt"
+    outside.write_text("2x faster")
+    reg = load(_provider("old", ("fetch",)),
+               _provider("claimant", ("fetch",),
+                         notes=f"BENCHMARK_IMPROVEMENT: 2x "
+                               f"evidence: {outside}"))
+    assert outside.is_file()
+    assert reg["claimant"].integration_mode == fabric.REFERENCE_ONLY
+
+
+def test_a_recorded_providers_own_note_is_not_a_benchmark_claim(load):
+    reg = load(_provider("old", ("fetch",)), _provider("dup", ("fetch",)))
+    assert not fabric.has_benchmark_improvement(reg["dup"])
 
 
 @pytest.mark.parametrize("notes", [
@@ -139,6 +191,18 @@ def test_an_already_reference_only_provider_is_left_as_declared(load):
                _provider("paper", ("fetch",), mode=fabric.REFERENCE_ONLY,
                          notes="Read for patterns."))
     assert reg["paper"].notes == "Read for patterns."
+
+
+# --- which provider is "existing" ------------------------------------------
+
+
+def test_discovery_order_does_not_depend_on_what_pkgutil_yields(monkeypatch):
+    natural = list(fabric._discover())
+    assert len(natural) > 1
+    real = fabric.pkgutil.iter_modules
+    monkeypatch.setattr(fabric.pkgutil, "iter_modules",
+                        lambda path: reversed(list(real(path))))
+    assert list(fabric._discover()) == natural
 
 
 # --- the real registry -----------------------------------------------------
