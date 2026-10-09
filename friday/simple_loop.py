@@ -420,3 +420,41 @@ async def run_simple(request: str, dispatch: Callable[..., Any],
 
     return await hand_over(
         f"{bounds.max_steps} actions ran and the postcondition is still unmet")
+
+
+async def route_simple(request: str, dispatch: Callable[..., Any],
+                       propose: Callable[[LoopState], Any], *,
+                       run: c.Run | None = None,
+                       bounds: LoopBounds = LoopBounds()) -> LoopResult | None:
+    """
+    Run `request` through the simple loop only if the classifier calls it
+    SIMPLE; otherwise return None, having proposed and dispatched nothing, so
+    the caller keeps the request on its own (Objective OS) path.
+    """
+    if TC.classify((request or "").strip()).task_class != TC.SIMPLE:
+        return None
+    return await run_simple(request, dispatch, propose, run=run, bounds=bounds)
+
+
+def model_proposer(complete: Callable[[LoopState], Any]) -> Callable[[LoopState], Any]:
+    """
+    Build a `propose` from a model transport the caller supplies.
+
+    `complete(state)` returns `(text, tokens, cost_usd)` (or an awaitable of
+    it). The text is a JSON action; an object with a `complex_because` key
+    says the task is too big for this loop. Text that is not JSON becomes a
+    proposal with no action, which `run_simple` rejects like any malformed
+    one. The tokens and cost are passed on so the loop's bounds meter them.
+    """
+    async def propose(state: LoopState) -> Proposal:
+        text, tokens, cost_usd = await _settled(complete(state))
+        try:
+            raw = json.loads(text)
+        except (TypeError, ValueError):
+            return Proposal(action=None, tokens=tokens, cost_usd=cost_usd)
+        if isinstance(raw, dict) and "complex_because" in raw:
+            return Proposal(tokens=tokens, cost_usd=cost_usd,
+                            complex_because=str(raw["complex_because"]))
+        return Proposal(action=raw, tokens=tokens, cost_usd=cost_usd)
+
+    return propose

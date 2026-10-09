@@ -393,3 +393,63 @@ def test_escalation_still_hands_over_when_the_step_that_ran_did_nothing():
 def test_escalation_is_held_for_a_step_the_registry_cannot_vouch_for():
     result, _, escalations = _escalate_after("not_in_the_registry")
     assert result.outcome == SL.BLOCKED and escalations.requests == []
+
+
+# --- the router and the model proposer ---------------------------------------------
+
+def test_route_simple_returns_none_for_non_simple():
+    dispatch = Dispatch()
+    proposer = Proposer(SL.Proposal(action=action()))
+    result = asyncio.run(SL.route_simple(
+        "delete all the files in my downloads folder", dispatch, proposer))
+    assert result is None
+    assert dispatch.calls == [] and proposer.seen == []
+
+
+def test_route_simple_runs_simple():
+    dispatch = Dispatch(output={"battery": "80%"})
+    proposer = Proposer(SL.Proposal(action=action(), tokens=300, cost_usd=0.002))
+    result = asyncio.run(SL.route_simple(SIMPLE_REQUEST, dispatch, proposer))
+    assert result is not None and result.outcome == SL.DONE
+    assert len(dispatch.calls) == 1 and proposer.seen == [0]
+
+
+def test_model_proposer_meters_tokens_and_cost():
+    import json as _json
+
+    counter = iter(range(100))
+    seen_states = []
+
+    def complete(state):
+        seen_states.append(len(state.steps))
+        return _json.dumps(action(arguments={"n": next(counter)})), 10, 0.04
+
+    dispatch, escalations = Dispatch(), Escalations()
+    result = go(SIMPLE_REQUEST, dispatch, SL.model_proposer(complete), escalations)
+    # $0.04 a step: $0.08 is inside the $0.10 ceiling, $0.12 is past it and not run.
+    assert len(dispatch.calls) == 2 and result.tokens == 30
+    assert result.cost_usd == pytest.approx(0.12)
+    assert result.outcome == SL.ESCALATED and "not run" in result.reason
+    assert seen_states == [0, 1, 2]
+
+
+def test_model_proposer_complex_because_escalates():
+    import json as _json
+
+    def complete(state):
+        return _json.dumps({"complex_because": "needs several systems"}), 5, 0.001
+
+    dispatch, escalations = Dispatch(), Escalations()
+    result = go(SIMPLE_REQUEST, dispatch, SL.model_proposer(complete), escalations)
+    assert result.outcome == SL.ESCALATED and "needs several systems" in result.reason
+    assert dispatch.calls == []
+
+
+@pytest.mark.parametrize("text", ["not json at all", "", "[1, 2]", "null"])
+def test_model_proposer_bad_json_is_rejected(text):
+    dispatch, escalations = Dispatch(), Escalations()
+    result = go(SIMPLE_REQUEST, dispatch,
+                SL.model_proposer(lambda state: (text, 7, 0.001)), escalations)
+    assert dispatch.calls == []
+    assert result.outcome == SL.ESCALATED and "not a valid action" in result.reason
+    assert result.tokens == 7
