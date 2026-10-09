@@ -1048,7 +1048,8 @@ def _asks_for_content(request: str) -> bool:
     return bool(_CONTENT_ASK.search(low)) and not _ACTION_ASK.search(low)
 
 
-def _honest_about_acting(answer: str, acted, calls_made, request: str = "") -> str:
+def _honest_about_acting(answer: str, acted, calls_made, ledger=None,
+                         request: str = "") -> str:
     """Refuse a completion claim the turn cannot back.
 
     `_honest_about_hermes` closed this for one family after Friday announced a
@@ -1073,7 +1074,7 @@ def _honest_about_acting(answer: str, acted, calls_made, request: str = "") -> s
     text = (answer or "").strip()
     if not text:
         return answer
-    from friday import honesty
+    from friday import honesty, turn_ledger
 
     claims = honesty.find_claims(text)
     if claims and _DID_YOU.match(request or "") and _DENIAL.match(text):
@@ -1081,10 +1082,15 @@ def _honest_about_acting(answer: str, acted, calls_made, request: str = "") -> s
     if claims and _asks_for_content(request):
         claims = [c for c in claims if _FIRST_PERSON.search(c)]
     if not claims:
+        # No completion claim; a failure claim still needs an attempt on record.
+        if ledger is not None and honesty.failure_claims(text):
+            return turn_ledger.refusal(text, ledger) or answer
         return answer
     ran = tuple(acted or ())
     if ran and any(pair not in _READ_ONLY_OPERATIONS for pair in ran):
-        return answer                      # something that can act ran
+        # Something that can act ran; whether it backs THIS sentence is the
+        # ledger's call - kind, target and correlation (ACT-001).
+        return turn_ledger.refusal(text, ledger) or answer
     if set(ran) & _STATUS_READS and not any(_FIRST_PERSON.search(c) for c in claims):
         return answer                      # a status report about another worker, backed by the read
     if not ran:
@@ -1542,6 +1548,8 @@ def _cli_reply(text, history, approval_note=""):
 
     used = []                      # families touched, for the response meta
     acted = []                     # (family, operation) pairs that ran OK
+    from friday import turn_ledger
+    ledger = turn_ledger.TurnLedger(executor="browser_brain")
     calls_made = 0                 # tool calls the model actually issued
     try:
         result = ask(True)
@@ -1560,6 +1568,12 @@ def _cli_reply(text, history, approval_note=""):
                 if "result" in out:
                     used.append(fam)
                     acted.append((fam, op))
+                    ledger.record(f"{fam}_{op}", arguments, out["result"],
+                                  operation=f"{fam}.{op}")
+                else:
+                    ledger.record(f"{fam}_{op}", arguments,
+                                  error=str(out.get("error") or "no result"),
+                                  operation=f"{fam}.{op}")
                 messages.append({"role": "tool", "tool_call_id": sent["id"],
                                  "content": json.dumps(out, default=str)[:_TOOL_RESULT_CHARS]})
             result = ask(True)
@@ -1582,7 +1596,8 @@ def _cli_reply(text, history, approval_note=""):
     answer = answer or "I found it, sir, but lost my words - ask me once more."
     # Both gates the Gemini turn has, fed with what actually ran: a hand-off to Hermes
     # or a completed action is a claim only a tool call this turn can back.
-    answer = _honest_about_acting(_honest_about_hermes(answer, used), acted, calls_made, request=text)
+    answer = _honest_about_acting(_honest_about_hermes(answer, used), acted, calls_made,
+                                  ledger, request=text)
     message_id = _remember_turn("assistant", answer)
     return {"reply": answer, "model": f"{result.provider}/{result.model}",
             "message_id": message_id, "used_memory": bool(ctx), "used_capabilities": used,
@@ -1711,6 +1726,8 @@ def reply(text, history=None):
 
         used = []                      # families touched, for the response meta
         acted = []                     # (family, operation) pairs that ran OK
+        from friday import turn_ledger
+        ledger = turn_ledger.TurnLedger(executor="browser_brain")
         calls_made = 0                 # tool calls the model actually issued
         timer.start("model")
         resp = client.models.generate_content(model=name, contents=contents, config=cfg)
@@ -1734,6 +1751,12 @@ def reply(text, history=None):
                 if "result" in out:
                     used.append(fam)
                     acted.append((fam, op))
+                    ledger.record(f"{fam}_{op}", args.get("arguments"), out["result"],
+                                  operation=f"{fam}.{op}")
+                else:
+                    ledger.record(f"{fam}_{op}", args.get("arguments"),
+                                  error=str(out.get("error") or "no result"),
+                                  operation=f"{fam}.{op}")
                 contents.append(types.Content(role="tool", parts=[
                     types.Part.from_function_response(name=call.name, response=out)]))
             timer.start("model")
@@ -1761,7 +1784,7 @@ def reply(text, history=None):
             answer = (resp.text or "").strip() or (
                 "I found it, sir, but lost my words - ask me once more.")
         answer = _honest_about_hermes(answer, used)
-        answer = _honest_about_acting(answer, acted, calls_made, request=text)
+        answer = _honest_about_acting(answer, acted, calls_made, ledger, request=text)
         message_id = _remember_turn("assistant", answer)
         latency = timer.report()
         return {"reply": answer, "model": name, "message_id": message_id,

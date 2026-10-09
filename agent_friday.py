@@ -35,7 +35,7 @@ try:
 except Exception:  # noqa: BLE001
     _turn_detector_plugin = None
 
-from friday import autolearn, capabilities, capability_router, governor, mcp_firewall, objective_cli, ownership, providers, resilience, turn_timing, write_licence
+from friday import autolearn, capabilities, capability_router, governor, mcp_firewall, objective_cli, ownership, providers, resilience, turn_ledger, turn_timing, write_licence
 from friday.continuous import ContinuousTaskExecutor
 
 
@@ -729,6 +729,7 @@ class FridayAgent(Agent):
     _acted_this_turn: tuple[str, ...] = ()
     #: Whether this turn consumed a tool result or a page; reset per turn.
     _read_this_turn: bool = False
+    _ledger = None   # a turn_ledger.TurnLedger, fresh each turn in prepare_turn
     #: Whether the turn before this one did. Its reply is what the learner gets
     #: as context, and a reply that read a page may be that page restated.
     _prior_turn_read: bool = False
@@ -864,8 +865,25 @@ class FridayAgent(Agent):
         """
         from friday import honesty
 
-        if self._acted_this_turn or not honesty.find_claims(spoken or ""):
-            return None
+        ledger = getattr(self, "_ledger", None)
+        if self._acted_this_turn:
+            # Something acted; whether it backs THIS sentence is the ledger's
+            # call: kind, target, correlation, and any failure claim (ACT-001).
+            correction = turn_ledger.refusal(spoken, ledger)
+            if correction is not None:
+                logger.warning("voice: claim not backed by the turn's evidence: %r",
+                               (spoken or "")[:160])
+            return correction
+        if not honesty.find_claims(spoken or ""):
+            if ledger is None or not honesty.failure_claims(spoken or ""):
+                return None
+            # A failure claim with nothing acted: a call that raised is on the
+            # ledger as FAILED, so saying it failed is the honest report.
+            correction = turn_ledger.refusal(spoken, ledger)
+            if correction is not None:
+                logger.warning("voice: failure claim not backed by the turn's "
+                               "evidence: %r", (spoken or "")[:160])
+            return correction
         logger.warning("voice: unbacked completion claim refused: %r", (spoken or "")[:160])
         return ("I have not actually done that, boss - I said it without doing "
                 "it. Nothing was touched. Ask me again and I will carry it out.")
@@ -1101,9 +1119,10 @@ class FridayAgent(Agent):
         self._router.note_used(capability)
         started = time.monotonic()
         try:
-            result = str(await self._call_capability(capability, parsed))
+            raw = await self._call_capability(capability, parsed)
         except Exception as exc:
             # The tool failed. Say so - do not let the model narrate success.
+            self._record_call(capability, parsed, error=f"{type(exc).__name__}: {exc}")
             return json.dumps({
                 "error": f"{capability} failed: {type(exc).__name__}: {exc}",
                 "may_claim_completion": False,
@@ -1117,7 +1136,10 @@ class FridayAgent(Agent):
         # What actually ACTED this turn, for the completion gate in tts_node.
         # Recorded after the call returned without raising: a capability that
         # threw is handled above and never reaches here, so it can never back
-        # a claim.
+        # a claim. The ledger gets the raw return, so the tool's own status
+        # and verification are the evidence; the model gets its text.
+        self._record_call(capability, parsed, raw)
+        result = str(raw)
         if not ownership.is_read_only(capability):
             self._acted_this_turn = self._acted_this_turn + (capability,)
         # Latency attribution (the owner's rule: report the cause, keep the
@@ -1134,6 +1156,12 @@ class FridayAgent(Agent):
                                "latency_note": note,
                                "say_if_asked_why_slow": note})
         return result
+
+    def _record_call(self, capability: str, arguments, result="", *, error: str = "") -> None:
+        """Put a finished call on this turn's evidence ledger (ACT-001)."""
+        if self._ledger is None:
+            self._ledger = turn_ledger.TurnLedger(executor="voice_agent")
+        self._ledger.record(capability, arguments, result, error=error)
 
     def _keep_group_open(self, capability: str) -> None:
         """
@@ -1506,6 +1534,7 @@ class FridayAgent(Agent):
         self._acted_this_turn = ()
         self._prior_turn_read = getattr(self, "_read_this_turn", False)
         self._read_this_turn = False
+        self._ledger = turn_ledger.TurnLedger(executor="voice_agent")
         self._spoke_this_turn = False
         self._router.note_turn()
         if await stop_or_resume(

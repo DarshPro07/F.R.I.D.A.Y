@@ -23,9 +23,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 from friday import runstate
-from friday.contracts import Run
+from friday.contracts import Correlation, Run
 
 #: Past/perfect forms of the verbs §5 lists as requiring `succeeded`.
 COMPLETION_PATTERNS = (
@@ -177,6 +178,12 @@ _LABEL_RE = re.compile(
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 
+#: Clause boundaries inside one sentence. "I created foo.txt but the upload
+#: failed" makes two claims; read as one sentence, the word "failed" negates
+#: the whole of it and the creation goes out unchecked.
+_CLAUSE_SPLIT = re.compile(
+    r"\s*;\s*|,?\s+(?:but|however|although|whereas)\b,?\s*", re.I)
+
 
 @dataclass(frozen=True)
 class ClaimAudit:
@@ -192,6 +199,12 @@ class ClaimAudit:
 
 def sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE_SPLIT.split(text or "") if s.strip()]
+
+
+def clauses(text: str) -> list[str]:
+    """Each sentence, split where it joins a second claim to the first."""
+    return [part.strip() for sentence in sentences(text)
+            for part in _CLAUSE_SPLIT.split(sentence) if part.strip()]
 
 
 def is_negated(sentence: str) -> bool:
@@ -241,12 +254,21 @@ def _still_going(result) -> bool:
     return bool(state) and state not in runstate.TERMINAL
 
 
-def _missing_evidence(sentence: str, backed) -> str:
-    """Why this specific claim is not supported, or '' if it is."""
+def _unbackable(sentence: str) -> str:
+    """Why no action at all could back this claim, or '' if one could."""
     for word, prefixes in required_evidence(sentence).items():
         if not prefixes:
             return (f"nothing in Friday can back {word!r} - there is no "
                     f"capability that does that yet, so no action could")
+    return ""
+
+
+def _missing_evidence(sentence: str, backed) -> str:
+    """Why this specific claim is not supported, or '' if it is."""
+    impossible = _unbackable(sentence)
+    if impossible:
+        return impossible
+    for word, prefixes in required_evidence(sentence).items():
         matching = [result for result in backed
                     if any(result.tool_id.startswith(p) for p in prefixes)]
         if not matching:
@@ -318,8 +340,16 @@ def touched_targets(result) -> list[str]:
     exists because the work happened - and the output and verification
     evidence are included because most tools name their target in one of
     them. All four, because a tool that records its target in only one place
-    should not thereby become unauditable.
+    should not thereby become unauditable. A failed attempt usually names its
+    target only in its error, so that is read too.
+
+    A target recorded in the action's Correlation overrides all of them: it is
+    the one thing the action was about, and a filename its evidence mentions
+    in passing ("copied bar.txt to foo.txt") is not a second target.
     """
+    correlation = getattr(result, "correlation", None)
+    if correlation is not None and correlation.target:
+        return [correlation.target]
     out: list[str] = []
     for artifact in getattr(result, "artifacts", ()) or ():
         for value in (artifact.path_or_uri, artifact.title):
@@ -342,6 +372,9 @@ def touched_targets(result) -> list[str]:
         # or, worse, matches by accident. The same extractor is used on both
         # sides so the comparison is between like and like.
         out.extend(named_targets(str(verification.evidence)))
+    error = getattr(result, "error", None)
+    if error:
+        out.extend(named_targets(str(error)))
     return out
 
 
@@ -384,58 +417,375 @@ def _target_mismatch(sentence: str, backed) -> str:
             f"evidence for one target does not back a claim about another")
 
 
-def audit(text: str, run: Run | None) -> ClaimAudit:
-    """
-    Check every completion claim in `text` against `run`.
+# ---------------------------------------------------------------------------
+# per-type proof shapes (ACT-001)
+# ---------------------------------------------------------------------------
+#
+# "Verified" is not one thing. A file write is proven by reading it back, a
+# code change by a diff AND a test run, a web action by the page's state
+# afterwards, an email by the provider's message id, a simulation by the
+# artifact it produced. Each shape lists groups of patterns that must ALL be
+# present in the verification text (method + evidence); a shape may also need
+# a recorded artifact.
 
-    Three conditions, each added because the one before it was not enough.
+@dataclass(frozen=True)
+class ProofShape:
+    name: str
+    prefixes: tuple[str, ...]
+    #: Each entry: what the proof is called, and patterns any one of which
+    #: satisfies it. Every entry must be satisfied.
+    needs: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    needs_artifact: bool = False
+
+
+#: Proof is a `key=value` token with a real value, never a bare word: prose
+#: such as "no diff, tests not run" or "12 bytes" names the words without
+#: proving anything. Counts must be non-zero; a hash must be hex; a value of
+#: none, null, false, unknown or zero is the absence of proof, not proof.
+_POS = r"(?:0*[1-9]\d*)"
+_VALUE = r"(?!(?:0+|none|null|false|no|nil|unknown|n/a)(?![^\s,;]))[^\s,;]+"
+PROOF_SHAPES: tuple[ProofShape, ...] = (
+    ProofShape("file", ("files_",),
+               needs=(("sha256=<hash> or readback=ok",
+                       (r"\bsha256[=:][0-9a-f]{16,}\b", r"\breadback=(?:ok|match)\b")),)),
+    ProofShape("code", ("claude_code", "hermes_", "executor_", "code_",
+                          "executor.claude_code", "executor.hermes"),
+               needs=(("diff_files=<n>", (rf"\bdiff_files={_POS}\b",)),
+                      ("tests_passed=<n>", (rf"\btests_passed={_POS}\b",)))),
+    ProofShape("web", ("browser_",),
+               needs=(("post_state=<state> or readback=ok",
+                       (rf"\bpost_state={_VALUE}", r"\breadback=(?:ok|match)\b")),)),
+    ProofShape("email", ("email_", "gmail_", "mail_"),
+               needs=(("message_id=<id>", (rf"\bmessage_id=(?=[^\s,;]{{3,}}){_VALUE}",)),)),
+    ProofShape("simulation", ("sim_", "simulation_", "cad_", "cad."), needs_artifact=True),
+)
+
+#: Every action without a typed shape above: at least one structured
+#: observation with a real value - `pid=1234`, `rows=412`, `status=200`, the
+#: form Verification's own docstring asks for. "Launched" or "the call
+#: returned" describes; it does not observe. A key inside a URL's query
+#: string is not an observation, so the key must start a word of its own.
+OBSERVATION = ProofShape(
+    "observed", ("",),
+    needs=(("an observed key=value", (rf"(?:^|\s)[a-z][a-z0-9_]*={_VALUE}",)),))
+
+
+def proof_shape_for(tool_id: str) -> ProofShape:
+    """The proof this tool's verification must show. Every tool has one."""
+    return next((s for s in PROOF_SHAPES
+                 if any(tool_id.startswith(p) for p in s.prefixes)), OBSERVATION)
+
+
+def proof_gap(result) -> str:
+    """What the action's verification lacks for its type, or '' if complete."""
+    shape = proof_shape_for(result.tool_id)
+    v = result.verification
+    text = f"{getattr(v, 'method', '')} {getattr(v, 'evidence', '')}".lower()
+    text = re.sub(r"\b(?:no|not|never|without|zero)\s+\w+\s*", " ", text)
+    for label, patterns in shape.needs:
+        if not any(re.search(p, text) for p in patterns):
+            return (f"{result.tool_id} is a {shape.name} action; its "
+                    f"verification does not show {label}")
+    if shape.needs_artifact and not result.artifacts:
+        return (f"{result.tool_id} is a {shape.name} action; it recorded "
+                f"no artifact")
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# correlation (ACT-001)
+# ---------------------------------------------------------------------------
+
+#: How far past this machine's clock evidence may be dated before it reads as
+#: invented rather than skewed.
+_CLOCK_SKEW = timedelta(minutes=1)
+
+
+def _as_time(stamp: str) -> datetime | None:
+    """An ISO timestamp as an aware UTC time, or None if it is not one."""
+    try:
+        parsed = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _timestamp_gap(result, run: Run) -> str:
+    """Why this evidence is not dated inside `run`, or '' if it is.
+
+    Compared as times, never as strings: '10:00+05:30' is before '06:00Z'.
+    Every stamp the evidence carries is checked, and evidence that carries
+    none, or one that is not a time, is refused rather than waved through.
+    """
+    corr = getattr(result, "correlation", None)
+    stamps = [s for s in (getattr(corr, "timestamp", ""), result.started_at,
+                          result.completed_at) if s]
+    if not stamps:
+        return f"{result.tool_id} evidence carries no timestamp"
+    began = _as_time(run.created_at)
+    if began is None:
+        return (f"{run.run_id} has no readable start time, so no evidence can "
+                f"be placed inside it")
+    latest = datetime.now(timezone.utc) + _CLOCK_SKEW
+    for stamp in stamps:
+        when = _as_time(stamp)
+        if when is None:
+            return f"{result.tool_id} evidence is dated {stamp!r}, which is not a time"
+        if when < began:
+            return (f"{result.tool_id} evidence is dated {stamp}, before "
+                    f"{run.run_id} began")
+        if when > latest:
+            return f"{result.tool_id} evidence is dated {stamp}, in the future"
+    return ""
+
+
+def _same_correlated_target(want: str, have: str) -> bool:
+    """A full path matches only itself; a bare name matches a path's tail."""
+    def norm(value: str) -> str:
+        return str(value).strip().replace(chr(92), "/").rstrip("/").lower()
+
+    a, b = norm(want), norm(have)
+    if not a or not b:
+        return False
+    if "/" in a and "/" in b:
+        return a == b
+    return a.rsplit("/", 1)[-1] == b.rsplit("/", 1)[-1]
+
+
+def correlation_gap(result, expect: dict | None = None,
+                    run: Run | None = None) -> str:
+    """Why this evidence is not about the action expected, or '' if it is.
+
+    Always, given the run: the evidence belongs to it and is dated inside
+    it. Then every key the run declared in its Correlation, and every key in
+    `expect` (workspace, objective, version, action, target, executor,
+    operation), must be recorded on the evidence with the same value. The two
+    are checked separately, so a caller cannot widen what the run declared.
+    Evidence that recorded no correlation cannot match an expectation.
+    """
+    if run is not None:
+        if result.run_id != run.run_id:
+            return f"{result.tool_id} belongs to {result.run_id}, not {run.run_id}"
+        gap = _timestamp_gap(result, run)
+        if gap:
+            return gap
+    declared = getattr(run, "correlation", None)
+    pairs = [(key, getattr(declared, key)) for key in Correlation.KEYS
+             if declared is not None and getattr(declared, key)]
+    pairs += list((expect or {}).items())
+    if not pairs:
+        return ""
+    corr = getattr(result, "correlation", None)
+    if corr is None:
+        return f"{result.tool_id} recorded no correlation key"
+    for key, want in pairs:
+        if key not in Correlation.KEYS:
+            raise ValueError(f"unknown correlation key {key!r}")
+        have = getattr(corr, key)
+        same = (_same_correlated_target(str(want), str(have)) if key == "target"
+                else bool(have) and str(have) == str(want))
+        if not same:
+            return (f"{result.tool_id} was recorded for {key}={have!r}, "
+                    f"not {want!r}")
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# failure claims (ACT-001)
+# ---------------------------------------------------------------------------
+#
+# "The upload failed" is a claim too: that an upload was tried, and that it
+# went wrong. It needs an attempt on record that did go wrong, of the kind
+# the sentence names, on the target it names - exactly as a success claim
+# does. A verified email is not evidence that an upload failed.
+
+_FAILURE_CLAIM_RE = re.compile(
+    r"\b(?:failed|tried|attempted|errored|crashed|timed out)\b", re.I)
+
+#: An attempt that was made and went wrong. SUCCEEDED and OBSERVED are not
+#: here, and neither are RUNNING and INITIATED, which have not gone anywhere
+#: yet.
+_WENT_WRONG = ("failed", "partial", "cancelled", "not_carried_out",
+               "not_permitted", "unsupported", "not_configured")
+
+#: The other forms a failure sentence uses for the act each CLAIM_EVIDENCE
+#: word names: "the upload failed", "refunding it timed out", "I tried to
+#: delete it". Keyed by every CLAIM_EVIDENCE word - a missing one is a
+#: KeyError at import - so an act gains a kind check for its failures the
+#: moment it gains one for its successes. Nouns that also name something
+#: else ("process", "import", "book") are left out: the narrow check that
+#: never fires wrongly beats the broad one.
+_ACT_FORMS: dict[str, tuple[str, ...]] = {
+    'processed': ('processing',),
+    'imported': ('importing',),
+    'exported': ('exporting',),
+    'scheduled': ('schedule', 'scheduling'),
+    'automated': ('automate', 'automating', 'automation'),
+    'remembered': ('remember', 'remembering'),
+    'learned': ('learn', 'learning'),
+    'played': ('play', 'playing', 'playback'),
+    'printed': ('print', 'printing'),
+    'posted': ('post', 'posting'),
+    'published': ('publish', 'publishing'),
+    'uploaded': ('upload', 'uploading'),
+    'subscribed': ('subscribe', 'subscribing', 'subscription'),
+    'emailed': ('emailing',),
+    'tweeted': ('tweet', 'tweeting'),
+    'refunded': ('refund', 'refunding'),
+    'paid': ('pay', 'paying', 'payment'),
+    'charged': ('charge',),
+    'transferred': ('transfer', 'transferring'),
+    'ordered': (r'(?<!in )order', 'ordering'),
+    'shipped': ('ship', 'shipping', 'shipment'),
+    'delivered': ('deliver', 'delivering', 'delivery'),
+    'booked': ('booking',),
+    'reserved': ('reserve', 'reserving', 'reservation'),
+    'cancelled': ('cancel', 'cancelling', 'canceling', 'cancellation'),
+    'repriced': ('reprice', 'repricing'),
+    'deployed': ('deploy', 'deploying', 'deployment'),
+    'deleted': ('delete', 'deleting', 'deletion'),
+}
+_ACT_RE = {word: re.compile(rf"\b(?:{'|'.join((word,) + _ACT_FORMS[word])})\b", re.I)
+           for word in CLAIM_EVIDENCE}
+
+
+def is_failure_claim(clause: str) -> bool:
+    """An assertion that an attempt was made and went wrong."""
+    return bool(_FAILURE_CLAIM_RE.search(clause)) and not re.search(
+        r"\b(?:if|when|whether|might|may|could)\b", clause, re.I)
+
+
+def failure_claims(text: str) -> list[str]:
+    """Clauses asserting that an attempt was made and went wrong."""
+    return [part for part in clauses(text) if is_failure_claim(part)]
+
+
+def _failure_mismatch(claim: str, went_wrong) -> str:
+    """Why no attempt on record is the one this failure claim describes."""
+    if not went_wrong:
+        return ("a failure or attempt was claimed but no attempt that went "
+                "wrong is recorded in this run")
+    candidates = list(went_wrong)
+    for word, rx in _ACT_RE.items():
+        if not rx.search(claim):
+            continue
+        prefixes = CLAIM_EVIDENCE[word]
+        if not prefixes:
+            return (f"nothing in Friday can do what {word!r} names, so no "
+                    f"attempt at it can have been made")
+        candidates = [r for r in candidates if r.tool_id.startswith(prefixes)]
+        if not candidates:
+            tried = sorted({r.tool_id for r in went_wrong})
+            return (f"a failure of {word!r} needs an attempt by one of "
+                    f"{list(prefixes)}; what went wrong was {tried}")
+    named = named_targets(claim)
+    if named:
+        touched = [value for r in candidates for value in touched_targets(r)]
+        if not any(_same_target(n, t) for n in named for t in touched):
+            return (f"the failure claimed names {named[0]!r}; no attempt that "
+                    f"went wrong was about it")
+    return ""
+
+
+def _completion_mismatch(claims, run: Run, in_scope, strict_proof: bool,
+                         out_of_scope: dict) -> tuple[list, list]:
+    """(claim, why) for each unbacked completion claim, and what backs the rest."""
+    # A verb no capability can do is refused for that reason first: no proof
+    # from some other action, however good, could change the answer.
+    wrong = [(claim, why) for claim in claims if (why := _unbackable(claim))]
+    claims = [claim for claim in claims if not _unbackable(claim)]
+    if not claims:
+        return wrong, []
+    succeeded = [r for r in run.results if r.may_claim_completion]
+    backed = [r for r in in_scope if r.may_claim_completion]
+    if succeeded and not backed:
+        why = "; ".join(dict.fromkeys(out_of_scope[id(r)] for r in succeeded))
+        return wrong + [(claim, why) for claim in claims], []
+    if strict_proof:
+        # Only actions whose verification matches their type's proof shape
+        # may back a claim; the rest are kept out as if unverified.
+        gaps = [proof_gap(r) for r in backed]
+        if any(gaps):
+            backed = [r for r, g in zip(backed, gaps) if not g]
+            if not backed:
+                why = "; ".join(dict.fromkeys(g for g in gaps if g))
+                return wrong + [(claim, why) for claim in claims], []
+    if not backed:
+        why = (f"completion claimed but no action succeeded in {run.run_id} "
+               f"({len(run.results)} action(s) recorded, none verified)")
+        return wrong + [(claim, why) for claim in claims], []
+    # Something succeeded. That is not yet permission to claim *this* -
+    # files_read succeeding is not evidence that a catalogue was processed.
+    wrong += [(claim, why) for claim in claims
+              if (why := _missing_evidence(claim, backed)
+                  or _target_mismatch(claim, backed))]
+    return wrong, backed
+
+
+def audit(text: str, run: Run | None, *, strict_proof: bool = True,
+          correlate: dict | None = None) -> ClaimAudit:
+    """
+    Check every completion and failure claim in `text` against `run`.
+
+    The conditions, each added because the one before it was not enough.
     Something must have succeeded in the run; for the verbs in
     CLAIM_EVIDENCE the thing that succeeded must be of the KIND the verb
     names - a verified `files_read` is real work and real evidence, and it is
     not evidence that a catalogue was processed; and when the sentence names
     a concrete TARGET, one of those actions must have touched it. Success on
     foo.txt is not permission to say bar.txt was created (FR-TRU-001).
+
+    And (ACT-001): its verification must show its type's proof shape; it
+    must be correlated to this run - dated inside it, and carrying the key
+    the run declared plus any `correlate` adds; and a failure claim needs a
+    correlated attempt that went wrong, of the kind and on the target it
+    names. Text is read clause by clause, so one claim cannot hide another.
     """
-    claims = tuple(find_claims(text))
-    if not claims:
+    parts = clauses(text)
+    claims = tuple(p for p in parts if is_completion_claim(p))
+    failures = tuple(p for p in parts if is_failure_claim(p))
+    said = claims + failures
+    if not said:
         return ClaimAudit(ok=True, reason="no completion claims")
 
     if run is None:
         return ClaimAudit(
-            ok=False, claims=claims, unbacked=claims,
-            reason="completion claimed with no Run at all",
+            ok=False, claims=said, unbacked=said,
+            reason=("completion claimed with no Run at all" if claims else
+                    "a failure or attempt was claimed with no Run at all, so "
+                    "no attempt is on record"),
         )
 
-    backed = [r for r in run.results if r.may_claim_completion]
-    if not backed:
-        attempted = len(run.results)
-        return ClaimAudit(
-            ok=False, claims=claims, unbacked=claims,
-            reason=(
-                f"completion claimed but no action succeeded in {run.run_id} "
-                f"({attempted} action(s) recorded, none verified)"
-            ),
-        )
+    out_of_scope = {id(r): correlation_gap(r, correlate, run) for r in run.results}
+    in_scope = [r for r in run.results if not out_of_scope[id(r)]]
 
-    # Something succeeded. That is not yet permission to claim *this* -
-    # files_read succeeding is not evidence that a catalogue was processed.
-    wrong = [(claim, why) for claim in claims
-             if (why := _missing_evidence(claim, backed)
-                 or _target_mismatch(claim, backed))]
+    wrong, backed = _completion_mismatch(claims, run, in_scope, strict_proof,
+                                         out_of_scope) if claims else ([], [])
+    went_wrong = [r for r in in_scope if r.status in _WENT_WRONG]
+    for claim in failures:
+        why = _failure_mismatch(claim, went_wrong)
+        if why and not went_wrong:
+            stray = [out_of_scope[id(r)] for r in run.results
+                     if r.status in _WENT_WRONG and out_of_scope[id(r)]]
+            why = "; ".join(dict.fromkeys([why] + stray))
+        if why:
+            wrong.append((claim, why))
+
+    evidence = tuple(r.verification.evidence for r in backed if r.verification)
     if wrong:
         return ClaimAudit(
-            ok=False, claims=claims,
+            ok=False, claims=said,
             unbacked=tuple(claim for claim, _ in wrong),
             reason="; ".join(dict.fromkeys(why for _, why in wrong)),
-            evidence=tuple(r.verification.evidence
-                           for r in backed if r.verification),
+            evidence=evidence,
         )
-
-    return ClaimAudit(
-        ok=True, claims=claims,
-        reason=f"{len(backed)} verified action(s) in {run.run_id}",
-        evidence=tuple(r.verification.evidence for r in backed if r.verification),
-    )
+    reasons = []
+    if claims:
+        reasons.append(f"{len(backed)} verified action(s) in {run.run_id}")
+    if failures:
+        reasons.append(f"{len(went_wrong)} attempt(s) that went wrong recorded")
+    return ClaimAudit(ok=True, claims=said, reason="; ".join(reasons),
+                      evidence=evidence)
 
 
 def safe_alternative(run: Run | None) -> str:

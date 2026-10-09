@@ -27,7 +27,8 @@ def _run_that_wrote(path: str, *, title: str = "", tool: str = "files_write"):
     """A run with exactly one verified write to `path`."""
     run = c.Run.create(f"write {path}", capability=tool)
     prior = c.started(run.run_id, tool)
-    verification = c.Verification(method="stat", evidence=f"{path} exists, 12 bytes")
+    verification = c.Verification(
+        method="stat", evidence=f"{path} exists, 12 bytes, sha256={'ab12' * 16}")
     artifact = c.new_artifact(run_id=run.run_id, type="file",
                               title=title or path.rsplit("/", 1)[-1],
                               path_or_uri=path, producer=tool,
@@ -75,7 +76,7 @@ def test_a_claim_with_no_concrete_target_is_left_to_the_kind_check():
     owns it; this rule must not invent a target to complain about."""
     run = c.Run.create("process the catalogue", capability="product_import")
     prior = c.started(run.run_id, "product_import")
-    verification = c.Verification(method="count", evidence="412 rows processed")
+    verification = c.Verification(method="count", evidence="rows=412 processed")
     run.record(c.succeeded(prior, output={"rows": 412}, verification=verification))
     assert H.audit("I processed the catalogue.", run).ok
 
@@ -84,7 +85,8 @@ def test_a_url_claim_is_checked_against_the_url_that_was_touched():
     run = c.Run.create("open the dashboard", capability="browser_open")
     prior = c.started(run.run_id, "browser_open")
     verification = c.Verification(method="page-title",
-                                  evidence="https://shop.example.com/admin loaded")
+                                  evidence="https://shop.example.com/admin loaded "
+                                           "post_state=dashboard")
     run.record(c.succeeded(prior, output={"url": "https://shop.example.com/admin"},
                            verification=verification))
     assert H.audit("I opened https://shop.example.com/admin.", run).ok
@@ -108,7 +110,8 @@ def test_a_succeeded_action_that_records_nothing_it_touched_backs_no_named_claim
     prior = c.started(run.run_id, "files_write")
     run.record(c.succeeded(prior, output="done",
                            verification=c.Verification(method="none",
-                                                       evidence="the call returned")))
+                                                       evidence="the call returned "
+                                                                f"sha256={'ab12' * 16}")))
     audit = H.audit("I created invoice.csv.", run)
     assert not audit.ok
     assert "recorded what it touched" in audit.reason

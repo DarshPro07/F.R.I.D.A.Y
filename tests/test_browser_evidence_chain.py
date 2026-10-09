@@ -126,7 +126,7 @@ def _run_from_step(step: B.Step, *, tool: str = "browser_open"):
     """
     run = c.Run.create(step.primitive, capability=tool)
     prior = c.started(run.run_id, tool)
-    verification = c.Verification(method="post-observation", evidence=step.evidence)
+    verification = c.Verification(method="post-observation", evidence=f"{step.evidence} post_state=observed")
     observed = step.after.url if step.after else ""
     run.record(c.succeeded(prior, output={"url": observed},
                            verification=verification))

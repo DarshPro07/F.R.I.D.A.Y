@@ -182,6 +182,34 @@ def new_artifact(
 
 
 @dataclass(frozen=True)
+class Correlation:
+    """
+    The key that ties a piece of evidence to the one action it is about.
+
+    An ActionResult records the key it was produced under; a Run declares the
+    key its work must carry. `honesty.audit` holds every result to the run's
+    declared key without being asked, refuses evidence recorded for anything
+    else, and evidence that recorded nothing cannot match a declared key at
+    all. A recorded `target` is the one thing the action was about, so a
+    filename that merely appears in its evidence text cannot be claimed.
+    `timestamp` is when the evidence was produced; it is compared as a time,
+    and the result's own started/completed stamps are checked beside it.
+    """
+
+    workspace: str = ""
+    objective: str = ""
+    version: str = ""
+    action: str = ""
+    target: str = ""
+    executor: str = ""
+    operation: str = ""
+    timestamp: str = ""
+
+    KEYS = ("workspace", "objective", "version", "action", "target",
+            "executor", "operation")
+
+
+@dataclass(frozen=True)
 class ActionResult:
     """
     The envelope every externally meaningful tool operation returns.
@@ -203,6 +231,7 @@ class ActionResult:
     artifacts: tuple[Artifact, ...] = ()
     side_effects: tuple[str, ...] = ()
     verification: Verification | None = None
+    correlation: Correlation | None = None
 
     def __post_init__(self) -> None:
         if self.status not in ACTION_STATUSES:
@@ -304,24 +333,30 @@ class ActionResult:
 # -- constructors: the only ergonomic way to build each status --------------
 
 
-def started(run_id: str, tool_id: str) -> ActionResult:
+def started(run_id: str, tool_id: str, *,
+            correlation: Correlation | None = None) -> ActionResult:
     return ActionResult(
-        run_id=run_id, tool_id=tool_id, status=RUNNING, started_at=now_iso()
+        run_id=run_id, tool_id=tool_id, status=RUNNING, started_at=now_iso(),
+        correlation=correlation,
     )
 
 
 def succeeded(
     prior: ActionResult, *, verification: Verification, output: object = None,
     artifacts: tuple[Artifact, ...] = (), side_effects: tuple[str, ...] = (),
+    correlation: Correlation | None = None,
 ) -> ActionResult:
     return prior.finish(
         status=SUCCEEDED, verification=verification, output=output,
         artifacts=artifacts, side_effects=side_effects,
+        correlation=correlation or prior.correlation,
     )
 
 
-def failed(prior: ActionResult, error: str, *, side_effects: tuple[str, ...] = ()) -> ActionResult:
-    return prior.finish(status=FAILED, error=error, side_effects=side_effects)
+def failed(prior: ActionResult, error: str, *, side_effects: tuple[str, ...] = (),
+           correlation: Correlation | None = None) -> ActionResult:
+    return prior.finish(status=FAILED, error=error, side_effects=side_effects,
+                        correlation=correlation or prior.correlation)
 
 
 def partial(
@@ -384,6 +419,11 @@ class Run:
     #: when it belongs to a durable objective. The capability runtime refuses
     #: a capability outside it, or after it expires.
     envelope: "Envelope | None" = None
+    #: The correlation key this run's work must carry (workspace, objective,
+    #: version, executor, ...). Declared once, when the run is created, so a
+    #: claim is audited against it by default rather than only when a caller
+    #: remembers to ask.
+    correlation: Correlation | None = None
 
     def __post_init__(self) -> None:
         if self.state not in RUN_STATES:
@@ -399,9 +439,10 @@ class Run:
 
     @classmethod
     def create(cls, request: str, capability: str | None = None, *,
-               provenance: str = PERSON) -> "Run":
+               provenance: str = PERSON,
+               correlation: Correlation | None = None) -> "Run":
         return cls(run_id=new_run_id(), request=request, capability=capability,
-                   provenance=provenance)
+                   provenance=provenance, correlation=correlation)
 
     @classmethod
     def from_read_material(cls, request: str, capability: str | None = None

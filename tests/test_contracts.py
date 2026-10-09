@@ -173,7 +173,7 @@ def test_run_completes_when_every_action_succeeded():
 def _verified(run, tool_id: str):
     return run.record(c.succeeded(
         c.started(run.run_id, tool_id),
-        verification=c.Verification(method="test", evidence="it happened")))
+        verification=c.Verification(method="test", evidence="it happened, rows=12")))
 
 
 def test_reading_the_file_does_not_back_having_processed_it():
@@ -215,7 +215,7 @@ def test_a_run_that_is_still_going_does_not_back_a_past_tense_claim():
     run.record(c.succeeded(
         c.started(run.run_id, "product_process"),
         output={"execution_state": "RUNNING", "outcome": "PENDING"},
-        verification=c.Verification(method="test", evidence="started")))
+        verification=c.Verification(method="test", evidence="started pid=7")))
     verdict = honesty.audit("The catalogue has been processed, boss.", run)
     assert not verdict.ok
     assert "RUNNING" in verdict.reason
@@ -226,7 +226,7 @@ def test_an_interrupted_run_does_not_back_it_either():
     run.record(c.succeeded(
         c.started(run.run_id, "product_process"),
         output={"execution_state": "INTERRUPTED", "outcome": "PARTIAL"},
-        verification=c.Verification(method="test", evidence="crashed")))
+        verification=c.Verification(method="test", evidence="crashed, rows=200")))
     assert honesty.audit("Processed it, boss.", run).ok, (
         "INTERRUPTED is terminal - it stopped, and saying so is honest; what "
         "must not pass is claiming completion while work is still under way")
@@ -237,7 +237,7 @@ def test_a_completed_run_backs_it():
     run.record(c.succeeded(
         c.started(run.run_id, "product_process"),
         output={"execution_state": "COMPLETED", "outcome": "PARTIAL"},
-        verification=c.Verification(method="test", evidence="ran")))
+        verification=c.Verification(method="test", evidence="ran, rows=412")))
     assert honesty.audit("The catalogue has been processed, boss.", run).ok
 
 

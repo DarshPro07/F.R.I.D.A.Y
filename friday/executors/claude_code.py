@@ -652,7 +652,8 @@ class ClaudeCodeExecutor:
             started, output=output,
             verification=c.Verification(
                 method="worktree_diff",
-                evidence=f"{len(changed)} file(s) changed in {where}: "
+                evidence=f"diff_files={len(changed)}; "
+                         f"{len(changed)} file(s) changed in {where}: "
                          f"{', '.join(changed[:6])}"
                          + (" ..." if len(changed) > 6 else "")
                          + f"; tools used: {self.progress.summary()}",
