@@ -1,8 +1,9 @@
 """
 The other side of the process boundary: where a forged skill actually runs.
 
-Executed as `python -I -m friday.forge_runtime <request.json>` with an
-environment built from nothing, so this process holds none of Friday's
+Executed by `forge.verify` as `python -I` running this module from the tree
+that launched it (`forge._RUNTIME_CHILD`), with `<request.json>` as its one
+argument and an environment built from nothing, so this process holds none of Friday's
 credentials. It loads one skill, gives it a CapabilityContext, runs the
 spec's declared cases, and prints one line of JSON.
 
@@ -77,6 +78,9 @@ class CapabilityContext:
         self.logs: list[str] = []
         self.artifacts: list[dict] = []
         self.calls: list[str] = []
+        #: Every path a skill asked to read, resolved, refused or not. The
+        #: parent compares these against the canaries it seeded (SANDBOX-001).
+        self.reads: list[str] = []
 
     # -- observation -------------------------------------------------------
 
@@ -91,10 +95,13 @@ class CapabilityContext:
     def read_text(self, path: str, *, max_chars: int = 200_000) -> str:
         """Read a file, if the spec scoped the filesystem and this is inside it."""
         self.calls.append("read_text")
+        # Recorded before any check: reaching for a path is the behaviour
+        # under observation, whether or not the scope would have refused it.
+        target = Path(path).expanduser().resolve()
+        self.reads.append(str(target))
         if self._spec.get("filesystem") != "scoped":
             raise CapabilityDenied(
                 "this skill's specification denies filesystem access")
-        target = Path(path).expanduser().resolve()
         if not any(target == root or target.is_relative_to(root)
                    for root in self._scope):
             raise CapabilityDenied(
@@ -239,6 +246,7 @@ def main(argv: list[str]) -> int:
         took = time.monotonic() - started
         record["took_ms"] = int(took * 1000)
         record["context_calls"] = ctx.calls
+        record["reads"] = ctx.reads
         if took > budget:
             record["passed"] = False
             record["error"] = f"took {took:.1f}s, over its {budget}s budget"

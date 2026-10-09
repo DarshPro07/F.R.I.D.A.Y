@@ -43,10 +43,12 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -404,6 +406,67 @@ def env_leaks(env: dict[str, str]) -> list[str]:
     """Names in a candidate environment that look like a credential."""
     return sorted(name for name in env if SECRET_SHAPED.search(name)
                   and name not in ("PATHEXT",))
+
+
+# ---------------------------------------------------------------------------
+# Behaviour canaries (SANDBOX-001)
+# ---------------------------------------------------------------------------
+
+#: Under the verification workdir: a fake home the candidate is pointed at.
+CANARY_DIRNAME = "canary_home"
+
+#: Fake credential files, relative to the canary home. Each is a place hostile
+#: code looks first; each holds the run's unique token.
+CANARY_FILES = (".aws/credentials", ".ssh/id_rsa", ".env")
+
+#: Bait environment names, set only in the child and never reported as given.
+CANARY_ENV = ("AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "OPENAI_API_KEY")
+
+#: The verification child runs the forge_runtime of the tree that launched it.
+#: Under -I neither the working directory nor PYTHONPATH reaches sys.path, so
+#: `-m friday.forge_runtime` would import whatever checkout the interpreter's
+#: own install names; the child puts this tree first instead.
+_RUNTIME_CHILD = ("import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); "
+                  "runpy.run_module('friday.forge_runtime', run_name='__main__', alter_sys=True)")
+
+
+@dataclass(frozen=True)
+class Canaries:
+    home: Path
+    token: str
+    env: dict[str, str]
+
+    def home_env(self) -> dict[str, str]:
+        """Where `~` resolves for the candidate: the canary home."""
+        return {"HOME": str(self.home), "USERPROFILE": str(self.home)}
+
+
+def seed_canaries(workdir: Path) -> Canaries:
+    """Plant fake secret files and bait env values; the token is unique per run."""
+    token = f"FRIDAY-CANARY-{uuid.uuid4().hex}"
+    home = Path(workdir) / CANARY_DIRNAME
+    for rel in CANARY_FILES:
+        target = home / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(token + "\n", encoding="utf-8")
+    return Canaries(home=home, token=token,
+                    env={name: f"{token}-{name}" for name in CANARY_ENV})
+
+
+def canary_findings(canaries: Canaries, cases: list[dict],
+                    output: str) -> list[str]:
+    """What the candidate touched that it was never given. Never echoes the token."""
+    home = canaries.home.resolve()
+    found = []
+    for case in cases:
+        for read in case.get("reads") or ():
+            path = Path(read)
+            if path == home or path.is_relative_to(home):
+                found.append(f"touched canary file {path.relative_to(home).as_posix()!r}"
+                             f" (case {case.get('case')})")
+    if canaries.token in output:
+        found.append("a canary value appeared in the candidate's output")
+    return found
 
 
 # ---------------------------------------------------------------------------
@@ -767,6 +830,7 @@ class VerificationReport:
     stderr: str = ""
     took_ms: int = 0
     env_names: list[str] = field(default_factory=list)
+    canary_names: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -774,6 +838,7 @@ class VerificationReport:
             "findings": self.findings, "stderr": self.stderr[-2000:],
             "took_ms": self.took_ms,
             "environment_given": self.env_names,
+            "canaries_seeded": self.canary_names,
             "claims": CLAIMS,
         }
 
@@ -802,19 +867,26 @@ def verify(source: str, spec: CapabilitySpec, *,
     request = workdir / "request.json"
     request.write_text(json.dumps(payload), encoding="utf-8")
 
-    env = scrubbed_env()
+    canaries = seed_canaries(workdir)
+    env = {**scrubbed_env(), **canaries.home_env()}
+    given = sorted(env)                   # the bait below is not "given"
+    env.update(canaries.env)
     try:
-        completed = subprocess.run(
-            [sys.executable, "-I", "-m", "friday.forge_runtime", str(request)],
-            capture_output=True, text=True, env=env,
-            cwd=str(PROJECT_ROOT),
-            timeout=spec.budget_seconds + 10,
-        )
-    except subprocess.TimeoutExpired:
-        return VerificationReport(
-            passed=False, findings=[f"exceeded its {spec.budget_seconds}s budget"],
-            took_ms=int((time.monotonic() - started) * 1000),
-            env_names=sorted(env))
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-I", "-c", _RUNTIME_CHILD, str(PROJECT_ROOT), str(request)],
+                capture_output=True, text=True, env=env,
+                cwd=str(PROJECT_ROOT),
+                timeout=spec.budget_seconds + 10,
+            )
+        except subprocess.TimeoutExpired:
+            return VerificationReport(
+                passed=False,
+                findings=[f"exceeded its {spec.budget_seconds}s budget"],
+                took_ms=int((time.monotonic() - started) * 1000),
+                env_names=given, canary_names=list(CANARY_ENV))
+    finally:
+        shutil.rmtree(canaries.home, ignore_errors=True)
 
     took = int((time.monotonic() - started) * 1000)
     try:
@@ -823,13 +895,18 @@ def verify(source: str, spec: CapabilitySpec, *,
         return VerificationReport(
             passed=False,
             findings=["the verification process returned nothing usable"],
-            stderr=completed.stderr, took_ms=took, env_names=sorted(env))
+            stderr=completed.stderr, took_ms=took, env_names=given,
+            canary_names=list(CANARY_ENV))
 
     cases = report.get("cases") or []
+    findings = (report.get("findings") or []) + canary_findings(
+        canaries, cases, completed.stdout + completed.stderr)
     return VerificationReport(
-        passed=bool(cases) and all(case.get("passed") for case in cases),
-        cases=cases, findings=report.get("findings") or [],
-        stderr=completed.stderr, took_ms=took, env_names=sorted(env))
+        passed=bool(cases) and all(case.get("passed") for case in cases)
+        and not findings,
+        cases=cases, findings=findings,
+        stderr=completed.stderr, took_ms=took, env_names=given,
+        canary_names=list(CANARY_ENV))
 
 
 # ---------------------------------------------------------------------------
