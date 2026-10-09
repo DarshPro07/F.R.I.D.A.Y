@@ -4489,6 +4489,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Added friday/toolsets/device_update.py with rollout(provider, release, prior, device_ids, probe=, verify_signature=). It verifies every integrity claim (sha256 and/or signature via an injected verifier; at least one is required) on both the new release and the rollback target before sending anything (build run, commit e64a25a5b)',
         "next_action": "GAPS: No real device backend: hermes-gadget-sdk is not cloned or pinned (DEVICE-001), so the install verb act(device, 'firmware.install', {version, payload}) is an unverified assumption.; No MCP wrapper in friday/tools/ and no policy.py category or confirmation binding for firmware install; the update is not yet callable by Friday.; No durable rollout history in friday/store.py.; No signature scheme or key policy; the verifier is injected by the caller.; The canary is the first listed device; there is no soak time or staged percentage rollout.; The prior release is supplied by the caller, not read from the device.",
     }),
+    ('WEBMCP-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Added WEBMCP as the first tier in friday/action_path.ORDER, with a "webmcp_" capability prefix mapped to it. rank() takes an injectable `trusted(cap)` predicate; a WebMCP candidate is selected only if trusted vouches for it, and by default nothing is trusted. So a trusted WebMCP tool ranks first, an (build run, commit cbd120f5c)',
+        "next_action": 'GAPS: No real WebMCP consumer: nothing detects navigator.modelContext/WebMCP tools in a page or registers webmcp_* capabilities; the trust predicate has no production implementation (stub-proved only).; No WebMCP producer for FRIDAY-owned sites (experimental in the PRD).; capability_router calls order_key directly and does not pass `trusted`; no webmcp_* capability exists in capabilities.CAPABILITIES yet, so the router is unaffected until one is added.; PRD ledger row WEBMCP-001 status not updated (build run does that).',
+    }),
 ]
 
 
