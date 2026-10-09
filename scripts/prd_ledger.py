@@ -4160,6 +4160,14 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "AuditLog.query gains keyword-only before_id for paging; reconstruct() now reads the run's audit rows a page at a time (_AUDIT_PAGE=500) and lists them all, with ids in decisions. The 'more than' disagreement is gone. (build run, commit 6e980f99a)",
         "next_action": "GAPS: Added 'id' to the audit decisions in the black box so a test (and a reader) can tell the paged rows apart; the packet asserted ids appear there but they were not exposed.; The full suite was not run (out of scope); only the 9 impacted test files.",
     }),
+    ('ASSUME-001', {
+        "status": VERIFIED,
+        "current_implementation": "A run held for an unvalidated high-impact assumption now says so: objectives.awaiting_validation, an awaiting_validation key in the objective_start output only when non-empty, and a HELD notice (statement, validation, objective_resume) in place of 'running it now'. (build run, commit df0cbc1cc)",
+        "next_action": '',
+        "evidence": 'build run ASSUME-001, commit df0cbc1cc; RED (assertion) at 28e747e3c and GREEN at the commit for tests/test_assumption_register.py; affected tests passed (failing before the change too: tests/test_objective_watchdog.py::test_watchdog_reconciles_orphan_once)',
+        "tests": ['tests/test_assumption_register.py::test_only_a_run_waiting_on_the_person_awaits_validation', 'tests/test_assumption_register.py::test_starting_a_held_objective_reports_what_it_awaits', 'tests/test_assumption_register.py::test_starting_an_unheld_objective_reports_nothing_to_await', 'tests/test_assumption_register.py::test_the_model_is_told_a_held_objective_has_not_started'],
+        "files": ['friday/requirements.py:101', 'friday/requirements.py:354', 'friday/requirements.py:451', 'agent_friday.py', 'friday/objectives.py', 'friday/toolsets/objectives.py'],
+    }),
 ]
 
 
