@@ -4727,6 +4727,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Design (next_action was a one-line instruction): new friday/dry_run.py is a pure read of the capability record. dry_run(tool_id, args) returns a frozen DryRun with acted=False, expected_effects (derived from side_effect, requires_edge, reversibility, data_classes), a blast radius in execution_econom (build run, commit dbf155e8d)',
         "next_action": 'GAPS: No live caller: MCP/tool dispatch does not yet call dry_run.propose before executing a consequential capability, so the dry run is not enforced in the real path.; No per-capability bespoke effect descriptions or per-argument targets; effects come from registry metadata only (no path or recipient detail).; Real-run step (consume the approved yes, then run) is not wired; only plan -> dry run -> approval request exists.; implementer did not claim acceptance met',
     }),
+    ('ULTRA-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Slice 1 built as specified. friday/ultracode/spec.py: frozen dataclasses Stage/Spec, stdlib validator (JSON-Schema subset type/properties/required/enum/items), SpecError(field) naming fields like stages[1].tier, budget_tokens required, at most one deep stage and only on judge|synthesis|architecture, (build run, commit 6b8118312)',
+        "next_action": "GAPS: Acceptance 'one spec loaded through both entry points compiles to equal plans' is only proven for three loaders in this module (path, JSON text, dict). The actual FRIDAY and Claude Code/Hermes harness entry points (HARN-001) do not exist yet, so the two-harness equality is not shown against real harness code.; Row says validated at load for a runnable workflow, but no objective/runner consumes the spec yet (out of scope: running agents, wiring, templates, UI).; Remaining ~95 test_impact-listed files not run; only the 13 closest plus reachability and workspace_isolation.; implementer did not claim acceptance met",
+    }),
 ]
 
 
