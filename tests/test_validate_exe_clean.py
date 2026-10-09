@@ -46,6 +46,34 @@ def test_a_doctor_that_printed_nothing_fails_the_journey():
     assert failed == []
 
 
+def test_a_dist_stamped_at_another_commit_is_called_stale():
+    note = clean.stale_dist_note("FRIDAY 0.1.0 (commit 344d62a, dev)", "8feeb03")
+
+    assert note and "344d62a" in note and "8feeb03" in note
+
+
+def test_a_dist_built_from_a_dirty_tree_is_called_stale_even_at_head():
+    note = clean.stale_dist_note("FRIDAY 0.1.0 (commit 8feeb03+dirty, dev)", "8feeb03")
+
+    assert note and "dirty" in note
+
+
+def test_a_dist_at_head_with_a_clean_tree_is_current():
+    assert clean.stale_dist_note("FRIDAY 0.1.0 (commit 8feeb03, dev)", "8feeb03") is None
+
+
+def test_abbreviations_of_different_length_still_match():
+    assert clean.stale_dist_note("FRIDAY 0.1.0 (commit 8feeb03, dev)", "8feeb03a1c") is None
+
+
+def test_a_version_line_without_a_commit_stamp_cannot_be_called_current():
+    assert clean.stale_dist_note("FRIDAY 0.1.0", "8feeb03")
+
+
+def test_an_unknown_checkout_is_not_judged():
+    assert clean.stale_dist_note("FRIDAY 0.1.0 (commit 344d62a, dev)", "") is None
+
+
 def test_sandbox_is_detected_by_its_executable(tmp_path):
     assert not clean.sandbox_available(str(tmp_path))
 

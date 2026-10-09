@@ -22,7 +22,10 @@ profile, CLEAN-03 --doctor bootstraps and does not FAIL for a missing
 dependency (DEGRADED for credentials/hermes/browser is the expected
 answer), CLEAN-04 the MCP server and control room start and answer
 (`--no-agent --no-browser`), CLEAN-05 --stop leaves nothing behind.
-Exit is non-zero when any journey fails; the copy is deleted afterwards.
+A STALE_DIST line is printed when the build's commit stamp is not this
+checkout's HEAD (or the build came from a dirty tree); it does not change the
+exit code. Exit is non-zero when any journey fails; the copy is deleted
+afterwards.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -69,6 +73,35 @@ def doctor_verdict(returncode: int, stdout: str) -> tuple[bool, list[str]]:
     unexpected = [row for row in failed if not row.partition(" ")[2].lstrip().startswith(EXPECTED_FAIL_CHECKS)]
     imports_pass = any(row.startswith("PASS") and "core imports" in row for row in rows)
     return returncode in (0, 1, 2) and not unexpected and imports_pass, failed
+
+
+def stale_dist_note(version_line: str, head: str) -> str | None:
+    """Why a build's `--version` line does not describe the checkout at `head`
+    (None when it does, or when the checkout is unknown). The journeys prove
+    the artifact they ran, so a verdict on an older or uncommitted build says
+    nothing about this tree; the note makes that visible without failing a
+    release artifact that is legitimately validated from another checkout."""
+    if not head:
+        return None
+    stamp = re.search(r"commit (\w+)(\+dirty)?", version_line)
+    if not stamp:
+        return f"the build carries no commit stamp ({version_line.strip() or 'no --version answer'})"
+    built, dirty = stamp.group(1), bool(stamp.group(2))
+    if not (head.startswith(built) or built.startswith(head)):
+        return f"the build is at commit {built}, the checkout is at {head}"
+    if dirty:
+        return f"the build at {built} was made from a dirty tree"
+    return None
+
+
+def repo_head() -> str:
+    """Short commit of this checkout, or '' when git cannot say."""
+    try:
+        done = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+                              timeout=15, cwd=ROOT)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
 
 
 def sandbox_available(system_root: str | None = None) -> bool:
@@ -166,6 +199,10 @@ def main() -> int:
         version = run("--version")
         record("CLEAN-01 --version", version.returncode == 0 and version.stdout.startswith("FRIDAY"),
                version.stdout.strip() or version.stderr.strip()[-200:])
+        stale = stale_dist_note(version.stdout, repo_head())
+        if stale:
+            print(f"  STALE_DIST  {stale}; rebuild with scripts/build_windows.py before reading "
+                  "these journeys as a verdict on this checkout", flush=True)
 
         where = run("--paths")
         try:
