@@ -4319,6 +4319,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Ran validate_exe_clean.py against the real stale dist (344d62a+dirty vs HEAD 4966ddc): STALE_DIST printed, 6/6 journeys passed. The final verdict line hid that, so it now repeats STALE_DIST; main()-driven tests added. (build run, commit 1d376cd6c)',
         "next_action": 'GAPS: No real Windows VM or Windows Sandbox run: WindowsSandbox.exe is absent on this host; validate_exe_clean.py stays the C:\\Windows\\Temp simulation and prints BLOCKED_EXTERNAL.; EXE-06/07 voice-worker journeys (validate_exe.py --with-agent) were not run: they need a real .env with LiveKit credentials beside the exe and register a worker on an external service, which this packet does not authorise.; The clean-machine journeys were run against the stale dist (344d62a+dirty), not a build of HEAD 4966ddc; no rebuild was made in this run.; implementer did not claim acceptance met',
     }),
+    ('CAP-FORGE-011', {
+        "status": PARTIAL,
+        "current_implementation": 'BENCHMARK_IMPROVEMENT evidence must now be a repo file that names the provider (id or upstream); an unrelated or empty file no longer keeps an overlapping import, which is recorded REFERENCE_ONLY with the reason. (build run, commit dae86bd3f)',
+        "next_action": "GAPS: Evidence is checked for being a file in the repo that names the provider; nothing parses it to confirm the numbers show an improvement, a reviewer follows the path.; Coverage is still operation-name equality within a family; behaviour is not compared.; Only providers with an upstream are judged, and only when ALL operations are covered; partial overlap loads as declared.; Which of two equivalent providers is 'existing' is the adapter module-name order (explicit and tested); renaming a module can swap them.; tool_embedder_base stays runnable via fabric.ACCEPTED_OVERLAPS (CTX-002 comparison pair); owner may prefer REFERENCE_ONLY.; Assumed evidence format 'BENCHMARK_IMPROVEMENT: <measurement> evidence: <repo-relative path>' naming the provider id or upstream; no shipped provider uses it, none invented. Revisit if the owner wants another form.; New tests were not run against the pre-change code; they fail there by inspection (old check accepted any existing file).",
+    }),
 ]
 
 
