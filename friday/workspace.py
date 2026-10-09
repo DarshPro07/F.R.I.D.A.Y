@@ -240,6 +240,8 @@ SCOPED = {
     "contacts": "people, i.e. personal data",
     "projects": "a workspace's projects",
     "project_decisions": "decisions taken inside those projects",
+    "project_brain_records": "a project's brain: decisions, research, failures "
+                             "and hand-offs, which are as private as the project",
     "requirements": "what a workspace asked for",
     "open_questions": "questions asked of a particular owner",
     "objective_runs": "what work was done for whom",

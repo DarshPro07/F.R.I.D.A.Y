@@ -179,6 +179,11 @@ DECLARED = {
                            "wiring step"),
     "friday/shadow": (PRODUCTION,
                       "observes every turn from watch_from_the_side"),
+    "friday/project_brain": (FUTURE,
+                             "BRAIN-001: the Project Brain's storage and "
+                             "Markdown export; the MCP tools and the "
+                             "objective-engine writers that reach it are a "
+                             "later slice"),
     "friday/forge": (FUTURE, "skill authoring, frozen by the product rescue"),
     "friday/forge_runtime": (FUTURE, "same"),
     "friday/repo_classifier": (FUTURE,
