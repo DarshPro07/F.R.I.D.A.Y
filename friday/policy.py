@@ -722,6 +722,127 @@ def composition_verdict(tool_ids, *, provenance: str, attended: bool,
                        f"{why}, and nobody is there to agree")
     return Verdict("objective.composition", "COMPOSITION", CONFIRM, why)
 
+
+# -- self-evolution authority zones (EVO-003) ---------------------------------
+#
+# A change to Friday itself falls in one zone, and the zone decides what it
+# needs before promotion. The zone is read off the paths the change touches,
+# never off what its builder says, and the highest zone touched wins.
+#
+#   Z1 local extension       promotes once independently verified, with rollback
+#   Z2 operational intelligence  ... and only after a held-out benchmark
+#   Z3 core product code     same as Z1 (owner ruling 2026-10-08c)
+#   Z4 protected trust roots proposal only; nothing here promotes by itself
+#
+# A missing verifier, rollback or benchmark is never AUTO. CONFIRM is the existing "a person says yes, one action at a time" decision;
+# the yes itself is `friday.confirmation`, bound to `promotion_target`.
+Z1, Z2, Z3, Z4 = "Z1", "Z2", "Z3", "Z4"
+
+#: Z1: extensions that only add or change a local skill.
+_Z1_PREFIXES = ("skills/", "friday/skills/builtin/")
+#: Z2: routing and benchmark logic; a regression degrades quality, not trust.
+_Z2_PATHS = frozenset({
+    "friday/route_benchmarks.py", "friday/routing_memory.py",
+    "friday/tool_router.py", "friday/tool_router_rollout.py",
+    "friday/capability_router.py", "friday/executor_router.py",
+    "friday/compression.py",
+})
+#: The kernel entries (`self_upgrade.KERNEL_PATHS`) that are the judge itself:
+#: the verifier, its guards and the test harness. Z4 is the whole kernel list;
+#: these are the part a candidate must not edit to pass its own experiment.
+JUDGE_PATHS = frozenset({
+    "friday/self_upgrade.py", "friday/selfdev.py", "friday/selfdev_benchmark.py",
+    "friday/toolsets/selfdev.py", "friday/promotion.py", "friday/evaluation.py",
+    "friday/honesty.py", "friday/adversarial.py", "friday/golden.py",
+    "friday/evolution_lab.py", "tests/conftest.py", "docs/golden/",
+})
+
+
+@dataclass(frozen=True)
+class EvolutionChange:
+    """A candidate self-evolution change, as the promotion gate sees it.
+
+    `judged_by` are the tests and verifier files that decide this candidate's
+    experiment; `verified_by` must name someone other than `built_by`;
+    `rollback` is what restores the prior state (a revert ref, a recorded
+    previous version id).
+    """
+    paths: tuple
+    built_by: str
+    verified_by: str = ""
+    heldout_passed: bool = False
+    judged_by: tuple = ()
+    rollback: str = ""
+
+
+def _norm_path(path: str) -> str:
+    from friday import self_upgrade
+    return self_upgrade._normalize_path(path)
+
+
+def zone_of(paths) -> str:
+    """The highest zone any of `paths` falls in; unknown paths are core (Z3)."""
+    from friday import self_upgrade
+    zones = set()
+    for path in paths:
+        norm = _norm_path(path)
+        if self_upgrade.is_kernel_path(path):
+            zones.add(Z4)
+        elif norm in _Z2_PATHS:
+            zones.add(Z2)
+        elif any(norm.startswith(prefix) for prefix in _Z1_PREFIXES):
+            zones.add(Z1)
+        else:
+            zones.add(Z3)
+    return max(zones, default=Z1)
+
+
+def promotion_target(change: EvolutionChange) -> str:
+    """The exact thing a confirmation is for: the zone and the sorted paths."""
+    return f"{zone_of(change.paths)}:" + ",".join(
+        sorted({_norm_path(p) for p in change.paths}))
+
+
+def evolution_verdict(change: EvolutionChange) -> Verdict:
+    """What `change` needs before it may be promoted. Like the other verdicts
+    here it takes no autonomy mode and no preference: it cannot be widened."""
+    from friday import self_upgrade
+    zone = zone_of(change.paths)
+    category = f"EVOLUTION_{zone}"
+    tool_id = "evolution.promote"
+    judged = {_norm_path(p) for p in change.judged_by}
+    for path in change.paths:
+        if _norm_path(path) in judged or \
+                self_upgrade.is_kernel_path(path) in JUDGE_PATHS:
+            return Verdict(tool_id, category, DENY,
+                           f"{path} is part of the judge of this experiment; a "
+                           f"candidate that edits its own judge is rejected")
+    if zone == Z4:
+        return Verdict(tool_id, category, CONFIRM,
+                       "Z4 trust root: proposal only, never promoted "
+                       "autonomously; the owner applies it")
+    missing = []
+    if not change.verified_by or change.verified_by == change.built_by:
+        if zone != Z3:
+            return Verdict(tool_id, category, DENY,
+                           "no independent verification: the builder does not "
+                           "verify its own change")
+        missing.append("independent verification (verified_by must name "
+                       "someone other than built_by)")
+    if zone == Z2 and not change.heldout_passed:
+        return Verdict(tool_id, category, DENY,
+                       "Z2 routing change needs a passing held-out benchmark")
+    if not change.rollback.strip():
+        missing.append("a rollback (what restores the prior state)")
+    if missing:
+        return Verdict(tool_id, category, CONFIRM,
+                       f"{zone} change cannot promote autonomously, missing: "
+                       + "; ".join(missing))
+    return Verdict(tool_id, category, AUTO,
+                   f"{zone} change verified independently with a rollback "
+                   f"recorded; promotes with automatic rollback")
+
+
 UNKNOWN_TOOL_DECISION = ASK
 
 
@@ -826,6 +947,20 @@ class PolicyEngine:
         try:
             from friday import trust
             trust.record_decision(tool_id, verdict)
+        except Exception:  # noqa: BLE001 - audit failure never changes a verdict
+            pass
+        return verdict
+
+    def decide_promotion(self, change: "EvolutionChange") -> Verdict:
+        """What a self-evolution change needs before promotion (EVO-003).
+
+        Independent of autonomy mode and session approvals: a zone's rule is
+        not something a mode or an earlier yes can loosen."""
+        verdict = evolution_verdict(change)
+        try:
+            from friday import trust
+            trust.record_decision(verdict.tool_id, verdict,
+                                  target=promotion_target(change))
         except Exception:  # noqa: BLE001 - audit failure never changes a verdict
             pass
         return verdict
