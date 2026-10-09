@@ -234,3 +234,65 @@ def test_manifest_tool_is_reachable_from_the_runtime():
     assert one.status == c.OBSERVED and one.output["type"] == M.NATIVE
     missing = MT.capability_manifest(run, "nope")
     assert missing.status == c.FAILED
+
+
+# -- CAP-003: installed is never healthy without a probe --------------------
+
+
+def _native_rows():
+    from friday import capabilities as C
+    return [m for m in M.build()
+            if m.id in C.CAPABILITIES and m.id not in fabric.registry()]
+
+
+def test_an_unprobed_native_tool_is_registered_never_ready():
+    rows = _native_rows()
+    assert len(rows) > 100
+    for m in rows:
+        assert m.state == fabric.REGISTERED, (m.id, m.state)
+        assert m.default_state == fabric.REGISTERED, (m.id, m.default_state)
+        assert m.detail == "installed; not probed", m.id
+
+
+def test_a_failing_probe_makes_an_installed_native_tool_unavailable():
+    from friday import capabilities as C
+
+    def broken():
+        raise RuntimeError("files root is not mounted")
+
+    C.register_probe("files_read", broken)
+    try:
+        row = M.describe("files_read")
+        assert row["state"] == fabric.UNAVAILABLE
+        assert "files root is not mounted" in row["detail"]
+        assert row["health_check"] == "capabilities.health"
+        # The failure is on the probed row only; the cheap listing is unchanged.
+        assert {m.id: m.state for m in M.build()}["files_read"] == fabric.REGISTERED
+    finally:
+        C.unregister_probe("files_read")
+
+    C.register_probe("files_read", lambda: True)
+    try:
+        assert M.describe("files_read")["state"] == fabric.READY
+    finally:
+        C.unregister_probe("files_read")
+    assert M.describe("files_read")["state"] == fabric.REGISTERED
+
+
+def test_building_and_summarising_the_manifest_never_runs_a_probe():
+    from friday import capabilities as C
+    calls = []
+
+    def probe():
+        calls.append(1)
+        return True
+
+    C.register_probe("files_read", probe)
+    try:
+        M.build()
+        summary = M.summary()
+    finally:
+        C.unregister_probe("files_read")
+    assert calls == []
+    assert fabric.READY not in {m.state for m in _native_rows()}
+    assert summary["by_state"].get(fabric.REGISTERED, 0) > 100

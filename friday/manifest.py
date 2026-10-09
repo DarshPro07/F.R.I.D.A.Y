@@ -213,11 +213,12 @@ def of_native_tool(capability) -> Manifest:
         cost_profile="free",
         latency_profile="subsecond",
         supported_platforms=("windows",),
-        default_state=fabric.READY,
-        state=fabric.READY,
+        default_state=fabric.REGISTERED,
+        state=fabric.REGISTERED,
         family=getattr(capability, "execution_scope", ""),
         supported_actions=(capability.id,),
         executable=True,
+        detail="installed; not probed",
         extra={"risk_tier": tier, "side_effect": getattr(capability, "side_effect", ""),
                "requires_edge": bool(getattr(capability, "requires_edge", False))},
     )
@@ -289,8 +290,18 @@ def summary() -> dict:
 
 
 def describe(capability_id: str) -> dict | None:
+    """One capability's full row. A native tool is probed here, and only here:
+    `build()` stays cheap, so its rows say "installed; not probed"."""
+    from friday import capabilities as C
     for m in build():
         if m.id == capability_id:
+            # BUILTIN fabric providers are also NATIVE, so key on the table.
+            if capability_id in C.CAPABILITIES and capability_id not in fabric.registry():
+                health = C.health(capability_id)
+                m.state = health["state"]
+                m.detail = health["detail"]
+                if m.state != fabric.REGISTERED:
+                    m.health_check = "capabilities.health"
             return m.to_dict()
     return None
 
