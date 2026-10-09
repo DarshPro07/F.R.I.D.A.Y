@@ -4273,6 +4273,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_autolearn.py::test_payload_reads_a_plain_dict', 'tests/test_autolearn.py::test_payload_reads_a_json_string', 'tests/test_autolearn.py::test_payload_unwraps_livekits_text_content', 'tests/test_autolearn.py::test_payload_on_nonsense_is_empty_not_an_exception', 'tests/test_autolearn.py::test_short_turns_are_not_learned_from', 'tests/test_autolearn.py::test_the_same_sentence_twice_is_only_learned_once', 'tests/test_autolearn.py::test_a_full_queue_drops_the_oldest_and_never_blocks', 'tests/test_autolearn.py::test_observe_never_raises', 'tests/test_autolearn.py::test_a_turn_is_learned_from_without_the_model_asking', 'tests/test_autolearn.py::test_the_briefing_is_loaded_before_the_first_turn', 'tests/test_autolearn.py::test_a_turn_that_taught_nothing_does_not_re_read_the_profile', 'tests/test_autolearn.py::test_a_conflict_becomes_something_to_ask_about'],
         "files": ['friday/governor.py:261'],
     }),
+    ('CAP-FORGE-011', {
+        "status": PARTIAL,
+        "current_implementation": "fabric.registry() now records a repo-backed provider REFERENCE_ONLY, with overlap evidence in notes and a log line, when earlier same-family providers already answer all its operations; a 'BENCHMARK_IMPROVEMENT: <measurement>' notes line overrides. (build run, commit 5fce3d2b1)",
+        "next_action": "GAPS: Coverage is operation-name equality within a family (the registry's only capability vocabulary); it does not compare behaviour.; Only providers with an upstream are judged, and only when ALL operations are covered; partial overlap loads as declared.; Discovery order (module name) decides which of two equivalent providers is 'existing'.; tool_embedder_base is the one shipped provider the rule would record; kept runnable via fabric.ACCEPTED_OVERLAPS (CTX-002 comparison pair, benchmarked and not promoted) - owner may prefer REFERENCE_ONLY.; BENCHMARK_IMPROVEMENT is a self-declared notes line; nothing verifies the measurement.",
+    }),
 ]
 
 
