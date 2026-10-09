@@ -383,6 +383,17 @@ class CapabilityRuntime:
                     error=f"JIT: {capability_id} has changed since this objective "
                           "was planned; it is revalidated before it runs"))
 
+        resolution = resolutions().get(capability_id)
+        if resolution is None:
+            return run.record(started.finish(
+                status=c.NOT_CONFIGURED,
+                error=f"{capability_id}: {ADAPTER_ONLY_REASON}",
+            ))
+        # A capability's probes are registered when its module is imported, so
+        # the module is loaded before they are asked: a first call must meet
+        # the same probes as the hundredth.
+        function = resolution.load()
+
         # JIT-001: what the capability says it needs (a live authentication,
         # a target in a compatible state) is asked again now, not trusted
         # from planning time. A probe that cannot answer refuses.
@@ -390,13 +401,6 @@ class CapabilityRuntime:
         if refusal:
             return run.record(started.finish(
                 status=c.NOT_PERMITTED, error=f"JIT: {refusal}"))
-
-        resolution = resolutions().get(capability_id)
-        if resolution is None:
-            return run.record(started.finish(
-                status=c.NOT_CONFIGURED,
-                error=f"{capability_id}: {ADAPTER_ONLY_REASON}",
-            ))
 
         # Same policy, same table, same decisions as conversation. A durable
         # run is not a licence.
@@ -439,7 +443,6 @@ class CapabilityRuntime:
                 objective_id=approved_run,
                 detail={"arguments": arguments})
 
-        function = resolution.load()
         try:
             result = function(run, **arguments)
         except TypeError as exc:

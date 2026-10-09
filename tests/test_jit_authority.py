@@ -128,9 +128,13 @@ def probes(monkeypatch):
     return CR
 
 
-def _execute(arguments=None):
+def _execute_capability(capability_id, arguments=None):
     return CR.CapabilityRuntime(engine=PO.PolicyEngine(autonomy=PO.FULL)).execute(
-        "system_get_info", arguments or {})
+        capability_id, arguments or {})
+
+
+def _execute(arguments=None):
+    return _execute_capability("system_get_info", arguments)
 
 
 def test_a_capability_with_no_probe_runs(probes):
@@ -175,5 +179,142 @@ def test_a_file_that_vanished_since_the_plan_is_refused_by_its_probe(tmp_path, m
 def test_the_file_capabilities_register_a_probe():
     from friday.toolsets import files as F  # noqa: F401 - registers on import
 
-    for capability in ("files_edit", "files_copy", "files_move", "files_recycle", "files_delete"):
+    for capability in ("files_edit", "files_copy", "files_move", "files_recycle", "files_delete",
+                       "files_create", "files_write"):
         assert CR._authority_probes.get(capability), capability
+
+
+def test_a_file_that_took_the_place_of_the_destination_folder_is_refused(tmp_path, monkeypatch):
+    from friday.toolsets import files as F
+
+    destination = tmp_path / "reports" / "new.txt"
+    monkeypatch.setattr(F, "_jail", F.FileJail(roots=(tmp_path,)))
+    for must_be_absent in (True, False):
+        probe = F._destination_state_probe("path", must_be_absent)
+        assert probe({"path": str(destination)}) == ""
+    (tmp_path / "reports").write_text("not a folder", encoding="utf-8")
+    for must_be_absent in (True, False):
+        probe = F._destination_state_probe("path", must_be_absent)
+        assert "destination folder is now a file" in probe({"path": str(destination)})
+
+
+def test_a_destination_in_a_folder_not_made_yet_is_allowed(tmp_path, monkeypatch):
+    from friday.toolsets import files as F
+
+    destination = tmp_path / "src" / "deeper" / "new.py"
+    monkeypatch.setattr(F, "_jail", F.FileJail(roots=(tmp_path,)))
+    for must_be_absent in (True, False):
+        assert F._destination_state_probe("path", must_be_absent)({"path": str(destination)}) == ""
+
+
+def test_a_create_over_a_file_that_appeared_since_the_plan_is_refused(tmp_path, monkeypatch):
+    from friday.toolsets import files as F
+
+    destination = tmp_path / "new.txt"
+    monkeypatch.setattr(F, "_jail", F.FileJail(roots=(tmp_path,)))
+    probe = F._destination_state_probe("path", True)
+    assert probe({"path": str(destination)}) == ""
+    destination.write_text("someone else's", encoding="utf-8")
+    assert "destination already exists" in probe({"path": str(destination)})
+
+
+def test_a_write_over_an_existing_file_is_still_allowed(tmp_path, monkeypatch):
+    from friday.toolsets import files as F
+
+    destination = tmp_path / "note.txt"
+    destination.write_text("old", encoding="utf-8")
+    monkeypatch.setattr(F, "_jail", F.FileJail(roots=(tmp_path,)))
+    assert F._destination_state_probe("path", False)({"path": str(destination)}) == ""
+
+
+def test_a_destination_moved_out_of_the_jail_is_refused(tmp_path, monkeypatch):
+    from friday.toolsets import files as F
+
+    root = tmp_path / "jail"
+    root.mkdir()
+    monkeypatch.setattr(F, "_jail", F.FileJail(roots=(root,)))
+    outside = tmp_path / "elsewhere.txt"
+    for must_be_absent in (True, False):
+        probe = F._destination_state_probe("path", must_be_absent)
+        assert "no longer reachable" in probe({"path": str(outside)})
+
+
+def test_a_destination_probe_with_no_path_names_nothing():
+    from friday.toolsets import files as F
+
+    probe = F._destination_state_probe("path", True)
+    assert probe({}) == "" and probe({"path": ""}) == "" and probe({"path": 3}) == ""
+
+
+def test_the_browser_capabilities_register_a_probe():
+    from friday.toolsets import web as W  # noqa: F401 - registers on import
+
+    for capability in ("browser_act", "browser_automate"):
+        assert CR._authority_probes.get(capability), capability
+
+
+def test_a_step_on_a_page_whose_session_has_closed_is_refused_at_execution(monkeypatch):
+    from friday.toolsets import web as W
+
+    monkeypatch.setattr(W.session, "_page", None)
+    result = _execute_capability("browser_act", {"primitive": "click", "target": "#go"})
+    assert result.status == c.NOT_PERMITTED
+    assert result.error.startswith("JIT:") and "no longer running" in result.error
+    assert "before click" in result.error
+
+
+def test_opening_a_page_needs_no_running_session(monkeypatch):
+    from friday.toolsets import web as W
+
+    monkeypatch.setattr(W.session, "_page", None)
+    for primitive in ("open", "navigate", " Open ", "", "no-such-primitive"):
+        assert CR.authority_refusal("browser_act", {"primitive": primitive}) == "", primitive
+
+
+def test_a_step_on_a_running_session_is_not_refused(monkeypatch):
+    from friday.toolsets import web as W
+
+    monkeypatch.setattr(W.session, "_page", object())
+    for primitive in ("click", "type", "inspect", "screenshot", "verify"):
+        assert CR.authority_refusal("browser_act", {"primitive": primitive}) == "", primitive
+
+
+def test_browser_automation_without_its_credential_is_refused_at_execution(monkeypatch):
+    from friday.toolsets import web as W  # noqa: F401 - registers on import
+
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    result = _execute_capability("browser_automate", {"task": "find the weather"})
+    assert result.status == c.NOT_PERMITTED
+    assert result.error.startswith("JIT:") and "credential is no longer configured" in result.error
+
+
+def test_browser_automation_with_its_credential_is_not_refused_and_never_echoes_it(monkeypatch):
+    from friday.toolsets import web as W  # noqa: F401 - registers on import
+
+    monkeypatch.setenv("GOOGLE_API_KEY", "sentinel-key-value")
+    assert CR.authority_refusal("browser_automate", {"task": "find the weather"}) == ""
+    monkeypatch.setenv("GOOGLE_API_KEY", "   ")
+    assert "credential" in CR.authority_refusal("browser_automate", {"task": "x"})
+    monkeypatch.setenv("GOOGLE_API_KEY", "sentinel-key-value")
+    refusal = CR.authority_refusal(
+        "browser_automate", {"task": "x", "start_url": "https://www.paypal.com/signin"})
+    assert refusal and "sentinel-key-value" not in refusal
+
+
+def test_the_first_call_meets_the_probe_its_module_registers_on_import(monkeypatch):
+    """A probe is registered when its module is imported. The module is loaded
+    before the probes are asked, so a capability's first call is checked too."""
+    loaded = []
+
+    class Stub:
+        def load(self):
+            loaded.append(True)
+            CR.register_authority_probe("system_get_info", lambda args: "no longer valid")
+            return lambda run, **arguments: pytest.fail("ran past a refusing probe")
+
+    monkeypatch.setattr(CR, "_authority_probes", {})
+    monkeypatch.setattr(CR, "resolutions", lambda: {"system_get_info": Stub()})
+    result = _execute_capability("system_get_info", {})
+    assert loaded == [True]
+    assert result.status == c.NOT_PERMITTED
+    assert result.error.startswith("JIT:") and "no longer valid" in result.error

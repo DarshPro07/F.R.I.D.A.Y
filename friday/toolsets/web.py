@@ -48,6 +48,8 @@ from friday import netguard
 
 from friday import sensitive_domains
 
+from friday.capability_runtime import register_authority_probe
+
 from friday.policy import PolicyEngine, default_engine
 
 from friday.toolsets.system import APPROVAL_PREFIX
@@ -1283,3 +1285,35 @@ def open_finance_world_monitor(run: c.Run, time_range: str = '', lat: float | No
 # ---------------------------------------------------------------------------
 # Browser session - lazily started, never left running by default
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# JIT authority (PRD v7 JIT-001). A step that acts on a page was planned while
+# a session was open; by the time it runs the session may have been closed, and
+# a goal-driven run needs its credential and a destination that is still
+# allowed. The runtime asks again at the moment of action.
+# ---------------------------------------------------------------------------
+
+def _browser_act_probe(arguments: dict) -> str:
+    from friday import browser as B
+
+    primitive = str(arguments.get("primitive") or "").strip().lower()
+    # open and navigate make the page they act on; an unknown primitive is
+    # rejected by browser_act itself.
+    if primitive in ("", "open", "navigate") or primitive not in B.PRIMITIVES:
+        return ""
+    if not session.running:
+        return ("the browser session this step acts on is no longer running; "
+                f"open the page again before {primitive}")
+    return ""
+
+
+def _browser_automate_probe(arguments: dict) -> str:
+    if not os.getenv("GOOGLE_API_KEY", "").strip():
+        return "browser automation's computer-use credential is no longer configured"
+    start_url = str(arguments.get("start_url") or "https://www.google.com")
+    return sensitive_domains.refusal(start_url) or ""
+
+
+register_authority_probe("browser_act", _browser_act_probe)
+register_authority_probe("browser_automate", _browser_automate_probe)

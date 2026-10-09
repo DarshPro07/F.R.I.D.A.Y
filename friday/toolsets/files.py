@@ -891,3 +891,30 @@ for _capability, _argument in (("files_edit", "path"), ("files_copy", "source"),
                                ("files_move", "source"), ("files_recycle", "path"),
                                ("files_delete", "path")):
     register_authority_probe(_capability, _target_state_probe(_argument))
+
+
+def _destination_state_probe(argument: str, must_be_absent: bool):
+    """For a call that makes a file: nothing may have taken the place of a folder
+    on its way, and a create must still have nothing to overwrite. A missing
+    folder is not refused - the write makes it, and a plan may rely on that."""
+    def probe(arguments: dict) -> str:
+        raw = arguments.get(argument)
+        if not isinstance(raw, str) or not raw:
+            return ""  # nothing named; the tool rejects that itself
+        try:
+            path = jail().resolve(raw)
+        except JailError as exc:
+            return "the target is no longer reachable: " + str(exc)
+        nearest = path.parent
+        while not nearest.exists() and nearest != nearest.parent:
+            nearest = nearest.parent
+        if nearest.exists() and not nearest.is_dir():
+            return "the destination folder is now a file: " + raw
+        if must_be_absent and path.exists():
+            return "the destination already exists: " + raw
+        return ""
+    return probe
+
+
+for _capability, _must_be_absent in (("files_create", True), ("files_write", False)):
+    register_authority_probe(_capability, _destination_state_probe("path", _must_be_absent))
