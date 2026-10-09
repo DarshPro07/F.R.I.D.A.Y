@@ -153,14 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: c6b15a3 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T11:40:15+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 99, "PARKED_BY_OWNER": 1, "PARTIAL": 50, "VERIFIED": 62}
+- HEAD: 27e0a2a on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T12:26:24+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 96, "PARKED_BY_OWNER": 1, "PARTIAL": 52, "VERIFIED": 63}
 - Unresolved P0: 11
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (281): CAP-MKT-002=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), ACT-001 (integration refused), JIT-001 (cascade exhausted), MEM-003 (NOT_CONFIRMED), MEM-002 (NO_TEST), TRAJ-001 (cascade exhausted), SEC-005 (cascade exhausted), BROW-004 (blocked), BG-001 (NOT_CONFIRMED), CAP-003 (partial x4)
-- Open escalations: 200
-  - SEC-005 cascade: 3 repairs spent
+- Last wave (287): CAP-MKT-002=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), ACT-001 (integration refused), JIT-001 (cascade exhausted), MEM-003 (NOT_CONFIRMED), MEM-002 (NO_TEST), TRAJ-001 (cascade exhausted), SEC-005 (cascade exhausted), BROW-004 (blocked), CAP-003 (partial x4)
+- Open escalations: 201
   - BRAIN-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\brain-001 already exists
   - BRAIN-001 resolved: controller unpark: controller re-integrated the run a killed program had landed ungated: INTEGRATED
   - PKG-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\pkg-001 already exists
@@ -170,5 +169,6 @@ That is the first implementation target of this program.
   - BG-001 integration: {"requirement": "BG-001", "result": "NOT_CONFIRMED", "red_green": {}, "verifier": null, "integrated_
   - BRAIN-001 resolved: controller unpark: controller re-ran the confirm after 5885f11 (tests from its own build commits): C
   - CAP-003 partial: integrated without closing its gaps
+  - BG-001 resolved: controller unpark: controller re-ran the confirm after 089f899 (its named test is @slow, never run b
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
