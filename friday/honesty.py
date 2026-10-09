@@ -109,7 +109,10 @@ CLAIM_EVIDENCE: dict[str, tuple[str, ...]] = {
     'repriced': (),
     'deployed': (),
     # FRIDAY does delete files, so this one is checkable rather than refused.
-    'deleted': ('files_',),
+    # The two removal tools only: `files_` would let a verified files_read or
+    # files_write of foo.txt back "I deleted foo.txt", which is the opposite
+    # of what that evidence shows.
+    'deleted': ('files_delete', 'files_recycle'),
 }
 
 _CLAIM_WORD_RE = {
@@ -445,6 +448,9 @@ class ProofShape:
 _POS = r"(?:0*[1-9]\d*)"
 _VALUE = r"(?!(?:0+|none|null|false|no|nil|unknown|n/a)(?![^\s,;]))[^\s,;]+"
 PROOF_SHAPES: tuple[ProofShape, ...] = (
+    # A removal has no content to hash: it is proven by the path being gone.
+    ProofShape("removal", ("files_delete", "files_recycle"),
+               needs=(("post_state=absent", (r"\bpost_state=absent\b",)),)),
     ProofShape("file", ("files_",),
                needs=(("sha256=<hash> or readback=ok",
                        (r"\bsha256[=:][0-9a-f]{16,}\b", r"\breadback=(?:ok|match)\b")),)),
@@ -687,6 +693,40 @@ def _failure_mismatch(claim: str, went_wrong) -> str:
     return ""
 
 
+#: Every claim verb except 'deleted'. The claim-to-evidence link runs both
+#: ways: the kind check above stops a read from backing "I deleted foo.txt",
+#: and this stops the removal's own proof - the path being absent - from
+#: backing any other verb. Without it, post_state=absent became proof of
+#: creation, because 'created', 'changed' and 'saved' have no CLAIM_EVIDENCE
+#: entry and so get no kind check at all.
+_NON_REMOVAL_VERB_RE = re.compile(
+    rf"\b(?!deleted\b)(?:{_CLAIM_VERBS}|{'|'.join(CLAIM_EVIDENCE)})\b", re.I)
+
+
+#: The only completion claims a removal is evidence for.
+_REMOVAL_CLAIMS = frozenset({"deleted", "done", "all done"})
+
+
+def _is_removal_claim(sentence: str) -> bool:
+    """True when every completion claim in the sentence is a removal claim.
+    A state assertion ('foo.txt is ready', 'here it is') is not one, so it
+    cannot ride on a removal even when it names the removed file."""
+    claimed = [" ".join(m.group(0).lower().split())
+               for pattern in COMPLETION_PATTERNS
+               for m in re.finditer(pattern, sentence, re.I)]
+    return (bool(claimed) and all(c in _REMOVAL_CLAIMS for c in claimed)
+            and not _NON_REMOVAL_VERB_RE.search(sentence))
+
+
+def _usable(sentence: str, backed) -> list:
+    """A removal proves only that a path is gone: it backs 'deleted' and a
+    bare 'done', never 'created', 'changed' or a state assertion such as
+    'foo.txt is ready' - foo.txt being gone contradicts all of them."""
+    if _is_removal_claim(sentence):
+        return list(backed)
+    return [r for r in backed if proof_shape_for(r.tool_id).name != "removal"]
+
+
 def _completion_mismatch(claims, run: Run, in_scope, strict_proof: bool,
                          out_of_scope: dict) -> tuple[list, list]:
     """(claim, why) for each unbacked completion claim, and what backs the rest."""
@@ -715,10 +755,18 @@ def _completion_mismatch(claims, run: Run, in_scope, strict_proof: bool,
                f"({len(run.results)} action(s) recorded, none verified)")
         return wrong + [(claim, why) for claim in claims], []
     # Something succeeded. That is not yet permission to claim *this* -
-    # files_read succeeding is not evidence that a catalogue was processed.
-    wrong += [(claim, why) for claim in claims
-              if (why := _missing_evidence(claim, backed)
-                  or _target_mismatch(claim, backed))]
+    # files_read succeeding is not evidence that a catalogue was processed,
+    # and a file being gone is not evidence that it was written.
+    for claim in claims:
+        usable = _usable(claim, backed)
+        if not usable:
+            wrong.append((claim, (
+                "what succeeded was a removal (files_delete/files_recycle); a "
+                "path being gone backs 'deleted' and nothing else")))
+            continue
+        why = _missing_evidence(claim, usable) or _target_mismatch(claim, usable)
+        if why:
+            wrong.append((claim, why))
     return wrong, backed
 
 
@@ -733,7 +781,9 @@ def audit(text: str, run: Run | None, *, strict_proof: bool = True,
     names - a verified `files_read` is real work and real evidence, and it is
     not evidence that a catalogue was processed; and when the sentence names
     a concrete TARGET, one of those actions must have touched it. Success on
-    foo.txt is not permission to say bar.txt was created (FR-TRU-001).
+    foo.txt is not permission to say bar.txt was created (FR-TRU-001). The
+    kind rule runs both ways: a removal is proven by the path being gone,
+    which backs 'deleted' and contradicts every other verb.
 
     And (ACT-001): its verification must show its type's proof shape; it
     must be correlated to this run - dated inside it, and carrying the key

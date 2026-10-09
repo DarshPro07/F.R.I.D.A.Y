@@ -49,6 +49,67 @@ def test_negated_or_zero_evidence_does_not_satisfy_a_shape():
         assert not H.audit("I created foo.txt.", _run(tool, "x", evidence)).ok
 
 
+@pytest.mark.parametrize("tool,method", [
+    ("files_delete", "path_absent_after_delete"),
+    ("files_recycle", "path_absent_after_recycle"),
+])
+def test_a_removal_is_proven_by_the_path_being_absent_not_by_a_hash(tool, method):
+    gone = "foo.txt (12 bytes) is gone from C:/w/foo.txt; post_state=absent"
+    assert H.audit("I deleted foo.txt.", _run(tool, method, gone)).ok
+    for weak in ("foo.txt deleted", "foo.txt post_state=present",
+                 f"foo.txt sha256={HASH}"):
+        assert not H.audit("I deleted foo.txt.", _run(tool, method, weak)).ok
+
+
+@pytest.mark.parametrize("tool", ["files_read", "files_write"])
+def test_only_a_removal_backs_a_deletion_claim(tool):
+    """A read or a write of foo.txt is not evidence that foo.txt is gone."""
+    refused = H.audit("I deleted foo.txt.",
+                      _run(tool, "readback", f"foo.txt sha256={HASH}"))
+    assert not refused.ok
+    assert "files_delete" in refused.reason
+
+
+@pytest.mark.parametrize("tool,method", [
+    ("files_delete", "path_absent_after_delete"),
+    ("files_recycle", "path_absent_after_recycle"),
+])
+def test_a_removal_backs_deleted_and_no_other_verb(tool, method):
+    """The path being gone contradicts 'I created foo.txt' - it cannot back it."""
+    gone = "foo.txt (12 bytes) is gone from C:/w/foo.txt; post_state=absent"
+    assert H.audit("I deleted foo.txt.", _run(tool, method, gone)).ok
+    for claim in ("I created foo.txt.", "I changed foo.txt.", "I saved foo.txt."):
+        refused = H.audit(claim, _run(tool, method, gone))
+        assert not refused.ok, claim
+        assert "deleted" in refused.reason, claim
+
+
+@pytest.mark.parametrize("tool,method", [
+    ("files_delete", "path_absent_after_delete"),
+    ("files_recycle", "path_absent_after_recycle"),
+])
+def test_a_removal_backs_no_state_assertion_about_the_removed_file(tool, method):
+    """'foo.txt is ready' is not a deletion claim: after a verified delete the
+    file is gone, so asserting it is ready/open/live must be refused."""
+    gone = "foo.txt (12 bytes) is gone from C:/w/foo.txt; post_state=absent"
+    for claim in ("foo.txt is ready.", "foo.txt is now open.", "foo.txt is live.",
+                  "foo.txt is running.", "That's complete.", "Here it is.",
+                  "foo.txt: all set.", "Ready."):
+        refused = H.audit(claim, _run(tool, method, gone))
+        assert not refused.ok, claim
+        assert "deleted" in refused.reason, claim
+
+
+@pytest.mark.parametrize("tool,method", [
+    ("files_delete", "path_absent_after_delete"),
+    ("files_recycle", "path_absent_after_recycle"),
+])
+def test_a_removal_still_backs_a_removal_claim_and_a_bare_done(tool, method):
+    gone = "foo.txt (12 bytes) is gone from C:/w/foo.txt; post_state=absent"
+    for claim in ("I deleted foo.txt.", "Done.", "All done."):
+        assert H.audit(claim, _run(tool, method, gone)).ok, claim
+
+
 def test_simulation_needs_a_recorded_artifact():
     assert not H.audit("I created foo.txt.", _run("sim_run", "run", "foo.txt ok")).ok
     assert H.audit("I created foo.txt.",

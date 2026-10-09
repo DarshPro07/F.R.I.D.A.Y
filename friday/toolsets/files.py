@@ -712,7 +712,7 @@ def files_recycle(run: c.Run, path: str, *, engine: PolicyEngine = default_engin
             method="path_absent_after_recycle",
             evidence=f"{target.name} ({size} bytes) is no longer at {target}; "
                      f"it went to the Recycle Bin rather than being destroyed, "
-                     f"so it can be restored"),
+                     f"so it can be restored; post_state=absent"),
     ))
 
 
@@ -820,7 +820,8 @@ def files_delete(run: c.Run, path: str, *, permanent: bool = False,
              "bytes": size, "restorable": True, "confirm": None}),
             side_effects=(f"recycled {target.name}",),
             verification=c.Verification(method="path_absent_after_recycle",
-                evidence=f"{target.name} ({size} bytes) went to the Recycle Bin and can be restored")))
+                evidence=f"{target.name} ({size} bytes) went to the Recycle Bin and can be restored; "
+                         f"post_state=absent")))
 
     # Permanent, and either exempt or nonce already spent above. A bare
     # permanent delete (no nonce, not exempt) asks and does nothing.
@@ -853,7 +854,8 @@ def files_delete(run: c.Run, path: str, *, permanent: bool = False,
          "bytes": size, "restorable": False, "confirm": None}),
         side_effects=(f"permanently deleted {target.name}",),
         verification=c.Verification(method="path_absent_after_delete",
-            evidence=f"{target.name} ({size} bytes) is permanently gone from {target}")))
+            evidence=f"{target.name} ({size} bytes) is permanently gone from {target}; "
+                     f"post_state=absent")))
 
 
 # ---------------------------------------------------------------------------

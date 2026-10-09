@@ -3,6 +3,7 @@ from datetime import timedelta
 import pytest
 from friday import confirmation
 from friday import contracts as c
+from friday import turn_ledger
 from friday.fsjail import FileJail
 from friday.policy import DELETE, FULL, PolicyEngine, TOOL_CATEGORIES
 from friday.toolsets import files as F
@@ -39,6 +40,58 @@ def test_recycle_requires_source_absence(root, monkeypatch):
     assert result.output['result'] == F.RECYCLED
     assert result.output['mode'] == 'recycle'
     assert not target.exists()
+
+
+def _says(tool, target, result, verb='deleted'):
+    """What the live gate does with 'I <verb> <file>.' after this real call."""
+    ledger = turn_ledger.TurnLedger(executor='voice_agent')
+    ledger.record(tool, {'path': str(target)}, result.to_dict())
+    return turn_ledger.refusal(f'I {verb} {target.name}.', ledger)
+
+
+def test_a_recycled_file_can_be_claimed_deleted(root, monkeypatch):
+    target = root / 'note.txt'
+    target.write_text('owned fixture', encoding='utf-8')
+    monkeypatch.setattr('send2trash.send2trash', lambda path: target.unlink())
+    result = F.files_delete(run(), str(target), engine=engine())
+    assert result.status == c.SUCCEEDED
+    assert _says('files_delete', target, result) is None
+
+
+def test_files_recycle_result_backs_a_deletion_claim(root, monkeypatch):
+    target = root / 'bin-me.txt'
+    target.write_text('owned fixture', encoding='utf-8')
+    monkeypatch.setattr('send2trash.send2trash', lambda path: target.unlink())
+    result = F.files_recycle(run(), str(target), engine=engine())
+    assert result.status == c.SUCCEEDED
+    assert _says('files_recycle', target, result) is None
+
+
+def test_a_real_deletion_cannot_be_claimed_as_a_creation(root, monkeypatch):
+    """The gate that lets 'I deleted note.txt' through must still refuse
+    'I created note.txt' on the same result: the file being gone is the
+    opposite of the claim, not evidence for it."""
+    target = root / 'note.txt'
+    target.write_text('owned fixture', encoding='utf-8')
+    monkeypatch.setattr('send2trash.send2trash', lambda path: target.unlink())
+    result = F.files_delete(run(), str(target), engine=engine())
+    assert result.status == c.SUCCEEDED
+    refused = _says('files_delete', target, result, 'created')
+    assert refused is not None
+    assert 'deleted' in refused
+
+
+def test_a_permanently_deleted_file_can_be_claimed_deleted(root):
+    target = root / 'permanent-claim.txt'
+    target.write_text('owned fixture', encoding='utf-8')
+    original = run()
+    asked = F.files_delete(original, str(target), permanent=True, engine=engine())
+    nonce = asked.output['confirm']['nonce']
+    assert confirmation.book.approve(nonce).ok
+    result = F.files_delete(run(original.run_id), str(target), permanent=True,
+                            nonce=nonce, engine=engine())
+    assert result.status == c.SUCCEEDED
+    assert _says('files_delete', target, result) is None
 
 
 def test_recycle_os_failure_is_truthful(root, monkeypatch):
