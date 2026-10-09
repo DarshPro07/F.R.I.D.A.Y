@@ -1,4 +1,5 @@
 import os
+import sys
 from mcp.server.fastmcp import FastMCP
 from friday.tools import register_all_tools
 from friday.prompts import register_all_prompts
@@ -39,6 +40,13 @@ def main() -> None:
     # RES-004: this process admits work, so it keeps the machine's profile
     # current - measured on first run, again when the hardware changes.
     hardware_profile.watch()
+    # PKG-001: started outside the launcher, a fresh install still gets the
+    # skills on disk registered (the launcher does the same on its own path).
+    from friday.launcher import register_skills_at_startup
+
+    note = register_skills_at_startup()
+    if note:
+        print(note, file=sys.stderr, flush=True)
     # Spin up transport adapter
     mcp.run(transport="sse")
 

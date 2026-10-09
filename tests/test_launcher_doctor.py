@@ -47,6 +47,21 @@ def test_startup_registers_the_skills_on_disk_so_the_doctor_finds_none_unregiste
     assert L.register_skills_at_startup() == ""                         # nothing left to do
 
 
+def test_the_server_entry_point_registers_the_skills_outside_the_launcher(tmp_path, monkeypatch):
+    """`friday` / `python server.py` start here without the launcher, so a fresh install
+    would otherwise keep its on-disk skills unregistered."""
+    import server as S
+    from friday import hardware_profile, stop
+
+    monkeypatch.setenv("ADA_DB", str(tmp_path / "doctor.sqlite3"))
+    assert "unregistered" in L.skills_check(tmp_path)[0][2]
+    monkeypatch.setattr(S.mcp, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(stop, "watch", lambda *args, **kwargs: None)
+    monkeypatch.setattr(hardware_profile, "watch", lambda *args, **kwargs: None)
+    S.main()
+    assert "unregistered" not in L.skills_check(tmp_path)[0][2]
+
+
 def test_registering_at_startup_leaves_an_already_registered_skill_untouched(tmp_path):
     from friday.skills import cli, files
 
