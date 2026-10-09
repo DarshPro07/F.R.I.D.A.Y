@@ -208,6 +208,10 @@ DECLARED = {
     "friday/appcontainer": (FUTURE,
                             "the OS boundary under friday.quarantine; reachable "
                             "once the quarantine has a caller (CAP-FORGE-004/014)"),
+    "friday/scoped_runner": (FUTURE,
+                             "EXEC-SBX-001 slice 1: the AppContainer command runner, "
+                             "unwired until the escape suite passes (slice 2 restores "
+                             "bridge_run_command); run by tests/test_scoped_runner_escape.py"),
     "friday/quarantine_guard": (FUTURE,
                                 "copied into a quarantine root and run as the "
                                 "child's entry script, never imported"),
