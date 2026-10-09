@@ -332,3 +332,21 @@ def test_signature_and_slug_are_stable():
     assert C.signature("Build the exe") == C.signature("build THE exe!")
     assert C.slug("Fix and diagnose the provider routing bug") == "fix-diagnose-provider-routing-bug"
     assert K.valid_name(C.slug("!!!")) is None
+
+
+def test_draft_skill_links_back_to_its_objective_in_frontmatter():
+    trace = C.ObjectiveTrace(objective="Run the build and check the log", verified=True,
+                             tool_calls=[C.ToolCall("build"), C.ToolCall("check_log")],
+                             final_path=["run build", "read log"], evidence=["log clean"],
+                             objective_id="obj-42", explicit_request=True)
+    proposal = C.SkillCandidateDetector().detect(trace)
+    assert proposal is not None and proposal.source == "objective:obj-42"
+    frontmatter, _ = F.parse_skill_md(proposal.content)
+    friday = F.friday_metadata(frontmatter)
+    assert friday["objective_id"] == "obj-42"
+    assert "verified" not in friday  # verification stays external (lint SELF_CLAIMS)
+
+    anonymous = C.ObjectiveTrace(objective="Run the build and check the log", verified=True,
+                                 final_path=["run build"], explicit_request=True)
+    frontmatter, _ = F.parse_skill_md(C.draft_skill_md(anonymous, "n", [(C.REPEATED, "x")]))
+    assert "objective_id" not in F.friday_metadata(frontmatter)

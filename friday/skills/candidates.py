@@ -114,6 +114,9 @@ def draft_skill_md(trace: ObjectiveTrace, name: str, criteria: list[tuple[str, s
             },
         },
     }
+    if trace.objective_id:
+        # the structured link from the skill to the verified objective it came from
+        frontmatter["metadata"]["friday"]["objective_id"] = trace.objective_id
     steps = trace.final_path or [c.name for c in trace.tool_calls if c.ok]
     pitfalls = [c.error or c.name for c in trace.tool_calls if not c.ok] + list(trace.errors)
     body = [f"# {description[:80]}", "",
