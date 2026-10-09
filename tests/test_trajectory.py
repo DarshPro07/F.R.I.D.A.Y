@@ -970,3 +970,125 @@ def test_a_forbidden_step_started_long_ago_is_still_scope_creep():
 
     assert found.verdict == T.DRIFTING, found
     assert any("delete was forbidden" in r for r in found.reasons)
+
+
+# -- failures since the last success, spread over more events than the recent window --
+
+def _long_run_failing(tmp_path, seed, failures, *, then=None):
+    """Like `_long_run_of`, for failures spread across more than one task: each
+    `(task_index, kind)` pair in `failures` becomes a task.failed event against
+    one of three tasks, far enough from the next that the early ones fall out of
+    the recent window. `then`, given, is a trailing `(task_index, event)` pair
+    (`task_index` may be `None`) recorded after the failures, before a final pad."""
+    rng = random.Random(seed)
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile_under(store, c.ObjectiveContract(goal="tidy the folder"),
+                            "system_get_info", 3, chained=False)
+    tasks = [t["task_id"] for t in store.objective_tasks(run_id)]
+    for task_index, kind in failures:
+        _pad(store, run_id, rng.randint(200, 300))
+        store.append_objective_event(run_id, O.EVENT_TASK_FAILED, task_id=tasks[task_index],
+                                     detail={"kind": kind, "reason": "the service answered 503"})
+    if then is not None:
+        task_index, event = then
+        store.append_objective_event(run_id, event,
+                                     task_id=tasks[task_index] if task_index is not None else None)
+    _pad(store, run_id, rng.randint(200, 300))
+    return store, run_id, tasks
+
+
+_SPREAD_FAILURES = [(0, "TRANSIENT"), (1, "NETWORK"), (0, "PROVIDER_DOWN"),
+                    (1, "TRANSIENT"), (0, "NETWORK"), (1, "PROVIDER_DOWN")]
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_failures_across_two_tasks_over_a_long_run_are_flagged_though_they_are_not_recent(
+        tmp_path, seed):
+    store, run_id, _ = _long_run_failing(tmp_path, seed, _SPREAD_FAILURES)
+    recent = [e for e in store.recent_objective_events(run_id) if e["event"] == O.EVENT_TASK_FAILED]
+    assert len(recent) < T.NO_PROGRESS_ATTEMPTS, "the benchmark must outlive the recent window"
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.NO_PROGRESS, found
+    assert found.signals["attempts_since_success"] == 6
+
+
+def test_the_same_cause_across_tasks_over_a_long_run_is_flagged_though_it_is_not_recent(tmp_path):
+    failures = [(0, "NETWORK"), (1, "NETWORK"), (2, "NETWORK"),
+                (0, "NETWORK"), (1, "NETWORK"), (2, "NETWORK")]
+    store, run_id, _ = _long_run_failing(tmp_path, 0, failures)
+    recent = [e for e in store.recent_objective_events(run_id) if e["event"] == O.EVENT_TASK_FAILED]
+    assert len(recent) < T.NO_PROGRESS_ATTEMPTS, "the benchmark must outlive the recent window"
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.NO_PROGRESS, found
+    assert any("NETWORK" in r for r in found.reasons)
+
+
+def test_an_old_success_outside_the_recent_window_still_bounds_the_count(tmp_path):
+    """The success is not recent either; the fix must fetch it from the store,
+    not rely on it surviving in the newest-500 window the old code read from."""
+    rng = random.Random(0)
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile_under(store, c.ObjectiveContract(goal="tidy the folder"),
+                            "system_get_info", 3, chained=False)
+    tasks = [t["task_id"] for t in store.objective_tasks(run_id)]
+    store.append_objective_event(run_id, O.EVENT_TASK_SUCCEEDED, task_id=tasks[0])
+    _pad(store, run_id, 600)
+    kinds = ["TRANSIENT", "NETWORK", "TRANSIENT", "PROVIDER_DOWN", "NETWORK"]
+    for i, kind in enumerate(kinds):
+        _pad(store, run_id, rng.randint(200, 300))
+        store.append_objective_event(run_id, O.EVENT_TASK_FAILED, task_id=tasks[i % 2],
+                                     detail={"kind": kind, "reason": "the service answered 503"})
+    _pad(store, run_id, rng.randint(200, 300))
+
+    found = T.for_run(store, run_id)
+    assert found.verdict == T.ON_TRACK, found
+    assert found.signals["attempts_since_success"] == 5
+
+    store.append_objective_event(run_id, O.EVENT_TASK_FAILED, task_id=tasks[0],
+                                 detail={"kind": "TRANSIENT", "reason": "the service answered 503"})
+    _pad(store, run_id, rng.randint(200, 300))
+
+    found = T.for_run(store, run_id)
+    assert found.verdict == T.NO_PROGRESS, found
+    assert found.signals["attempts_since_success"] == 6
+
+
+def test_a_success_after_a_long_run_of_spread_failures_resets_the_count(tmp_path):
+    store, run_id, _ = _long_run_failing(tmp_path, 0, _SPREAD_FAILURES,
+                                         then=(0, O.EVENT_TASK_SUCCEEDED))
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.ON_TRACK, found
+    assert found.signals["attempts_since_success"] == 0
+
+
+def test_a_resume_after_a_long_run_of_spread_failures_gives_on_track(tmp_path):
+    store, run_id, _ = _long_run_failing(tmp_path, 0, _SPREAD_FAILURES,
+                                         then=(None, O.EVENT_RUN_RESUMED))
+
+    found = T.for_run(store, run_id)
+
+    assert found.verdict == T.ON_TRACK, found
+
+
+def test_a_long_run_where_every_failure_is_followed_by_its_own_success_is_never_flagged(tmp_path):
+    rng = random.Random(0)
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile_under(store, c.ObjectiveContract(goal="tidy the folder"),
+                            "system_get_info", 3, chained=False)
+    tasks = [t["task_id"] for t in store.objective_tasks(run_id)]
+    for i in range(20):
+        task = tasks[i % 3]
+        _pad(store, run_id, rng.randint(200, 300))
+        store.append_objective_event(run_id, O.EVENT_TASK_FAILED, task_id=task,
+                                     detail={"kind": "TRANSIENT", "reason": "the service answered 503"})
+        store.append_objective_event(run_id, O.EVENT_TASK_SUCCEEDED, task_id=task)
+
+        found = T.for_run(store, run_id)
+        assert found.verdict == T.ON_TRACK, (i, found)
+        assert found.signals["attempts_since_success"] == 0

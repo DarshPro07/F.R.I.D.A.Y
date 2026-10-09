@@ -22,7 +22,8 @@ BACKENDS = (NATIVE, TEMPORAL)
 KERNEL_OPERATIONS = (
     "acquire_objective_lease", "append_objective_approval", "append_objective_event",
     "append_objective_evidence", "create_objective_delivery", "finish_objective_run",
-    "objective_events", "objective_ledger", "objective_run", "objective_runs",
+    "objective_event_counts", "objective_events", "objective_events_named",
+    "objective_ledger", "objective_run", "objective_runs",
     "objective_task", "objective_tasks", "recent_objective_events",
     "release_objective_lease", "stop_latched", "touch_objective_run",
     "update_objective_task", "update_objective_task_if",

@@ -151,7 +151,7 @@ def _questions_waved_through(earlier: list[dict], open_questions: tuple) -> bool
 def assess(events: list[dict], tasks: list[dict], *, spend: float = 0.0,
            governance: dict | None = None, open_questions: tuple = (),
            upcoming: tuple = (), refusals: int | None = None,
-           starts: dict | None = None) -> Assessment:
+           starts: dict | None = None, since: list[dict] | None = None) -> Assessment:
     """
     Where the run is going, from its events since the person last resumed it
     (all of them if never), its task rows, and the largest fraction of any
@@ -159,18 +159,20 @@ def assess(events: list[dict], tasks: list[dict], *, spend: float = 0.0,
     questions it also says whether the run has left what was asked. `upcoming`
     is the ids of the tasks the executor is about to dispatch: a side-effecting
     one under an open question is flagged before it starts, not after.
-    `refusals` and `starts` (task id -> times started) are those counts over the
-    whole window when `events` holds only the newest of a long run; left out,
-    they are counted from `events`.
+    `refusals`, `starts` (task id -> times started) and `since` (the failed,
+    retried or blocked attempts since the run's last success) are those counts
+    over the whole window when `events` holds only the newest of a long run;
+    left out, they are counted from `events`.
     """
     governance = governance or {}
     start = max((i for i, e in enumerate(events) if e.get("event") == _RESUMED), default=-1)
     window = events[start + 1:]
 
-    last_success = max((i for i, e in enumerate(window) if e.get("event") == _SUCCEEDED),
-                       default=-1)
-    since = [e for e in window[last_success + 1:]
-             if e.get("event") in (_FAILED, _RETRY, _BLOCKED)]
+    if since is None:
+        last_success = max((i for i, e in enumerate(window) if e.get("event") == _SUCCEEDED),
+                           default=-1)
+        since = [e for e in window[last_success + 1:]
+                 if e.get("event") in (_FAILED, _RETRY, _BLOCKED)]
     failing = {e.get("task_id") for e in since if e.get("task_id")}
     per_cause: Counter = Counter()
     for e in since:
@@ -298,16 +300,24 @@ def for_run(store, run_id: str, upcoming: tuple = ()) -> Assessment:
         contract = {}
     contract = contract if isinstance(contract, dict) else {}
     events = _events_for(store, run_id)
-    # Refusals and starts are common per run, so they cannot be fetched by name
-    # like the rest: the store counts them over the whole window, which opens at
-    # the last resume, rather than over the newest events only.
+    # Refusals, starts and the failures since the last success are common per
+    # run, so they cannot be fetched by name like the rest: the store counts
+    # them over the whole window, which opens at the last resume, rather than
+    # over the newest events only.
     opened = max((e["id"] for e in events if e.get("event") == _RESUMED), default=0)
     refusals = sum(1 for e in store.objective_events_named(
         run_id, (_FAILED, _RETRY, _BLOCKED), after_id=opened, mentioning=_REFUSAL_MARKS)
         if _refused(e))
+    # Bounded: at most one success per task, and failures after the last
+    # success are capped by the per-task retry limit (continuous.py's
+    # DEFAULT_MAX_ATTEMPTS, 3) before NO_PROGRESS pauses the run at 6.
+    succeeded = store.objective_events_named(run_id, (_SUCCEEDED,), after_id=opened)
+    since = store.objective_events_named(
+        run_id, (_FAILED, _RETRY, _BLOCKED),
+        after_id=max((e["id"] for e in succeeded), default=opened))
     return assess(events, store.objective_tasks(run_id),
                   spend=spend_fraction(store, run_id),
                   governance=dict(contract.get("governance") or {}),
                   open_questions=tuple(contract.get("open_questions") or ()),
-                  upcoming=tuple(upcoming), refusals=refusals,
+                  upcoming=tuple(upcoming), refusals=refusals, since=since,
                   starts=store.objective_event_counts(run_id, _STARTED, after_id=opened))

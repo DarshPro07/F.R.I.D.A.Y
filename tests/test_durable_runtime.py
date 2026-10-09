@@ -121,3 +121,38 @@ def test_an_unknown_backend_name_is_refused(tmp_path):
 
 def test_the_store_provides_every_operation_the_interface_names(tmp_path):
     assert D.missing_operations(Store(tmp_path / "ada.sqlite3")) == []
+
+
+class _InterfaceOnly:
+    """A backend that offers the store's operations named in KERNEL_OPERATIONS
+    and nothing else, as a provider built from the interface alone would."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def __getattr__(self, name):
+        if name not in D.KERNEL_OPERATIONS:
+            raise AttributeError(f"{name} is not a kernel operation")
+        return getattr(self._inner, name)
+
+
+def test_the_trajectory_check_runs_on_nothing_but_the_interface(tmp_path):
+    from friday import trajectory
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store)
+    backend = D.select_backend("temporal", native=store, temporal=lambda: _InterfaceOnly(store))
+    assert trajectory.for_run(backend, run_id).verdict == trajectory.ON_TRACK
+
+
+def test_a_backend_without_the_whole_window_counts_is_refused(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    for absent in ("objective_events_named", "objective_event_counts"):
+        class Short(_InterfaceOnly):
+            def __getattr__(self, name):
+                if name == absent:
+                    raise AttributeError(name)
+                return super().__getattr__(name)
+
+        with pytest.raises(D.BackendUnavailable) as err:
+            D.select_backend("temporal", native=store, temporal=lambda: Short(store))
+        assert absent in str(err.value)
