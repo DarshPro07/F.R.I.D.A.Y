@@ -4188,6 +4188,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Gated AutoLearner with the governor: each turn waits and retries while the person is active, on battery or under pressure; admit(OPTIONAL) grants a lease, a governor-stopped attempt is cancelled and the turn retried, the lease freed in finally. governor=None stays ungated. (build run, commit 38a285ecd)',
         "next_action": "GAPS: Acceptance 'runs when idle, plugged in, with headroom' is shown only with injected Ctx/Dial readings; a live check of the idle/battery behaviour on the real probes needs the running agent.; Harness bug outside this worktree: build_kernel.py _failing_tests reports red_green.tests as failing on INTEGRATED records (falls back to red_green.tests when a record has no failures), needing a controller fix to build_kernel.py.; implementer did not claim acceptance met",
     }),
+    ('BBOX-001', {
+        "status": PARTIAL,
+        "current_implementation": 'reconstruct() dropped an unreadable audit read and still reported consistent. It now names the unread audit rows as a disagreement. New test fails without the fix (1 failed, 14 passed) and passes with it. (build run, commit 8745c9084)',
+        "next_action": 'GAPS: Full suite not run; only tests/test_observability.py and tests/test_trust.py (test_impact.py lists only test_observability.py as directly affected by friday/observability.py).; Not addressed: a row deleted just before a chain break is reported intact when the break is in a later row (prev_hash break). Needs a design decision on how strict per-run completeness must be; left as is.',
+    }),
 ]
 
 
