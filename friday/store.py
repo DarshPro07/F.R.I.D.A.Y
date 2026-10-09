@@ -379,36 +379,6 @@ CREATE TABLE IF NOT EXISTS open_questions (
 CREATE INDEX IF NOT EXISTS idx_open_questions_project
     ON open_questions(project, answered_at);
 
--- The Project Brain (BRAIN-001): structured, human-inspectable project records
--- of 13 kinds. friday/project_brain.py owns the kinds and the body shapes;
--- this table only keeps them. A record that restates a row in another table
--- (a decision, a requirement, an artifact) points at it through ref instead
--- of copying it. A change supersedes: the old row stays as history, and only
--- one row per (project, kind, key) can be active at a time.
-CREATE TABLE IF NOT EXISTS project_brain_records (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    project     TEXT NOT NULL REFERENCES projects(name),
-    kind        TEXT NOT NULL
-                CHECK (kind IN ('architecture', 'requirements', 'decisions',
-                                'assumptions', 'research', 'failures',
-                                'experiments', 'objectives', 'incidents',
-                                'artifacts', 'handoffs', 'procedures',
-                                'entities')),
-    key         TEXT NOT NULL,
-    body        TEXT NOT NULL,
-    state       TEXT NOT NULL DEFAULT 'active'
-                CHECK (state IN ('active', 'superseded')),
-    origin      TEXT NOT NULL,
-    ref         TEXT,
-    supersedes  INTEGER REFERENCES project_brain_records(id),
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_brain_active_key
-    ON project_brain_records(project, kind, key) WHERE state = 'active';
-CREATE INDEX IF NOT EXISTS idx_brain_project_kind
-    ON project_brain_records(project, kind, state);
-
 -- What the selective router would have done, beside what Friday did.
 --
 -- Never acted on. This exists so a promotion decision can be made against
@@ -1209,7 +1179,6 @@ class Store:
             for table in (
                 "memories", "observations", "utterances", "conversations",
                 "messages", "contacts", "projects", "project_decisions",
-                "project_brain_records",
                 "requirements", "open_questions", "objective_runs",
                 "forged_skills", "product_records", "product_runs",
                 "automations", "schedules", "reminders",
@@ -1788,85 +1757,6 @@ class Store:
             "SELECT * FROM project_decisions WHERE project=? AND superseded=0 "
             "ORDER BY created_at DESC", (project,)
         )]
-
-    # -- project brain (BRAIN-001) --------------------------------------------
-    # Thin on purpose: the kinds, body shapes and secret filter belong to
-    # friday/project_brain.py. These only keep and fetch rows.
-
-    #: The table and key column each Project Brain `ref` may point into.
-    BRAIN_REF_TABLES = {
-        "project_decisions": "id", "open_questions": "id",
-        "assumption_register": "id", "requirements": "id",
-        "artifacts": "artifact_id",
-    }
-
-    def brain_ref_exists(self, ref: str) -> bool:
-        """Whether `table:id` names a real row in a table a brain record may
-        reference. The table and column come from BRAIN_REF_TABLES, never from
-        the caller; only the id is a bound parameter."""
-        table, _, row_id = ref.partition(":")
-        column = self.BRAIN_REF_TABLES.get(table)
-        if column is None or not row_id:
-            return False
-        return self._conn.execute(
-            f"SELECT 1 FROM {table} WHERE {column}=?", (row_id,)
-        ).fetchone() is not None
-
-    def brain_insert(self, project: str, kind: str, key: str, body: str, *,
-                     origin: str, ref: str | None = None,
-                     supersedes: int | None = None) -> int:
-        """Insert an active record. sqlite3.IntegrityError if the kind is
-        unknown or (project, kind, key) already has an active record."""
-        self.ensure_project(project)
-        with self._tx() as conn:
-            return self._brain_insert(conn, project, kind, key, body, origin,
-                                      ref, supersedes)
-
-    def brain_supersede(self, project: str, kind: str, key: str, body: str, *,
-                        origin: str, ref: str | None = None) -> int:
-        """Retire the active record and insert its replacement in one
-        transaction. LookupError if there is no active record to retire."""
-        with self._tx() as conn:
-            old = conn.execute(
-                "SELECT id FROM project_brain_records "
-                "WHERE project=? AND kind=? AND key=? AND state='active'",
-                (project, kind, key)).fetchone()
-            if old is None:
-                raise LookupError(f"no active {kind} record {key!r} in {project!r}")
-            conn.execute(
-                "UPDATE project_brain_records SET state='superseded', "
-                "updated_at=? WHERE id=?", (now_iso(), old["id"]))
-            return self._brain_insert(conn, project, kind, key, body, origin,
-                                      ref, int(old["id"]))
-
-    @staticmethod
-    def _brain_insert(conn, project, kind, key, body, origin, ref,
-                      supersedes) -> int:
-        stamp = now_iso()
-        cur = conn.execute(
-            "INSERT INTO project_brain_records (project, kind, key, body, "
-            "origin, ref, supersedes, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            (project, kind, key, body, origin, ref, supersedes, stamp, stamp))
-        return int(cur.lastrowid)
-
-    def brain_rows(self, project: str, *, kind: str | None = None,
-                   key: str | None = None,
-                   include_superseded: bool = False) -> list[dict]:
-        """Records for a project, ordered by kind, key, then age (oldest first,
-        so a key's history reads top to bottom)."""
-        sql = "SELECT * FROM project_brain_records WHERE project=?"
-        args: list = [project]
-        if kind is not None:
-            sql += " AND kind=?"
-            args.append(kind)
-        if key is not None:
-            sql += " AND key=?"
-            args.append(key)
-        if not include_superseded:
-            sql += " AND state='active'"
-        sql += " ORDER BY kind, key, id"
-        return [dict(r) for r in self._conn.execute(sql, args)]
 
     def ask_question(self, project: str, question: str, *, why: str = "",
                      options: str = "", blocking: bool = True, impact: str = "",
