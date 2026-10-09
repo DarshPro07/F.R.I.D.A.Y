@@ -4178,6 +4178,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Added browser_start_temporary_profile (toolset + MCP tool): asks via confirmation.book, launches nothing without the person's approved nonce, then starts a TEMPORARY profile. Registered in policy, capabilities, router and tool cards. 6 new tests. (build run, commit e4770d5ec)",
         "next_action": 'GAPS: tests/test_phase1b.py::test_live_browser_opens_and_closes is @live (excluded from the gate) and failed because example.com returned a Spanish page; not related to this change.; Only the 20 most relevant of the 93 impacted test files were run; the other 73 were not run.; Out of scope per packet: AUTHORIZED profile, live Chromium, Browser.resume, browser_automate.',
     }),
+    ('BRAIN-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Re-applied the Project Brain slice (70ec74e): 13 record kinds in one Store table, ProjectBrain add/get/list/supersede/history, and a secret-redacting Markdown export. Golden files untouched; test_golden_suite now passes. (build run, commit 70ba483f9)',
+        "next_action": 'GAPS: Not wired to MCP tools or the objective-engine writers; reachability.py declares friday/project_brain as FUTURE (packet: do not wire in this slice).; Only the targeted tests ran (51 new + 207 neighbours); the chunked gate and the verifier are still to run.',
+    }),
 ]
 
 
