@@ -4679,6 +4679,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Design: fold(layout, bulk_tier, ledger) in friday/context_health.py collapses the non-critical lines of the bulk tier (deduplicated) into ONE line. The block goes through _shorten with compression.FOLD_TO_ARTIFACT, so the whole original block is kept in the vault and the ledger holds a recovery poin (build run, commit f2bdf975e)',
         "next_action": "GAPS: Acceptance 'Long-run benchmark' is still not met by a named, passing proof: the benchmark test (tests/test_context_health.py::test_the_long_run_benchmark_passes_and_writes_its_evidence) runs scripts/golden_context.py, and the last verifier could not run it. It passed in this file's full run (35 passed), but scripts/golden_context.py was not changed to exercise the real fold.; Reset/HANDOFF is still advisory: there is no PRD 19.6 temp branch and no session-restart seam, so the 'reset' part of 'trim/fold/reset' is not built.; The three UNMEASURED metrics (failed_attempt_density, struggle_score, retrieval_confidence) remain unmeasured (out of scope per the packet).; ADVISORY still lists FOLD although fold is now real in-process; clearing it would change an existing test's assertion (:118 advisory True), so I left it for the owner to decide.; implementer did not claim acceptance met",
     }),
+    ('COG-005', {
+        "status": PARTIAL,
+        "current_implementation": 'Appended to friday/simple_loop.py after run_simple, with no existing function changed. route_simple(request, dispatch, propose, *, run=None, bounds=LoopBounds()) returns None when task_class.classify says the request is not SIMPLE, without calling propose or dispatch. Otherwise it returns await run_ (build run, commit 70bb83dc0)',
+        "next_action": 'GAPS: Acceptance is not fully met: there is still no live caller (voice-turn routing in agent_friday.py, out of scope per the packet).; There is no real model_gateway transport or spend source feeding complete(); the caller supplies it.; route_simple has no escalate parameter (the packet signature has none), so escalation inside it uses the default escalate_to_objective_os.; reachability verdict left FUTURE as instructed.; implementer did not claim acceptance met',
+    }),
 ]
 
 
