@@ -132,7 +132,13 @@ def development_promote(run: c.Run, root: str, run_id: str, branch: str,
     except W.WorktreeError as exc:
         return run.record(c.failed(started, f"not promoted: {exc}"))
     if promotion.state != W.PROMOTED:
-        return run.record(c.failed(started, f"not promoted: {promotion.reason}"))
+        failure = c.failed(started, f"not promoted: {promotion.reason}")
+        if promotion.conflicts:
+            # A conflict is not a dead end: it comes back as the task that
+            # resolves it, with both sides' requirements and diffs.
+            failure = failure.finish(output={
+                "integration_task": manager.integration_task(promotion)})
+        return run.record(failure)
     return run.record(c.succeeded(
         started,
         output={"branch": promotion.target, "merge_commit": promotion.merge_commit,

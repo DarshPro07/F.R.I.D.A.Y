@@ -51,6 +51,9 @@ logger = logging.getLogger("friday-agent.executors.worktrees")
 #: Where the CLI puts them. Probed, not guessed.
 WORKTREE_DIR = Path(".claude") / "worktrees"
 
+#: Characters of each side's diff an integration task carries.
+INTEGRATION_DIFF_LIMIT = 20_000
+
 #: And what it calls the branch.
 BRANCH_PREFIX = "worktree-"
 
@@ -106,6 +109,8 @@ class Promotion:
     result_commit: str = ""    # the worktree commit that carried the work
     merge_commit: str = ""     # what landed on the target
     reason: str = ""
+    #: Files the merge could not combine; set only on a conflict rejection.
+    conflicts: tuple[str, ...] = ()
 
     @property
     def rollback_target(self) -> str:
@@ -292,16 +297,49 @@ class WorktreeManager:
             git(self.repo, "merge", "--no-ff", "-m", message, branch)
         except WorktreeError as exc:
             # A conflict is a rejection, not a half-promotion. The target is
-            # put back exactly as it was.
+            # put back exactly as it was; the files that clashed are read
+            # first, because the abort clears them.
+            conflicts = tuple(git(self.repo, "diff", "--name-only",
+                                  "--diff-filter=U", check=False).splitlines())
             git(self.repo, "merge", "--abort", check=False)
             return Promotion(REJECTED, branch, target, base_commit=base,
-                             result_commit=result,
+                             result_commit=result, conflicts=conflicts,
                              reason=f"the merge did not apply cleanly: {exc}")
 
         merged = git(self.repo, "rev-parse", "HEAD")
         return Promotion(PROMOTED, branch, target, base_commit=base,
                          result_commit=result, merge_commit=merged,
                          reason=message)
+
+    def integration_task(self, promotion: Promotion) -> dict:
+        """
+        A conflicting promotion as a bounded task for someone to resolve.
+
+        Nothing is merged blind: the task carries what each side was asked to
+        do (its commit subjects since they diverged) and what each side did to
+        the clashing files, so the resolution can keep both requirements.
+        """
+        if not promotion.conflicts:
+            raise WorktreeError("this promotion has no conflict to integrate")
+        branch, target = promotion.branch, promotion.target
+        base = git(self.repo, "merge-base", target, branch)
+        files = list(promotion.conflicts)
+
+        def side(ref: str) -> tuple[list[str], str]:
+            subjects = git(self.repo, "log", "--format=%s", f"{base}..{ref}")
+            diff = git(self.repo, "diff", base, ref, "--", *files)
+            return subjects.splitlines(), diff[:INTEGRATION_DIFF_LIMIT]
+
+        asked_target, diff_target = side(target)
+        asked_worker, diff_worker = side(branch)
+        return {
+            "kind": "integration", "target": target, "branch": branch,
+            "merge_base": base, "conflicts": files,
+            "requirements": {"target": asked_target, "worker": asked_worker},
+            "diffs": {"target": diff_target, "worker": diff_worker},
+            "acceptance": ("both requirements hold in the resolved files; "
+                           "the tests that cover them pass"),
+        }
 
     def reject(self, name: str, reason: str) -> Promotion:
         """Nothing moves. The worktree is kept so the failure can be read."""

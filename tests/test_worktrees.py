@@ -377,3 +377,82 @@ def test_a_promotion_is_persisted_with_its_rollback_point(tmp_path, repo):
         assert row["target_branch"] == manager.current_branch()
     finally:
         store.close()
+
+
+# ---------------------------------------------------------------------------
+# ORCH-006: concurrent workers, FRIDAY integrates, a conflict is a task
+# ---------------------------------------------------------------------------
+
+
+def test_two_concurrent_workers_never_share_a_checkout(manager):
+    a = manager.create("ada-a")
+    b = manager.create("ada-b")
+    assert a.path != b.path and a.branch != b.branch
+    assert a.path.resolve() != manager.repo.resolve()
+    tops = {run(w.path, "git", "rev-parse", "--show-toplevel") for w in (a, b)}
+    assert len(tops) == 2
+    (a.path / "only_a.py").write_text("A = 1\n", encoding="utf-8")
+    (b.path / "only_b.py").write_text("B = 1\n", encoding="utf-8")
+    assert not (b.path / "only_a.py").exists() and not (a.path / "only_b.py").exists()
+    assert not (manager.repo / "only_a.py").exists()
+    assert manager.changes("ada-a") == ["only_a.py"]
+    assert manager.changes("ada-b") == ["only_b.py"]
+    assert manager.verify("ada-a")[0] and manager.verify("ada-b")[0]
+
+
+def test_a_second_worker_cannot_take_a_checkout_that_is_in_use(manager):
+    manager.create("ada-a")
+    with pytest.raises(W.WorktreeError, match="already exists"):
+        manager.create("ada-a")
+
+
+def test_each_workers_result_is_integrated_by_promotion(manager):
+    a = manager.create("ada-a")
+    b = manager.create("ada-b")
+    (a.path / "only_a.py").write_text("A = 1\n", encoding="utf-8")
+    (b.path / "only_b.py").write_text("B = 1\n", encoding="utf-8")
+    target = manager.current_branch()
+    assert manager.promote("ada-a", target=target, message="a").state == W.PROMOTED
+    assert manager.promote("ada-b", target=target, message="b").state == W.PROMOTED
+    assert (manager.repo / "only_a.py").exists() and (manager.repo / "only_b.py").exists()
+
+
+def _conflict(manager):
+    """A worker and the main checkout edit the same line, each for its own reason."""
+    path = make_worktree(manager, "ada-x")
+    (path / "calc.py").write_text("def add(a, b):\n    return a - b  # worker\n",
+                                  encoding="utf-8")
+    (manager.repo / "calc.py").write_text(
+        "def add(a, b):\n    return a * b  # main\n", encoding="utf-8")
+    run(manager.repo, "git", "commit", "-qam", "make add multiply")
+    return manager.promote("ada-x", target=manager.current_branch(),
+                           message="make add subtract")
+
+
+def test_a_conflicting_promotion_names_the_files_that_conflict(manager):
+    promotion = _conflict(manager)
+    assert promotion.state == W.REJECTED
+    assert promotion.conflicts == ("calc.py",)
+
+
+def test_a_conflict_becomes_an_integration_task_with_both_requirements(manager):
+    promotion = _conflict(manager)
+    before = run(manager.repo, "git", "rev-parse", "HEAD")
+    task = manager.integration_task(promotion)
+    assert task["kind"] == "integration"
+    assert task["conflicts"] == ["calc.py"]
+    assert task["target"] == promotion.target and task["branch"] == promotion.branch
+    assert task["requirements"]["worker"] == ["make add subtract"]
+    assert task["requirements"]["target"] == ["make add multiply"]
+    assert "a - b  # worker" in task["diffs"]["worker"]
+    assert "a * b  # main" in task["diffs"]["target"]
+    assert run(manager.repo, "git", "rev-parse", "HEAD") == before
+
+
+def test_a_clean_promotion_has_no_integration_task(manager):
+    path = make_worktree(manager, "ada-x")
+    (path / "isolated.py").write_text("HELLO = 1\n", encoding="utf-8")
+    promotion = manager.promote("ada-x", target=manager.current_branch(), message="x")
+    assert promotion.conflicts == ()
+    with pytest.raises(W.WorktreeError, match="no conflict"):
+        manager.integration_task(promotion)

@@ -258,6 +258,22 @@ def test_a_promotion_onto_a_branch_that_is_not_checked_out_is_refused(finished):
     assert result.status == c.FAILED and "not promoted" in result.error
 
 
+def test_a_conflicting_promotion_comes_back_as_an_integration_task(finished):
+    _, repo, branch = finished
+    (repo / "calc.py").write_text("def add(a, b):\n    return a * b\n", encoding="utf-8")
+    _git(repo, "commit", "-qam", "make add multiply")
+    before = _git(repo, "rev-parse", branch)
+    run = c.Run.create("promote", capability="development_promote")
+    result = DT.development_promote(run, str(repo), "r1", branch,
+                                    "add subtract to calc.py")
+    assert result.status == c.FAILED and "not promoted" in result.error
+    task = result.output["integration_task"]
+    assert task["conflicts"] == ["calc.py"]
+    assert task["requirements"] == {"target": ["make add multiply"],
+                                    "worker": ["add subtract to calc.py"]}
+    assert _git(repo, "rev-parse", branch) == before
+
+
 # --- commands, facts and the envelope ----------------------------------------
 
 
