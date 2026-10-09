@@ -4296,6 +4296,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "BENCHMARK_IMPROVEMENT override now needs an 'evidence: <path>' to a file inside the repo, else the overlapping import is recorded REFERENCE_ONLY with the reason. Adapter discovery sorted by module name explicitly. 7 new tests fail on old code. (build run, commit 53653cd2a)",
         "next_action": "GAPS: Evidence check is existence only: a cited file inside the repo is accepted, nothing reads it to confirm the measurement shows an improvement; a reviewer follows the path.; Coverage is still operation-name equality within a family; behaviour is not compared (the registry's only capability vocabulary).; Only providers with an upstream are judged, and only when ALL operations are covered; partial overlap loads as declared.; Which of two equivalent providers is 'existing' is the adapter module-name order (now explicit and tested); renaming a module can swap them.; tool_embedder_base stays runnable via fabric.ACCEPTED_OVERLAPS (CTX-002 comparison pair); owner may prefer REFERENCE_ONLY.; Assumed the evidence format 'BENCHMARK_IMPROVEMENT: <measurement> evidence: <repo-relative path>' - no shipped provider uses the marker; revisit if the owner wants a different form.",
     }),
+    ('PKG-001', {
+        "status": PARTIAL,
+        "current_implementation": "Rebuilt dist at 8feeb03 and ran validate_exe_clean.py end to end: CLEAN-01..06 pass (6/6). Added a STALE_DIST guard so the validator says when it checked a build that is not this checkout's HEAD (the earlier dist was 344d62a+dirty). Real VM run still blocked. (build run, commit 0b631c637)",
+        "next_action": 'GAPS: No real Windows VM or Windows Sandbox run: WindowsSandbox.exe is absent on this host; validate_exe_clean.py remains the C:\\Windows\\Temp simulation and prints BLOCKED_EXTERNAL.; EXE-06/07 voice-worker journeys (validate_exe.py --with-agent) were not run: they need a real .env with LiveKit credentials beside the exe and register a worker on an external service, which this packet does not authorise.; The rebuilt dist was made before the STALE_DIST edit; the guard itself is covered by unit tests only, not exercised against a stale dist end to end.; implementer did not claim acceptance met',
+    }),
 ]
 
 
