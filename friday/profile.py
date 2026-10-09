@@ -37,6 +37,7 @@ import os
 from dataclasses import asdict, dataclass
 
 from friday.contracts import READ_MATERIAL
+from friday.memory_promotion import PERSON_SCOPES
 from friday.store import FACT, INFERENCE, MEMORY_KINDS, PATTERN, PREFERENCE, Store
 
 #: The dimensions of the model, in the user's own terms.
@@ -370,7 +371,15 @@ def learn(
             # one is checked, not only the newest.
             theirs = next((row for row in current
                            if row.get("trust_class") != READ_MATERIAL), None)
-            if action == "store" and theirs is not None:
+            if candidate.dimension in PERSON_SCOPES:
+                # Those dimensions are shown as what the person wants and
+                # who they are (memory_promotion.PERSON_SCOPES).
+                action = "reject"
+                reason = (
+                    f"read material cannot be filed under {candidate.dimension}; "
+                    f"that speaks for the person"
+                )
+            elif action == "store" and theirs is not None:
                 action, existing = "conflict", theirs
                 reason = (
                     f"read material cannot overrule what you said "

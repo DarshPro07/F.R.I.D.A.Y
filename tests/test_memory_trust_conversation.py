@@ -194,7 +194,8 @@ def _extractor(monkeypatch, *candidates):
 
 
 def _claim(**kw) -> P.Candidate:
-    base = dict(dimension=P.PREFERENCES, subject="user.editor", value="vim",
+    # POSSESSIONS: read material may be kept there; the person's scopes refuse it.
+    base = dict(dimension=P.POSSESSIONS, subject="user.editor", value="vim",
                 kind=FACT, confidence=0.9, evidence="I use vim")
     base.update(kw)
     return P.Candidate(**base).validated()

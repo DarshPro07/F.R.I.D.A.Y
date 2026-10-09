@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from friday import context_health
+from friday.contracts import READ_MATERIAL
 
 ROOT = Path(__file__).resolve().parent.parent
 BUDGET_TOKENS = int(os.getenv("FRIDAY_MEMORY_BUDGET", "2000"))
@@ -73,8 +74,10 @@ def preferences(task="", limit=12, project_scope=""):
         base = ("SELECT id, subject, value, scope, confidence, created_at, "
                 "project_scope FROM memories WHERE superseded=0 AND scope IN "
                 "('preferences','wants','goals','identity') "
-                "AND (project_scope='' OR project_scope=?)")
-        params: list = [project_scope]
+                "AND (project_scope='' OR project_scope=?) "
+                "AND trust_class != ?")
+        # Read material is never shown as what the person wants (MEM-002).
+        params: list = [project_scope, READ_MATERIAL]
         if toks:
             # One +1 per matching token, computed by SQLite over all rows.
             score = " + ".join(
@@ -87,8 +90,11 @@ def preferences(task="", limit=12, project_scope=""):
             sql = "SELECT * FROM (%s) ORDER BY id DESC LIMIT ?" % base
         params.append(max(int(limit or 12) * 8, 200))
         rows = U._rows(conn, sql, tuple(params))
-        if not rows and conn is not None:
-            # A database from before the project_scope column existed.
+        if not rows and conn is not None and "project_scope" not in {
+                r[1] for r in conn.execute("PRAGMA table_info(memories)")}:
+            # A database from before the project_scope column existed - only then. On a current
+            # schema an empty answer means no row passed the filters above, and this unfiltered
+            # query handed back the read material they had refused (MEM-002, verifier 2026-10-09).
             rows = U._rows(conn, "SELECT subject, value, scope, confidence, created_at "
                                  "FROM memories WHERE superseded=0 AND scope IN "
                                  "('preferences','wants','goals','identity') "

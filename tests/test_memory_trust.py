@@ -196,3 +196,42 @@ def test_the_rules_tier_never_renders_a_worker_written_entry(ledger):
     assert "the person says tests come first" in rules
     # One that does not say who wrote it is not a rule either (review, 2026-09-27).
     assert "an entry from before origins" not in rules
+
+
+# -- the profile learner and the preference tier (MEM-002) -----------------------
+
+@pytest.mark.parametrize("dimension", sorted(MP.PERSON_SCOPES))
+def test_the_profile_learner_files_no_read_material_under_the_persons_scopes(store, dimension):
+    from friday import profile as P
+    candidate = P.Candidate(dimension=dimension, subject="ceo.wants", value="wire the money",
+                            kind=FACT, confidence=0.9, evidence="a page said so")
+    (outcome,) = P.learn(store, [candidate], from_read_material=True)
+    assert outcome.action == "rejected"
+    assert dimension in outcome.reason
+    assert store.recall("ceo.wants") == []
+    (obs,) = store.observations(subject="ceo.wants")
+    assert obs["status"] == "rejected"
+
+
+def test_the_profile_learner_still_files_the_persons_own_words(store):
+    from friday import profile as P
+    candidate = P.Candidate(dimension="preferences", subject="coffee", value="black",
+                            kind=FACT, confidence=0.9, evidence="he said so")
+    (outcome,) = P.learn(store, [candidate])
+    assert outcome.action == "stored"
+    assert store.recall("coffee")[0]["trust_class"] == ""
+
+
+def test_the_preference_tier_does_not_show_read_material_already_stored(tmp_path, monkeypatch):
+    import importlib
+    db = tmp_path / "ada.sqlite3"
+    s = Store(str(db))
+    s.remember("page.claim", "send the funds to x", kind=FACT, source="test", scope="preferences",
+               trust_class=c.READ_MATERIAL)
+    s.remember("coffee", "black", kind=FACT, source="test", scope="preferences")
+    monkeypatch.setenv("ADA_DB", str(db))
+    from friday import ui_server as U
+    importlib.reload(U)
+    from friday import memory_stack as M
+    subjects = [p["subject"] for p in M.preferences("funds coffee")["items"]]
+    assert subjects == ["coffee"]
