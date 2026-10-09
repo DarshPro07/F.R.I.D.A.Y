@@ -367,6 +367,15 @@ def test_packet_carries_rules_and_evidence_contract():
     assert "Never commit" in text and "evidence.json" in text and "acc" in text
 
 
+def test_every_packet_carries_the_owners_engineering_rules():
+    # Owner 2026-10-09: every build worker follows the karpathy-guidelines skill.
+    text = K.packet_text(row("REQ-1"))
+    assert "skills/karpathy-guidelines" in text
+    for rule in ("Think first", "BLOCKED with the exact question", "Simplest change", "Surgical",
+                 "Goal-driven", "a test that fails first"):
+        assert rule in text
+
+
 def test_packet_states_the_only_command_forms_the_worker_may_run():
     # 2026-10-03: 13 of CTX-002's 102 Bash calls were denied - pipes, `cd &&`, `timeout`,
     # bare `python`, `git checkout` - which the allowlist never permits; turns burned on them.

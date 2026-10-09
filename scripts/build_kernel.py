@@ -838,7 +838,17 @@ Summary: {row['summary']}
 ## Cited tests
 {_bullets(row.get('tests'))}
 
-{found}{code_map}## Rules
+{found}{code_map}## Engineering rules (owner 2026-10-09: skills/karpathy-guidelines)
+- Think first: state your assumptions in the evidence summary. If the packet is ambiguous or contradicts the code,
+  finish BLOCKED with the exact question in blockers instead of guessing.
+- Simplest change that meets the acceptance: nothing speculative, no abstraction for a single use, no
+  configurability nobody asked for, no handling of impossible cases.
+- Surgical: touch only what the requirement needs and match the surrounding style. Do not refactor, reformat or
+  "improve" adjacent code; remove only what your own change orphaned; name unrelated dead code in gaps.
+- Goal-driven: turn the acceptance into a test that fails first, then loop until it passes. Every changed line
+  traces to the acceptance.
+
+## Rules
 - Work only in this worktree. Never commit (the kernel commits a DONE run). Never touch data/ (especially data/ada.sqlite3).
 - Read budget: at most {READ_FILES.get(klass, 8)} files and <= 400 lines before your first edit.
 - Run targeted tests only: `{VENV_PY} scripts/test_impact.py --direct --files <changed files>` then
