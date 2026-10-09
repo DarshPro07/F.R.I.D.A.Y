@@ -92,7 +92,7 @@ def register(mcp):
                 "say": f"{provider} is {activation.state.lower()}"}
 
     @mcp.tool()
-    def capability_manifest(capability_id: str = "") -> dict:
+    def capability_manifest(capability_id: str = "", probe: bool = False) -> dict:
         """
         The capability manifest (PRD 9.6): every executable or instructional
         capability with its type (NATIVE, MCP, CLI, SDK, HTTP, SIDECAR, SKILL,
@@ -104,15 +104,25 @@ def register(mcp):
         type and state, the id list, and which entries are guidance-only);
         with an id it returns that one entry in full. Nothing is activated
         to answer.
+
+        probe=True (no id) answers "what is installed but failing?": it runs
+        every health probe once and returns the counts by probed state plus
+        the `unhealthy` rows with the reason. It is slower than the summary
+        (each executor runs `--version`), so it is asked for, never default.
+        A capability with no probe stays REGISTERED - unproven, not failing.
         """
         from friday import contracts as c
         from friday.toolsets import manifest as MT
 
         run = c.Run.create("capability manifest", capability="capability_manifest")
-        result = MT.capability_manifest(run, capability_id)
+        result = MT.capability_manifest(run, capability_id, probe=probe)
         if result.status == c.FAILED:
             return {"capability": capability_id, "found": False, "say": result.error}
         entry = result.output
+        if probe and not capability_id:
+            return {**entry,
+                    "say": (f"{len(entry['unhealthy'])} of {entry['total']} "
+                            f"capabilities are unhealthy")}
         if capability_id:
             return {"capability": capability_id, "found": True, **entry,
                     "say": (f"{capability_id} is a {entry['type']} capability, "

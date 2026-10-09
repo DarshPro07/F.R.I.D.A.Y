@@ -402,3 +402,70 @@ def test_unhealthy_lists_failures_and_leaves_the_unprobed_alone(monkeypatch):
     assert bad["executor:hermes"]["detail"] == "not installed"
     assert fabric.REGISTERED not in {row["state"] for row in bad.values()}
     assert fabric.READY not in {row["state"] for row in bad.values()}
+
+
+def test_health_report_probes_once_and_names_what_failed(monkeypatch):
+    from friday import capabilities as C
+    from friday import executor_router as XR
+    _executors_at(monkeypatch, XR)
+    calls = []
+
+    def broken():
+        calls.append(1)
+        raise RuntimeError("dead")
+
+    C.register_probe("files_read", broken)
+    try:
+        report = M.health_report()
+    finally:
+        C.unregister_probe("files_read")
+
+    assert len(calls) == 1, "one pass: the report must not probe twice"
+    assert report["total"] == len(M.build())
+    failing = {row["id"]: row for row in report["unhealthy"]}
+    assert failing["files_read"]["state"] == fabric.UNAVAILABLE
+    assert "dead" in failing["files_read"]["detail"]
+    # The counts describe the probed rows, so a failure is in them.
+    assert report["by_state"][fabric.UNAVAILABLE] >= len(failing)
+    assert sum(report["by_state"].values()) == report["total"]
+
+
+def test_the_manifest_tool_can_ask_which_installed_capabilities_are_failing(monkeypatch):
+    """CAP-003 acceptance, through the real MCP tool: an installed capability
+    whose probe fails is reported unhealthy, and the default call stays a cheap,
+    unprobed listing."""
+    from friday import capabilities as C
+    from friday import executor_router as XR
+    from friday.tools import fabric_control
+    _executors_at(monkeypatch, XR)
+    registered = {}
+
+    class Registrar:
+        def tool(self, *args, **kwargs):
+            def take(fn):
+                registered[fn.__name__] = fn
+                return fn
+            return take
+
+    fabric_control.register(Registrar())
+    manifest_tool = registered["capability_manifest"]
+    calls = []
+
+    def broken():
+        calls.append(1)
+        raise RuntimeError("files root is not mounted")
+
+    C.register_probe("files_read", broken)
+    try:
+        listing = manifest_tool()
+        assert calls == [], "the default listing must not run a probe"
+        assert "unhealthy" not in listing
+
+        probed = manifest_tool(probe=True)
+    finally:
+        C.unregister_probe("files_read")
+
+    failing = {row["id"]: row for row in probed["unhealthy"]}
+    assert failing["files_read"]["state"] == fabric.UNAVAILABLE
+    assert "files root is not mounted" in failing["files_read"]["detail"]
+    assert "unhealthy" in probed["say"]

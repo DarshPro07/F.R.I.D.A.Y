@@ -340,15 +340,32 @@ def probe_all() -> list[dict]:
     return [m.to_dict() for m in rows]
 
 
+def _failing(rows: list[dict]) -> list[dict]:
+    return [row for row in rows
+            if row["state"] in (fabric.UNAVAILABLE, fabric.DEGRADED,
+                                fabric.AUTH_REQUIRED, fabric.FAILED)]
+
+
 def unhealthy() -> list[dict]:
     """The probed rows reporting a failure state. REGISTERED is excepted: a
     capability nobody wrote a probe for is unproven, not failing, and listing
     all of them would bury the ones a probe actually condemned. Fabric
     providers appear with the state the fabric holds - they are not activated
     to find out."""
-    return [row for row in probe_all()
-            if row["state"] in (fabric.UNAVAILABLE, fabric.DEGRADED,
-                                fabric.AUTH_REQUIRED, fabric.FAILED)]
+    return _failing(probe_all())
+
+
+def health_report() -> dict:
+    """The summary's counts, but over probed rows, plus the rows that failed.
+    One `probe_all()` serves both, so a caller asking "what is broken?" does
+    not pay for two passes - and `by_state` agrees with `unhealthy`, which two
+    separate passes could not promise."""
+    rows = probe_all()
+    by_state: dict[str, int] = {}
+    for row in rows:
+        by_state[row["state"]] = by_state.get(row["state"], 0) + 1
+    return {"total": len(rows), "by_state": dict(sorted(by_state.items())),
+            "unhealthy": _failing(rows)}
 
 
 def export(path=None) -> str:
