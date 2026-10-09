@@ -209,6 +209,13 @@ _NATIVE_FILE_TOOLS = frozenset({"read_file", "write_file", "patch",
 ENV_GATEWAY_TOOLSETS = "HERMES_TUI_TOOLSETS"
 
 
+def _profile_config_path(profile: str = "") -> Path | None:
+    """The profile's config.yaml, or None when there is no profile home."""
+    home = os.environ.get(ENV_PROFILE_HOME) or profile_home(
+        profile or os.environ.get(ENV_PROFILE, DEFAULT_PROFILE))
+    return Path(home) / "config.yaml" if home else None
+
+
 def _toolset_names_in_profile_config(profile: str = "") -> list[str]:
     """
     The lower-cased toolset names a Hermes profile's config turns on, in the
@@ -216,9 +223,7 @@ def _toolset_names_in_profile_config(profile: str = "") -> list[str]:
     none; a config that is there and cannot be read raises ValueError,
     because then nothing is known.
     """
-    home = os.environ.get(ENV_PROFILE_HOME) or profile_home(
-        profile or os.environ.get(ENV_PROFILE, DEFAULT_PROFILE))
-    config_path = Path(home) / "config.yaml" if home else None
+    config_path = _profile_config_path(profile)
     if config_path is None or not config_path.is_file():
         return []
     import yaml
@@ -320,6 +325,38 @@ def native_tools_in_session_info(info) -> tuple[str, ...]:
         for name in tools:
             note(name)
     return tuple(found)
+
+
+def native_tools_in_tools_list(result) -> tuple[str, ...]:
+    """
+    Hermes' own file/terminal tools a session holds, read from the answer to
+    its `tools.list` RPC: `{"toolsets": [{name, enabled, tools: [str]}]}`
+    (tui_gateway/methods_tools.py). Every tool of an enabled `file` or
+    `terminal` toolset counts, whatever its name - Hermes says which tools
+    those toolsets hold, so a tool added to them is found without FRIDAY
+    having to know it. A toolset that does not say it is enabled is taken as
+    enabled; one reported disabled holds nothing; an answer in any other shape
+    names none.
+    """
+    rows = result.get("toolsets") if isinstance(result, dict) else None
+    found: list[str] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or row.get("enabled") is False:
+            continue
+        if str(row.get("name", "")).lower() not in _NATIVE_FILE_TOOLSETS:
+            continue
+        tools = row.get("tools")
+        for name in tools if isinstance(tools, list) else []:
+            if isinstance(name, str) and name not in found:
+                found.append(name)
+    return tuple(found)
+
+
+def _safe_mode_on(*envs) -> bool:
+    """HERMES_SAFE_MODE set truthy in any of these environments: Hermes then
+    registers no shell hook (agent/shell_hooks.py), the envelope hook included."""
+    return any(str((env or {}).get("HERMES_SAFE_MODE", "")).strip().lower()
+               in ("1", "true", "yes", "on") for env in envs)
 
 
 #: Hermes gateway event type → Friday event name. Anything absent is
@@ -1493,6 +1530,18 @@ class HermesSupervisor:
             raise c.OutsideEnvelope(
                 f"a gateway for a delegation under an envelope would carry Hermes' own "
                 f"{', '.join(native)} toolset, which cannot be held to it")
+        if _safe_mode_on(os.environ, self._extra_env):
+            raise c.OutsideEnvelope(
+                "HERMES_SAFE_MODE is set, which switches off every Hermes hook, the "
+                "one that vetoes a tool outside the envelope included")
+        try:
+            from friday import hermes_envelope_hook
+            config_path = _profile_config_path(self.profile)
+            if config_path is not None:
+                hermes_envelope_hook.ensure_hook_installed(config_path)
+        except (OSError, ValueError) as exc:
+            raise c.OutsideEnvelope(
+                f"the profile's hooks cannot carry the envelope hook: {exc}") from exc
         with self._scoped_lock:
             gateway = self._scoped_gateway
             if gateway is None:
@@ -1569,6 +1618,19 @@ class HermesSupervisor:
         raise c.OutsideEnvelope(
             f"the gateway for this delegation reports holding Hermes' own "
             f"{held}, which cannot be held to an envelope; nothing was sent")
+
+    def _listed_native_tools(self, sid: str) -> tuple[str, ...] | None:
+        """The native file/terminal tools Hermes' `tools.list` says this
+        session holds, or None when the gateway does not answer it (an older
+        gateway, an error) - then the session is unverified, not clean."""
+        try:
+            result = self.request("tools.list", {"session_id": sid}, timeout=30)
+        except (HermesUnavailable, RuntimeError, TimeoutError) as exc:
+            logger.info("hermes.tools_list_unavailable session=%s: %s", sid, exc)
+            return None
+        if not isinstance(result.get("toolsets"), list):
+            return None
+        return native_tools_in_tools_list(result)
 
     def _deny_native_tool(self, name: str) -> None:
         """The backstop to `_refuse_native_session`, for a gateway that did
@@ -2248,9 +2310,11 @@ class HermesSupervisor:
         self._turn_done[sid] = threading.Event()
         if self._owner is not None:
             native = native_tools_in_session_info(info)
+            listed = None if native else self._listed_native_tools(sid)
+            native = native or listed or ()
             if native:
                 self._refuse_native_session(work_run_id, sid, native)
-            if "tools" not in info:
+            if "tools" not in info and listed is None:
                 logger.info("hermes.envelope_unverified work_run=%s: the session "
                             "does not report its tools; only a native tool call "
                             "would reveal an ignored toolset", work_run_id)

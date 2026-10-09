@@ -25,6 +25,9 @@ Behaviour is scripted through env vars so one binary covers every test:
                             holds (`info.tools`, toolset -> names), as Hermes'
                             own session info does: Hermes' file/terminal
                             tools unless HERMES_TUI_TOOLSETS is honoured
+    FAKE_HERMES_TOOLS_LIST=json
+                            tools.list answers {"toolsets": <json>}, as Hermes'
+                            own RPC does; unset, it answers an empty result
     FAKE_HERMES_CALL_LOG=p  append each RPC method received to path p, one
                             per line (so a test can see what was never sent)
     FAKE_HERMES_REFUSE_INTERRUPT=1
@@ -173,6 +176,9 @@ def main():
                 ok(rid, {"status": "interrupted"})
                 event("message.complete", sid,
                       {"text": "interrupted", "status": "error"})
+
+        elif method == "tools.list" and os.getenv("FAKE_HERMES_TOOLS_LIST"):
+            ok(rid, {"toolsets": json.loads(os.environ["FAKE_HERMES_TOOLS_LIST"])})
 
         elif method == "commands.catalog":
             ok(rid, {"pairs": [["/new", "new session"]]})

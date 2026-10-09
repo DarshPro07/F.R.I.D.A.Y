@@ -1037,3 +1037,213 @@ def test_the_delegate_tool_reports_the_refusal_not_a_crash(area, tmp_path, monke
     finally:
         hc.configure(None)
     assert out["status"] == "failed" and out["error"].startswith("ENVELOPE:"), out
+
+
+# -- Hermes' own seams: tools.list names the tools, a fail-closed hook vetoes a call ---------
+
+def _toolsets(*rows) -> str:
+    return json.dumps([{"name": name, "description": "", "tool_count": len(tools),
+                        "enabled": enabled, "tools": list(tools)}
+                       for name, tools, enabled in rows])
+
+
+def test_a_tool_that_tools_list_puts_in_hermes_file_toolset_is_refused_though_nothing_else_names_it(area, tmp_path, monkeypatch):
+    assert "fs_swap" not in hb._NATIVE_FILE_TOOLS       # the constant has never heard of it
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web]\n")
+    monkeypatch.setenv("FAKE_HERMES_IGNORE_TOOLSETS", "1")
+    monkeypatch.setenv("FAKE_HERMES_TOOLS_LIST", _toolsets(
+        ("file", ["fs_swap"], True), ("web", ["web_search"], True)))
+    calls = tmp_path / "calls.log"
+    monkeypatch.setenv("FAKE_HERMES_CALL_LOG", str(calls))
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        with pytest.raises(c.OutsideEnvelope, match="fs_swap"):
+            supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                scope=_envelope(area), expires_in=3600)
+        assert "tools.list" in _calls(calls)
+        assert "prompt.submit" not in _calls(calls)         # the task never reached Hermes
+        assert "session.interrupt" in _calls(calls)
+        [run] = supervisor.log.recent(1)
+        assert run["failure_kind"] == hb.HermesSupervisor.ENVELOPE_BREACHED
+        assert S.active() == []
+        assert supervisor._scoped_unsound
+    finally:
+        supervisor.stop()
+
+
+def test_a_native_toolset_that_tools_list_reports_disabled_holds_nothing(area, tmp_path, monkeypatch):
+    _profile(tmp_path, monkeypatch, "toolsets: [file, terminal, web]\n")
+    monkeypatch.setenv("FAKE_HERMES_TOOLS_LIST", _toolsets(
+        ("file", ["read_file"], False), ("terminal", ["terminal"], False),
+        ("mcp-friday_exec", ["mcp__friday_exec__bridge_read_file"], True)))
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        run = supervisor.delegate(hb.TaskBundle(goal="scoped"), workspace=str(area.workspace),
+                                  scope=_envelope(area), expires_in=3600, wait=True,
+                                  turn_timeout=30)["work_run_id"]
+        assert supervisor.log.get(run)["status"] == hb.COMPLETE
+        assert supervisor._scoped_unsound == ""
+    finally:
+        supervisor.stop()
+
+
+@pytest.mark.parametrize("result, expected", [
+    ({"toolsets": [{"name": "file", "enabled": True, "tools": ["read_file", "fs_swap"]},
+                   {"name": "Terminal", "enabled": True, "tools": ["terminal"]},
+                   {"name": "web", "enabled": True, "tools": ["web_search"]}]},
+     ("read_file", "fs_swap", "terminal")),
+    ({"toolsets": [{"name": "file", "enabled": False, "tools": ["read_file"]}]}, ()),
+    ({"toolsets": [{"name": "file", "tools": ["read_file"]}]}, ("read_file",)),   # silent on enabled: held
+    ({"toolsets": [{"name": "file", "enabled": True, "tools": [3, None, "patch"]}]}, ("patch",)),
+    ({"toolsets": []}, ()), ({"toolsets": None}, ()), ({}, ()), (None, ()), ("file", ()),
+])
+def test_the_native_tools_tools_list_reports_are_those_of_the_enabled_file_and_terminal_toolsets(result, expected):
+    assert hb.native_tools_in_tools_list(result) == expected
+
+
+def test_a_scoped_session_is_refused_when_hermes_safe_mode_would_switch_the_hook_off(area, tmp_path, monkeypatch):
+    dump = tmp_path / "env.jsonl"
+    monkeypatch.setenv("FAKE_HERMES_ENV_DUMP", str(dump))
+    monkeypatch.setenv("HERMES_SAFE_MODE", "1")
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        with pytest.raises(c.OutsideEnvelope, match="HERMES_SAFE_MODE"):
+            supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                scope=_envelope(area), expires_in=3600)
+        assert not dump.exists()                            # no gateway was started
+        assert S.active() == []
+    finally:
+        supervisor.stop()
+
+
+def test_safe_mode_set_for_the_gateway_alone_also_refuses_a_scoped_session(area, monkeypatch):
+    supervisor = _supervisor(area.root, monkeypatch, hang=False,
+                             extra_env={"HERMES_SAFE_MODE": "true"})
+    try:
+        with pytest.raises(c.OutsideEnvelope, match="HERMES_SAFE_MODE"):
+            supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                scope=_envelope(area), expires_in=3600)
+    finally:
+        supervisor.stop()
+
+
+def test_safe_mode_does_not_stop_a_delegation_with_no_envelope(area, monkeypatch):
+    monkeypatch.setenv("HERMES_SAFE_MODE", "1")
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        run = supervisor.delegate(hb.TaskBundle(goal="shared"), wait=True,
+                                  turn_timeout=30)["work_run_id"]
+        assert supervisor.log.get(run)["status"] == hb.COMPLETE
+    finally:
+        supervisor.stop()
+
+
+def test_the_scoped_gateway_is_launched_accepting_the_profiles_hooks(area, tmp_path, monkeypatch):
+    dump = tmp_path / "env.jsonl"
+    monkeypatch.setenv("FAKE_HERMES_ENV_DUMP", str(dump))
+    monkeypatch.delenv("HERMES_ACCEPT_HOOKS", raising=False)
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                            scope=_envelope(area), expires_in=3600)
+        (env,) = _gateway_envs(dump)
+        assert env["HERMES_ACCEPT_HOOKS"] == "1"
+    finally:
+        supervisor.stop()
+
+
+def _hook_entries(tmp_path) -> list[dict]:
+    import yaml
+    config = yaml.safe_load((tmp_path / "hermes-profile" / "config.yaml").read_text(encoding="utf-8"))
+    return config["hooks"]["pre_tool_call"]
+
+
+def test_a_scoped_session_puts_the_fail_closed_envelope_hook_in_the_profile(area, tmp_path, monkeypatch):
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                            scope=_envelope(area), expires_in=3600)
+        [entry] = _hook_entries(tmp_path)
+        assert entry["fail_closed"] is True                 # Hermes fails open otherwise
+        assert "hermes_envelope_hook" in entry["command"]
+        assert "matcher" not in entry                       # every tool, not a name pattern
+        supervisor.stop()
+        supervisor.delegate(hb.TaskBundle(goal="again"), workspace=str(area.workspace),
+                            scope=_envelope(area), expires_in=3600)
+        assert len(_hook_entries(tmp_path)) == 1            # installed once, not per delegation
+    finally:
+        supervisor.stop()
+
+
+def test_a_profile_with_its_own_hooks_is_not_rewritten_and_refuses_the_scoped_session(area, tmp_path, monkeypatch):
+    config = "toolsets: [web]\nhooks:\n  post_tool_call:\n    - command: audit\n"
+    _profile(tmp_path, monkeypatch, config)
+    supervisor = _supervisor(area.root, monkeypatch, hang=False)
+    try:
+        with pytest.raises(c.OutsideEnvelope, match="hooks"):
+            supervisor.delegate(hb.TaskBundle(goal="edit"), workspace=str(area.workspace),
+                                scope=_envelope(area), expires_in=3600)
+        assert (tmp_path / "hermes-profile" / "config.yaml").read_text(encoding="utf-8") == config
+    finally:
+        supervisor.stop()
+
+
+# -- the hook itself: the veto Hermes asks FRIDAY for before any tool runs -----------------
+
+def _run_hook(stdin: str):
+    from friday import hermes_envelope_hook as hook
+    return subprocess.run([sys.executable, hook.__file__], input=stdin, capture_output=True,
+                          text=True, timeout=60, env=dict(os.environ))
+
+
+def _call(tool: str, **tool_input) -> str:
+    return json.dumps({"hook_event_name": "pre_tool_call", "tool_name": tool,
+                       "tool_input": tool_input, "session_id": "s", "cwd": "."})
+
+
+def test_the_hook_allows_everything_while_no_delegation_holds_the_bridge(area):
+    done = _run_hook(_call("write_file", path=str(area.elsewhere / "x.txt")))
+    assert done.returncode == 0, done.stderr
+
+
+@pytest.mark.parametrize("tool", sorted(hb._NATIVE_FILE_TOOLS))
+def test_the_hook_exits_2_for_a_hermes_file_or_terminal_tool_under_an_envelope(held, tool):
+    done = _run_hook(_call(tool, path=str(held.elsewhere / "x.txt")))
+    assert done.returncode == 2
+    assert json.loads(done.stdout)["action"] == "block"
+
+
+def test_the_hook_exits_2_for_a_path_outside_the_envelope_and_0_inside_it(held):
+    outside = _run_hook(_call("some_new_tool", path=str(held.elsewhere / "other.txt")))
+    assert outside.returncode == 2
+    assert json.loads(outside.stdout)["message"]
+    assert _run_hook(_call("web_search", query="no path at all")).returncode == 0
+
+
+def test_the_hook_lets_a_path_inside_the_envelope_through(held):
+    # in this process: the jail the area fixture set is not the one a child process builds
+    from friday import hermes_envelope_hook as hook
+    assert hook.run(_call("some_new_tool", path=str(held.workspace / "mine.txt"))) == (0, "")
+
+
+def test_the_hook_lets_the_exec_bridge_through_because_the_bridge_judges_its_own_paths(held):
+    done = _run_hook(_call("mcp__friday_exec__bridge_read_file", path=str(held.elsewhere / "other.txt")))
+    assert done.returncode == 0
+
+
+def test_the_hook_blocks_when_the_registry_cannot_be_read(area):
+    S._folder().mkdir(parents=True, exist_ok=True)
+    (S._folder() / "broken.json").write_text("{not json", encoding="utf-8")
+    assert _run_hook(_call("web_search", query="q")).returncode == 2
+
+
+@pytest.mark.parametrize("stdin", ["", "not json", "[]", "null", "{}", '{"tool_name": 7}'])
+def test_a_hook_that_cannot_make_sense_of_its_input_blocks_instead_of_crashing_open(held, stdin):
+    assert _run_hook(stdin).returncode == 2
+
+
+def test_a_hook_that_crashes_inside_the_decision_blocks(held, monkeypatch):
+    from friday import hermes_envelope_hook as hook
+    monkeypatch.setattr(S, "active", lambda: 1 / 0)
+    code, out = hook.run(_call("web_search", query="q"))
+    assert code == 2 and json.loads(out)["action"] == "block"
