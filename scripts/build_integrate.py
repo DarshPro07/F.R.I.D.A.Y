@@ -126,6 +126,16 @@ def commit_test_files(run: dict, repo: Path = ROOT) -> list[str]:
             and Path(f).name.startswith("test_")]
 
 
+def row_test_files(req: str, repo: Path = ROOT) -> list[str]:
+    """Test files the row's own build commits on HEAD added or changed - each passed RED/GREEN
+    when it was integrated - that HEAD still has. A PARTIAL row cites no tests in the ledger."""
+    if not re.fullmatch(r"[A-Za-z0-9-]+", req):  # ids are plain; anything else is no git pattern
+        return []
+    shas = lines(git(repo, "log", "--format=%H", f"--grep=^Build run: {req}$", "HEAD", check=True).stdout)
+    found = {f for sha in shas for f in commit_test_files({"commit": sha}, repo)}
+    return sorted(f for f in found if (repo / f).is_file())
+
+
 @contextlib.contextmanager
 def temp_worktree(repo: Path, sha: str):
     tmp = Path(tempfile.mkdtemp(prefix="bi-wt-"))
@@ -835,13 +845,16 @@ def _confirm_existing(req: str, run: dict, row: dict, out: dict, done, *, repo: 
     """The worker changed nothing and says the acceptance is already met. 2026-10-09:
     BCON-001, CYBER-002, DUR-001 and EVAL-001 were each refused 'run has no commit' and
     parked in one night, waiting for a controller to flip them by hand. Prove it on HEAD
-    instead: the row's named tests pass there, and a fresh verifier finds the acceptance
-    met by the existing code; then the row is VERIFIED on that evidence."""
+    instead: the row's named tests (or, for a row that cites none yet, the tests its own
+    build commits brought) pass there, and a fresh verifier finds the acceptance met by
+    the existing code; then the row is VERIFIED on that evidence."""
     if KEEP_SCOPE.search(row.get("next_action") or ""):
         return done("NOT_CONFIRMED", detail="the owner keeps extra scope in this row; the worker built none of it")
     head = git(repo, "rev-parse", "HEAD", check=True).stdout.strip()
     tests = named_tests(row.get("tests"))
     files = sorted({str(t).split("::")[0] for t in row.get("tests") or [] if str(t).split("::")[0].endswith(".py")})
+    if not tests and not files:  # PARTIAL so far (2026-10-09: BRAIN-001 refused "names no test")
+        files = row_test_files(req, repo)
     if not tests and files:
         with temp_worktree(repo, head) as wt:
             tests = named_tests(collected_ids(python, wt, files))

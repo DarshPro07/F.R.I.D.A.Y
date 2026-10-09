@@ -886,6 +886,26 @@ def test_a_run_that_changed_nothing_is_confirmed_on_head(tmp_path):
         "docs(ledger): REQ-1 -> VERIFIED from build run"]
 
 
+def test_a_row_citing_no_test_is_confirmed_with_its_own_build_commits_tests(tmp_path):
+    # 2026-10-09: BRAIN-001 was PARTIAL - a PARTIAL row cites no tests - when a worker found its
+    # acceptance met; the confirm was refused "names no test" although the row's own build commit
+    # on main had added tests/test_project_brain.py, proven RED/GREEN when it was integrated.
+    repo, runs, run, rows = setup(tmp_path)
+    sh(repo, "cherry-pick", run["commit"])
+    sh(repo, "commit", "-q", "--amend", "-m", "build(REQ-1): twice\n\nBuild run: REQ-1")
+    run, rows = _no_change(runs, run, rows, [])
+    asked = []
+
+    def paid(cmd, prompt, cwd):
+        asked.append(prompt)
+        return json.dumps({"result": '{"verdict": "PASS", "requirement_ids": ["REQ-1"]}', "total_cost_usd": 0.2})
+
+    out = go(repo, runs, rows, runner=paid)
+    assert out["result"] == "CONFIRMED" and out["ledger_status"] == "VERIFIED"
+    assert "tests/test_twice.py::test_twice" in asked[0]
+    assert bi.row_test_files("REQ-10", repo) == []  # another row's id is no prefix match
+
+
 @pytest.mark.parametrize("tests, next_action, verdict, why", [
     (["tests/test_old.py::test_old"], "RULING: keep this extra scope inside the row", "PASS", "extra scope"),
     ([], "", "PASS", "names no test"),
