@@ -110,6 +110,112 @@ def test_a_removal_still_backs_a_removal_claim_and_a_bare_done(tool, method):
         assert H.audit(claim, _run(tool, method, gone)).ok, claim
 
 
+#: Ways to report that foo.txt was removed. Each is the same claim as "I
+#: deleted foo.txt" and needs the same proof; the second half is what FRIDAY's
+#: own files_recycle tool and the Recycle Bin are called, and the sentences that
+#: say the file no longer exists, which "no longer" once hid from the gate.
+REMOVAL_WORDINGS = (
+    "I removed foo.txt.", "I erased foo.txt.", "foo.txt was removed.",
+    "foo.txt is gone.", "It's now gone.",
+    "I recycled foo.txt.", "foo.txt was moved to the Recycle Bin.",
+    "I sent foo.txt to the Recycle Bin.", "I put foo.txt in the trash.",
+    "I trashed foo.txt.", "I binned foo.txt.", "I wiped foo.txt.",
+    "I purged foo.txt.", "I discarded foo.txt.", "I shredded foo.txt.",
+    "I unlinked foo.txt.", "I got rid of foo.txt.", "foo.txt has been disposed of.",
+    "I threw away foo.txt.",
+    "foo.txt no longer exists.", "foo.txt doesn't exist anymore.",
+    "foo.txt isn't there any more.",
+)
+
+
+@pytest.mark.parametrize("claim", REMOVAL_WORDINGS)
+def test_a_removal_said_without_the_word_deleted_is_still_a_claim(claim):
+    """Every other way of saying a file was removed reports the same act as
+    'deleted'; none may slip past the gate just because it uses another word."""
+    assert H.find_claims(claim) == [claim]
+    assert not H.audit(claim, None).ok
+    for tool in ("files_read", "files_write"):
+        refused = H.audit(claim, _run(tool, "readback", f"foo.txt sha256={HASH}"))
+        assert not refused.ok, (claim, tool)
+        assert "files_delete" in refused.reason, (claim, tool)
+
+
+@pytest.mark.parametrize("tool,method", [
+    ("files_delete", "path_absent_after_delete"),
+    ("files_recycle", "path_absent_after_recycle"),
+])
+def test_a_removal_backs_every_wording_of_a_removal_claim(tool, method):
+    gone = "foo.txt (12 bytes) is gone from C:/w/foo.txt; post_state=absent"
+    for claim in REMOVAL_WORDINGS:
+        audited = H.audit(claim, _run(tool, method, gone))
+        assert audited.ok and audited.claims == (claim,), claim
+
+
+@pytest.mark.parametrize("word", sorted(H._REMOVAL_ACTS))
+def test_every_word_in_the_removal_table_is_gated_the_same_way(word):
+    """The table is the one list of removal verbs: a word added to it must be a
+    claim, need a removal tool, and be backed by one, with no further edit."""
+    claim = f"I {word} foo.txt."
+    gone = "foo.txt (12 bytes) is gone from C:/w/foo.txt; post_state=absent"
+    assert H.find_claims(claim) == [claim]
+    assert not H.audit(claim, None).ok
+    assert not H.audit(claim, _run("files_read", "readback", f"foo.txt sha256={HASH}")).ok
+    for tool, method in (("files_delete", "path_absent_after_delete"),
+                         ("files_recycle", "path_absent_after_recycle")):
+        assert H.audit(claim, _run(tool, method, gone)).ok, (word, tool)
+        assert not H.audit(f"{claim} It is ready.",
+                           _run(tool, method, gone)).ok, (word, tool)
+
+
+@pytest.mark.parametrize("sentence", [
+    "I've gone through your inbox.", "Gone are the days of manual filing.",
+    "The meeting has gone well.", "I did not remove foo.txt.",
+    "Remove foo.txt from the list.", "The removed file is listed below.",
+    "The recycle bin is empty.", "I've gone through the trash folder.",
+    "The purged records are listed below.", "I moved foo.txt to the archive folder.",
+    "Move foo.txt to the Recycle Bin.", "Should I move foo.txt to the Recycle Bin?",
+    "I can move foo.txt to the trash.", "I couldn't recycle foo.txt.",
+    "I did not trash foo.txt.", "foo.txt is not gone.", "foo.txt doesn't exist.",
+    "I couldn't find foo.txt; it doesn't exist.",
+    "I couldn't confirm that foo.txt no longer exists.",
+    "Once I've moved foo.txt to the trash, it will be gone.",
+    "If you moved foo.txt to the trash, check there.",
+])
+def test_removal_words_that_report_no_removal_are_not_claims(sentence):
+    assert H.find_claims(sentence) == []
+
+
+@pytest.mark.parametrize("claim", [
+    "I removed foo.txt and created bar.txt.",
+    "I recycled foo.txt and created bar.txt.",
+    "foo.txt no longer exists and bar.txt is ready.",
+    "I got rid of foo.txt and saved bar.txt.",
+    # The other verb sits inside the move phrase's own span: after a second
+    # clause, or in the object being moved.
+    "I sent the invoice to Bob and moved foo.txt to the Recycle Bin.",
+    "I sent the invoice to Bob and dropped foo.txt in the trash.",
+    "I sent Bob the invoice before putting foo.txt in the trash.",
+    "I sent the invoice I created to the trash.",
+    "I put the report I saved in the trash.",
+])
+def test_a_removal_does_not_back_a_removal_word_beside_another_verb(claim):
+    gone = "foo.txt (12 bytes) is gone from C:/w/foo.txt; post_state=absent"
+    refused = H.audit(claim, _run("files_delete", "path_absent_after_delete", gone))
+    assert not refused.ok, claim
+
+
+@pytest.mark.parametrize("claim", [
+    "I moved foo.txt and bar.txt to the trash.",
+    "I sent the invoice to Bob and moved foo.txt to the Recycle Bin.",
+])
+def test_a_move_phrase_with_more_than_one_object_stays_a_claim(claim):
+    """Narrowing what a removal claim hides must not narrow what counts as a
+    claim: both sentences report a removal and go unchecked if they stop being
+    one."""
+    assert H.find_claims(claim) == [claim]
+    assert not H.audit(claim, None).ok
+
+
 def test_simulation_needs_a_recorded_artifact():
     assert not H.audit("I created foo.txt.", _run("sim_run", "run", "foo.txt ok")).ok
     assert H.audit("I created foo.txt.",

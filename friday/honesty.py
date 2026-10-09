@@ -53,6 +53,57 @@ NEGATION_PATTERNS = (
     r"\?",
 )
 
+#: The two tools that remove a file, and the one table of what removing one is
+#: called. Each row is a claim word and the other forms a failure sentence uses
+#: for the same act ("I tried to recycle it", "the removal failed").
+#: CLAIM_EVIDENCE, _ACT_FORMS, _CLAIM_VERBS and the removal-claim test all read
+#: this table, so a verb added here is gated in every one of them at once. A
+#: removal said in a word that is not here is a way round the gate. Words with
+#: a second everyday sense ('cleared', 'dropped', 'destroyed', 'scrapped') are
+#: left out on purpose: the narrow check that never fires wrongly beats the
+#: broad one. Removal said in more than one word is in _REMOVAL_PHRASE_RE.
+REMOVAL_TOOLS = ('files_delete', 'files_recycle')
+_REMOVAL_ACTS: dict[str, tuple[str, ...]] = {
+    'deleted': ('delete', 'deleting', 'deletion'),
+    'removed': ('remove', 'removing', 'removal'),
+    'erased': ('erase', 'erasing'),
+    'recycled': ('recycle', 'recycling'),
+    'trashed': ('trash', 'trashing'),
+    'binned': ('binning',),
+    'wiped': ('wipe', 'wiping'),
+    'purged': ('purge', 'purging'),
+    'discarded': ('discard', 'discarding'),
+    'shredded': ('shred', 'shredding'),
+    'unlinked': ('unlink', 'unlinking'),
+}
+
+#: Removal said without a removal verb. "foo.txt is gone", "I got rid of it" and
+#: "it was moved to the Recycle Bin" report the same act as 'deleted'. 'gone'
+#: alone is no claim ("I've gone through your inbox"), and neither is a bare
+#: "moved" ("I moved it to the archive"): only the state assertion and the move
+#: into the bin count. "No longer exists" is one although "no longer" is a
+#: negation; the only negations kept out of it are the ones it spells itself.
+_REMOVAL_PHRASE_RE = re.compile(
+    r"\b(?:"
+    r"(?:is|are|it's|that's)\s+(?:now\s+)?gone"
+    r"|no\s+longer\s+(?:exists?|there|present)"
+    r"|(?:doesn['’]t|does\s+not|don['’]t|do\s+not|isn['’]t|is\s+not|"
+    r"aren['’]t|are\s+not)\s+(?:exist|there|present)\s+any\s?(?:more|longer)"
+    r"|(?:got|gotten)\s+rid\s+of"
+    r"|disposed\s+of"
+    r"|(?:threw|thrown)\s+away"
+    r"|(?P<verb>moved|sent|put|placed|thrown)\b(?P<what>[^;!?]{0,60}?)\b(?:to|into|in)\s+(?:the\s+)?"
+    r"(?:recycle\s+bin|recycling\s+bin|trash(?:\s+(?:can|bin))?|wastebasket)"
+    r")\b", re.I)
+
+#: What stops a move phrase's object being one thing that was moved. When the
+#: text between the move verb and the bin holds any of these, it is more than
+#: an object - a second clause or a second verb - so _is_removal_claim keeps it
+#: in view instead of treating the whole span as the removal.
+_NOT_ONE_OBJECT_RE = re.compile(
+    r"[,:–—]|\b(?:and|or|but|then|also|plus|after|before|while|once|when|until|so|because|having|"
+    r"mov(?:e|ed|ing)|sen(?:d|t|ding)|put(?:ting)?|plac(?:e|ed|ing)|throw(?:n|ing)?|threw)\b", re.I)
+
 #: Claim word -> the tool ids that can back it, as prefixes.
 #:
 #: "Any succeeded action backs any claim" was too weak, and it cost a false
@@ -108,11 +159,12 @@ CLAIM_EVIDENCE: dict[str, tuple[str, ...]] = {
     'cancelled': (),
     'repriced': (),
     'deployed': (),
-    # FRIDAY does delete files, so this one is checkable rather than refused.
+    # FRIDAY does delete files, so these are checkable rather than refused.
     # The two removal tools only: `files_` would let a verified files_read or
     # files_write of foo.txt back "I deleted foo.txt", which is the opposite
-    # of what that evidence shows.
-    'deleted': ('files_delete', 'files_recycle'),
+    # of what that evidence shows. Every word _REMOVAL_ACTS names needs the
+    # same proof, or the one left out would be a way round it.
+    **{word: REMOVAL_TOOLS for word in _REMOVAL_ACTS},
 }
 
 _CLAIM_WORD_RE = {
@@ -121,9 +173,11 @@ _CLAIM_WORD_RE = {
 
 #: Every word above is also a completion claim, so the two lists cannot drift
 #: apart: a word with an evidence requirement that is not detected as a claim
-#: would be a requirement nothing ever checks.
+#: would be a requirement nothing ever checks. The removal phrases are claims
+#: for the same reason.
 _COMPLETION_RE = tuple(re.compile(p, re.I) for p in COMPLETION_PATTERNS) + (
     re.compile(rf"\b(?:{'|'.join(CLAIM_EVIDENCE)})\b", re.I),
+    _REMOVAL_PHRASE_RE,
 )
 _NEGATION_RE = tuple(re.compile(p, re.I) for p in NEGATION_PATTERNS)
 
@@ -157,8 +211,9 @@ _FIRST_PERSON_RE = re.compile(r"\b(?:I|I've|I'd|I'm|we|we've)\b")
 #: Anthropic published ..." - they say nothing about what FRIDAY did. 2026-10-09
 #: end-to-end test: both replaced correct answers with "I have not done it yet".
 #: "Your 2026 report has been sent" holds no date expression and stays a claim.
-_CLAIM_VERBS = ("created|opened|sent|changed|deleted|printed|built|deployed|completed|learned|"
-                "saved|installed|generated|downloaded|wrote|updated|launched|started|released|published")
+_CLAIM_VERBS = ("created|opened|sent|changed|printed|built|deployed|completed|learned|"
+                "saved|installed|generated|downloaded|wrote|updated|launched|started|released|published|"
+                + "|".join(_REMOVAL_ACTS))
 _ADJECTIVAL_RE = re.compile(
     r"\b(?:the|a|an|your|my|this|that|these|those|its|their|our)\s+(?:recently\s+|newly\s+)?"
     rf"(?:{_CLAIM_VERBS}|{'|'.join(CLAIM_EVIDENCE)})\s+(?=\w)", re.I)
@@ -217,7 +272,9 @@ def is_negated(sentence: str) -> bool:
 def is_completion_claim(sentence: str) -> bool:
     """An affirmative, past/perfect assertion that something now exists."""
     rest = _NEGATIVE_SUBJECT_RE.sub(" ", _PLACEHOLDER_RE.sub(" ", sentence))
-    if is_negated(rest):
+    # "foo.txt no longer exists" is a removal claim, so the negation it spells
+    # is not read as a denial; any other negation in the sentence still is.
+    if is_negated(_REMOVAL_PHRASE_RE.sub(" ", rest)):
         return False
     mine = _FIRST_PERSON_RE.search(rest)
     if not mine and (_IMPERATIVE_RE.match(rest) or _DATED_RE.search(rest) or _LABEL_RE.match(rest)):
@@ -237,8 +294,11 @@ def required_evidence(sentence: str) -> dict[str, tuple[str, ...]]:
     A sentence with none of them keeps the old rule - any succeeded action
     backs it - because most claims are about the one thing the turn did.
     """
-    return {word: CLAIM_EVIDENCE[word]
-            for word, rx in _CLAIM_WORD_RE.items() if rx.search(sentence)}
+    needed = {word: CLAIM_EVIDENCE[word]
+              for word, rx in _CLAIM_WORD_RE.items() if rx.search(sentence)}
+    for phrase in _REMOVAL_PHRASE_RE.finditer(sentence):
+        needed[" ".join(phrase.group(0).lower().split())] = REMOVAL_TOOLS
+    return needed
 
 
 def _still_going(result) -> bool:
@@ -649,7 +709,7 @@ _ACT_FORMS: dict[str, tuple[str, ...]] = {
     'cancelled': ('cancel', 'cancelling', 'canceling', 'cancellation'),
     'repriced': ('reprice', 'repricing'),
     'deployed': ('deploy', 'deploying', 'deployment'),
-    'deleted': ('delete', 'deleting', 'deletion'),
+    **_REMOVAL_ACTS,
 }
 _ACT_RE = {word: re.compile(rf"\b(?:{'|'.join((word,) + _ACT_FORMS[word])})\b", re.I)
            for word in CLAIM_EVIDENCE}
@@ -693,29 +753,50 @@ def _failure_mismatch(claim: str, went_wrong) -> str:
     return ""
 
 
-#: Every claim verb except 'deleted'. The claim-to-evidence link runs both
-#: ways: the kind check above stops a read from backing "I deleted foo.txt",
-#: and this stops the removal's own proof - the path being absent - from
-#: backing any other verb. Without it, post_state=absent became proof of
+#: Every claim verb except the removal verbs. The claim-to-evidence link runs
+#: both ways: the kind check above stops a read from backing "I deleted
+#: foo.txt", and this stops the removal's own proof - the path being absent -
+#: from backing any other verb. Without it, post_state=absent became proof of
 #: creation, because 'created', 'changed' and 'saved' have no CLAIM_EVIDENCE
 #: entry and so get no kind check at all.
 _NON_REMOVAL_VERB_RE = re.compile(
-    rf"\b(?!deleted\b)(?:{_CLAIM_VERBS}|{'|'.join(CLAIM_EVIDENCE)})\b", re.I)
+    rf"\b(?!(?:{'|'.join(_REMOVAL_ACTS)})\b)(?:{_CLAIM_VERBS}|{'|'.join(CLAIM_EVIDENCE)})\b",
+    re.I)
 
 
-#: The only completion claims a removal is evidence for.
-_REMOVAL_CLAIMS = frozenset({"deleted", "done", "all done"})
+#: The only completion claims a removal is evidence for: the removal verbs, the
+#: removal phrases (_REMOVAL_PHRASE_RE) and a bare 'done'.
+_REMOVAL_CLAIMS = frozenset({*_REMOVAL_ACTS, "done", "all done"})
+
+
+def _own_words(m: re.Match) -> str:
+    """What of a removal phrase is not part of the removal claim itself."""
+    what = m.group("what")
+    if what is None:
+        return " "
+    if _NOT_ONE_OBJECT_RE.search(what):
+        return f" {m.group('verb')} {what} "
+    return f" {what} "
 
 
 def _is_removal_claim(sentence: str) -> bool:
     """True when every completion claim in the sentence is a removal claim.
     A state assertion ('foo.txt is ready', 'here it is') is not one, so it
     cannot ride on a removal even when it names the removed file."""
-    claimed = [" ".join(m.group(0).lower().split())
-               for pattern in COMPLETION_PATTERNS
-               for m in re.finditer(pattern, sentence, re.I)]
-    return (bool(claimed) and all(c in _REMOVAL_CLAIMS for c in claimed)
-            and not _NON_REMOVAL_VERB_RE.search(sentence))
+    # A removal phrase may hold a verb of its own - "sent foo.txt to the
+    # Recycle Bin" - so it is read as one claim and taken out before the rest
+    # of the sentence is held to the removal verbs. Only its own words go: when
+    # the span between the move verb and the bin is more than one object ("sent
+    # the invoice to Bob and moved foo.txt to the bin") the verb and the span
+    # stay in view, so a claim verb hiding inside them is still held to account.
+    phrases = [" ".join(m.group(0).lower().split())
+               for m in _REMOVAL_PHRASE_RE.finditer(sentence)]
+    rest = _REMOVAL_PHRASE_RE.sub(_own_words, sentence)
+    claimed = phrases + [" ".join(m.group(0).lower().split())
+                         for rx in _COMPLETION_RE for m in rx.finditer(rest)]
+    return (bool(claimed)
+            and all(c in _REMOVAL_CLAIMS or c in phrases for c in claimed)
+            and not _NON_REMOVAL_VERB_RE.search(rest))
 
 
 def _usable(sentence: str, backed) -> list:
