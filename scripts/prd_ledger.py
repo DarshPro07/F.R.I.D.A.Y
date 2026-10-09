@@ -4664,6 +4664,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Design: forge.verify() now seeds a per-run canary tree under workdir/canary_home with fake .aws/credentials, .ssh/id_rsa and .env. Each holds a unique token. The child\'s HOME and USERPROFILE point at that tree, so ctx.read_text("~/.aws/credentials") lands on a canary. Bait env values (AWS_SECRET_ACC (build run, commit 87b2a2ce1)',
         "next_action": 'GAPS: Only file reads through ctx.read_text are observed. There is no process or network behaviour observation, because the skill sandbox has no process or network route today.; The new tests are not marked slow, so they run in the not-slow gate. They cost about 2s for 4 subprocess starts.',
     }),
+    ('S1-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Design: new friday/system_one.py holding a SystemOne gateway with choose/score/yes_no/rank/classify/confidence over pluggable backends. A backend is any object with `name` and `call(op, prompt, items)`. MockBackend is deterministic (sha256-derived). Each backend is put through data_class.decision(co (build run, commit 20c4dccd7)',
+        "next_action": "GAPS: No Laya/Jev backend adapters and no live caller: this slice is the contract plus the mock backend, as the next_action asks.; Hosted backends are not routed through ModelGateway.complete itself. They go through the gateway's data-class seam (data_class.decision), which is the shared decision point, so System One is not billed or recorded in the gateway telemetry yet.",
+    }),
 ]
 
 
