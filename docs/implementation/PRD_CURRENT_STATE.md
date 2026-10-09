@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: cb87f9e on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T15:24:27+00:00
+- HEAD: d233247 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-09T16:40:39+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 7, "MISSING": 138, "PARKED_BY_OWNER": 1, "PARTIAL": 51, "VERIFIED": 64}
 - Unresolved P0: 11
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (299): TRAJ-001=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), COG-006 (cascade exhausted), CTX-004 (integration refused), EXP-001 (CONFLICT), MEM-003 (NOT_CONFIRMED), BROW-004 (blocked), CAP-003 (partial x4), PKG-001 (partial x4), CAP-MKT-002 (blocked), MEM-002 (NOT_CONFIRMED)
-- Open escalations: 209
-  - CAP-003 partial: integrated without closing its gaps
-  - BG-001 resolved: controller unpark: controller re-ran the confirm after 089f899 (its named test is @slow, never run b
-  - PKG-001 partial: integrated without closing its gaps
-  - CAP-MKT-002 blocked: Python >= 3.12 is needed to run the real SkillSpector; the build venv is 3.11.; git clone/add is den
-  - ACT-001 resolved: controller unpark: P0 unpark triage wf_daa29142, 2026-10-09: slice packet written to the ledger
-  - JIT-001 resolved: controller unpark: P0 unpark triage wf_daa29142, 2026-10-09: slice packet written to the ledger
-  - SEC-005 resolved: controller unpark: P0 unpark triage wf_daa29142, 2026-10-09: slice packet written to the ledger
-  - TRAJ-001 resolved: controller unpark: P0 unpark triage wf_daa29142, 2026-10-09: slice packet written to the ledger
+- Last wave (305): SEC-005=SCOUT_DONE
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), MEM-002 (NOT_CONFIRMED), MEM-003 (integration refused), ACT-001 (VERIFIER_FAIL)
+- Open escalations: 217
   - MEM-002 resolved: controller unpark: P0 unpark triage wf_daa29142, 2026-10-09: slice packet written to the ledger
   - MEM-002 integration: {"requirement": "MEM-002", "result": "NOT_CONFIRMED", "red_green": {}, "verifier": {"verdict": "FAIL
+  - CAP-003 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
+  - CTX-004 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
+  - COG-006 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
+  - CAP-MKT-002 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
+  - EXP-001 resolved: controller unpark: P1 unpark triage wf_3f5877de, 2026-10-09: slice packet written to the ledger
+  - MEM-003 resolved: controller unpark: controller 2026-10-09 (owner approved): ACT-001 integrated at 20:08, the hold con
+  - MEM-003 integration: merge queue: MEM-003 waited 1800s behind DEVICE-003
+  - ACT-001 integration: {"requirement": "ACT-001", "result": "VERIFIER_FAIL", "red_green": {"result": "OK", "tests": ["tests
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
