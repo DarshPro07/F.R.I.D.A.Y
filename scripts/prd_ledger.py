@@ -4173,6 +4173,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Native tools no longer report READY unprobed: manifest rows are REGISTERED ('installed; not probed'); describe(id) runs capabilities.health, so a failing probe shows UNAVAILABLE with its reason. build()/summary() never probe. (build run, commit 1f27fdc3f)",
         "next_action": 'GAPS: No production code registers a capabilities probe, so every native tool still reads REGISTERED; nothing reports READY until probes are written.; fabric.py providers still carry their own READY/state logic and are not tied to the capability health probe (next slice).; executors: of_executor still sets state READY from installed() alone (manifest.py of_executor), no probe.; capability_manifest summary (by_state) is unprobed by design; only describe(id) probes, one id at a time.; Capability fields (version, backend, provenance, data_classes, latency/cost class, tests, last_verified) are not back-filled for existing records.',
     }),
+    ('BROW-003', {
+        "status": PARTIAL,
+        "current_implementation": "Added browser_start_temporary_profile (toolset + MCP tool): asks via confirmation.book, launches nothing without the person's approved nonce, then starts a TEMPORARY profile. Registered in policy, capabilities, router and tool cards. 6 new tests. (build run, commit e4770d5ec)",
+        "next_action": 'GAPS: tests/test_phase1b.py::test_live_browser_opens_and_closes is @live (excluded from the gate) and failed because example.com returned a Spanish page; not related to this change.; Only the 20 most relevant of the 93 impacted test files were run; the other 73 were not run.; Out of scope per packet: AUTHORIZED profile, live Chromium, Browser.resume, browser_automate.',
+    }),
 ]
 
 
