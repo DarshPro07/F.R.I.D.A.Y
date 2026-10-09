@@ -16,7 +16,7 @@ from friday import governor as G
 
 def test_attach_completes_the_record_after_admission():
     gov, _ = make()
-    d = gov.admit(G.WORKER, label="job", owner="claude_code")
+    d = gov.admit(G.WORKER, spawn_reason=G.SPECIALISATION, label="job", owner="claude_code")
     assert gov.owned_processes()[0]["pid"] is None
     assert gov.attach(d.lease, pid=77, cleanup=lambda: None, deadline_s=30.0)
     rec = gov.owned_processes()[0]
@@ -28,9 +28,9 @@ def test_attach_completes_the_record_after_admission():
 def test_high_pressure_stops_surplus_workers_newest_first_and_keeps_one():
     gov, dial = make(max_workers=3)
     stopped = []
-    a = gov.admit(G.WORKER, label="a", cleanup=lambda: stopped.append("a"))
-    b = gov.admit(G.WORKER, label="b", cleanup=lambda: stopped.append("b"))
-    gov.admit(G.WORKER, label="c", cleanup=lambda: stopped.append("c"))
+    a = gov.admit(G.WORKER, spawn_reason=G.SPECIALISATION, label="a", cleanup=lambda: stopped.append("a"))
+    b = gov.admit(G.WORKER, spawn_reason=G.SPECIALISATION, label="b", cleanup=lambda: stopped.append("b"))
+    gov.admit(G.WORKER, spawn_reason=G.SPECIALISATION, label="c", cleanup=lambda: stopped.append("c"))
     gov._owned[a.lease].started -= 3
     gov._owned[b.lease].started -= 2
     dial.s = sample(cpu=90)
@@ -42,7 +42,7 @@ def test_high_pressure_stops_surplus_workers_newest_first_and_keeps_one():
 def test_a_worker_that_never_heartbeats_is_not_reaped_as_silent():
     gov, _ = make(heartbeat_stale_s=30.0)
     gone = []
-    d = gov.admit(G.WORKER, label="job", cleanup=lambda: gone.append(1))
+    d = gov.admit(G.WORKER, spawn_reason=G.SPECIALISATION, label="job", cleanup=lambda: gone.append(1))
     gov._owned[d.lease].heartbeat -= 600.0
     gov.reduce_running()
     assert gone == [] and gov.active(G.WORKER) == 1
@@ -89,8 +89,8 @@ def test_owner_release_after_the_governor_stopped_the_work_keeps_the_queue():
     """The governor releases a victim it stopped; the owner's own release then
     runs a second time and must not retire a different caller's queue entry."""
     gov, dial = make(max_workers=3)
-    a = gov.admit(G.WORKER, label="a", cleanup=lambda: None)
-    b = gov.admit(G.WORKER, label="b", cleanup=lambda: None)
+    a = gov.admit(G.WORKER, spawn_reason=G.SPECIALISATION, label="a", cleanup=lambda: None)
+    b = gov.admit(G.WORKER, spawn_reason=G.SPECIALISATION, label="b", cleanup=lambda: None)
     gov._owned[a.lease].started -= 2
     gov._queue.extend(["waiting-1", "waiting-2"])
     before = gov.queue_depth()
@@ -270,7 +270,7 @@ def test_critical_pressure_on_a_real_reading_stops_real_workers_and_unloads_the_
 
     try:
         for i, proc in enumerate(helpers):
-            d = gov.admit(G.WORKER, label=f"helper{i}", pid=proc.pid, cleanup=proc.terminate)
+            d = gov.admit(G.WORKER, spawn_reason=G.SPECIALISATION, label=f"helper{i}", pid=proc.pid, cleanup=proc.terminate)
             assert d.admitted, d.to_dict()
         gw = _local_gateway(monkeypatch, gov, W())
         gw._infer("ollama", {"model": "m"}, timeout=5)

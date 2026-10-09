@@ -81,6 +81,15 @@ OPTIONAL = "optional"        # autolearn, benchmarks, background digests
 MODEL = "model"              # a local model held resident in RAM/VRAM (MODEL-005)
 KINDS = (WORKER, BROWSER, OPTIONAL, MODEL)
 
+# -- why a worker is started (ORCH-002). A request that fits none of these ---
+# -- runs in the current worker; `admit(WORKER)` refuses to start another. ---
+
+PARALLEL = "parallel"                # independent streams that run at once
+SPECIALISATION = "specialisation"    # work another engine does better (coding in Hermes)
+ISOLATION = "isolation"              # context that must not leak into the current worker
+VERIFICATION = "verification"        # a check made independently of the one who built it
+SPAWN_REASONS = (PARALLEL, SPECIALISATION, ISOLATION, VERIFICATION)
+
 # -- priority of the objective the work serves (BG-001) ----------------------
 
 BACKGROUND = "background"    # proactive work: waits for the person to be away and the power to be on
@@ -701,11 +710,13 @@ class OwnedProcess:
     #: The priority it was admitted at: BACKGROUND optional work is also
     #: stopped when the person returns or the power goes to battery.
     priority: str = BACKGROUND
+    #: Why a worker was started: one of SPAWN_REASONS ("" for other kinds).
+    spawn_reason: str = ""
 
     def to_dict(self, now: float | None = None) -> dict:
         return {"lease": self.lease, "kind": self.kind, "owner": self.owner,
                 "objective_id": self.objective_id, "label": self.label,
-                "priority": self.priority,
+                "priority": self.priority, "spawn_reason": self.spawn_reason,
                 "pid": self.pid, "started": self.started,
                 "heartbeat": self.heartbeat, "deadline": self.deadline,
                 "cleanup": bool(self.cleanup)}
@@ -969,15 +980,22 @@ class Governor:
     def admit(self, kind: str, *, label: str = "", objective_id: str = "",
               owner: str = "", pid: int | None = None,
               deadline_s: float | None = None, cleanup=None,
-              priority: str = BACKGROUND) -> Decision:
+              priority: str = BACKGROUND, spawn_reason: str = "") -> Decision:
         """`owner`, `pid`, `deadline_s` (seconds from now) and `cleanup` fill
         section 55's owned-process record for an admitted lease; a caller
         that omits `owner` is recorded under its label. `priority` is that of
         the objective the work serves: optional work at BACKGROUND (the
         default) is also deferred while the person is active or the machine
-        is on battery; URGENT skips those two, never the pressure gate."""
+        is on battery; URGENT skips those two, never the pressure gate.
+
+        A WORKER is started only for one of SPAWN_REASONS, which the lease
+        records; with none (or another) this raises, and the caller's work
+        runs in the worker it already has."""
         if kind not in KINDS:
             raise ValueError(f"unknown work kind {kind!r}; known: {KINDS}")
+        if kind == WORKER and spawn_reason not in SPAWN_REASONS:
+            raise ValueError(f"a worker needs a spawn_reason, one of {SPAWN_REASONS}; "
+                             f"got {spawn_reason!r}")
         if priority not in PRIORITIES:
             raise ValueError(f"unknown priority {priority!r}; known: {PRIORITIES}")
         p = self.pressure()
@@ -1004,7 +1022,7 @@ class Governor:
                         objective_id=objective_id, label=label, pid=pid,
                         started=now, heartbeat=now,
                         deadline=None if deadline_s is None else now + deadline_s,
-                        cleanup=cleanup, priority=priority)
+                        cleanup=cleanup, priority=priority, spawn_reason=spawn_reason)
                 elif decision == QUEUE:
                     self._queue.append((kind, label, time.time()))
                 d = Decision(decision, kind, reason, p.level, lease,

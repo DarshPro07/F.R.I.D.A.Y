@@ -251,7 +251,7 @@ def test_without_a_qualified_baseline_the_governor_profiles_the_machine_itself()
     assert gov.baseline.readings == 5
     assert gov.baseline.ram_available_gb == pytest.approx(TOTAL_GB * 0.7)
     # Readings taken while FRIDAY holds work do not.
-    lease = gov.admit(G.WORKER).lease
+    lease = gov.admit(G.WORKER, spawn_reason=G.PARALLEL).lease
     dial.s = sample(ram=70.0, at=60.0)
     gov.pressure()
     assert gov.baseline.readings == 5
@@ -282,27 +282,27 @@ def test_live_sampler_has_the_shape_and_never_guesses():
 
 def test_worker_cap_is_two_by_default_then_queue_then_shed():
     gov, _ = make(max_queue=1)
-    a = gov.admit(G.WORKER, label="one")
-    b = gov.admit(G.WORKER, label="two")
+    a = gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="one")
+    b = gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="two")
     assert a.admitted and b.admitted and a.lease != b.lease
-    c = gov.admit(G.WORKER, label="three")
+    c = gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="three")
     assert c.decision == G.QUEUE and "cap 2" in c.reason
-    d = gov.admit(G.WORKER, label="four")
+    d = gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="four")
     assert d.decision == G.SHED and "queue full" in d.reason
     gov.release(a.lease)
     assert gov.active(G.WORKER) == 1
-    e = gov.admit(G.WORKER, label="five")
+    e = gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="five")
     assert e.admitted
 
 
 def test_parallel_justification_lifts_the_cap_by_one_for_that_objective():
     gov, _ = make()
-    gov.admit(G.WORKER)
-    gov.admit(G.WORKER)
-    assert gov.admit(G.WORKER, objective_id="serial").decision == G.QUEUE
+    gov.admit(G.WORKER, spawn_reason=G.PARALLEL)
+    gov.admit(G.WORKER, spawn_reason=G.PARALLEL)
+    assert gov.admit(G.WORKER, spawn_reason=G.PARALLEL, objective_id="serial").decision == G.QUEUE
     gov.justify_parallel("fanout")
-    assert gov.admit(G.WORKER, objective_id="fanout").admitted
-    assert gov.admit(G.WORKER, objective_id="fanout").decision == G.QUEUE
+    assert gov.admit(G.WORKER, spawn_reason=G.PARALLEL, objective_id="fanout").admitted
+    assert gov.admit(G.WORKER, spawn_reason=G.PARALLEL, objective_id="fanout").decision == G.QUEUE
 
 
 def test_worker_capacity_is_what_admit_would_let_run_at_once():
@@ -312,7 +312,7 @@ def test_worker_capacity_is_what_admit_would_let_run_at_once():
     assert gov.worker_capacity("fanout") == 3
     assert gov.worker_capacity("serial") == 2, "the lift is for that objective only"
     admitted = 0
-    while gov.admit(G.WORKER, objective_id="fanout").admitted:
+    while gov.admit(G.WORKER, spawn_reason=G.PARALLEL, objective_id="fanout").admitted:
         admitted += 1
         assert admitted <= 3
     assert admitted == gov.worker_capacity("fanout")
@@ -325,9 +325,9 @@ def test_worker_capacity_is_what_admit_would_let_run_at_once():
 def test_high_pressure_reduces_concurrency_to_one():
     gov, dial = make()
     dial.s = sample(cpu=90)
-    first = gov.admit(G.WORKER)
+    first = gov.admit(G.WORKER, spawn_reason=G.PARALLEL)
     assert first.admitted and "HIGH" in first.reason
-    second = gov.admit(G.WORKER)
+    second = gov.admit(G.WORKER, spawn_reason=G.PARALLEL)
     assert second.decision == G.QUEUE and "reduced to 1" in second.reason
 
 
@@ -335,7 +335,7 @@ def test_critical_pressure_sheds_all_new_work():
     gov, dial = make()
     dial.s = sample(ram=97)
     for kind in (G.WORKER, G.BROWSER, G.OPTIONAL):
-        d = gov.admit(kind)
+        d = gov.admit(kind, spawn_reason=G.PARALLEL)
         assert d.decision == G.SHED, kind
         assert "RAM 97%" in d.reason
 
@@ -345,7 +345,7 @@ def test_optional_work_is_shed_first():
     assert gov.admit(G.OPTIONAL).admitted
     dial.s = sample(ram=60)                      # merely ELEVATED
     assert gov.admit(G.OPTIONAL).decision == G.SHED
-    assert gov.admit(G.WORKER).admitted           # workers still fine
+    assert gov.admit(G.WORKER, spawn_reason=G.PARALLEL).admitted           # workers still fine
 
 
 def test_browser_cap_and_high_pressure_serialise_browsers():
@@ -378,7 +378,7 @@ def test_sample_failure_degrades_to_elevated_not_a_crash():
     gov = G.Governor(sampler=broken, sample_ttl_s=0.0)
     p = gov.pressure()
     assert p.level == G.ELEVATED and "sample failed" in p.reasons[0]
-    assert gov.admit(G.WORKER).admitted          # workers still run
+    assert gov.admit(G.WORKER, spawn_reason=G.PARALLEL).admitted          # workers still run
     assert gov.admit(G.OPTIONAL).decision == G.SHED
 
 
@@ -395,7 +395,7 @@ def test_control_plane_reads_stay_responsive_under_pressure():
     gov.sample_ttl_s = 60.0
     dial.s = sample(cpu=99)
     t0 = time.perf_counter()
-    decisions = [gov.admit(G.WORKER) for _ in range(500)]
+    decisions = [gov.admit(G.WORKER, spawn_reason=G.PARALLEL) for _ in range(500)]
     elapsed = time.perf_counter() - t0
     assert all(d.decision == G.SHED for d in decisions)
     assert elapsed < 1.0
@@ -410,8 +410,8 @@ def test_hermes_delegate_is_refused_under_a_saturated_governor(tmp_path, monkeyp
     gov, _ = make()
     G.configure(gov)
     try:
-        gov.admit(G.WORKER, label="busy-1")
-        gov.admit(G.WORKER, label="busy-2")
+        gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="busy-1")
+        gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="busy-2")
         log = hb.WorkRunLog(tmp_path / "bridge.sqlite3")
         sup = hb.HermesSupervisor(log=log, command=[sys.executable, FAKE_GATEWAY], profile="")
         sup.READY_TIMEOUT = 20
@@ -573,7 +573,7 @@ def test_an_observer_hears_each_fresh_reading_and_cannot_break_it():
 
 def test_every_admitted_lease_records_the_owned_process_fields():
     gov, _ = make()
-    d = gov.admit(G.WORKER, label="job", objective_id="obj-1", owner="hermes",
+    d = gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="job", objective_id="obj-1", owner="hermes",
                   pid=4242, deadline_s=60.0)
     (rec,) = gov.owned_processes()
     assert (rec["lease"], rec["owner"], rec["objective_id"], rec["pid"]) == (d.lease, "hermes", "obj-1", 4242)
@@ -583,11 +583,36 @@ def test_every_admitted_lease_records_the_owned_process_fields():
     assert gov.owned_processes() == []
 
 
+@pytest.mark.parametrize("reason", G.SPAWN_REASONS)
+def test_every_worker_records_why_it_was_started(reason):
+    """ORCH-002: a worker exists for parallel work, specialisation, context
+    isolation or independent verification, and its lease says which."""
+    assert set(G.SPAWN_REASONS) == {G.PARALLEL, G.SPECIALISATION, G.ISOLATION, G.VERIFICATION}
+    gov, _ = make()
+    d = gov.admit(G.WORKER, label="job", spawn_reason=reason)
+    assert d.admitted
+    (rec,) = gov.owned_processes()
+    assert rec["spawn_reason"] == reason
+
+
+@pytest.mark.parametrize("reason", ["", "because I can", "parallel "])
+def test_a_worker_with_no_valid_reason_is_refused_and_takes_no_lease(reason):
+    """ORCH-002: a request that fits none of the four runs in the current
+    worker - nothing is spawned for it."""
+    gov, _ = make()
+    with pytest.raises(ValueError, match="spawn_reason"):
+        gov.admit(G.WORKER, label="job", spawn_reason=reason)
+    with pytest.raises(ValueError, match="spawn_reason"):
+        gov.admit(G.WORKER, label="job")
+    assert gov.active(G.WORKER) == 0 and gov.owned_processes() == []
+    assert gov.queue_depth() == 0 and gov.decisions == []
+
+
 def test_pressure_stops_running_optional_work_but_not_workers():
     gov, dial = make()
     stopped = []
     opt = gov.admit(G.OPTIONAL, label="digest", cleanup=lambda: stopped.append("digest"))
-    worker = gov.admit(G.WORKER, label="job", cleanup=lambda: stopped.append("job"))
+    worker = gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="job", cleanup=lambda: stopped.append("job"))
     assert opt.admitted and worker.admitted
     dial.s = sample(cpu=90)
     assert gov.pressure(fresh=True).level != G.NORMAL
@@ -685,7 +710,7 @@ def test_running_background_work_stops_when_the_person_returns():
     gov, _ = make_ctx(ctx)
     stopped = []
     opt = gov.admit(G.OPTIONAL, label="digest", cleanup=lambda: stopped.append("digest"))
-    worker = gov.admit(G.WORKER, label="job", cleanup=lambda: stopped.append("job"))
+    worker = gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="job", cleanup=lambda: stopped.append("job"))
     assert opt.admitted and worker.admitted
     assert gov.pressure(fresh=True).level == G.NORMAL and stopped == []   # still away
     ctx.idle_s = 3.0                                  # the person is back at the keyboard
@@ -750,7 +775,7 @@ def test_the_context_is_not_probed_when_no_background_work_runs():
         return G.Context(user_idle_s=600.0, on_battery=False)
 
     gov, _ = make_ctx(counting)
-    gov.admit(G.WORKER, label="job")
+    gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="job")
     gov.pressure(fresh=True)
     assert probes == []
     gov.admit(G.OPTIONAL, label="digest", cleanup=lambda: None)
@@ -770,7 +795,7 @@ def test_an_unreadable_context_never_defers_work():
 def test_only_optional_work_waits_for_the_person():
     gov, _ = make_ctx(Ctx(idle_s=1.0, on_battery=True))
     for kind in (G.WORKER, G.BROWSER, G.MODEL):
-        assert gov.admit(kind).admitted, kind
+        assert gov.admit(kind, spawn_reason=G.PARALLEL).admitted, kind
 
 
 def test_an_unknown_priority_is_refused():
@@ -871,11 +896,11 @@ def test_the_real_idle_probe_reads_a_plausible_value():
 def test_work_past_its_deadline_or_silent_is_reaped_at_any_pressure():
     gov, _ = make(heartbeat_stale_s=30.0, max_workers=5)
     gone = []
-    late = gov.admit(G.WORKER, label="late", deadline_s=-1.0, cleanup=lambda: gone.append("late"))
-    quiet = gov.admit(G.WORKER, label="quiet", cleanup=lambda: gone.append("quiet"))
+    late = gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="late", deadline_s=-1.0, cleanup=lambda: gone.append("late"))
+    quiet = gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="quiet", cleanup=lambda: gone.append("quiet"))
     assert gov.heartbeat(quiet.lease)               # it reported in once, then went silent
     gov._owned[quiet.lease].heartbeat -= 60.0
-    live = gov.admit(G.WORKER, label="live", cleanup=lambda: gone.append("live"))
+    live = gov.admit(G.WORKER, spawn_reason=G.PARALLEL, label="live", cleanup=lambda: gone.append("live"))
     gov.reduce_running()
     assert sorted(gone) == ["late", "quiet"]
     assert gov.heartbeat(late.lease) is False and gov.heartbeat(live.lease) is True

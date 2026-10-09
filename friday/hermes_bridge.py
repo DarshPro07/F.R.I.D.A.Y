@@ -2261,7 +2261,8 @@ class HermesSupervisor:
         # cannot read: the caller reports "queued under pressure" honestly.
         from friday import governor as G
         decision = G.governor().admit(G.WORKER, label=f"hermes:{bundle.goal[:40]}",
-                                      objective_id=friday_run_id, owner="hermes_bridge")
+                                      objective_id=friday_run_id, owner="hermes_bridge",
+                                      spawn_reason=G.SPECIALISATION)
         if not decision.admitted:
             raise G.Refused(decision)
         if scope is not None:

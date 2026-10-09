@@ -371,7 +371,8 @@ class ClaudeCodeExecutor:
         # reason, recorded as a failed action - never silently started.
         from friday import governor as G
         decision = G.governor().admit(G.WORKER, label=f"claude:{bundle.goal[:40]}",
-                                      objective_id=bundle.run_id, owner="claude_code")
+                                      objective_id=bundle.run_id, owner="claude_code",
+                                      spawn_reason=G.SPECIALISATION)
         if not decision.admitted:
             return run_ctx.record(c.failed(
                 started, f"governor {decision.decision}: {decision.reason}; "

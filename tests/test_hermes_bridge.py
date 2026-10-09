@@ -495,3 +495,15 @@ def test_the_gateway_has_time_to_start_cold(monkeypatch):
         assert hb._ready_timeout() == 150.0
     monkeypatch.delenv("FRIDAY_HERMES_READY_TIMEOUT")
     assert hb._ready_timeout() == 150.0
+
+
+def test_a_hermes_worker_records_why_it_was_started(tmp_path, monkeypatch):
+    """ORCH-002: Hermes is the specialist coding engine; its lease says so."""
+    from friday import governor as G
+    supervisor = make(tmp_path, monkeypatch, flags={'FAKE_HERMES_HANG': '1'})
+    try:
+        out = supervisor.delegate(hb.TaskBundle(goal='long job'))
+        owned = G.governor()._owned[supervisor._leases[out['work_run_id']]]
+        assert owned.spawn_reason == G.SPECIALISATION
+    finally:
+        supervisor.stop()

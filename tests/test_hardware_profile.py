@@ -224,7 +224,7 @@ def test_a_busy_governor_postpones_the_measurement(tmp_path, monkeypatch):
     gov = G.Governor(sampler=Readings(total=15.35, used=76.0))
     G.configure(gov)
     try:
-        lease = gov.admit(G.WORKER).lease
+        lease = gov.admit(G.WORKER, spawn_reason=G.PARALLEL).lease
         profile, cause = hp.refresh_and_adopt(machine=REFERENCE_A,
                                               sampler=Readings(total=15.35, used=76.0),
                                               readings=2, every_s=0.0)

@@ -135,7 +135,8 @@ def nfr_p09_worker_cap() -> dict:
     healthy = GV.Sample(at=time.time(), cpu_percent=5, ram_percent=40, ram_available_gb=8.0,
                         disk_free_gb=100.0, browser_processes=0, friday_rss_mb=300.0)
     g = GV.Governor(sampler=lambda: healthy)
-    decisions = [g.admit(GV.WORKER, label=f"perf {i}", objective_id=f"obj-{i}") for i in range(6)]
+    decisions = [g.admit(GV.WORKER, label=f"perf {i}", objective_id=f"obj-{i}",
+                         spawn_reason=GV.PARALLEL) for i in range(6)]
     granted = sum(1 for d in decisions if d.decision == GV.ADMIT)
     queued = sum(1 for d in decisions if d.decision == GV.QUEUE)
     return {"nfr": "NFR-P09", "target": "0-2 default active execution workers",

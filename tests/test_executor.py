@@ -477,3 +477,29 @@ def test_every_stream_event_is_a_governor_heartbeat(store, bundle, monkeypatch):
     result = asyncio.run(executor(store).execute(bundle))
     assert result.status == c.PARTIAL, result.error
     assert len(beats) == len(events) and len(set(beats)) == 1
+
+
+def test_a_claude_code_worker_records_why_it_was_started(store, bundle, monkeypatch):
+    """ORCH-002: the governor lease of a Claude Code run says why it exists."""
+    from friday import contracts as c
+    from friday import governor as G
+
+    class FakeRun:
+        process = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        async def events(self, timeout=None):
+            gov = G.governor()
+            reasons.extend(o.spawn_reason for o in gov._owned.values())
+            yield cli.Event("result", {"result": "done"})
+
+    reasons: list[str] = []
+    monkeypatch.setattr(cli, "available", lambda: True)
+    monkeypatch.setattr(cli, "Run", FakeRun)
+    monkeypatch.setattr(ClaudeCodeExecutor, "finish",
+                        lambda self, b, started, final: started.finish(status=c.PARTIAL))
+    result = asyncio.run(executor(store).execute(bundle))
+    assert result.status == c.PARTIAL, result.error
+    assert reasons == [G.SPECIALISATION]

@@ -84,8 +84,8 @@ def _probe(gov, started: float) -> dict:
     # One real sample, held for the three asks, so they see the same machine.
     pressure = gov.pressure(fresh=True)
     asks = (gov.admit(G.OPTIONAL, label="stress optional"),
-            gov.admit(G.WORKER, label="stress worker 1"),
-            gov.admit(G.WORKER, label="stress worker 2"))
+            gov.admit(G.WORKER, label="stress worker 1", spawn_reason=G.PARALLEL),
+            gov.admit(G.WORKER, label="stress worker 2", spawn_reason=G.PARALLEL))
     for d in asks:
         if d.lease:
             gov.release(d.lease)
