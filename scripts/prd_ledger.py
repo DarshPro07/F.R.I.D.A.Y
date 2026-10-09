@@ -4211,6 +4211,14 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Executors no longer report READY from installed() alone: build() rows are REGISTERED ('installed; not probed'); describe('executor:<id>') probes Executor.problem() (path still a file, builder exists), so a missing or unbuildable executor shows UNAVAILABLE with its reason. (build run, commit 7f3b07709)",
         "next_action": 'GAPS: No production code registers a capabilities probe, so every native tool still reads REGISTERED until probes are written.; fabric.py providers still carry their own READY/state logic and are not tied to the capability health probe (next slice).; The executor probe is filesystem and builder only; it does not run the binary (e.g. --version), so a corrupt-but-present executable still probes READY.; Bulk probing is not wired: summary()/build() stay unprobed by design and only describe(id) probes, one id at a time.; Capability fields (version, backend, provenance, data_classes, latency/cost class, tests, last_verified) are not back-filled for existing records.',
     }),
+    ('BROW-003', {
+        "status": VERIFIED,
+        "current_implementation": "Added browser_start_temporary_profile (toolset + MCP tool): asks via confirmation.book, launches nothing without the person's approved nonce, then starts a TEMPORARY profile. Registered in policy, capabilities, router and tool cards. 6 new tests. (build run, commit e4770d5ec)",
+        "next_action": '',
+        "evidence": 'Confirmed at 48ec251e6: the build worker found the acceptance already met and changed nothing; tests/test_browser_capability.py::test_auth_pages_hand_off_to_user, tests/test_workspace_isolation.py::test_a_browser_profile_approved_by_one_workspace_is_refused_to_another pass at HEAD and an independent verifier judged the existing code to meet it. Worker: No code change needed. Verified e4770d5 (browser_start_temporary_profile): unapproved profiles refused, OTP/passkey/hardware-key steps pause for the person. All 96 impacted test files now run (previously 20): 2393 passed, 0 failed.',
+        "tests": ['tests/test_browser_capability.py::test_auth_pages_hand_off_to_user', 'tests/test_workspace_isolation.py::test_a_browser_profile_approved_by_one_workspace_is_refused_to_another'],
+        "files": ['friday/browser_capability.py:46', 'friday/browser_capability.py:131'],
+    }),
 ]
 
 
