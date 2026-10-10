@@ -170,9 +170,10 @@ DECLARED = {
     "friday/specialist": (FUTURE,
                           "FAB-005: composes a temporary specialist (role + "
                           "route + executor + skills + tools + workspace "
-                          "policy) and records it on the agent ledger; the "
-                          "dispatcher that calls it is a later slice, run by "
-                          "tests/test_specialist.py"),
+                          "policy), runs it on its executor and records the "
+                          "result on the agent ledger; the live caller that "
+                          "picks role and route per objective task is a later "
+                          "slice, run by tests/test_specialist.py"),
     "friday/prompts": (PRODUCTION, "loaded as text by the agent"),
     "friday/audit_fixtures": (TEST_ONLY, "fixtures for the audit suite"),
     "friday/intake": (FUTURE,

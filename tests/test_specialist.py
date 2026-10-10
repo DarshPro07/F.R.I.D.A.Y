@@ -10,12 +10,14 @@ needed to compose a specialist).
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 
+from friday import contracts as c
 from friday import specialist as S
-from friday.agent_ledger import AgentLedger, LedgerError, SUCCEEDED
+from friday.agent_ledger import AgentLedger, FAILED, LedgerError, SUCCEEDED, TERMINAL
 from friday.store import Store
 
 ROUTE = "anthropic/claude-sonnet/5.5/subscription"
@@ -93,4 +95,113 @@ def test_a_route_without_four_parts_is_refused_before_anything_is_recorded(ledge
     spec = S.compose("minimal", executor_id="claude", model_route="gpt-4")
     with pytest.raises(LedgerError):
         S.record(ledger, spec, run_id="R2", task="t", workspace="/w")
+    assert ledger.by_role("minimal") == []
+
+
+class _Executor:
+    """Stands in for an executor: `execute(bundle) -> ActionResult` is the contract."""
+
+    def __init__(self, tool_id: str, outcome: str = "succeeded") -> None:
+        self.tool_id, self.outcome, self.seen = tool_id, outcome, []
+
+    async def execute(self, bundle, **_kwargs):
+        self.seen.append(bundle)
+        started = c.started(c.new_run_id(), self.tool_id)
+        if self.outcome == "raise":
+            raise RuntimeError("the executor fell over")
+        if self.outcome == "failed":
+            return c.failed(started, "the build is red")
+        if self.outcome == "partial":
+            return started.finish(status=c.PARTIAL, error="needs an answer")
+        return c.succeeded(
+            started, output={"result": "done"},
+            verification=c.Verification(method=f"{self.tool_id}.turn_complete",
+                                        evidence="reported COMPLETE"))
+
+
+@pytest.fixture
+def executors(monkeypatch):
+    """`executor_router.build` hands back a stand-in, by id, as it would a real one."""
+    made = {"hermes": _Executor("executor.hermes"),
+            "claude": _Executor("executor.claude_code")}
+    monkeypatch.setattr(S.executor_router, "build",
+                        lambda executor_id, store, **kw: made[executor_id])
+    return made
+
+
+def _results(ledger, run_id: str) -> list[dict]:
+    return [json.loads(e["message"]) for e in ledger.events(run_id)
+            if e["kind"] == S.RESULT]
+
+
+def test_the_same_role_is_run_on_two_executors_and_both_results_are_the_roles(
+        ledger, executors):
+    for executor_id, run_id in (("hermes", "R-H"), ("claude", "R-C")):
+        got = asyncio.run(S.dispatch(
+            ledger, _compose(executor_id), "fix the bug", "/w", run_id=run_id))
+        assert got.status == c.SUCCEEDED
+
+    hermes, claude = executors["hermes"].seen[0], executors["claude"].seen[0]
+    assert (hermes.role, hermes.allowed_paths, hermes.isolate, hermes.constraints) \
+        == (claude.role, claude.allowed_paths, claude.isolate, claude.constraints) \
+        == ("minimal", POLICY.allowed_paths, True, ("Allowed tools: Read, Edit, Bash",))
+    assert (hermes.run_id, claude.run_id) == ("R-H", "R-C")
+
+    attributed = ledger.by_role("minimal")
+    assert {r["run_id"]: (r["executor_id"], r["status"]) for r in attributed} \
+        == {"R-H": ("hermes", SUCCEEDED), "R-C": ("claude", SUCCEEDED)}
+    assert _results(ledger, "R-H")[0]["tool_id"] == "executor.hermes"
+    assert _results(ledger, "R-C")[0]["tool_id"] == "executor.claude_code"
+    for run_id in ("R-H", "R-C"):
+        (result,) = _results(ledger, run_id)
+        assert result["status"] == c.SUCCEEDED
+        assert result["verification"]["evidence"] == "reported COMPLETE"
+
+
+def test_a_failed_result_closes_the_role_run_as_failed_with_the_reason(
+        ledger, executors):
+    executors["hermes"].outcome = "failed"
+    got = asyncio.run(S.dispatch(ledger, _compose("hermes"), "t", "/w", run_id="R1"))
+    assert got.status == c.FAILED
+    assert ledger.run("R1")["status"] == FAILED
+    assert _results(ledger, "R1")[0]["error"] == "the build is red"
+
+
+def test_a_partial_result_is_recorded_without_claiming_the_run_finished(
+        ledger, executors):
+    executors["claude"].outcome = "partial"
+    asyncio.run(S.dispatch(ledger, _compose("claude"), "t", "/w", run_id="R1"))
+    assert ledger.run("R1")["status"] not in TERMINAL
+    assert _results(ledger, "R1")[0]["status"] == c.PARTIAL
+
+
+def test_a_result_the_executor_already_closed_is_not_closed_twice(ledger, executors):
+    class Closing(_Executor):
+        async def execute(self, bundle, **kwargs):
+            got = await super().execute(bundle, **kwargs)
+            ledger.finish(bundle.run_id, SUCCEEDED, [f"executor_runs:{bundle.run_id}"])
+            return got
+
+    executors["claude"] = Closing("executor.claude_code")
+    asyncio.run(S.dispatch(ledger, _compose("claude"), "t", "/w", run_id="R1"))
+    kinds = [e["kind"] for e in ledger.events("R1")]
+    assert kinds.count("finished") == 1
+    assert kinds.count(S.RESULT) == 1
+
+
+def test_an_executor_that_raises_leaves_the_run_failed_not_pending(ledger, executors):
+    executors["hermes"].outcome = "raise"
+    with pytest.raises(RuntimeError, match="fell over"):
+        asyncio.run(S.dispatch(ledger, _compose("hermes"), "t", "/w", run_id="R1"))
+    assert ledger.run("R1")["status"] == FAILED
+
+
+def test_an_executor_that_cannot_be_built_is_refused_before_anything_is_recorded(
+        ledger, monkeypatch):
+    def missing(executor_id, store, **kw):
+        raise FileNotFoundError("claude is not on PATH, so claude cannot run")
+
+    monkeypatch.setattr(S.executor_router, "build", missing)
+    with pytest.raises(S.SpecialistError, match="not on PATH"):
+        asyncio.run(S.dispatch(ledger, _compose("claude"), "t", "/w", run_id="R1"))
     assert ledger.by_role("minimal") == []
