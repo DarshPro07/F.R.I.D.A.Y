@@ -182,6 +182,11 @@ DECLARED = {
                           "picks role and route per objective task is a later "
                           "slice, run by tests/test_specialist.py"),
     "friday/prompts": (PRODUCTION, "loaded as text by the agent"),
+    "friday/harness_sync": (FUTURE,
+                            "HARN-001: renders the .claude harness into the Claude "
+                            "Code and Hermes profile layouts from one source; the "
+                            "operator entry point is scripts/harness_sync.py, run "
+                            "by tests/test_harness_sync.py"),
     "friday/audit_fixtures": (TEST_ONLY, "fixtures for the audit suite"),
     "friday/intake": (FUTURE,
                       "INTAKE-001 slice 1: the repository intake front door "
