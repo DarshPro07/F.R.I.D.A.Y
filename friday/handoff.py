@@ -11,7 +11,51 @@ and the in-memory progress dict actually contain - an empty list here means
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, asdict
+
+#: ORCH-004: what a worker's result costs FRIDAY. The record below is read
+#: into a parent's context on every delegation; the full result (up to 4000
+#: chars) stays in the work-run row, read on demand through hermes_status.
+RECORD_TOKEN_CAP = 400
+
+_ITEM_CHARS = 120
+_ITEMS = 5
+_REPORT_LABELS = {
+    "commit": "commit", "files changed": "files", "tests": "tests",
+    "tests run": "tests", "evidence": "evidence", "blockers": "blockers",
+}
+_LABELLED = re.compile(r"^\s*(status|commit|files changed|tests run|tests|"
+                       r"evidence|blockers)\s*:\s*(.*)$", re.I)
+_NOTHING = {"", "none", "n/a", "na", "-", "no", "nothing"}
+_SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
+
+
+def _parse_report(text: str) -> tuple[dict[str, list[str] | str], str]:
+    """The labelled lines of a worker report (TaskBundle.REPORTING_CONTRACT)
+    and the prose left over. Only what the worker wrote is returned - a label
+    it did not write stays empty, never guessed."""
+    from friday.brain import _sensitive
+    found: dict[str, list[str] | str] = {
+        "commit": "", "files": [], "tests": [], "evidence": [], "blockers": []}
+    prose: list[str] = []
+    for line in (text or "").splitlines():
+        m = _LABELLED.match(line)
+        if m is None:
+            prose.append(line)
+            continue
+        key = _REPORT_LABELS.get(m.group(1).lower())
+        value = m.group(2).strip()
+        if key is None or value.lower().rstrip(".") in _NOTHING:
+            continue
+        if key == "commit":
+            sha = _SHA.search(value)
+            found["commit"] = sha.group(0) if sha else ""
+            continue
+        parts = value.split("," if key == "files" else ";")
+        found[key] = [p.strip()[:_ITEM_CHARS] for p in parts
+                      if p.strip() and not _sensitive(p)][:_ITEMS]
+    return found, "\n".join(prose).strip()
 
 
 @dataclass
@@ -33,6 +77,11 @@ class Handoff:
     memory_candidates: tuple[str, ...] = ()
     skill_candidates: tuple[str, ...] = ()
     next_action: str = ""
+    commit: str = ""
+    evidence_refs: tuple[str, ...] = ()
+    #: Where the full transcript lives (the Hermes stored session id); read
+    #: on demand, never carried in the record.
+    transcript_ref: str = ""
 
     def to_json(self) -> str:
         return json.dumps(asdict(self))
@@ -66,10 +115,48 @@ class Handoff:
         if _sensitive(summary):
             summary = ""
         pending_question = (record.get("pending_question") or "").strip()
+        report, _ = _parse_report(record.get("result") or "")
         return cls(
             task_id=record.get("work_run_id", ""),
             agent=record.get("model", "") or record.get("provider", ""),
             status=record.get("status", ""),
             summary=summary,
             next_action=pending_question,
+            files_changed=tuple(report["files"]),
+            tests_run=tuple(report["tests"]),
+            blockers=tuple(report["blockers"]),
+            commit=report["commit"],
+            evidence_refs=tuple(report["evidence"]),
+            transcript_ref=(record.get("hermes_stored_session_id")
+                            or record.get("hermes_session_id") or ""),
         )
+
+
+def work_run_record(record: dict) -> dict:
+    """The compact record FRIDAY receives for one worker: status, commit,
+    tests, evidence references, blockers - at most RECORD_TOKEN_CAP tokens
+    however long the transcript. Trimming drops list tails and prose, never
+    the status, commit or transcript reference."""
+    from friday.brain import _sensitive
+    h = Handoff.from_work_run(record)
+    _, prose = _parse_report(record.get("result") or "")
+    out: dict = {
+        "work_run_id": h.task_id, "status": h.status, "commit": h.commit,
+        "tests": list(h.tests_run), "evidence": list(h.evidence_refs),
+        "blockers": list(h.blockers), "files_changed": list(h.files_changed),
+        "summary": "" if _sensitive(prose) else prose[:300],
+        "transcript_ref": h.transcript_ref, "next_action": h.next_action[:200],
+    }
+    while len(json.dumps(out)) // 4 > RECORD_TOKEN_CAP:
+        lists = [k for k in ("tests", "evidence", "blockers", "files_changed")
+                 if out[k]]
+        if len(out["summary"]) > 60:
+            out["summary"] = out["summary"][:len(out["summary"]) // 2]
+        elif lists:
+            out[max(lists, key=lambda k: len(json.dumps(out[k])))].pop()
+        elif out["next_action"]:
+            out["next_action"] = out["next_action"][:len(out["next_action"]) // 2]
+        else:
+            out["summary"] = ""
+            break
+    return out

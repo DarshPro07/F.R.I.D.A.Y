@@ -513,9 +513,14 @@ class TaskBundle:
     #: Always present - the worker gets told the shape of a good report up
     #: front, not discovered after it has already written a transcript.
     REPORTING_CONTRACT = (
-        "State: status (SUCCEEDED/FAILED/PARTIAL/BLOCKED), files changed, "
-        "tests run, evidence for each claim, and any blockers. Compact, "
-        "not a transcript."
+        "Report as labelled lines, then at most two sentences of prose:\n"
+        "Status: SUCCEEDED/FAILED/PARTIAL/BLOCKED\n"
+        "Commit: <sha, if you made one>\n"
+        "Files changed: <comma-separated paths>\n"
+        "Tests: <test ids and their result, semicolon-separated>\n"
+        "Evidence: <paths or ids that prove each claim, semicolon-separated>\n"
+        "Blockers: <what stopped you, or none>\n"
+        "Compact, not a transcript - the transcript stays on disk."
     )
 
     def _sections(self) -> list[tuple[str, str]]:

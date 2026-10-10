@@ -24,6 +24,7 @@ from friday import contracts as c
 from friday import execution_economics as ee
 from friday import governor as G
 from friday import hermes_bridge as hb
+from friday.handoff import work_run_record
 from friday.policy import PolicyEngine, PolicyError
 from friday.toolsets.system import APPROVAL_PREFIX
 
@@ -282,7 +283,10 @@ def register(mcp):
                 return {
                     "status": record["status"].lower(),
                     "work_run_id": work_run_id,
-                    "result": record.get("result", ""),
+                    # ORCH-004: the record, not the transcript. The full
+                    # result stays in the work-run row (hermes_status).
+                    "handoff": work_run_record(record),
+                    "result": (record.get("result") or "")[:600],
                     "pending_question": record.get("pending_question", ""),
                     "bundle": out["bundle"],
                     "model": record.get("model", ""),
