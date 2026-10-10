@@ -83,8 +83,10 @@ def test_a_browser_capability_routes_to_playwright(playwright_present):
 
 def test_a_desktop_capability_routes_to_the_native_desktop(screen):
     route = computer_use.route("desktop_step")
+    # a display is only the first step: READY waits for an observed action
+    # (tests/test_desktop_readiness.py)
     assert (route.path, route.backend, route.state) == (
-        action_path.COORDINATES, "native_desktop", fabric.READY)
+        action_path.COORDINATES, "native_desktop", fabric.DEGRADED)
     assert "1920x1080" in route.detail
 
 
