@@ -38,7 +38,7 @@ import os
 import pkgutil
 import re
 import time
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -264,15 +264,24 @@ def _discover() -> dict[str, Provider]:
 #: is a line in `notes`: `BENCHMARK_IMPROVEMENT: <what was measured> evidence:
 #: <repo-relative path>`. Text is required after the colon, so the marker
 #: cannot be an empty claim - and "benchmarked, not promoted" is not a claim of
-#: improvement. The path must be a file in this tree (the script, plan or
-#: result the measurement came from) and that file must name the provider (its
-#: id or its upstream), so a claim nobody can follow, or one that cites an
-#: unrelated file, does not count. That is all this checks: it cannot know
-#: whether the numbers in the file show an improvement; a reviewer follows the
-#: path for that.
+#: improvement. The path must be a file in this tree that names the provider
+#: (its id or its upstream) and holds a measurement line that compares it with
+#: a provider already covering it:
+#:     MEASURED <metric>: <provider> = <number> vs <covering id> = <number>
+#:     (higher|lower is better)
+#: The claim is honoured only when the provider's number is strictly better in
+#: the stated direction, so evidence that records no measurement, compares
+#: something else, or shows no gain does not count. It trusts the file's
+#: numbers: whether the measurement was honestly taken is for a reviewer.
 _BENCHMARK_MARK = re.compile(r"BENCHMARK_IMPROVEMENT:\s*\S")
 _BENCHMARK_EVIDENCE = re.compile(r"\bevidence:\s*(\S+)")
 _EVIDENCE_READ_LIMIT = 1 << 20
+_MEASUREMENT = re.compile(
+    r"MEASURED\s+[^:\n]+:\s*(?P<named>[^\s=]+)\s*=\s*"
+    r"(?P<value>\d+(?:\.\d+)?)\S*\s+vs\s+"
+    r"(?P<rival>[^\s=]+)\s*=\s*(?P<rival_value>\d+(?:\.\d+)?)\S*"
+    r"\s*\(?(?P<better>higher|lower)\s+is\s+better",
+    re.IGNORECASE)
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: Providers reviewed by a person and kept runnable although earlier providers
@@ -294,8 +303,10 @@ def _benchmark_claim(provider: Provider) -> str | None:
     return provider.notes[marked.start():] if marked else None
 
 
-def _evidence_problem(claim: str, provider: Provider) -> str:
-    """Why the claim's evidence cannot be followed; "" when it can."""
+def _evidence_problem(claim: str, provider: Provider,
+                      covering: Collection[str]) -> str:
+    """Why the claim's evidence does not show `provider` beating one of the
+    `covering` providers; "" when it does."""
     cited = _BENCHMARK_EVIDENCE.search(claim)
     if cited is None:
         return "it cites no 'evidence: <repo-relative path>'"
@@ -306,23 +317,46 @@ def _evidence_problem(claim: str, provider: Provider) -> str:
         if target.is_relative_to(_REPO_ROOT) and target.is_file():
             with target.open("rb") as handle:
                 text = handle.read(_EVIDENCE_READ_LIMIT).decode(
-                    "utf-8", "replace").lower()
+                    "utf-8", "replace")
     except (OSError, ValueError):
         text = None
     if text is None:
         return f"evidence {path!r} is not a file in this repository"
-    if any(name.lower() in text for name in (provider.id, provider.upstream)
-           if name):
-        return ""
-    return (f"evidence {path!r} never names {provider.id!r} or its upstream, "
-            f"so it is not a measurement of this provider")
+    names = {name.lower() for name in (provider.id, provider.upstream) if name}
+    if not any(name in text.lower() for name in names):
+        return (f"evidence {path!r} never names {provider.id!r} or its "
+                f"upstream, so it is not a measurement of this provider")
+    measurements = list(_MEASUREMENT.finditer(text))
+    if not measurements:
+        return (f"evidence {path!r} records no measurement (a "
+                f"'MEASURED <metric>: <provider> = <n> vs <covering> = <n> "
+                f"(higher|lower is better)' line)")
+    rivals = {name.lower() for name in covering}
+    relevant = [m for m in measurements
+                if m["named"].lower() in names and m["rival"].lower() in rivals]
+    if not relevant:
+        return (f"evidence {path!r} compares {provider.id!r} with no provider "
+                f"that already covers it ({', '.join(map(repr, sorted(covering)))})")
+    for m in relevant:
+        value, rival = float(m["value"]), float(m["rival_value"])
+        if value > rival if m["better"].lower() == "higher" else value < rival:
+            return ""
+    return (f"evidence {path!r} shows no improvement over "
+            f"{', '.join(map(repr, sorted(covering)))}: "
+            f"{relevant[0].group(0)!r}")
 
 
-def has_benchmark_improvement(provider: Provider) -> bool:
-    """Whether `notes` states a benchmark improvement whose evidence is a
-    file in this tree that names the provider."""
+def has_benchmark_improvement(provider: Provider,
+                              covering: Collection[str] | None = None) -> bool:
+    """Whether `notes` states a benchmark improvement whose evidence file
+    measures `provider` strictly better than a provider already covering it
+    (`covering` ids; default: every provider `find_overlaps` finds)."""
     claim = _benchmark_claim(provider)
-    return claim is not None and not _evidence_problem(claim, provider)
+    if claim is None:
+        return False
+    if covering is None:
+        covering = {existing for existing, _ in find_overlaps(provider)}
+    return not _evidence_problem(claim, provider, covering)
 
 
 def find_overlaps(provider: Provider,
@@ -358,7 +392,8 @@ def _recorded_by_overlap(provider: Provider,
         for existing_id, ops in covering.items())
     claim = _benchmark_claim(provider)
     rejected = (f" Its stated BENCHMARK_IMPROVEMENT was not honoured: "
-                f"{_evidence_problem(claim, provider)}." if claim else "")
+                f"{_evidence_problem(claim, provider, covering)}."
+                if claim else "")
     note = (f"OVERLAP: recorded {REFERENCE_ONLY} (declared "
             f"{provider.integration_mode}); every operation is already "
             f"answered by a registered provider - {evidence}. Imported only "
@@ -385,10 +420,11 @@ def _apply_overlap_policy(found: dict[str, Provider]) -> dict[str, Provider]:
     for provider_id, provider in found.items():
         if (provider.upstream
                 and provider.integration_mode != REFERENCE_ONLY
-                and provider_id not in ACCEPTED_OVERLAPS
-                and not has_benchmark_improvement(provider)):
+                and provider_id not in ACCEPTED_OVERLAPS):
             overlaps = find_overlaps(provider, admitted)
-            if {op for _, op in overlaps} >= set(provider.operations):
+            if ({op for _, op in overlaps} >= set(provider.operations)
+                    and not has_benchmark_improvement(
+                        provider, {existing for existing, _ in overlaps})):
                 provider = _recorded_by_overlap(provider, overlaps)
                 logger.warning(
                     "fabric provider %s recorded %s: %s", provider_id,

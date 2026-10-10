@@ -129,12 +129,19 @@ def bench_repo(monkeypatch, tmp_path):
     return _write
 
 
+def _measured(name: str, value: float, rival: str, rival_value: float,
+              better: str = "higher") -> str:
+    """An evidence file body holding one measurement line."""
+    return (f"MEASURED pages/s: {name} = {value} vs {rival} = {rival_value} "
+            f"({better} is better)\n")
+
+
 @pytest.mark.parametrize("cite", [
     "evidence: {path}",
     "(evidence: {path}).",
 ])
 def test_stated_benchmark_improvement_keeps_the_import(load, bench_repo, cite):
-    path = bench_repo("better: 2.1x pages/s over old (bench_scrape 2026-10-01)")
+    path = bench_repo(_measured("better", 42.0, "old", 20.0))
     reg = load(_provider("old", ("fetch",)),
                _provider("better", ("fetch",),
                          notes=f"BENCHMARK_IMPROVEMENT: 2.1x pages/s, "
@@ -146,7 +153,7 @@ def test_stated_benchmark_improvement_keeps_the_import(load, bench_repo, cite):
 
 def test_evidence_may_name_the_upstream_instead_of_the_provider_id(
         load, bench_repo):
-    path = bench_repo("SomeOrg/Repo scraped 2.1x faster than old")
+    path = bench_repo(_measured("someorg/repo", 42.0, "old", 20.0))
     reg = load(_provider("old", ("fetch",)),
                _provider("better", ("fetch",),
                          notes=f"BENCHMARK_IMPROVEMENT: 2.1x pages/s "
@@ -165,6 +172,64 @@ def test_evidence_that_never_names_the_provider_is_not_honoured(
     assert claimant.integration_mode == fabric.REFERENCE_ONLY
     assert "not honoured" in claimant.notes
     assert "never names 'claimant'" in claimant.notes
+
+
+def test_a_lower_is_better_measurement_that_improves_keeps_the_import(
+        load, bench_repo):
+    path = bench_repo(_measured("better", 80.0, "old", 120.0, better="lower"))
+    reg = load(_provider("old", ("fetch",)),
+               _provider("better", ("fetch",),
+                         notes=f"BENCHMARK_IMPROVEMENT: 80ms evidence: {path}"))
+    assert reg["better"].integration_mode == fabric.ADAPTER
+
+
+def test_evidence_naming_the_provider_without_a_measurement_is_not_honoured(
+        load, bench_repo):
+    path = bench_repo("claimant is the better scraper, trust me; old is slow\n")
+    reg = load(_provider("old", ("fetch",)),
+               _provider("claimant", ("fetch",),
+                         notes=f"BENCHMARK_IMPROVEMENT: faster evidence: {path}"))
+    claimant = reg["claimant"]
+    assert claimant.integration_mode == fabric.REFERENCE_ONLY
+    assert "not honoured" in claimant.notes
+    assert "records no measurement" in claimant.notes
+
+
+@pytest.mark.parametrize("value, rival_value, better", [
+    (20.0, 42.0, "higher"),     # slower
+    (42.0, 42.0, "higher"),     # no change
+    (120.0, 80.0, "lower"),     # slower
+    (80.0, 80.0, "lower"),      # no change
+])
+def test_a_measurement_that_shows_no_improvement_is_not_honoured(
+        load, bench_repo, value, rival_value, better):
+    path = bench_repo(_measured("claimant", value, "old", rival_value, better))
+    reg = load(_provider("old", ("fetch",)),
+               _provider("claimant", ("fetch",),
+                         notes=f"BENCHMARK_IMPROVEMENT: 2x evidence: {path}"))
+    claimant = reg["claimant"]
+    assert claimant.integration_mode == fabric.REFERENCE_ONLY
+    assert "shows no improvement" in claimant.notes
+
+
+def test_a_measurement_against_a_provider_that_does_not_cover_it_is_refused(
+        load, bench_repo):
+    path = bench_repo(_measured("claimant", 99.0, "stranger", 1.0))
+    reg = load(_provider("old", ("fetch",)),
+               _provider("claimant", ("fetch",),
+                         notes=f"BENCHMARK_IMPROVEMENT: 99x evidence: {path}"))
+    claimant = reg["claimant"]
+    assert claimant.integration_mode == fabric.REFERENCE_ONLY
+    assert "compares" in claimant.notes and "'old'" in claimant.notes
+
+
+def test_a_measurement_of_the_covering_provider_alone_is_refused(
+        load, bench_repo):
+    path = bench_repo(_measured("old", 99.0, "claimant", 1.0))
+    reg = load(_provider("old", ("fetch",)),
+               _provider("claimant", ("fetch",),
+                         notes=f"BENCHMARK_IMPROVEMENT: 99x evidence: {path}"))
+    assert reg["claimant"].integration_mode == fabric.REFERENCE_ONLY
 
 
 def test_an_unrelated_file_in_the_repository_is_not_evidence(load):
