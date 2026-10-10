@@ -4752,6 +4752,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "A plain list of removed files ('foo.txt and bar.txt to the Recycle Bin') is now one removal claim, and a removal claim needs every file it names shown removed. Failure-claim correlation was already enforced via in_scope; pinned with a test. Repair after the verifier (folded in): Three changes in fri (build run, commit ec30ccbfc)",
         "next_action": "GAPS: The full 4-chunk suite was not run, only the 7 files that import friday.honesty.; Controller: integrated as PARTIAL; a confirm will judge the whole row's acceptance next.; implementer did not claim acceptance met",
     }),
+    ('CHAOS-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Attempt 6 was NOT_RED (red_rc 0): a tests-only commit has base == commit under build_integrate. Added a test checking the committed chaos report agrees with FAULT_MAP and is 9/9 green. Pre-attempt-6 report: hermes_crash mismatch; HEAD: []. Report regenerated, 9/9 green. (build run, commit 97e6bc436)',
+        "next_action": 'GAPS: Real process kills and real network drops are out of scope per the packet; browser crash, network loss and malformed tool output are simulated at the capability port (ScriptedPort), by design.; Regenerating CHAOS_SUITE_REPORT.json produced a byte-identical file; only the .md timestamp line changed. RED holds at any base: main has no report at all (FileNotFoundError) and HEAD~1 carries the stale hermes_crash entry.',
+    }),
 ]
 
 
