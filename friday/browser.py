@@ -586,6 +586,11 @@ class Step:
     detail: str = ""
     handoff: str = ""
     evidence: str = ""
+    #: CUA-004: the backend reported the primitive done, and the page read
+    #: back through the driver afterwards does not show the change. Distinct
+    #: from `ok=False` alone (the backend itself said it failed): this is a
+    #: success claim the state contradicts, and the toolset records it FAILED.
+    contradicted: bool = False
 
     def to_dict(self) -> dict:
         return {"primitive": self.primitive, "target": self.target, "args": self.args,
@@ -593,7 +598,26 @@ class Step:
                 "before": {"url": self.before.url, "title": self.before.title} if self.before else None,
                 "after": {"url": self.after.url, "title": self.after.title} if self.after else None,
                 "ok": self.ok, "detail": self.detail, "handoff": self.handoff,
-                "evidence": self.evidence}
+                "evidence": self.evidence, "contradicted": self.contradicted}
+
+
+def _resolved(path: str) -> str:
+    return str(Path(path).resolve())
+
+
+def _file_signature(path: str) -> tuple[int, int]:
+    info = Path(path).stat()
+    return info.st_size, info.st_mtime_ns
+
+
+def _file_signatures(directory: str) -> dict[str, tuple[int, int]]:
+    """size and mtime of every file directly in `directory` (empty when it is
+    not one), the baseline a download is compared against."""
+    folder = Path(directory)
+    if not folder.is_dir():
+        return {}
+    return {_resolved(str(p)): _file_signature(str(p)) for p in folder.iterdir()
+            if p.is_file()}
 
 
 class Refused(Exception):
@@ -772,9 +796,16 @@ class Browser:
                     step.ok = True
             elif step.primitive == DOWNLOAD:
                 into = str(step.args.get("into", "."))
+                known = _file_signatures(into)
                 saved = await d.download(selector, into, timeout_ms)
-                step.ok = Path(saved).is_file()
-                step.detail = saved
+                # CUA-004: a file at that path before the click is not proof
+                # of this download; it must be new or rewritten.
+                written = Path(saved).is_file()
+                fresh = written and known.get(_resolved(saved)) != _file_signature(saved)
+                step.ok = fresh
+                step.contradicted = written and not fresh
+                step.detail = saved if fresh or not written else (
+                    f"{saved} is unchanged by the download (same size and mtime as before)")
             elif step.primitive == TABS:
                 op = step.args.get("op", "list")
                 if op == "new":
@@ -821,6 +852,7 @@ class Browser:
         """The observation checkpoint: what changed, and does it match the
         expectation the step carried (`expect` in args)?"""
         before, after = step.before, step.after
+        reported_ok = step.ok
         if after is None:
             step.evidence = "no post-observation"
             step.ok = False
@@ -837,6 +869,7 @@ class Browser:
                 got = {"url": after.url, "title": after.title, "text": after.text}.get(key, "")
                 if str(want).lower() not in str(got).lower():
                     step.ok = False
+                    step.contradicted = step.contradicted or reported_ok
                     parts.append(f"expected {key} to contain {want!r}")
                 else:
                     parts.append(f"{key} contains {want!r}")

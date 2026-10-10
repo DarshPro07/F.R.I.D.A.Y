@@ -164,6 +164,9 @@ DECLARED = {
                         "CapabilityRuntime, never by a static call"),
     "friday/tools": (PRODUCTION,
                      "same: resolved by id at call time"),
+    "friday/computer_use_verify": (PRODUCTION,
+                                   "CUA-004: post-state verifier; browser_open, browser_close and "
+                                   "desktop_step confirm a reported success against a fresh read"),
     "friday/platform": (PRODUCTION,
                         "OS-specific implementations chosen at runtime"),
     "friday/computer_use_sessions": (FUTURE,

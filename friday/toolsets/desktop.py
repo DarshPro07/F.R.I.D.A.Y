@@ -35,6 +35,7 @@ import threading
 import time
 from typing import NamedTuple
 
+from friday import computer_use_verify as verify_state
 from friday import confirmation
 from friday import contracts as c
 from friday import policy as policy_module
@@ -157,6 +158,13 @@ def _title(hwnd: int) -> str:
         return ""
 
 
+def _read_window(kind: str, target: str) -> str | None:
+    """The foreground window's title, read from the OS (CUA-004)."""
+    if kind != verify_state.WINDOW or target != "foreground":
+        return None
+    return _title(_foreground()) or None
+
+
 def _gate(run: c.Run, tool_id: str, engine: PolicyEngine) -> c.ActionResult | None:
     """For the AUTO tools here (stopping). CONFIRM uses `_precheck` instead."""
     verdict = engine.decide(tool_id)
@@ -229,6 +237,9 @@ _PLAN_SCHEMA = {
                     "target": {"type": "string"},
                     "text": {"type": "string"},
                     "say": {"type": "string"},
+                    # CUA-004: the window that must be in front once the
+                    # step is done; the step is checked against it.
+                    "expect_window": {"type": "string"},
                 },
                 "required": ["action", "say"],
             },
@@ -605,14 +616,21 @@ def desktop_step(run: c.Run, nonce: str = "", *, monitor: int | None = None,
             started, "the action was sent but the screen did not change",
             output=payload))
 
-    return run.record(c.succeeded(
+    reported = c.succeeded(
         started, output=payload,
         side_effects=(did,),
         verification=c.Verification(
             method="screen_changed_after_action",
             evidence=f"{did}; screen sha256 {before.digest} -> "
                      f"{after.digest if after else 'unknown'}"),
-    ))
+    )
+    # CUA-004: a step that names the window it must leave in front
+    # (`expect_window`) is only a success if the foreground, read again from
+    # the OS, is that window. A step that names none keeps the screen-digest
+    # check above, which is itself an independent read.
+    wanted = {"expect_window": str(step.get("expect_window") or "")}
+    return run.record(verify_state.confirm(
+        reported, verify_state.expectation_for(tool_id, wanted), _read_window))
 
 
 def desktop_stop(run: c.Run, *, engine: PolicyEngine = default_engine) -> c.ActionResult:

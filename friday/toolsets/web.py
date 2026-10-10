@@ -42,6 +42,7 @@ from friday import breaker
 
 from friday import browser_readiness
 
+from friday import computer_use_verify as verify_state
 from friday import contracts as c
 
 from friday import netguard
@@ -697,6 +698,14 @@ async def browser_act(
         return run.record(c.failed(started, str(exc)))
 
     payload = {"step": step.to_dict(), "page": loop.last.to_dict() if loop.last else None}
+    if step.contradicted:
+        # CUA-004: the driver said the primitive worked and the page read
+        # back afterwards does not show it. That is a failed action, not a
+        # partial one, and it counts against this path's reliability.
+        return run.record(c.failed(
+            started, "backend reported success but the page does not show it: "
+                     f"{step.detail or step.evidence}",
+        ).finish(output=_scoped(payload, BROWSER_SCOPE)))
     if not step.ok:
         return run.record(c.partial(started, step.detail or step.evidence,
                                     output=_scoped(payload, BROWSER_SCOPE)))
@@ -783,6 +792,29 @@ async def _page_state(page) -> dict:
     return {"url": page.url, "title": title}
 
 
+def _page_reader(page=None):
+    """CUA-004: an observer for `computer_use_verify` that reads the browser's
+    state afresh (the page's url, title or text as it is now, or whether the
+    session is still running), not what the action reported. `page` is the
+    page the action drove; without one the session's own page is read."""
+    async def read(kind: str, target: str) -> str | None:
+        if kind != verify_state.PAGE:
+            return None
+        if target == "session":
+            return "open" if session.running else None
+        current = page if page is not None else session._page
+        if current is None:
+            return None
+        if target == "url":
+            return current.url
+        if target == "title":
+            return await current.title()
+        if target == "text":
+            return await current.inner_text("body")
+        return None
+    return read
+
+
 async def browser_open(
     run: c.Run, url: str, *, engine: PolicyEngine = default_engine,
     headless: bool | None = None, timeout_ms: int = 30000,
@@ -822,7 +854,7 @@ async def browser_open(
             output=_scoped(state | {"status": status}, BROWSER_SCOPE),
         ))
 
-    return run.record(c.succeeded(
+    reported = c.succeeded(
         started,
         output=_scoped(state | {"status": status}, BROWSER_SCOPE),
         side_effects=("browser session opened",),
@@ -831,7 +863,11 @@ async def browser_open(
             evidence=f"browser at {state['url']} (HTTP {status}), "
                      f"title={state['title'][:60]!r}",
         ),
-    ))
+    )
+    # CUA-004: success stands only if the page, read again, is the one asked for.
+    return run.record(await verify_state.aconfirm(
+        reported, verify_state.expectation_for(tool_id, {"url": url}),
+        _page_reader(page), required=True))
 
 
 async def browser_navigate(
@@ -1147,14 +1183,18 @@ async def browser_close(
                 method="session_state", evidence="no browser session was open"
             ),
         ))
-    return run.record(c.succeeded(
+    reported = c.succeeded(
         started, output=_scoped({"was_running": True}, BROWSER_SCOPE),
         side_effects=("browser session closed",),
         verification=c.Verification(
             method="session_closed",
             evidence="browser and playwright driver stopped; session.running is False",
         ),
-    ))
+    )
+    # CUA-004: a close counts only if the session is gone when read again.
+    return run.record(await verify_state.aconfirm(
+        reported, verify_state.expectation_for(tool_id, {}), _page_reader(),
+        required=True))
 
 
 """
