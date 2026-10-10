@@ -5,7 +5,7 @@ Add new tool modules here as you build them.
 
 from friday import ownership
 from friday.tools import (
-    audio_control, automation_control, brightness_control, document_control,
+    audio_control, automation_control, binary_control, brightness_control, document_control,
     browser_policy_control, brain_control, connector_control,
     executor_control, fabric_control, hardware_control, hermes_control,
     model_gateway_control, adversarial_control, selfdev_control, development_control,
@@ -45,6 +45,7 @@ def register_all_tools(mcp):
     schedule_control.register(mcp)  # PRD v3.1 FR-041/042: scheduled objectives + conditional monitoring
     product_control.register(mcp)  # §13: catalogues in, evidence out
     document_control.register(mcp)  # the files files_read cannot open
+    binary_control.register(mcp)  # BIN-002: read an EXE or DLL, never run it
     hardware_control.register(mcp)  # batch 2A: what this machine is
     window_control.register(mcp)  # batch 2B: individual windows
     audio_control.register(mcp)  # batch 2C: audio sessions

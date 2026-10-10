@@ -158,6 +158,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "research": ("web_crawl", "web_deep_research"),
     "documents": ("documents_extract", "documents_inspect"),
+    "binary": ("binary_analyze",),
     "hardware": ("system_battery", "system_disks", "system_displays", "system_network"),
     "windows": (
         "windows_list", "windows_focus", "windows_minimize", "windows_restore",
@@ -256,6 +257,7 @@ GROUP_PURPOSE: dict[str, str] = {
     'research': 'read whole pages, compare sources, research a topic deeply',
     'screen': 'point at where to click, or take the mouse and do it (asks first)',
     'documents': 'read a pdf, word document, spreadsheet, slide deck or zip',
+    'binary': 'inspect an exe or dll (architecture, imports, exports) without running it',
     'hardware': 'battery, disks and free space, screens, network adapters',
     'windows': 'what windows are open, and moving, snapping or minimising one',
     'audio': 'what is making sound, and how loud one app or the whole machine is',

@@ -463,6 +463,26 @@ _ALL = (
         ),
     ),
     Capability(
+        id='binary_analyze',
+        description='Architecture, sections, imports, exports, entry point and hashes of an EXE or DLL, read from its bytes without running it.',
+        execution_scope='user_device',
+        side_effect='read',
+        requires_edge=True,
+        operation_kind='READ',
+        intent_examples=(
+            'what does this exe import',
+            'is this dll 32 or 64 bit',
+            'list the sections of this executable',
+        ),
+        negative_examples=(
+            'run this exe',
+            'open this program',
+            'what does this pdf say',
+        ),
+        verification_scope='LOCAL_REAL',
+        handles_content=('.exe', '.dll'),
+    ),
+    Capability(
         id='system_battery',
         description='Battery charge, whether it is charging, and how long is left.',
         execution_scope='user_device',

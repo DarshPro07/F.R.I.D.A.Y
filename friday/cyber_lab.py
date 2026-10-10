@@ -129,6 +129,32 @@ def execute(provider: LabProvider, auth: T.SecurityAuthorization | None,
     return LabEvidence(**rec)
 
 
+def record_offline(provider: str, host: str, action: str, output: dict, *,
+                   intensity: str = T.PASSIVE, allowed: bool = True, reason: str = "",
+                   now: datetime | None = None) -> LabEvidence:
+    """Evidence for work done at the offline tier: bytes already on this machine.
+
+    `execute` gates a request against a `SecurityAuthorization` because a
+    target host has to be in someone's scope. An offline run has no target and
+    no network, so there is no scope to check; what the tier still fixes is the
+    intensity, and anything above passive is recorded as refused. The record is
+    the same hash-bound `LabEvidence`, so `verify_evidence` accepts it. `host`
+    is the subject (a file path), not an address.
+    """
+    permitted = _ORDER.get(intensity, 99) <= _ORDER[TIER_MAX_INTENSITY[TIER_OFFLINE]]
+    if allowed and not permitted:
+        allowed = False
+        reason = f"intensity {intensity} exceeds what sandbox tier {TIER_OFFLINE} permits"
+    rec = LabEvidence(
+        provider=provider, tier=TIER_OFFLINE, host=host, action=action,
+        intensity=intensity, allowed=allowed,
+        reason=reason or "offline analysis of a local file: no target, no network",
+        approval_id="", at=(now or datetime.now(timezone.utc)).isoformat(timespec="seconds"),
+        output=output if allowed else {},
+    ).to_dict()
+    rec["digest"] = _digest(rec)
+    return LabEvidence(**rec)
+
 def verify_evidence(rec: LabEvidence) -> bool:
     return rec.digest == _digest(rec.to_dict())
 

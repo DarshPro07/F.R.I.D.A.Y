@@ -198,6 +198,7 @@ _OPERATION_BY_SUFFIX = {
     'read': READ,
     'fetch': READ,
     'inspect': READ,
+    'analyze': READ,
     'recap': READ,
     'context': READ,
     'explain': READ,

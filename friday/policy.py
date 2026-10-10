@@ -473,6 +473,7 @@ TOOL_CATEGORIES: dict[str, str] = {
     'product.status': READ_LOCAL_SAFE,
     'documents.extract': READ_LOCAL_SAFE,
     'documents.inspect': READ_LOCAL_SAFE,
+    'binary.analyze': READ_LOCAL_SAFE,
     'product.result': READ_LOCAL_SAFE,
     'automations.create': REMINDER,
     'automations.delete': REMINDER,
@@ -685,7 +686,7 @@ COMPOSITION_NEUTRAL = frozenset({
 #: read the person's own content, so they count as private reads.
 PRIVATE_READ_TOOLS = frozenset({
     "files.read", "files.search", "files.list", "files.info",
-    "documents.extract", "documents.inspect", "clipboard.read",
+    "documents.extract", "documents.inspect", "binary.analyze", "clipboard.read",
     "brain_recall", "brain_entity", "reminders.list", "windows.list",
     "identity.profiles", "browser.profiles", "browser_profiles",
 })
