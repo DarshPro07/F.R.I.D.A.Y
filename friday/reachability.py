@@ -217,6 +217,11 @@ DECLARED = {
                              "Markdown export; the MCP tools and the "
                              "objective-engine writers that reach it are a "
                              "later slice"),
+    "friday/research_routing": (FUTURE,
+                                "RSCH-004: routes a research run's outputs to the "
+                                "research store, ledger, Project Brain and gated "
+                                "memory; the research tool's call is the next "
+                                "wiring step, run by tests/test_research_routing.py"),
     "friday/forge": (FUTURE, "skill authoring, frozen by the product rescue"),
     "friday/dry_run": (FUTURE,
                        "SIDE-002: dry-run stage and blast-radius escalation; the "
