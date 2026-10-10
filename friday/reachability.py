@@ -198,6 +198,11 @@ DECLARED = {
                           "S1-001: the System One decision gateway and its "
                           "mock backend; a Laya/Jev backend and a live caller "
                           "are later slices, run by tests/test_system_one.py"),
+    "friday/system_one_calibration": (FUTURE,
+                                      "S1-002: empirical confidence calibration and "
+                                      "System Two escalation over System One; a live "
+                                      "caller and durable outcome records are later "
+                                      "slices, run by tests/test_system_one_calibration.py"),
     "friday/project_brain": (FUTURE,
                              "BRAIN-001: the Project Brain's storage and "
                              "Markdown export; the MCP tools and the "
