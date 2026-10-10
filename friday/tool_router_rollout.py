@@ -19,7 +19,9 @@ Promotion from shadow to staged is an owner decision backed by evidence
 (docs/plans/ctx-002/PLAN.md); `Metrics` carries the numbers it needs. The
 evidence is an arena report (friday/arena.py, kind capability_path, candidate
 `staged_router`) named by FRIDAY_TOOL_ROUTER_REPORT: `staged` without a passing
-one runs as `shadow`. A record holds a hash of the request, never its text.
+one runs as `shadow`. `Rollout.promotion_report()` makes that report from the
+shadow records, so the owner's step is to run it and name the report id it returns.
+A record holds a hash of the request, never its text.
 """
 from __future__ import annotations
 
@@ -47,6 +49,10 @@ MAX_PENDING = 8         # shadow evaluations queued before more are dropped, nev
 BUILD_RETRY_S = 300.0   # after a failed build, serve legacy this long before building again
 RECORDS_KEPT = 500
 LATENCIES_KEPT = 2000
+
+CANDIDATE = "staged_router"      # the capability_path arena candidate that `staged` is promoted as
+MIN_CASES = 10                   # requests with a known right tool before a report can pass (assumed)
+SUCCESS_AT_1, SUCCESS_AT_3 = 0.90, 0.97    # docs/plans/ctx-002/PLAN.md: the bar for promotion to staged
 
 
 def _number(env: Mapping[str, str], key: str, default, kind, low, high):
@@ -87,7 +93,7 @@ class Config:
             mode = LEGACY
         if mode == STAGED:
             try:
-                arena.promote(arena.ArenaKind.CAPABILITY_PATH, "staged_router",
+                arena.promote(arena.ArenaKind.CAPABILITY_PATH, CANDIDATE,
                               report_id=(env.get("FRIDAY_TOOL_ROUTER_REPORT") or "").strip(),
                               store=store)
             except arena.PromotionRefused as exc:
@@ -324,6 +330,47 @@ class Rollout:
             self._chooser_used += 1
         self._count(route)
         self._record(sha, turn, SHADOW, route, latency_ms, legacy=legacy)
+
+    # -- promotion ----------------------------------------------------------
+
+    def promotion_report(self, store: "arena.ArenaStore | None" = None, *,
+                         provenance: Mapping[str, object] | None = None) -> arena.ArenaReport:
+        """Score the staged router on this process's records, store the capability_path
+        report and return it; its `report_id` is what FRIDAY_TOOL_ROUTER_REPORT names.
+
+        A case is a route record whose request was followed, in the same turn, by a tool
+        that ran successfully (the `observed` event). The router is right at 1 when that
+        tool led its answer and at 3 when it was among the first three. An abstain or a
+        fallback is an answer legacy would have given, so it is a miss."""
+        records = list(self.records)
+        ran: dict[tuple, set[str]] = {}
+        for rec in records:
+            if rec["event"] == "observed":
+                ran.setdefault((rec["query_sha"], rec["turn"]), set()).add(rec["tool"])
+        cases = [(rec, ran[(rec["query_sha"], rec["turn"])]) for rec in records
+                 if rec["event"] == "route" and (rec["query_sha"], rec["turn"]) in ran]
+        hit1 = hit3 = 0
+        for rec, tools in cases:
+            if rec["fallback"] or rec["decision"] == tool_router.ABSTAIN:
+                continue
+            ranked = list(rec["staged_top"])
+            if rec["staged_choice"]:                 # first, as `_staged_search` orders its answer
+                ranked = [rec["staged_choice"], *(n for n in ranked if n != rec["staged_choice"])]
+            hit1 += bool(ranked) and ranked[0] in tools
+            hit3 += bool(tools.intersection(ranked[:3]))
+        latency = sorted(rec["latency_ms"] for rec, _ in cases)
+        p95 = latency[max(0, math.ceil(0.95 * len(latency)) - 1)] if latency else 0.0
+        n = len(cases)
+        at1, at3 = (hit1 / n, hit3 / n) if n else (0.0, 0.0)
+        score = arena.Score(
+            gates={"minimum_cases": n >= MIN_CASES, "success_at_1": at1 >= SUCCESS_AT_1,
+                   "success_at_3": at3 >= SUCCESS_AT_3,
+                   "p95_latency": p95 <= self.config.timeout_s * 1000},
+            cases=n, score=at1,
+            metrics={"success_at_1": at1, "success_at_3": at3, "p95_latency_ms": p95})
+        report = arena.build_report(arena.ArenaKind.CAPABILITY_PATH, {CANDIDATE: score},
+                                    provenance=provenance)
+        return (arena.default_store() if store is None else store).record(report)
 
     # -- shared -------------------------------------------------------------
 

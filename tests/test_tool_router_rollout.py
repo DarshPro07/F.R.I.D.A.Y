@@ -146,6 +146,107 @@ def test_legacy_and_shadow_need_no_arena_report(store):
         assert RO.Config.from_env({"FRIDAY_TOOL_ROUTER_MODE": mode}, store=store).mode == mode
 
 
+# -- the arena report is made from the shadow records (EVAL-004) -------------
+
+
+def _labelled(rollout, n, *, ran="music_search", choice="music_search",
+              top=("music_search", "music_play_mood", "files_read"), decision=tool_router.TOOL,
+              latency_ms=40.0, fallback=None):
+    """One route record plus the `observed` event of the tool that then ran, as the rollout logs them."""
+    sha = RO.query_id(f"request {n}")
+    rollout.records.append({
+        "event": "route", "mode": RO.SHADOW, "query_sha": sha, "turn": n, "staged_choice": choice,
+        "staged_top": list(top), "decision": decision, "latency_ms": latency_ms, "fallback": fallback})
+    if ran:
+        rollout.records.append({"event": "observed", "query_sha": sha, "turn": n, "tool": ran,
+                                "shortlisted": True})
+
+
+def _passing_rollout(cases=12):
+    rollout, _ = make(RO.SHADOW)
+    for n in range(cases):
+        _labelled(rollout, n)
+    return rollout
+
+
+def test_shadow_evidence_that_clears_the_targets_makes_a_report_that_promotes_staged(default_store):
+    report = _passing_rollout().promotion_report(provenance=PROVENANCE)
+    result = report.result("staged_router")
+    assert report.kind is arena.ArenaKind.CAPABILITY_PATH
+    assert result.passed and result.cases == 12
+    assert result.metrics["success_at_1"] == 1.0 and result.metrics["success_at_3"] == 1.0
+    assert default_store.latest(arena.ArenaKind.CAPABILITY_PATH, "staged_router").report_id == report.report_id
+    env = {"FRIDAY_TOOL_ROUTER_MODE": "staged", "FRIDAY_TOOL_ROUTER_REPORT": report.report_id}
+    assert RO.Config.from_env(env).mode == RO.STAGED
+
+
+def test_too_few_labelled_cases_cannot_promote(default_store):
+    report = _passing_rollout(cases=9).promotion_report(provenance=PROVENANCE)
+    assert report.result("staged_router").failed_gates == ("minimum_cases",)
+    env = {"FRIDAY_TOOL_ROUTER_MODE": "staged", "FRIDAY_TOOL_ROUTER_REPORT": report.report_id}
+    assert RO.Config.from_env(env).mode == RO.SHADOW
+
+
+def test_a_route_with_no_tool_that_then_ran_is_not_a_case(default_store):
+    rollout = _passing_rollout(cases=10)
+    for n in range(100, 105):
+        _labelled(rollout, n, ran=None, choice="files_info", top=("files_info",))
+    result = rollout.promotion_report(provenance=PROVENANCE).result("staged_router")
+    assert result.cases == 10 and result.passed
+
+
+def test_the_tool_that_ran_must_lead_the_staged_answer_for_success_at_1(default_store):
+    rollout, _ = make(RO.SHADOW)
+    for n in range(10):                      # the right tool is always shortlisted, but second
+        _labelled(rollout, n, ran="music_play_mood")
+    result = rollout.promotion_report(provenance=PROVENANCE).result("staged_router")
+    assert result.failed_gates == ("success_at_1",)
+    assert result.metrics["success_at_1"] == 0.0 and result.metrics["success_at_3"] == 1.0
+
+
+def test_one_miss_in_ten_fails_success_at_3_and_is_never_averaged_away(default_store):
+    rollout = _passing_rollout(cases=9)
+    _labelled(rollout, 50, ran="files_info", choice="music_search")      # not in the top three
+    result = rollout.promotion_report(provenance=PROVENANCE).result("staged_router")
+    assert result.failed_gates == ("success_at_3",)
+    assert result.metrics["success_at_1"] == 0.9 and result.metrics["success_at_3"] == 0.9
+
+
+@pytest.mark.parametrize("miss", [{"decision": tool_router.ABSTAIN}, {"fallback": "timeout"}],
+                         ids=["abstain", "fell-back-to-legacy"])
+def test_an_answer_that_would_have_gone_to_legacy_is_a_miss(default_store, miss):
+    rollout = _passing_rollout(cases=9)
+    _labelled(rollout, 60, **miss)           # the tool that ran is in staged_top, but legacy would have answered
+    result = rollout.promotion_report(provenance=PROVENANCE).result("staged_router")
+    assert "success_at_3" in result.failed_gates and result.cases == 10
+
+
+def test_a_p95_latency_over_the_staged_deadline_fails(default_store):
+    rollout, _ = make(RO.SHADOW, timeout_s=0.5)
+    for n in range(10):
+        _labelled(rollout, n, latency_ms=900.0)
+    result = rollout.promotion_report(provenance=PROVENANCE).result("staged_router")
+    assert result.failed_gates == ("p95_latency",)
+    assert result.metrics["p95_latency_ms"] == 900.0
+
+
+def test_an_empty_shadow_log_makes_a_report_that_does_not_promote(default_store):
+    rollout, _ = make(RO.SHADOW)
+    report = rollout.promotion_report(provenance=PROVENANCE)
+    assert not report.result("staged_router").passed and report.winner == ""
+
+
+def test_a_real_shadow_run_pairs_each_search_with_the_tool_that_then_ran(default_store):
+    rollout, _ = make(RO.SHADOW, thresholds=EAGER)
+    for n in range(10):
+        rollout.search("find songs by name", 3)
+        rollout.drain()
+        rollout.observe("music_search")
+        rollout.new_turn()
+    result = rollout.promotion_report(provenance=PROVENANCE).result("staged_router")
+    assert result.cases == 10 and result.metrics["success_at_3"] == 1.0
+
+
 # -- legacy -----------------------------------------------------------------
 
 
