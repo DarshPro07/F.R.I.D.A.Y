@@ -1098,6 +1098,24 @@ CREATE TABLE IF NOT EXISTS ultracode_results (
     created_at    TEXT NOT NULL,
     PRIMARY KEY (workspace_id, result_key)
 );
+
+-- PRD v7 PRO-001: the Opportunities Inbox. A deterministic detector over rows
+-- the engine already writes raises one row per distinct fact; the unique key
+-- is what makes re-scanning the same facts free. `evidence_key` names the
+-- fact (e.g. the first run of a failure streak), so a dismissed row stays
+-- dismissed until something new happens.
+CREATE TABLE IF NOT EXISTS opportunities (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id  TEXT NOT NULL DEFAULT 'default',
+    kind          TEXT NOT NULL,
+    subject       TEXT NOT NULL,
+    evidence_key  TEXT NOT NULL,
+    detail        TEXT NOT NULL DEFAULT '{}',
+    status        TEXT NOT NULL DEFAULT 'open',
+    created_at    TEXT NOT NULL,
+    resolved_at   TEXT,
+    UNIQUE (workspace_id, kind, subject, evidence_key)
+);
 """
 
 
@@ -2279,6 +2297,51 @@ class Store:
                 "INSERT OR REPLACE INTO ultracode_results "
                 "(workspace_id, result_key, result, created_at) VALUES (?,?,?,?)",
                 (workspace_id, key, json.dumps(result, sort_keys=True), now_iso()))
+
+    # -- opportunities inbox (PRO-001) --------------------------------------
+
+    OPPORTUNITY_RESOLUTIONS = ("resolved", "dismissed")
+
+    def opportunity_raise(self, workspace_id: str, kind: str, subject: str,
+                          evidence_key: str, detail: dict) -> dict | None:
+        """Record one opportunity. Returns the new row, or None when this exact
+        fact is already in the inbox (open or not): re-scanning is free."""
+        with self._tx() as conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO opportunities "
+                "(workspace_id, kind, subject, evidence_key, detail, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (workspace_id, kind, subject, evidence_key,
+                 json.dumps(detail, sort_keys=True), now_iso()))
+            if not cur.rowcount:
+                return None
+            row = conn.execute("SELECT * FROM opportunities WHERE id=?",
+                               (cur.lastrowid,)).fetchone()
+        return self._opportunity(row)
+
+    @staticmethod
+    def _opportunity(row) -> dict:
+        got = dict(row)
+        got["detail"] = json.loads(got["detail"])
+        return got
+
+    def opportunities(self, workspace_id: str, status: str = "open") -> list[dict]:
+        return [self._opportunity(r) for r in self._conn.execute(
+            "SELECT * FROM opportunities WHERE workspace_id=? AND status=? "
+            "ORDER BY id", (workspace_id, status))]
+
+    def opportunity_resolve(self, workspace_id: str, opportunity_id: int,
+                            status: str) -> bool:
+        """Close an open opportunity of this workspace. False when there is
+        none such - another workspace's row is not visible here."""
+        if status not in self.OPPORTUNITY_RESOLUTIONS:
+            raise ValueError(f"unknown resolution {status!r}; "
+                             f"known: {list(self.OPPORTUNITY_RESOLUTIONS)}")
+        with self._tx() as conn:
+            return conn.execute(
+                "UPDATE opportunities SET status=?, resolved_at=? "
+                "WHERE id=? AND workspace_id=? AND status='open'",
+                (status, now_iso(), opportunity_id, workspace_id)).rowcount > 0
 
     # -- contacts -----------------------------------------------------------
 

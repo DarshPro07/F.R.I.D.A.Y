@@ -213,6 +213,10 @@ DECLARED = {
                                       "System Two escalation over System One; a live "
                                       "caller and durable outcome records are later "
                                       "slices, run by tests/test_system_one_calibration.py"),
+    "friday/opportunities": (FUTURE,
+                             "PRO-001: deterministic anomaly detectors over automation runs "
+                             "feeding the Opportunities Inbox; a scheduled caller and an "
+                             "inbox tool are later slices, run by tests/test_opportunities.py"),
     "friday/project_brain": (FUTURE,
                              "BRAIN-001: the Project Brain's storage and "
                              "Markdown export; the MCP tools and the "
