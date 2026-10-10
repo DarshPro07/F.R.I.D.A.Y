@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import os
+import posixpath
 import signal
 import subprocess
 import sys
@@ -123,6 +124,17 @@ class WorkPacket:
         if not self.checks or not all(argv for argv in self.checks):
             raise ValueError("a work packet needs at least one check "
                              "(an acceptance test as an argv list)")
+        editable = [arg for argv in self.checks for arg in argv
+                    if self._names_in_scope(arg)]
+        if editable:
+            raise ValueError("a check must live outside allowed_paths, or the runtime "
+                             "could edit the test that judges it: " + ", ".join(editable))
+
+    def _names_in_scope(self, arg: str) -> bool:
+        """Whether a check argument is a path the runtime may write: a pytest
+        node id is cut to its file, and `..` is resolved before the scope test."""
+        text = posixpath.normpath(arg.split("::", 1)[0].replace("\\", "/"))
+        return self.in_scope(text)
 
     def in_scope(self, path: str) -> bool:
         """Whether `path` is a listed file or under a listed directory."""

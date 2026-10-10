@@ -60,6 +60,26 @@ def test_a_packet_without_a_goal_or_a_check_is_refused():
         _packet(checks=((),))
 
 
+@pytest.mark.parametrize("argv", [
+    (sys.executable, "-m", "pytest", "tests/test_uploader.py"),
+    (sys.executable, "-m", "pytest", "tests/test_uploader.py::test_ttl"),
+    (sys.executable, "-m", "pytest", "tests\\sub\\test_uploader.py"),
+    (sys.executable, "-m", "pytest", "friday/../tests/test_uploader.py"),
+    (sys.executable, "friday/uploader.py")])
+def test_a_check_the_runtime_could_edit_is_refused(argv):
+    with pytest.raises(ValueError, match="outside allowed_paths"):
+        _packet(checks=(CHECK, argv))
+
+
+@pytest.mark.parametrize("argv", [
+    (sys.executable, "-m", "pytest", "checks/test_uploader.py::test_ttl"),
+    (sys.executable, "-m", "pytest", "tests_extra/test_uploader.py"),
+    (sys.executable, "-m", "pytest", "../elsewhere/test_uploader.py"),
+    (sys.executable, "-c", "import pathlib; pathlib.Path('friday/uploader.py').read_text()")])
+def test_a_check_outside_the_scope_is_accepted(argv):
+    assert _packet(checks=(argv,)).checks == (argv,)
+
+
 @pytest.mark.parametrize("usd,seconds", [(-1.0, 60.0), (0.0, 0.0), (0.0, float("inf")),
                                          (float("nan"), 60.0)])
 def test_a_budget_must_be_finite_and_non_negative(usd, seconds):
