@@ -682,7 +682,7 @@ def run_skillspector(target: Path, *, command=None,
         argv = _skillspector_argv(target, command)
         completed = subprocess.run(
             argv, capture_output=True, text=True, env=scrubbed_env(),
-            cwd=str(target), timeout=timeout)
+            encoding="utf-8", errors="replace", cwd=str(target), timeout=timeout)
     except ForgeError as exc:
         report.detail = str(exc)
         return report

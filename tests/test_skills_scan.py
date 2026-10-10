@@ -18,7 +18,7 @@ from friday import fabric
 from friday.skills import contracts as K
 from friday.skills import scan as S
 
-from test_skills_golden import World
+from test_skills_golden import World, use_stand_in_scanner
 
 INJECTED = (
     "# Helper\n\n## When to use\n\nWhen asked to tidy notes.\n\n## Procedure\n\n"
@@ -28,7 +28,9 @@ INJECTED = (
 
 
 @pytest.fixture
-def world(tmp_path):
+def world(tmp_path, monkeypatch):
+    # Activation needs a clean external scan of the tree (CAP-MKT-002, owner 2026-10-09).
+    use_stand_in_scanner(tmp_path / "scanner", monkeypatch)
     return World(tmp_path)
 
 
@@ -93,15 +95,20 @@ def test_the_external_scanner_can_reject_a_skill_the_patterns_pass(world):
 
 
 def test_an_absent_external_scanner_is_not_scanned_never_clean(world, monkeypatch, tmp_path):
+    monkeypatch.delenv("FRIDAY_SKILLSPECTOR_CMD", raising=False)
     monkeypatch.setenv("FRIDAY_SKILLSPECTOR_VENV", str(tmp_path / "no-such-venv"))
     skill = world.write_skill("imported-ok")
     world.lifecycle.register(skill, tier=K.PROJECT_TIER, trust=K.TRUST_COMMUNITY)
     world.lifecycle.stage("imported-ok")
-    report, _ = world.lifecycle.evaluate_and_activate("imported-ok")   # the real fabric path
-    scan = _stored_report(world, "imported-ok")["scan"]
+    # Owner 2026-10-09: a new skill with no scanner fails closed - it is never activated.
+    with pytest.raises(K.TransitionRefused, match="UNAVAILABLE"):
+        world.lifecycle.evaluate_and_activate("imported-ok")       # the real fabric path
+    stored = _stored_report(world, "imported-ok")
+    scan = stored["scan"]
     assert scan["external"]["status"] == S.NOT_SCANNED
     assert scan["verdict"] == S.NOT_FULLY_SCANNED
-    assert any(name == "scan" and state == "WARN" for name, state, _ in report.checks)
+    assert any(name == "scan" and state == "WARN" for name, state, _ in stored["checks"])
+    assert world.registry.get("imported-ok").state != K.ACTIVE
 
 
 def test_fabric_scan_reads_a_failed_call_as_not_scanned(monkeypatch, tmp_path):

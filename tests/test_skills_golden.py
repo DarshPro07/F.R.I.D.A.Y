@@ -20,6 +20,7 @@ subprocess through the evaluator.
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -95,8 +96,40 @@ class World:
         return record
 
 
+#: Stands in for `skillspector scan <dir> --no-llm --format json` (v2.12.0
+#: report shape: issues, risk_assessment, metadata). It flags a read of the
+#: cloud metadata endpoint, which lint does not look for, and calls everything
+#: else clean; the lifecycle runs it through the real subprocess path, as it
+#: would the installed CLI.
+SKILLSPECTOR_STAND_IN = '''
+import json, pathlib, sys
+
+target = pathlib.Path(sys.argv[1])
+text = "".join(p.read_text(encoding="utf-8").lower()
+               for p in sorted(target.rglob("*")) if p.is_file())
+issues = []
+if "169.254.169.254" in text:
+    issues.append({"id": "EXFILTRATION", "category": "exfiltration", "severity": "HIGH",
+                   "confidence": 0.9, "explanation": "metadata endpoint",
+                   "location": {"file": "helper.sh", "start_line": 2}})
+risk = ({"score": 70, "severity": "HIGH", "recommendation": "DO_NOT_INSTALL"} if issues
+        else {"score": 0, "severity": "LOW", "recommendation": "SAFE"})
+print(json.dumps({"risk_assessment": risk, "issues": issues,
+                  "metadata": {"skillspector_version": "9.9-test"}}))
+sys.exit(1 if issues else 0)
+'''
+
+
+def use_stand_in_scanner(tmp_path: Path, monkeypatch) -> None:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    script = tmp_path / "skillspector_stand_in.py"
+    script.write_text(SKILLSPECTOR_STAND_IN, encoding="utf-8")
+    monkeypatch.setenv("FRIDAY_SKILLSPECTOR_CMD", json.dumps([sys.executable, "-I", str(script), "{target}"]))
+
+
 @pytest.fixture
-def world(tmp_path):
+def world(tmp_path, monkeypatch):
+    use_stand_in_scanner(tmp_path / "scanner", monkeypatch)
     return World(tmp_path)
 
 

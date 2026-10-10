@@ -22,6 +22,7 @@ a flag.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from friday.skills import contracts as K
@@ -35,6 +36,26 @@ QUALITY_FLOOR = 0.4
 
 #: States from which `activate` may proceed once evidence is on record.
 ACTIVATABLE = (K.STAGED, K.TESTING, K.NEEDS_REVALIDATION, K.DEGRADED, K.DISABLED, K.STALE, K.BROKEN)
+
+#: What "clean" means for the SkillSpector gate: no high or critical finding,
+#: a verdict below DO_NOT_INSTALL, and complete coverage (friday.forge reads
+#: all three; anything else is not CLEAN). Bump it when that rule changes so
+#: a report kept under the old rule is scanned again instead of reused.
+SCAN_POLICY_VERSION = 1
+
+
+def default_scan(directory: Path):
+    """The SkillSpector scan of a skill directory: the dedicated pinned
+    environment's strict command when it exists, else forge's own command
+    (FRIDAY_SKILLSPECTOR_CMD or `skillspector` on PATH, UNAVAILABLE when
+    neither is there). Resolved per call, so a repaired install is picked up."""
+    from friday import forge
+    from friday.fabric_adapters import skillspector as ss
+
+    exe = None if os.environ.get(forge.SKILLSPECTOR_ENV) else ss.executable()
+    if exe is None:
+        return forge.scan_import(directory)
+    return forge.scan_import(directory, command=[str(exe), *ss.STRICT_ARGS], timeout=ss.SCAN_TIMEOUT)
 
 
 def record_from_skill(skill: F.SkillFiles, *, tier: str, trust: str, scope: str | None = None,
@@ -77,7 +98,7 @@ def record_from_skill(skill: F.SkillFiles, *, tier: str, trust: str, scope: str 
 
 class SkillLifecycle:
     def __init__(self, registry, *, snapshots_dir: Path | None = None,
-                 evaluator: SkillEvaluator | None = None, graph=None) -> None:
+                 evaluator: SkillEvaluator | None = None, graph=None, scanner=None) -> None:
         if snapshots_dir is None:
             from friday.config import SKILLS_DIR
 
@@ -86,6 +107,8 @@ class SkillLifecycle:
         self.snapshots_dir = Path(snapshots_dir)
         self.evaluator = evaluator or SkillEvaluator(registry)
         self.graph = graph
+        #: Path -> forge.ScanReport. None means `default_scan`.
+        self.scanner = scanner
 
     # -- registration -------------------------------------------------------------
 
@@ -169,12 +192,13 @@ class SkillLifecycle:
             raise K.TransitionRefused(f"{name}: cannot activate from {record.state}")
         record.version = report.version or record.version
         record.content_hash = current_hash
+        self._require_clean_scan(record, skill, actor)
         if self.graph is not None:
             # The codebase fingerprint: which repository, at which commit,
             # this version was verified against. Empty outside git.
             record.codebase_id, record.codebase_commit = self.graph.identity()
         self.registry.upsert(record)
-        record = self.registry.transition(name, K.ACTIVE, actor=actor, reason=f"evaluation {report.nonce} passed")
+        record = self.registry.transition(name, K.ACTIVE, actor=actor, reason=f"evaluation {report.nonce} passed; skillspector scan clean")
         snapshot = F.snapshot(skill, self.snapshots_dir / name / record.version)
         self.registry.record_version(name, record.version, current_hash, snapshot_path=str(snapshot),
                                      evaluation=report)
@@ -182,6 +206,59 @@ class SkillLifecycle:
             self.graph.index(skill)
         self.evaluator.rescore(name)
         return self.registry.get(name)
+
+    def _require_clean_scan(self, record: K.SkillRecord, skill: F.SkillFiles, actor: str) -> None:
+        """Every skill, whatever its trust, needs a SkillSpector scan that is
+        CLEAN for exactly the tree on disk. Missing, failing, raising,
+        incomplete or over-threshold scanners all refuse; none is approval.
+        The scan is kept beside the version snapshot whatever the outcome; a
+        condemning finding quarantines the skill where the lifecycle allows
+        it. A kept CLEAN report for this very tree, from the pinned scanner
+        under the current policy, is reused, so an unchanged verified skill
+        does not depend on the scanner being installed."""
+        from friday import forge
+
+        before = forge.tree_digest(skill.dir)
+        kept = self.snapshots_dir / record.name / f"{record.version}.skillspector.json"
+        if self._kept_scan_still_holds(kept, before):
+            return
+        try:
+            report = (self.scanner or default_scan)(skill.dir)
+        except Exception as exc:  # a crashing scanner is a refusal with its cause, never a pass
+            report = forge.ScanReport(status=forge.SCAN_ERROR, detail=f"the scanner raised {exc!r}")
+        scan = report.to_dict()
+        scan["policy_version"] = SCAN_POLICY_VERSION
+        kept.parent.mkdir(parents=True, exist_ok=True)
+        kept.write_text(json.dumps(scan, indent=2, sort_keys=True), encoding="utf-8")
+        if scan.get("target_sha256") == before and forge.scan_admits(scan, skill.dir):
+            return
+        status = scan.get("status")
+        if status == forge.SCAN_BLOCKED:
+            why = f"{scan.get('blocking', 0)} blocking finding(s)"
+        elif status == forge.SCAN_CLEAN:
+            why = "the tree changed during the scan"
+        else:
+            why = scan.get("detail") or "not scanned"
+        reason = f"skillspector scan {status}: {why}"
+        if status == forge.SCAN_BLOCKED and K.QUARANTINED in K.TRANSITIONS.get(record.state, ()):
+            self.registry.transition(record.name, K.QUARANTINED, actor=actor, reason=reason)
+        else:
+            self.registry.note(record.name, reason, actor=actor)
+        raise K.TransitionRefused(f"{record.name}: {reason}")
+
+    @staticmethod
+    def _kept_scan_still_holds(kept: Path, tree_digest: str) -> bool:
+        """The kept report is CLEAN for this tree, under this policy, from the pinned scanner."""
+        from friday import forge
+
+        try:
+            scan = json.loads(kept.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return (isinstance(scan, dict) and scan.get("status") == forge.SCAN_CLEAN
+                and scan.get("target_sha256") == tree_digest
+                and scan.get("policy_version") == SCAN_POLICY_VERSION
+                and str(scan.get("scanner_version") or "").lstrip("v") == forge.SKILLSPECTOR_RELEASE.lstrip("v"))
 
     def evaluate_and_activate(self, name: str, *, run_tests: bool = True, actor: str = "friday") -> tuple[K.EvaluationReport, K.SkillRecord]:
         record = self._require(name)

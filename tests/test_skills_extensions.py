@@ -21,6 +21,7 @@ from friday.skills import plugins as P
 from friday.skills.evaluator import SkillEvaluator
 from friday.skills.lifecycle import SkillLifecycle
 from friday.skills.registry import SkillRegistry
+from test_skills_golden import use_stand_in_scanner
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +122,8 @@ def test_git_identity_is_empty_without_git_and_filled_inside_a_repo(tmp_path, mo
     assert identity.replace("/", "").endswith("repo")
 
 
-def test_activation_stamps_the_codebase_fingerprint(tmp_path):
+def test_activation_stamps_the_codebase_fingerprint(tmp_path, monkeypatch):
+    use_stand_in_scanner(tmp_path / "scanner", monkeypatch)
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(["init", "-q"], repo)
@@ -160,7 +162,8 @@ def _write_builtin(root: Path, version: str, extra_steps=(), tests=("pytest test
     return skill
 
 
-def test_builtin_adoption_and_upgrade_replace_untouched_and_merge_edited(tmp_path):
+def test_builtin_adoption_and_upgrade_replace_untouched_and_merge_edited(tmp_path, monkeypatch):
+    use_stand_in_scanner(tmp_path / "scanner", monkeypatch)
     roots = {K.BUILT_IN: tmp_path / "builtin", K.LOCAL_USER: tmp_path / "user", K.PROJECT_TIER: tmp_path / "proj"}
     for path in roots.values():
         path.mkdir()
