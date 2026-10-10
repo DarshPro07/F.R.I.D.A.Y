@@ -255,6 +255,10 @@ DECLARED = {
                              "the MCP inbox tool that lists and resolves rows is a later "
                              "slice, run by tests/test_opportunities.py, "
                              "tests/test_proactive_tick.py and tests/test_proactive_event.py"),
+    "friday/agent_registry": (FUTURE,
+                              "AGENT-002: registered agents, instances and teams over"
+                              " the ledger; the composer and team views that call it"
+                              " are later slices, run by tests/test_agent_registry.py"),
     "friday/project_brain": (FUTURE,
                              "BRAIN-001: the Project Brain's storage and "
                              "Markdown export; the MCP tools and the "

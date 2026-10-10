@@ -314,6 +314,47 @@ BEGIN SELECT RAISE(ABORT, 'agent_events is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS agent_events_no_delete BEFORE DELETE ON agent_events
 BEGIN SELECT RAISE(ABORT, 'agent_events is append-only'); END;
 
+-- AGENT-002: registered agents (roles), their instances and teams. An
+-- instance's id is its agent_runs run_id.
+CREATE TABLE IF NOT EXISTS agent_registry (
+    role_id        TEXT PRIMARY KEY,
+    personality    TEXT NOT NULL DEFAULT '',
+    skills         TEXT NOT NULL DEFAULT '[]',
+    permissions    TEXT NOT NULL DEFAULT '[]',
+    model_strategy TEXT NOT NULL DEFAULT '',
+    registered_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_instances (
+    instance_id    TEXT PRIMARY KEY REFERENCES agent_runs(run_id),
+    role_id        TEXT NOT NULL REFERENCES agent_registry(role_id),
+    team_id        TEXT NOT NULL DEFAULT '',
+    executor_id    TEXT NOT NULL,
+    model_route    TEXT NOT NULL,
+    skills         TEXT NOT NULL DEFAULT '[]',
+    workspace      TEXT NOT NULL,
+    budget_usd     REAL NOT NULL,
+    objective      TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_instances_role ON agent_instances(role_id);
+CREATE TABLE IF NOT EXISTS agent_teams (
+    team_id        TEXT PRIMARY KEY,
+    created_at     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_team_roles (
+    team_id        TEXT NOT NULL REFERENCES agent_teams(team_id),
+    role_id        TEXT NOT NULL REFERENCES agent_registry(role_id),
+    reason         TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (team_id, role_id)
+);
+CREATE TABLE IF NOT EXISTS agent_team_edges (
+    team_id        TEXT NOT NULL REFERENCES agent_teams(team_id),
+    from_role      TEXT NOT NULL,
+    to_role        TEXT NOT NULL,
+    kind           TEXT NOT NULL,
+    PRIMARY KEY (team_id, from_role, to_role, kind)
+);
+
 CREATE TABLE IF NOT EXISTS run_narrations (
     run_id         TEXT NOT NULL REFERENCES runs(run_id),
     milestone_key  TEXT NOT NULL,
