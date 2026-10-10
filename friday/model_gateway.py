@@ -214,6 +214,7 @@ class ModelGatewayResult:
     entitlement_state: str = ""
     warnings: list[str] = field(default_factory=list)
     route_kind: str = ""
+    billing_class: str = ""                 # who pays: one of BILLING_CLASSES (FAB-001)
     boundary: str = ""                       # upstream_cloud | local
     attempts: list[dict] = field(default_factory=list)
     call_id: int = 0
@@ -343,6 +344,68 @@ class GrowthGuard:
 
 
 # ---------------------------------------------------------------------------
+# Billing class (FAB-001) - who pays for a route, kept apart on every report
+# ---------------------------------------------------------------------------
+
+SUBSCRIPTION_CLI = "subscription_cli"
+PREPAID_API_CREDIT = "prepaid_api_credit"
+FREE_TIER = "free_tier"
+BILLABLE_API = "billable_api"
+LOCAL = "local"
+BILLING_CLASSES = (SUBSCRIPTION_CLI, PREPAID_API_CREDIT, FREE_TIER, BILLABLE_API, LOCAL)
+
+#: Provider ids, comma separated, whose API calls the owner pays for from a
+#: prepaid credit balance (for example the Claude Max monthly API credit).
+#: Nothing in the route inventory says so, so it is stated, never guessed.
+PREPAID_ENV = "FRIDAY_PREPAID_CREDIT_PROVIDERS"
+
+#: Environment variable NAMES that make Claude Code bill the API instead of the
+#: signed-in subscription.
+CLAUDE_API_KEY_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def billing_class_for(route_kind: str, provider: str = "") -> str:
+    """The one billing class of a route, from the transport the inventory
+    reports (`route_kind`). An unknown kind is billable: under-reporting spend
+    is the mistake that costs money."""
+    if route_kind in ("cli", "subscription"):
+        return SUBSCRIPTION_CLI
+    if route_kind == "free_tier":
+        return FREE_TIER
+    if route_kind == "local":
+        return LOCAL
+    prepaid = {p.strip() for p in os.environ.get(PREPAID_ENV, "").split(",") if p.strip()}
+    if route_kind == "api" and provider in prepaid:
+        return PREPAID_API_CREDIT
+    return BILLABLE_API
+
+
+@dataclass(frozen=True)
+class ClaudeCodeBilling:
+    """Which way a Claude Code launch will be billed, judged before it starts.
+    `variables` are the NAMES that moved it off the subscription - never values."""
+    billing_class: str
+    variables: tuple[str, ...] = ()
+
+    @property
+    def billable(self) -> bool:
+        return self.billing_class == BILLABLE_API
+
+    def report(self) -> str:
+        if not self.billable:
+            return f"billing: {self.billing_class}"
+        return (f"billing: {self.billing_class} - {', '.join(self.variables)} is set in the "
+                "run's environment, so Claude Code bills the API, not the subscription")
+
+
+def claude_code_billing(env) -> ClaudeCodeBilling:
+    """Judge a Claude Code environment by the PRESENCE of an API-key variable
+    name. The value is never read: membership only."""
+    found = tuple(name for name in CLAUDE_API_KEY_VARS if name in env)
+    return ClaudeCodeBilling(BILLABLE_API if found else SUBSCRIPTION_CLI, found)
+
+
+# ---------------------------------------------------------------------------
 # Telemetry (FR-080) - a table in Friday's store, written by the gateway
 # ---------------------------------------------------------------------------
 
@@ -356,6 +419,7 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
     provider          TEXT NOT NULL DEFAULT '',
     model             TEXT NOT NULL DEFAULT '',
     route_kind        TEXT NOT NULL DEFAULT '',
+    billing_class     TEXT NOT NULL DEFAULT '',
     credential        TEXT NOT NULL DEFAULT '',
     status            TEXT NOT NULL,
     entitlement_state TEXT NOT NULL DEFAULT '',
@@ -402,6 +466,7 @@ _ADDED_COLUMNS = (
     ("context_sections", "TEXT NOT NULL DEFAULT ''"),
     ("cost_usd", "REAL NOT NULL DEFAULT 0"),
     ("input_sources", "TEXT NOT NULL DEFAULT ''"),
+    ("billing_class", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: Indexes over columns that may have just been added. Created after the
@@ -507,7 +572,31 @@ class GatewayTelemetry:
                 "input_tokens": sum(r["input_tokens"] for r in rows),
                 "output_tokens": sum(r["output_tokens"] for r in rows),
                 "cost_usd": round(sum(r.get("cost_usd") or 0.0 for r in rows), 6),
-                "by_worker": by_worker}
+                "by_worker": by_worker, "by_class": self.spend_by_class(objective_id)}
+
+    def spend_by_class(self, objective_id: str = "") -> dict[str, dict]:
+        """FAB-001: calls, tokens and reported cost per billing class, so a
+        subscription call, a free call and a billable one are never one number.
+        A row written before the column existed is classed from its route kind;
+        one that reached no route is reported as `unrouted`."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT billing_class, route_kind, provider, input_tokens, output_tokens,"
+                " cost_usd FROM gateway_calls"
+                + (" WHERE objective_id=?" if objective_id else ""),
+                (objective_id,) if objective_id else ()).fetchall()
+        out: dict[str, dict] = {}
+        for r in rows:
+            cls = (r["billing_class"]
+                   or (billing_class_for(r["route_kind"], r["provider"])
+                       if r["route_kind"] else "unrouted"))
+            bucket = out.setdefault(cls, {"calls": 0, "input_tokens": 0,
+                                          "output_tokens": 0, "cost_usd": 0.0})
+            bucket["calls"] += 1
+            bucket["input_tokens"] += r["input_tokens"]
+            bucket["output_tokens"] += r["output_tokens"]
+            bucket["cost_usd"] = round(bucket["cost_usd"] + (r["cost_usd"] or 0.0), 6)
+        return out
 
     def spikes(self, *, limit: int = 5) -> list[dict]:
         """The calls responsible for the most tokens - FR-080 acceptance:
@@ -1092,6 +1181,11 @@ class ModelGateway:
             if p.get("id") == provider:
                 return p.get("route_kind", "")
         return ""
+
+    def billing_class(self, provider: str) -> str:
+        """The billing class of a provider's route, "" when it has no route."""
+        kind = self.route_kind(provider)
+        return billing_class_for(kind, provider) if kind else ""
 
     def _infer(self, provider: str, params: dict, *, timeout: float) -> dict:
         """One worker `infer` call. A local route holds a MODEL lease for the
@@ -1731,7 +1825,9 @@ class ModelGateway:
                     reasoning_tokens=int(usage.get("reasoning_tokens") or 0),
                     latency_ms=int(res.get("latency_ms") or elapsed),
                     failover_count=index, entitlement_state="OK",
-                    route_kind=kind, boundary="local" if kind == "local" else "upstream_cloud",
+                    route_kind=kind, billing_class=billing_class_for(
+                        kind, res.get("provider") or provider),
+                    boundary="local" if kind == "local" else "upstream_cloud",
                     attempts=attempts, data_class=content_class, redactions=redactions,
                     cost_usd=float(res.get("cost_usd") or 0.0),
                     tool_calls=[dict(c) for c in res.get("tool_calls") or ()])
@@ -1932,6 +2028,7 @@ class ModelGateway:
                 task_class=request.task_class,
                 tier=tier or request.preferred_quality_tier or "",
                 provider=provider, model=model, route_kind=route_kind,
+                billing_class=billing_class_for(route_kind, provider) if route_kind else "",
                 credential=credential or self.credential_label(provider),
                 status=status, entitlement_state=entitlement_state,
                 input_tokens=input_tokens, output_tokens=output_tokens,

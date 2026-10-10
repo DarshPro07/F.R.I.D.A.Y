@@ -267,6 +267,26 @@ def parse(line: str) -> list[Event]:
 # ---------------------------------------------------------------------------
 
 
+def child_environment(launch: Launch, sandbox=None) -> dict[str, str]:
+    """The environment the CLI process is started with: the sandbox's, or the
+    allowlisted worker environment (never FRIDAY's own secrets, V7-D18)."""
+    from friday import execution
+
+    if sandbox is not None:
+        return sandbox.environment()
+    return execution.worker_environment(
+        "claude-host", passthrough=launch.env_passthrough, prefixes=CLI_CONFIG_PREFIXES)
+
+
+def launch_billing(launch: Launch, sandbox=None):
+    """FAB-001: how this launch will be billed, judged from the environment the
+    CLI will actually hold, by variable NAME only. An API-key variable moves
+    Claude Code from the subscription to pay-as-you-go."""
+    from friday import model_gateway
+
+    return model_gateway.claude_code_billing(child_environment(launch, sandbox))
+
+
 class Run:
     """
     A live CLI process.
@@ -288,7 +308,12 @@ class Run:
                     f" [sandbox {self.sandbox.name}]" if self.sandbox else "")
         # HOST or SANDBOX, the worker gets the allowlisted environment - never
         # FRIDAY's own secrets (V7-D18). HOST keeps its reach, not the keys.
-        from friday import execution
+        env = child_environment(self.launch, self.sandbox)
+        from friday import model_gateway
+
+        billing = model_gateway.claude_code_billing(env)
+        if billing.billable:
+            logger.warning("claude: %s", billing.report())
 
         self.process = await asyncio.create_subprocess_exec(
             *argv, cwd=self.launch.cwd,
@@ -296,10 +321,7 @@ class Run:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=STREAM_LINE_LIMIT,
-            env=(self.sandbox.environment() if self.sandbox
-                 else execution.worker_environment(
-                     "claude-host", passthrough=self.launch.env_passthrough,
-                     prefixes=CLI_CONFIG_PREFIXES)),
+            env=env,
         )
         if self.sandbox is not None:
             # Adopted into the job object before anything else happens, so

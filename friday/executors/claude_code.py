@@ -424,6 +424,11 @@ class ClaudeCodeExecutor:
 
         self.sandbox = self._sandbox_for(bundle)
         self.run = cli.Run(launch, sandbox=self.sandbox)
+        # FAB-001: say so before the CLI starts if its environment moves it
+        # from the subscription to pay-as-you-go.
+        billing = cli.launch_billing(launch, self.sandbox)
+        if billing.billable:
+            self.runs.saw(bundle.run_id, billing.report())
         self.progress = Progress()
         final: dict = {}
         limit = envelope.tool_call_limit if envelope is not None else 0

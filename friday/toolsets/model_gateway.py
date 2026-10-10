@@ -37,6 +37,8 @@ def model_providers(run: c.Run, *, engine: PolicyEngine = default_engine) -> c.A
                 "healthy": healthy, "unavailable": unavailable,
                 "health": {p: v.to_dict() for p, v in verdicts.items()},
                 "providers": [{"id": p["id"], "route_kind": p.get("route_kind", ""),
+                               "billing_class": mg.billing_class_for(
+                                   p.get("route_kind", ""), p["id"]),
                                "authenticated": bool(p.get("authenticated")),
                                "default_model": p.get("default_model", "")}
                               for p in inv.get("providers", [])]},
