@@ -179,6 +179,10 @@ DECLARED = {
                       "INTAKE-001 slice 1: the repository intake front door "
                       "(URL parse, SHA pin, stage order), run by "
                       "tests/test_intake_dossier.py"),
+    "friday/research_providers": (FUTURE,
+                                  "RSCH-002: the FridayResearchProvider interface and its web "
+                                  "provider, no live caller yet, run by "
+                                  "tests/test_research_providers.py"),
     "friday/reflex": (FUTURE,
                       "the local fast path, off by default and behind a "
                       "feature flag; reachable when enabled"),
