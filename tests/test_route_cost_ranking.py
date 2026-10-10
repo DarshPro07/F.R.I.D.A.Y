@@ -236,6 +236,85 @@ def test_one_model_in_two_configurations_is_measured_as_two_routes(tmp_path):
                           ("p", "m", "hermes", "hermes_deep")}
 
 
+def test_cost_per_completion_reads_one_executor_and_configuration(tmp_path):
+    outcomes = ee.RouteOutcomes(tmp_path / "o.sqlite3")
+    _run(outcomes, "hs", provider="p", model="m", tokens=10_000,
+         route_level="hermes_single")
+    _run(outcomes, "hd", provider="p", model="m", tokens=40_000,
+         route_level="hermes_deep")
+    _run(outcomes, "ks", provider="p", model="m", tokens=20_000,
+         executor="claude-code", route_level="hermes_single")
+    read = outcomes.cost_per_completion
+    assert read("code_change") == {("p", "m"): pytest.approx(70_000 / 3, rel=0.01)}
+    assert read("code_change", executor="hermes") == {("p", "m"): pytest.approx(25_000, rel=0.01)}
+    assert read("code_change", route_level="hermes_single") == {
+        ("p", "m"): pytest.approx(15_000, rel=0.01)}
+    assert read("code_change", executor="hermes", route_level="hermes_deep") == {
+        ("p", "m"): pytest.approx(40_000, rel=0.01)}
+    assert read("code_change", executor="nobody") == {}
+
+
+def test_an_executors_evidence_is_not_crowded_out_by_the_read_limit(tmp_path):
+    import sqlite3
+    path = tmp_path / "o.sqlite3"
+    outcomes = ee.RouteOutcomes(path)
+    _run(outcomes, "k1", provider="p", model="m", tokens=10_000, executor="claude-code")
+    for i in range(3):
+        _run(outcomes, f"h{i}", provider="p", model="m", tokens=20_000)
+    db = sqlite3.connect(path)
+    db.execute("UPDATE route_outcomes SET created_at ="
+               " CASE WHEN executor = 'hermes' THEN 2000 ELSE 1000 END")
+    db.commit()
+    db.close()
+    # The two newest rows are Hermes's; the executor asked for is still read.
+    costs = outcomes.cost_per_completion("code_change", limit=2, executor="claude-code")
+    assert costs == {("p", "m"): pytest.approx(10_000, rel=0.01)}
+
+
+def test_a_request_ranks_on_the_evidence_of_the_executor_it_names(tmp_path, monkeypatch):
+    """One model behind two providers, measured under two executors: the same
+    cheap route that fails under Hermes completes under claude-code, and the
+    ranking a request gets is the one for the executor it will run under."""
+    routes = [("fast", "p1", "m"), ("standard", "p2", "m")]
+    outcomes = ee.RouteOutcomes(tmp_path / "o.sqlite3")
+
+    def measure(executor, provider, *, completed, failed=0, tokens):
+        for i in range(completed + failed):
+            _run(outcomes, f"{executor}-{provider}-{i}", provider=provider, model="m",
+                 tokens=tokens, task_class=mg.SIMPLE, executor=executor,
+                 status="COMPLETE" if i < completed else "FAILED")
+
+    measure("hermes", "p1", completed=1, failed=2, tokens=10_000)      # 30k a completion
+    measure("hermes", "p2", completed=3, tokens=20_000)                # 20k
+    measure("claude-code", "p1", completed=3, tokens=10_000)           # 10k
+    measure("claude-code", "p2", completed=3, tokens=20_000)           # 20k
+    gw = _gateway(tmp_path, monkeypatch, routes)
+    gw._outcomes = outcomes
+    order = lambda **kw: [r[1] for r in gw.candidates(_req(**kw))]  # noqa: E731
+    assert order(executor="hermes") == ["p2", "p1"]
+    assert order(executor="claude-code") == ["p1", "p2"]
+    # Named by neither, the evidence is pooled, as before: 15k beats 20k.
+    assert order() == ["p1", "p2"]
+    # An executor nothing has run under has no evidence: the order stands.
+    assert order(executor="nobody") == ["p1", "p2"]
+
+
+def test_a_request_ranks_on_the_configuration_it_names(tmp_path, monkeypatch):
+    routes = [("fast", "p1", "m"), ("standard", "p2", "m")]
+    outcomes = ee.RouteOutcomes(tmp_path / "o.sqlite3")
+    for level, p1_status in (("hermes_single", "FAILED"), ("hermes_deep", "COMPLETE")):
+        for provider, tokens, status in (("p1", 10_000, p1_status), ("p2", 20_000, "COMPLETE")):
+            for i in range(3):
+                _run(outcomes, f"{level}-{provider}-{i}", provider=provider, model="m",
+                     tokens=tokens, task_class=mg.SIMPLE, route_level=level, status=status)
+    gw = _gateway(tmp_path, monkeypatch, routes)
+    gw._outcomes = outcomes
+    single = gw.candidates(_req(route_level="hermes_single"))
+    deep = gw.candidates(_req(route_level="hermes_deep"))
+    assert [r[1] for r in single] == ["p2", "p1"]
+    assert [r[1] for r in deep] == ["p1", "p2"]
+
+
 def test_an_old_outcome_table_gains_the_executor_and_its_rows_read_as_hermes(tmp_path):
     import sqlite3
     path = tmp_path / "old.sqlite3"

@@ -652,12 +652,20 @@ class RouteOutcomes:
             db.execute("UPDATE route_outcomes SET rework = rework + 1"
                        " WHERE work_run_id = ?", (work_run_id,))
 
-    def by_class(self, task_class: str, limit: int = 50) -> list[dict]:
+    def by_class(self, task_class: str, limit: int = 50, *, executor: str = "",
+                 route_level: str = "") -> list[dict]:
+        """Newest-first records for a task class; `executor` and `route_level`
+        narrow them when given, before `limit` is applied."""
+        where, args = "task_class = ?", [task_class]
+        for column, value in (("executor", executor), ("route_level", route_level)):
+            if value:
+                where += f" AND {column} = ?"
+                args.append(value)
         with self._connect() as db:
             rows = db.execute(
-                "SELECT * FROM route_outcomes WHERE task_class = ?"
+                f"SELECT * FROM route_outcomes WHERE {where}"
                 " ORDER BY created_at DESC LIMIT ?",
-                (task_class, limit)).fetchall()
+                (*args, limit)).fetchall()
         return [dict(r) for r in rows]
 
     def by_run_prefix(self, prefix: str, limit: int = 1000) -> list[dict]:
@@ -696,7 +704,8 @@ class RouteOutcomes:
 
     def cost_per_completion(self, task_class: str, limit: int = 500,
                             min_runs: int = 1,
-                            key: tuple[str, ...] = ("provider", "model")
+                            key: tuple[str, ...] = ("provider", "model"),
+                            executor: str = "", route_level: str = ""
                             ) -> dict[tuple[str, ...], float]:
         """FAB-003: per `key` (the route a gateway request names, (provider,
         model), by default; `ROUTE_KEY` adds the executor and configuration),
@@ -707,11 +716,15 @@ class RouteOutcomes:
         serving one model are two keys, and under `ROUTE_KEY` so are two
         executors. A run counts as completed when its status is COMPLETE, the
         same test `execution_value` applies. A route with fewer than
-        `min_runs` runs on record is left out: too few to rank on."""
+        `min_runs` runs on record is left out: too few to rank on. Naming an
+        `executor` or a `route_level` (configuration) reads only the runs
+        recorded under it, which is how a request that will run under one
+        executor is ranked on that executor's evidence rather than the pool."""
         spent: dict[tuple[str, ...], float] = {}
         done: dict[tuple[str, ...], int] = {}
         runs: dict[tuple[str, ...], int] = {}
-        for rec in self.by_class(task_class, limit):
+        for rec in self.by_class(task_class, limit, executor=executor,
+                                 route_level=route_level):
             route = tuple(rec[column] for column in key)
             spent[route] = spent.get(route, 0.0) + self.run_cost(rec)
             done[route] = done.get(route, 0) + (rec["status"] == "COMPLETE")

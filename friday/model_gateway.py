@@ -195,6 +195,13 @@ class ModelGatewayRequest:
     #: is automatic). On by default; a route with too few runs keeps its place.
     #: The store is read once per window, not per request. False opts out.
     rank_by_outcomes: bool = True
+    #: The executor and configuration (`route_level`) the call will run under.
+    #: When named, routes are ranked on the outcomes recorded under them alone;
+    #: when empty, on all of a route's outcomes pooled. A route's measured cost
+    #: is keyed by `execution_economics.ROUTE_KEY`, so one model behind two
+    #: executors is two sets of evidence, not one.
+    executor: str = ""
+    route_level: str = ""
 
     def input_tokens(self) -> int:
         return sum(approx_tokens(str(m.get("content", "")))
@@ -1210,8 +1217,9 @@ class ModelGateway:
         self._tier_table = tier_table
         self._unhealthy: dict[tuple[str, str], float] = {}
         self._providers_cache: tuple[float, dict] | None = None
-        #: task class -> (read at, route cost per completion), see `_rank_by_outcomes`.
-        self._route_costs: dict[str, tuple[float, dict]] = {}
+        #: (task class, executor, route level) -> (read at, route cost per
+        #: completion), see `_rank_by_outcomes`.
+        self._route_costs: dict[tuple[str, str, str], tuple[float, dict]] = {}
         self._lock = threading.Lock()
         #: Where an objective's DURABLE token ceiling is read from before any
         #: provider is touched (invariant A-048 "budget"). The GrowthGuard
@@ -1417,18 +1425,20 @@ class ModelGateway:
         wait on the store and a dead one is warned about once per window."""
         from friday import execution_economics as ee
         now = time.monotonic()
-        held = self._route_costs.get(request.task_class)
+        scope = (request.task_class, request.executor, request.route_level)
+        held = self._route_costs.get(scope)
         if held is None or now - held[0] >= self._OUTCOME_CACHE_S:
             try:
                 if self._outcomes is None:
                     self._outcomes = ee.RouteOutcomes()
                 costs = self._outcomes.cost_per_completion(
-                    request.task_class, min_runs=ee.MIN_RANKED_RUNS)
+                    request.task_class, min_runs=ee.MIN_RANKED_RUNS,
+                    executor=request.executor, route_level=request.route_level)
             except Exception:  # noqa: BLE001 - see docstring
                 logger.warning("gateway: route outcomes unreadable; keeping route order",
                                exc_info=True)
                 costs = {}
-            held = self._route_costs[request.task_class] = (now, costs)
+            held = self._route_costs[scope] = (now, costs)
         return ee.rank_routes(routes, held[1])
 
     def _route_carries_tools(self, provider: str, model: str) -> bool:
