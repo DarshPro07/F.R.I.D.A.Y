@@ -102,10 +102,11 @@ class _Executor:
     """Stands in for an executor: `execute(bundle) -> ActionResult` is the contract."""
 
     def __init__(self, tool_id: str, outcome: str = "succeeded") -> None:
-        self.tool_id, self.outcome, self.seen = tool_id, outcome, []
+        self.tool_id, self.outcome, self.seen, self.limits = tool_id, outcome, [], []
 
     async def execute(self, bundle, **_kwargs):
         self.seen.append(bundle)
+        self.limits.append(_kwargs)
         started = c.started(c.new_run_id(), self.tool_id)
         if self.outcome == "raise":
             raise RuntimeError("the executor fell over")
@@ -156,6 +157,20 @@ def test_the_same_role_is_run_on_two_executors_and_both_results_are_the_roles(
         (result,) = _results(ledger, run_id)
         assert result["status"] == c.SUCCEEDED
         assert result["verification"]["evidence"] == "reported COMPLETE"
+
+
+def test_the_run_limits_reach_every_executor_alike_and_none_is_invented(
+        ledger, executors):
+    envelope = c.Envelope(run_id="R-ENV", cwd="/w", write_roots=("/w",))
+    for executor_id, run_id in (("hermes", "R-H"), ("claude", "R-C")):
+        asyncio.run(S.dispatch(ledger, _compose(executor_id), "t", "/w",
+                               run_id=run_id, timeout=90.0, envelope=envelope))
+    assert executors["hermes"].limits == executors["claude"].limits \
+        == [{"timeout": 90.0, "envelope": envelope}]
+
+    # No limit asked for: the executor's own default applies, not one made up here.
+    asyncio.run(S.dispatch(ledger, _compose("hermes"), "t", "/w", run_id="R-D"))
+    assert executors["hermes"].limits[-1] == {}
 
 
 def test_a_failed_result_closes_the_role_run_as_failed_with_the_reason(

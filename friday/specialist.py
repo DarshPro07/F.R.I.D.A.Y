@@ -112,14 +112,19 @@ def record(ledger: AgentLedger, specialist: Specialist, *, run_id: str, task: st
 
 async def dispatch(ledger: AgentLedger, specialist: Specialist, goal: str,
                    workspace: str, *, parent_run_id: str = "",
+                   timeout: float | None = None,
+                   envelope: c.Envelope | None = None,
                    **fields) -> c.ActionResult:
     """
     Run the specialist on its executor and attach the result to its ledger run.
 
     The executor is built from `specialist.executor_id` here, never passed in,
     so the executor the ledger names is the one that ran. `fields` are
-    `TaskBundle` fields (`run_id`, `acceptance`, ...). Nothing is claimed for a
-    run that cannot start.
+    `TaskBundle` fields (`run_id`, `acceptance`, ...). `timeout` and `envelope`
+    are the run's limits and reach the executor unchanged, so the same role is
+    held to the same limits whichever executor runs it; left unset, the
+    executor's own default applies. Nothing is claimed for a run that cannot
+    start.
     """
     try:
         executor = executor_router.build(specialist.executor_id, ledger.store)
@@ -129,8 +134,10 @@ async def dispatch(ledger: AgentLedger, specialist: Specialist, goal: str,
     run_id = bundle.run_id
     record(ledger, specialist, run_id=run_id, task=goal, workspace=workspace,
            parent_run_id=parent_run_id)
+    limits = {name: value for name, value in
+              (("timeout", timeout), ("envelope", envelope)) if value is not None}
     try:
-        result = await executor.execute(bundle)
+        result = await executor.execute(bundle, **limits)
     except Exception as exc:
         ledger.finish(run_id, FAILED, [f"agent_runs:{run_id}"],
                       f"executor raised {type(exc).__name__}")
