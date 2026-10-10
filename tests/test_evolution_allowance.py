@@ -24,7 +24,7 @@ from tests.test_governor import make
 
 MANIFEST = [{"id": "system_get_info", "description": "cpu"}]
 NOW = datetime(2026, 10, 10, 3, 0, tzinfo=timezone.utc)
-LIMITS = W.Limits(usd=2.0, ram_gb_s=100.0, wall_s=60.0)
+LIMITS = W.AllowanceLimits(usd=2.0, ram_gb_s=100.0, wall_s=60.0)
 
 
 def _gov():
@@ -160,7 +160,7 @@ def test_idle_research_with_no_trigger_spends_nothing_and_leaves_no_trace(tmp_pa
 
 def test_every_spend_is_a_labelled_record_and_the_total_is_their_sum(tmp_path):
     store, gov = Store(tmp_path / "e.sqlite3"), _gov()
-    allowance, _ = _allowance(tmp_path, W.Limits(usd=100, ram_gb_s=1e6, wall_s=1e6))
+    allowance, _ = _allowance(tmp_path, W.AllowanceLimits(usd=100, ram_gb_s=1e6, wall_s=1e6))
     first, _ = _running_experiment(store, gov)
     allowance.charge(gov, first, money_usd=0.10, ram_gb_s=12.5, wall_s=3.0, now=NOW)
     allowance.charge(gov, first, money_usd=0.20, now=NOW)

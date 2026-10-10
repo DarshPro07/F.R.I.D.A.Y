@@ -71,7 +71,7 @@ class AllowanceError(ValueError):
 
 
 @dataclass(frozen=True)
-class Limits:
+class AllowanceLimits:
     """What evolution may spend per period, per dimension."""
 
     usd: float = 5.0
@@ -111,10 +111,10 @@ def _amount(dimension: str, value) -> float:
 class EvolutionAllowance:
     """The evolution allowance and its ledger in `<root>/spend.jsonl`."""
 
-    def __init__(self, root: Path | str | None = None, limits: Limits | None = None) -> None:
+    def __init__(self, root: Path | str | None = None, limits: AllowanceLimits | None = None) -> None:
         self.root = Path(root) if root is not None else DATA_DIR / "evolution_allowance"
         self.path = self.root / "spend.jsonl"
-        self.limits = limits or Limits()
+        self.limits = limits or AllowanceLimits()
 
     # -- the ledger --------------------------------------------------------
 
