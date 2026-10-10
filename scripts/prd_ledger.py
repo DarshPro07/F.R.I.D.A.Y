@@ -4790,6 +4790,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Design: new friday/system_one_calibration.py built on SystemOne. Calibrator.record(decision_id, predicted, correct) stores predicted confidence and verified outcome per decision (range-checked, one record per decision). report() gives the calibration report: per-bin n, mean confidence and accuracy,  (build run, commit 00b289326)',
         "next_action": "GAPS: Outcome records are in memory only. Making them durable through friday/store.py (with a SCOPED/UNSCOPED declaration) is a later slice.; There is no live caller yet, and nothing wires verified outcomes from the objective engine into Calibrator.record.; The MockBackend's pseudo-random confidences are not calibrated, so only the Fixed test backends exercise decide end to end.; Red was observed only as a collection ModuleNotFoundError, since the module did not exist.",
     }),
+    ('SKILL-004', {
+        "status": PARTIAL,
+        "current_implementation": "Design: the row's next_action was a one-line instruction, so I built the smallest slice that meets it. New friday/skills/scan.py is a scan stage with two parts. (1) An in-process injection scan over every text file of the skill, wider than lint's one prompt_injection wording. It covers role override (build run, commit 77073f29b)",
+        "next_action": 'GAPS: No dependency/CVE or dynamic behaviour stage: SkillSpector looks up declared dependency names on OSV.dev itself, but nothing runs the skill and observes behaviour; that is why runtime_safe is always False.; The real SkillSpector scan was not run end to end: the worktree has no .venv-skillspector, so the live path was only exercised as UNAVAILABLE and via a stub.; On the main checkout, where .venv-skillspector exists, a test that evaluates an AGENT or COMMUNITY skill with a default evaluator would run the real scanner (up to 120s). No current test does, but a conftest guard may be wanted.',
+    }),
 ]
 
 
