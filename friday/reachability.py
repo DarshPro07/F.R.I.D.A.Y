@@ -235,6 +235,11 @@ DECLARED = {
     "friday/research_routing": (PRODUCTION,
                                 "web_deep_research routes every completed run through it"),
     "friday/forge": (FUTURE, "skill authoring, frozen by the product rescue"),
+    "friday/evolution_archive": (FUTURE,
+                                 "EVO-002: the Evolution Archive of experiments and the "
+                                 "rejected-candidate check, kept outside the person's memory; "
+                                 "the evolution controller that records into it is a later "
+                                 "slice, run by tests/test_evolution_archive.py"),
     "friday/dry_run": (FUTURE,
                        "SIDE-002: dry-run stage and blast-radius escalation; the "
                        "live caller (consequential tool dispatch) is the next "
