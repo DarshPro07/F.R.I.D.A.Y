@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 8157176 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T03:09:11+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 3, "MISSING": 111, "PARKED_BY_OWNER": 1, "PARTIAL": 76, "VERIFIED": 70}
-- Unresolved P0: 6
+- HEAD: fabf4d3 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T10:26:15+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 95, "PARKED_BY_OWNER": 1, "PARTIAL": 93, "VERIFIED": 71}
+- Unresolved P0: 5
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (341): ORCH-003=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), ACT-001 (VERIFIER_FAIL), CAP-MKT-002 (stale worktree), CAP-FORGE-011 (stale worktree), ORCH-002 (stale worktree), SKILL-004 (stale worktree), EVO-003 (stale worktree), EVO-006 (stale worktree), UX-001 (stale worktree), EVOLAB-001 (stale worktree), CTX-004 (stale worktree), FAB-008 (stale worktree), ORCH-007 (stale worktree), RSCH-002 (stale worktree), RSCH-004 (stale worktree), S1-002 (stale worktree), SKILL-006 (blocked), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), FAB-003 (merge queue busy), ORCH-004 (stale worktree), ORCH-009 (stale worktree), PRO-001 (stale worktree), RSCH-003 (stale worktree), SIGNAL-001 (stale worktree), SANDBOX-001 (blocked), WF-001 (blocked), EXP-001 (stale worktree), FAB-009 (stale worktree), ORCH-008 (stale worktree), OTEL-001 (stale worktree)
-- Open escalations: 275
+- Last wave (346): FAB-005=INTEGRATED, CAP-MKT-002=BLOCKED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), SKILL-006 (blocked), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), ORCH-004 (stale worktree), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), BIN-002 (stale worktree), SIDE-001 (merge queue busy), COG-006 (stale worktree), EVO-001 (stale worktree), EVO-002 (stale worktree), TRAJ-002 (stale worktree), ULTRA-002 (stale worktree), ULTRA-006 (stale worktree), AGENT-002 (stale worktree), LAB-003 (stale worktree), FAB-007 (stale worktree), HARN-001 (stale worktree), RSCH-003 (stale worktree), COG-005 (merge queue busy), EVAL-005 (stale worktree), ORCH-009 (stale worktree), ORCH-001 (stale worktree), OTEL-001 (stale worktree), PRO-001 (stale worktree), RSCH-001 (stale worktree), RSCH-002 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked)
+- Open escalations: 339
+  - EVAL-005 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\eval-005 already exists
   - ORCH-009 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-009 already exists
-  - PRO-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\pro-001 already exists
-  - RSCH-003 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-003 already exists
-  - SIGNAL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\signal-001 already exists
-  - SANDBOX-001 blocked: Question for owner: should a skill that REACHES for a host outside its network allowlist (refused by
-  - WF-001 blocked: PIN: no clone, lock row or NEW_UPSTREAM_SET row exists for activepieces, n8n or windmill (grep of th
-  - EXP-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\exp-001 already exists
-  - FAB-009 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\fab-009 already exists
-  - ORCH-008 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-008 already exists
+  - ORCH-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-001 already exists
   - OTEL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\otel-001 already exists
+  - PRO-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\pro-001 already exists
+  - RSCH-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-001 already exists
+  - RSCH-002 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-002 already exists
+  - SIGNAL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\signal-001 already exists
+  - FAB-005 partial: integrated without closing its gaps
+  - CAP-MKT-002 blocked: OWNER DECISION: how should a SKILL.md that names repo-internal files (depends_on: [friday/launcher.p
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
