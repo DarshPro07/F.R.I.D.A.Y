@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import math
 import os
 import re
 import sqlite3
@@ -607,6 +608,12 @@ class RouteOutcomes:
         """
         if record.get("status") != "COMPLETE":
             return 0.0
+        return 1_000_000.0 / self.run_cost(record)
+
+    @staticmethod
+    def run_cost(record: dict) -> float:
+        """What one run cost, whatever its outcome: tokens, plus the repair
+        its rework implies, plus latency."""
         tokens = (record.get("prompt_tokens") or 0) + \
                  (record.get("output_tokens") or 0)
         # A rework is not a discount on quality - it is the cost of the
@@ -615,4 +622,36 @@ class RouteOutcomes:
         # right). So each rework adds ~2x the original cost.
         cost = max(tokens, 1) * (1 + 2 * (record.get("rework") or 0))
         cost += (record.get("duration_s") or 0) * 100     # latency weight
-        return 1_000_000.0 / cost
+        return cost
+
+    def cost_per_completion(self, task_class: str, limit: int = 500
+                            ) -> dict[tuple[str, str], float]:
+        """FAB-003: per (provider, model), everything the route spent on this
+        task class divided by the runs it verifiably completed. Failed runs
+        are paid for by the completions, so a cheap route that fails often
+        costs more per task than a dear one that completes; a route with no
+        completion is infinity. Two providers serving one model are two keys.
+        A run counts as completed when its status is COMPLETE, the same test
+        `execution_value` applies."""
+        spent: dict[tuple[str, str], float] = {}
+        done: dict[tuple[str, str], int] = {}
+        for rec in self.by_class(task_class, limit):
+            key = (rec["provider"], rec["model"])
+            spent[key] = spent.get(key, 0.0) + self.run_cost(rec)
+            done[key] = done.get(key, 0) + (rec["status"] == "COMPLETE")
+        return {k: (spent[k] / done[k] if done[k] else math.inf) for k in spent}
+
+
+def rank_routes(routes: list[tuple[str, str, str]],
+                costs: dict[tuple[str, str], float]
+                ) -> list[tuple[str, str, str]]:
+    """Order (tier, provider, model) routes by measured cost per completed
+    task, cheapest first (FAB-003). Only routes with evidence move: they are
+    sorted among the positions the measured routes already held, so an
+    unmeasured route keeps its place and an empty `costs` changes nothing."""
+    slots = [i for i, (_, p, m) in enumerate(routes) if (p, m) in costs]
+    ordered = sorted((routes[i] for i in slots), key=lambda r: costs[(r[1], r[2])])
+    out = list(routes)
+    for i, route in zip(slots, ordered):
+        out[i] = route
+    return out

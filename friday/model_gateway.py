@@ -187,6 +187,10 @@ class ModelGatewayRequest:
     #: Extra tries on the SAME route after a transient provider error or a stalled
     #: worker call (UCW-001), spread inside `timeout_s`. 0 = none: fail over at once.
     transient_retries: int = 0
+    #: Order the fit routes by measured cost per verified completed task for
+    #: this task class (FAB-003). Off by default: the voice path asks no
+    #: question of the outcome store, and a route with no record keeps its place.
+    rank_by_outcomes: bool = False
 
     def input_tokens(self) -> int:
         return sum(approx_tokens(str(m.get("content", "")))
@@ -1171,11 +1175,33 @@ class ModelGateway:
         lists, cooldowns, recent health and - since FR-MDL-006 - declared
         capability fitness for what this request actually needs."""
         routes = self.route_decision(request, self._raw_candidates(request)).routes
+        if request.rank_by_outcomes and len(routes) > 1:
+            routes = self._rank_by_outcomes(request, routes)
         if request.tools:
             # A request with tools prefers routes that can carry them: the rest
             # stay fallbacks, in their own order (the sort is stable).
             routes = sorted(routes, key=lambda r: not self._route_carries_tools(r[1], r[2]))
         return routes
+
+    #: The route outcome store behind `rank_by_outcomes`; opened on first use.
+    _outcomes = None
+
+    def _rank_by_outcomes(self, request: ModelGatewayRequest,
+                          routes: list[tuple[str, str, str]]
+                          ) -> list[tuple[str, str, str]]:
+        """Cheapest cost per verified completed task first (FAB-003). An
+        outcome store that cannot be read leaves the order as it was: ranking
+        is an optimisation of a route list that is already valid."""
+        from friday import execution_economics as ee
+        try:
+            if self._outcomes is None:
+                self._outcomes = ee.RouteOutcomes()
+            costs = self._outcomes.cost_per_completion(request.task_class)
+        except Exception:  # noqa: BLE001 - see docstring
+            logger.warning("gateway: route outcomes unreadable; keeping route order",
+                           exc_info=True)
+            return routes
+        return ee.rank_routes(routes, costs)
 
     def _route_carries_tools(self, provider: str, model: str) -> bool:
         """False for a signed-in CLI route (pure completion) and for a model
