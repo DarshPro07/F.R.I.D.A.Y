@@ -71,7 +71,9 @@ class World:
     def write_skill(self, name: str, *, tier=K.PROJECT_TIER, scope="repository", tests=("pytest tests/test_ok.py",),
                     depends=("friday/launcher.py",), triggers=("build the exe",), never_for=("book a table",),
                     body: str | None = None, task: str = "", version: str = "1.0.0", publish: str = "private",
-                    license: str = "MIT", extra_friday: dict | None = None) -> F.SkillFiles:
+                    license: str = "MIT", extra_friday: dict | None = None, measured: bool = True) -> F.SkillFiles:
+        if measured:
+            self.measure(name)
         skill = F.SkillFiles(self.roots[tier] / name)
         friday = {"scope": scope, "depends_on": list(depends), "tests": list(tests),
                   "triggers": list(triggers), "never_for": list(never_for), "publish": publish}
@@ -86,6 +88,13 @@ class World:
             f"# {name}\n\n## When to use\n\nWhen asked to {name.replace('-', ' ')}.\n\n"
             "## Procedure\n\n1. Run the build script\n2. Run the validator\n\n## Verification\n\n- the validator passes\n"))
         return skill
+
+    def measure(self, name: str) -> None:
+        """Recorded task outcomes showing a lift (SKILL-005: no measured value, no activation):
+        four tasks that went well with the skill, four that went badly without it."""
+        for _ in range(4):
+            self.registry.record_usage(name, "success", objective="a task done with the skill")
+            self.registry.record_baseline(name, "failure", objective="the same kind of task without it")
 
     def activate(self, skill: F.SkillFiles, *, trust=K.TRUST_OWNER, tier=K.PROJECT_TIER) -> K.SkillRecord:
         self.lifecycle.register(skill, tier=tier, trust=trust)
@@ -190,6 +199,7 @@ def test_sk02_approve_curate_lint_test_activate(world):
     assert record.state == K.QUARANTINED                             # agent-written: quarantine first
     record, lint_report = world.lifecycle.stage(skill.name)
     assert record.state == K.STAGED and lint_report.verdict != L.FAIL
+    world.measure(skill.name)                                        # SKILL-005: no measured value, no activation
     report, record = world.lifecycle.evaluate_and_activate(skill.name)
     assert report.passed and record.state == K.ACTIVE
     assert world.registry.evaluation_on_record(report)
@@ -443,6 +453,7 @@ def test_pub01_private_git_publish_and_fresh_clone_discovery(world, tmp_path):
     lifecycle = SkillLifecycle(world.registry, snapshots_dir=tmp_path / "v", evaluator=real, graph=world.graph)
     lifecycle.register(skill, tier=K.LOCAL_USER, trust=K.TRUST_OWNER)
     lifecycle.stage("say-ok")
+    world.measure("say-ok")
     report, record = lifecycle.evaluate_and_activate("say-ok")
     assert report.passed and record.state == K.ACTIVE, report.checks
 
@@ -462,6 +473,9 @@ def test_pub01_private_git_publish_and_fresh_clone_discovery(world, tmp_path):
                                 graph=SkillDependencyGraph(other, repo_root=world.repo))
     other_life.register(found[0], tier=K.SHARED_PRIVATE, trust=K.TRUST_OWNER, source="tap")
     other_life.stage("say-ok")
+    for _ in range(4):                                               # this registry has its own outcome rows
+        other.record_usage("say-ok", "success")
+        other.record_baseline("say-ok", "failure")
     report, record = other_life.evaluate_and_activate("say-ok")
     assert report.passed and record.state == K.ACTIVE
     assert RT.SkillRouter(other, roots).select("say ok").names() == ["say-ok"]

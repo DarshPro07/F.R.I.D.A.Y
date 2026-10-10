@@ -269,6 +269,10 @@ class SkillLifecycle:
         if report.passed:
             return report, self.activate(name, report, actor=actor)
         failures = "; ".join(report.failures())[:300]
+        for stage, state, detail in report.checks:
+            if stage in ("overlap", "value") and state == "FAIL":
+                # Why it stays inactive is its own history row, not the tail of a truncated list.
+                self.registry.note(name, f"inactive: {stage}: {detail}"[:400], actor=actor)
         if record.state == K.NEEDS_REVALIDATION:
             record = self.registry.transition(name, K.BROKEN, actor=actor, reason=f"revalidation failed: {failures}")
         elif record.state == K.TESTING:

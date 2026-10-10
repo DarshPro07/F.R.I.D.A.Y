@@ -259,7 +259,13 @@ def cmd_facts(services: Services, args) -> int:
 
 
 def cmd_outcome(services: Services, args) -> int:
-    """Record how a use of a skill went; quality follows from these rows."""
+    """Record how a use of a skill went; quality follows from these rows. With
+    --without it is the other arm of the value comparison: the same kind of
+    task done without the skill (a skill is activated only on measured lift)."""
+    if args.without:
+        services.registry.record_baseline(args.name, args.outcome, objective=args.objective)
+        print(f"{args.name}: {args.outcome} recorded without the skill")
+        return 0
     services.registry.record_usage(args.name, args.outcome, latency_ms=args.latency_ms, cost=args.cost,
                                    objective=args.objective, version=(services.registry.get(args.name) or K.SkillRecord(args.name)).version)
     score = services.evaluator.rescore(args.name)
@@ -398,7 +404,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("outcome", help="record how a use of a skill went")
     p.add_argument("name"); p.add_argument("outcome", choices=("success", "failure", "corrected"))
     p.add_argument("--latency-ms", type=int, default=0); p.add_argument("--cost", type=float, default=0.0)
-    p.add_argument("--objective", default=""); p.set_defaults(func=cmd_outcome)
+    p.add_argument("--objective", default="")
+    p.add_argument("--without", action="store_true", help="the task was done WITHOUT the skill (the comparison arm)")
+    p.set_defaults(func=cmd_outcome)
     p = sub.add_parser("usage", help="rates, averages and recent uses of a skill")
     p.add_argument("name"); p.set_defaults(func=cmd_usage)
     p = sub.add_parser("diff", help="what changed on disk since the last verified version")

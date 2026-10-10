@@ -8,6 +8,9 @@ Whether a skill still works, and how well.
     non-trigger   the declared `never_for` phrases do not
     procedure     the declared tests pass                  (subprocess, bounded)
     tokens        loading it stays within budget
+    overlap       not a near-duplicate of a skill that is already active
+    value         measured lift: tasks done with the skill against the same
+                  kind of task done without it (recorded outcomes, both arms)
 
 The result is an EvaluationReport, recorded in the registry under its
 nonce. That record - not a line in the SKILL.md, not the skill's own
@@ -41,6 +44,16 @@ TEST_TIMEOUT_S = 600.0
 #: Loading a skill above this is a WARN in lint and a FAIL here: the
 #: router's promise is that a skill costs less than rediscovery.
 TOKEN_BUDGET = 8_000
+
+#: Two skills whose routing metadata (description and triggers, as the router
+#: reads them) share this fraction of their words compete for the same
+#: requests: the later one is flagged and cannot activate beside the earlier.
+OVERLAP_THRESHOLD = 0.8
+#: A skill is measured only with at least this many recorded tasks in EACH arm
+#: (with the skill, without it), and is worth activating only when its success
+#: rate beats the without-arm by at least MIN_LIFT (a fraction: 0.1 = 10 points).
+MIN_TRIALS = 3
+MIN_LIFT = 0.1
 
 Runner = Callable[[list[str], Path, float], tuple[int, str]]
 
@@ -78,6 +91,23 @@ def test_argv(command: str, skill_dir: Path | None = None) -> list[str]:
             script = str(Path(skill_dir) / script)
         return [sys.executable, script, *parts[1:]]
     return parts
+
+
+def _routing_words(record: K.SkillRecord) -> set[str]:
+    return set(RT.tokens(" ".join([record.description, *record.triggers])))
+
+
+def similarity(a: K.SkillRecord, b: K.SkillRecord) -> float:
+    """Jaccard overlap of what the router would match a request against."""
+    first, second = _routing_words(a), _routing_words(b)
+    union = first | second
+    return round(len(first & second) / len(union), 3) if union else 0.0
+
+
+def success_rate(outcomes: list[str]) -> float:
+    """A task counts as won only when it succeeded; a failure and a use the
+    owner had to correct are both not wins."""
+    return sum(1 for outcome in outcomes if outcome == "success") / len(outcomes)
 
 
 class SkillEvaluator:
@@ -159,12 +189,44 @@ class SkillEvaluator:
         checks.append(("tokens", PASS if estimate <= TOKEN_BUDGET else FAIL,
                        f"about {estimate:,} tokens to load (budget {TOKEN_BUDGET:,})"))
 
+        checks.append(self._overlap(record, pool[1:]))
+        checks.append(self._value(record))
+
         result = K.EvaluationReport(skill=record.name, version=record.version,
                                     content_hash=skill.content_hash() if skill.exists() else "",
                                     passed=not any(state == FAIL for _, state, _ in checks),
                                     checks=checks, token_estimate=estimate, scan=scan)
         self.registry.record_evaluation(result)
         return result
+
+    @staticmethod
+    def _overlap(record: K.SkillRecord, active: list[K.SkillRecord]) -> tuple[str, str, str]:
+        close = sorted(((similarity(record, other), other.name) for other in active), reverse=True)
+        close = [(score, name) for score, name in close if score >= OVERLAP_THRESHOLD]
+        if close:
+            return ("overlap", FAIL, "near-duplicate of active " + ", ".join(
+                f"{name} ({score:.0%} of routing words)" for score, name in close[:3])
+                + "; differentiate it or retire the other before activating")
+        return ("overlap", PASS, f"no active skill shares {OVERLAP_THRESHOLD:.0%} of its routing words")
+
+    def _value(self, record: K.SkillRecord) -> tuple[str, str, str]:
+        """The with/without comparison on recorded outcomes. No measurement is
+        not a pass: a safe skill nobody has shown to help stays inactive."""
+        used = [row["outcome"] for row in self.registry.usage(record.name, limit=1000)]
+        without = [row["outcome"] for row in self.registry.baseline(record.name, limit=1000)]
+        if len(used) < MIN_TRIALS or len(without) < MIN_TRIALS:
+            detail = (f"no measured value: {len(used)} task(s) with the skill, {len(without)} without recorded "
+                      f"(need {MIN_TRIALS} of each); it stays inactive until measured")
+            if record.state == K.NEEDS_REVALIDATION:
+                return ("value", WARN, f"{detail} - already active, so not re-gated for revalidation")
+            return ("value", FAIL, detail)
+        with_rate, without_rate = success_rate(used), success_rate(without)
+        lift = with_rate - without_rate
+        measured = (f"{with_rate:.0%} success with the skill ({len(used)} tasks) vs {without_rate:.0%} without "
+                    f"({len(without)} tasks): lift {lift * 100:+.0f} points")
+        if lift < MIN_LIFT:
+            return ("value", FAIL, f"no measured lift: {measured} (needs +{MIN_LIFT * 100:.0f}); it stays inactive")
+        return ("value", PASS, measured)
 
     @staticmethod
     def _scan_detail(scan: dict) -> str:

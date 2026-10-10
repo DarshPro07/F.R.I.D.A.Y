@@ -122,6 +122,13 @@ def test_git_identity_is_empty_without_git_and_filled_inside_a_repo(tmp_path, mo
     assert identity.replace("/", "").endswith("repo")
 
 
+def _measure(registry, name: str) -> None:
+    """Recorded outcomes showing a lift: SKILL-005 activates only a skill with measured value."""
+    for _ in range(4):
+        registry.record_usage(name, "success")
+        registry.record_baseline(name, "failure")
+
+
 def test_activation_stamps_the_codebase_fingerprint(tmp_path, monkeypatch):
     use_stand_in_scanner(tmp_path / "scanner", monkeypatch)
     repo = tmp_path / "repo"
@@ -140,6 +147,7 @@ def test_activation_stamps_the_codebase_fingerprint(tmp_path, monkeypatch):
                 "# S\n\n## When to use\nx\n\n## Procedure\n1. x\n\n## Verification\nok\n")
     life.register(skill, tier=K.PROJECT_TIER, trust=K.TRUST_OWNER)
     life.stage("stamped")
+    _measure(reg, "stamped")
     report, record = life.evaluate_and_activate("stamped")
     assert report.passed and len(record.codebase_commit) >= 7 and record.codebase_id
 
@@ -178,6 +186,7 @@ def test_builtin_adoption_and_upgrade_replace_untouched_and_merge_edited(tmp_pat
     with pytest.raises(K.SkillError):
         life.adopt_builtin("guide", roots=roots)                     # never twice
     life.stage("guide")
+    _measure(reg, "guide")
     report, record = life.evaluate_and_activate("guide")
     assert report.passed and record.state == K.ACTIVE and record.version == "1.0.0"
     assert life.builtin_updates(roots=roots) == [{"skill": "guide", "upstream_changed": False,

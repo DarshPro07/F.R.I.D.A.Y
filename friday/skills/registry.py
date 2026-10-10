@@ -88,6 +88,13 @@ CREATE TABLE IF NOT EXISTS skill_usage (
     objective     TEXT NOT NULL DEFAULT '',
     at            TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS skill_baseline (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    outcome       TEXT NOT NULL,
+    objective     TEXT NOT NULL DEFAULT '',
+    at            TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS skill_dependencies (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL,
@@ -313,6 +320,21 @@ class SkillRegistry:
     def usage(self, name: str, limit: int = 100) -> list[dict]:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM skill_usage WHERE name = ? ORDER BY id DESC LIMIT ?",
+                              (name, limit)).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_baseline(self, name: str, outcome: str, *, objective: str = "") -> None:
+        """How a task the skill covers went WITHOUT it: the other arm of the
+        with/without comparison that `skill_usage` is the first arm of."""
+        if outcome not in USAGE_OUTCOMES:
+            raise K.SkillError(f"unknown outcome {outcome!r} ({', '.join(USAGE_OUTCOMES)})")
+        with self._connect() as db:
+            db.execute("INSERT INTO skill_baseline (name, outcome, objective, at) VALUES (?,?,?,?)",
+                       (name, outcome, objective, K.now_iso()))
+
+    def baseline(self, name: str, limit: int = 1000) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM skill_baseline WHERE name = ? ORDER BY id DESC LIMIT ?",
                               (name, limit)).fetchall()
         return [dict(row) for row in rows]
 
