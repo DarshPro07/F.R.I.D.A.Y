@@ -1515,6 +1515,8 @@ class HermesSupervisor:
         #: transition (FR-013: the worker count is the count of workers
         #: actually running, not of runs ever started).
         self._leases: dict[str, str] = {}
+        #: work_run_id -> the open span over a `wait=False` run (OTEL-001).
+        self._background: dict = {}
         #: Leases whose delegation was registered with its envelope for the
         #: exec bridge to hold it to; released with the lease.
         self._scoped: set[str] = set()
@@ -1540,7 +1542,45 @@ class HermesSupervisor:
         if owner is None:
             self.log.on_terminal_hook = self._release_lease
 
+    def _trace_background_run(self, work_run_id: str, *, model: str = "") -> None:
+        """OTEL-001: a `wait=False` run outlives the delegating call, so give it
+        its own span, opened here under the caller's current span and closed at
+        the run's terminal event (`_end_background_run`). Carries ids and
+        status only - never the goal or the result."""
+        from friday import telemetry
+        self._background[work_run_id] = telemetry.start(
+            "hermes.background_run", component="hermes",
+            attributes={"gen_ai.operation.name": "invoke_agent",
+                        "gen_ai.agent.name": "hermes",
+                        "gen_ai.request.model": model,
+                        "friday.work_run_id": work_run_id})
+        # A run that finished before the span was registered has already
+        # passed its terminal hook; close it now (a second close is a no-op).
+        record = self.log.get(work_run_id) or {}
+        if record.get("status") in TERMINAL:
+            self._end_background_run(work_run_id)
+
+    def _end_background_run(self, work_run_id: str) -> None:
+        """Close the run's background span, once. A run that did not reach a
+        clean terminal status (failed, or its gateway went away first) is an
+        error span, so the lost time stays attributed and visibly bad."""
+        # The span lives on the supervisor `delegate` was called on, which is
+        # the owner when the run is held on its scoped gateway.
+        span = self._background.pop(work_run_id, None)
+        if span is None and self._owner is not None:
+            span = self._owner._background.pop(work_run_id, None)
+        if span is None:
+            return
+        from friday import telemetry
+        status = (self.log.get(work_run_id) or {}).get("status", "")
+        span.set("friday.work_run.status", status)
+        if status != COMPLETE:
+            span.status = telemetry.ERROR
+            span.set("error.type", "RunFailed" if status in TERMINAL else "RunStopped")
+        span.end()
+
     def _release_lease(self, work_run_id: str) -> None:
+        self._end_background_run(work_run_id)
         scoped = self._scoped_runs.get(work_run_id)
         if scoped is not None:
             scoped._release_lease(work_run_id)
@@ -2273,6 +2313,13 @@ class HermesSupervisor:
             sp.set("gen_ai.prompt", bundle.goal)
             out = self._delegate(bundle, **kwargs)
             sp.set("friday.work_run_id", out.get("work_run_id", ""))
+            # A run that outlives this call keeps a span: one not waited for,
+            # or one whose wait timed out before the terminal event.
+            if out.get("work_run_id") and (
+                    not kwargs.get("wait")
+                    or (out.get("result") or {}).get("status") not in TERMINAL):
+                self._trace_background_run(out["work_run_id"],
+                                           model=kwargs.get("model") or "")
             return out
 
     def _delegate(self, bundle: TaskBundle, *, friday_run_id: str = "",

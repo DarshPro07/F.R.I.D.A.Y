@@ -179,8 +179,19 @@ class Recorder:
         return [s for s in self.spans() if s.trace_id == trace_id]
 
     def duration_ms(self, trace_id: str) -> float:
-        """Wall time of the run: the roots' durations."""
-        return sum(s.duration_ms for s in self.trace(trace_id) if s.parent_id is None)
+        """Wall time of the run: the time covered by at least one of its ended
+        spans. A span that outlives its parent (a background run) extends it,
+        so this equals the sum of `component_time_ms`."""
+        spans = sorted((s for s in self.trace(trace_id) if s.end_ns is not None),
+                       key=lambda s: s.start_ns)
+        total = 0
+        reach = None
+        for s in spans:
+            lo = s.start_ns if reach is None else max(s.start_ns, reach)
+            if s.end_ns > lo:
+                total += s.end_ns - lo
+            reach = s.end_ns if reach is None else max(reach, s.end_ns)
+        return total / 1e6
 
     def component_time_ms(self, trace_id: str) -> dict[str, float]:
         """Wall time per component. Every instant of the run is counted once:

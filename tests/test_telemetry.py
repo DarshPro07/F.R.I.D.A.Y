@@ -434,3 +434,174 @@ def test_parallel_tool_calls_in_a_real_executor_run_sum_to_the_run(tmp_path, mon
     assert sum(t.duration_ms for t in tools) > tools[0].duration_ms   # they overlap
     times = rec.component_time_ms(root.trace_id)
     assert sum(times.values()) == pytest.approx(rec.duration_ms(root.trace_id))
+
+
+# -- a background Hermes run keeps a span until its terminal event -----------
+
+
+def _bridge_supervisor(tmp_path, monkeypatch):
+    import sys
+    from pathlib import Path
+    from friday import hermes_bridge as hb
+    for key in ("FAKE_HERMES_CLARIFY", "FAKE_HERMES_HANG", "FAKE_HERMES_DIE"):
+        monkeypatch.delenv(key, raising=False)
+    fake = str(Path(__file__).parent / "fake_hermes_gateway.py")
+    supervisor = hb.HermesSupervisor(log=hb.WorkRunLog(tmp_path / "bridge.sqlite3"),
+                                     command=[sys.executable, fake], profile="")
+    supervisor.READY_TIMEOUT = 20
+    return hb, supervisor
+
+
+def test_a_background_hermes_run_has_a_span_that_closes_at_its_terminal_event(
+        tmp_path, monkeypatch):
+    hb, supervisor = _bridge_supervisor(tmp_path, monkeypatch)
+    out = tmp_path / "bg.jsonl"
+    rec = telemetry.configure(path=out)
+    try:
+        with telemetry.span("invoke_agent friday", component="runtime") as root:
+            started = supervisor.delegate(
+                hb.TaskBundle(goal=f"{PROMPT_TEXT} {DUMMY_SECRET}"), wait=False)
+        work_run_id = started["work_run_id"]
+        # The delegating call has returned; the run is still being traced.
+        supervisor.wait_for(work_run_id, timeout=30)
+        assert (supervisor.log.get(work_run_id) or {})["status"] == hb.COMPLETE
+    finally:
+        supervisor.stop()
+        telemetry.reset()
+
+    by_name = {s.name: s for s in rec.trace(root.trace_id)}
+    run = by_name["invoke_agent hermes"]
+    bg = by_name["hermes.background_run"]
+    assert bg.parent_id == run.span_id and bg.component == "hermes"
+    assert bg.attributes["friday.work_run_id"] == work_run_id
+    assert bg.attributes["friday.work_run.status"] == hb.COMPLETE
+    assert bg.status == telemetry.OK and bg.end_ns is not None
+    assert bg.end_ns > run.end_ns            # it outlives the delegating call
+    assert rec.component_time_ms(root.trace_id)["hermes"] > 0
+    dumped = out.read_text(encoding="utf-8")
+    assert PROMPT_TEXT not in dumped and DUMMY_SECRET not in dumped
+
+
+def test_a_background_run_attributes_the_wall_time_between_delegation_and_its_end(
+        tmp_path, monkeypatch):
+    hb, supervisor = _bridge_supervisor(tmp_path, monkeypatch)
+    clock = FakeClock()
+    rec = telemetry.Recorder(clock=clock)
+    monkeypatch.setattr(telemetry, "_recorder", rec)
+    run_id = supervisor.log.create(task="t", friday_run_id="", bundle_chars=1,
+                                   token_budget=0)
+    with rec.span("invoke_agent friday", component="runtime") as root:
+        clock.tick(5)
+        with rec.span("invoke_agent hermes", component="hermes_bridge"):
+            clock.tick(10)
+            supervisor._trace_background_run(run_id, model="m")
+    clock.tick(300)                          # the run works on its own
+    open_before = [s for s in rec.trace(root.trace_id) if s.name == "hermes.background_run"]
+    assert open_before == []                 # still open, so not yet exported
+    supervisor.log.update(run_id, status=hb.FAILED)
+
+    (bg,) = [s for s in rec.trace(root.trace_id) if s.name == "hermes.background_run"]
+    assert bg.status == telemetry.ERROR
+    assert bg.attributes["friday.work_run.status"] == hb.FAILED
+    assert bg.duration_ms == 300.0
+    times = rec.component_time_ms(root.trace_id)
+    assert times == {"runtime": 5.0, "hermes_bridge": 10.0, "hermes": 300.0}
+    # Ending twice (a late lease release) changes nothing.
+    supervisor._end_background_run(run_id)
+    assert len([s for s in rec.spans() if s.name == "hermes.background_run"]) == 1
+
+
+def test_a_background_run_whose_gateway_stops_is_closed_as_an_error(tmp_path, monkeypatch):
+    hb, supervisor = _bridge_supervisor(tmp_path, monkeypatch)
+    rec = telemetry.Recorder(clock=FakeClock())
+    monkeypatch.setattr(telemetry, "_recorder", rec)
+    run_id = supervisor.log.create(task="t", friday_run_id="", bundle_chars=1,
+                                   token_budget=0)
+    supervisor.log.update(run_id, status=hb.WORKING)
+    supervisor._trace_background_run(run_id, model="")
+    supervisor._leases[run_id] = ""          # the stop path walks the held runs
+    supervisor.stop()
+    (bg,) = [s for s in rec.spans() if s.name == "hermes.background_run"]
+    assert bg.status == telemetry.ERROR and bg.end_ns is not None
+
+
+def test_a_run_already_terminal_when_traced_closes_at_once(tmp_path, monkeypatch):
+    hb, supervisor = _bridge_supervisor(tmp_path, monkeypatch)
+    rec = telemetry.Recorder(clock=FakeClock())
+    monkeypatch.setattr(telemetry, "_recorder", rec)
+    run_id = supervisor.log.create(task="t", friday_run_id="", bundle_chars=1,
+                                   token_budget=0)
+    supervisor.log.update(run_id, status=hb.COMPLETE)
+    supervisor._trace_background_run(run_id, model="")
+    (bg,) = [s for s in rec.spans() if s.name == "hermes.background_run"]
+    assert bg.status == telemetry.OK
+    assert not supervisor._background
+
+
+def test_a_background_run_on_the_scoped_gateway_is_closed_when_the_owner_stops(
+        tmp_path, monkeypatch):
+    # The owner's delegate registers the span on the owner, but the run is held
+    # on the scoped gateway; owner.stop() reaches only the scoped gateway's own
+    # lease release, which must still end the owner's span.
+    hb, owner = _bridge_supervisor(tmp_path, monkeypatch)
+    rec = telemetry.Recorder(clock=FakeClock())
+    monkeypatch.setattr(telemetry, "_recorder", rec)
+    scoped = hb.HermesSupervisor(log=owner.log, command=owner._command, profile="",
+                                 owner=owner)
+    run_id = owner.log.create(task="t", friday_run_id="", bundle_chars=1,
+                              token_budget=0)
+    owner.log.update(run_id, status=hb.WORKING)
+    owner._trace_background_run(run_id, model="")
+    scoped._leases[run_id] = ""
+    owner._scoped_runs[run_id] = scoped
+    owner._scoped_gateway = scoped
+    owner.stop()
+    (bg,) = [s for s in rec.spans() if s.name == "hermes.background_run"]
+    assert bg.status == telemetry.ERROR and bg.end_ns is not None
+    assert bg.attributes["error.type"] == "RunStopped"
+    assert not owner._background
+
+
+def test_a_waited_delegation_that_times_out_keeps_a_background_span(
+        tmp_path, monkeypatch):
+    hb, supervisor = _bridge_supervisor(tmp_path, monkeypatch)
+    rec = telemetry.Recorder(clock=FakeClock())
+    monkeypatch.setattr(telemetry, "_recorder", rec)
+    run_id = supervisor.log.create(task="t", friday_run_id="", bundle_chars=1,
+                                   token_budget=0)
+    supervisor.log.update(run_id, status=hb.WORKING)
+    monkeypatch.setattr(supervisor, "_delegate", lambda bundle, **kw: {
+        "work_run_id": run_id, "result": {"status": hb.WORKING}})
+    supervisor.delegate(hb.TaskBundle(goal="g"), wait=True)
+    assert run_id in supervisor._background        # still running: still traced
+    supervisor.log.update(run_id, status=hb.COMPLETE)
+    assert not supervisor._background
+    (bg,) = [s for s in rec.spans() if s.name == "hermes.background_run"]
+    assert bg.status == telemetry.OK
+
+
+def test_a_waited_delegation_that_finished_gets_no_background_span(
+        tmp_path, monkeypatch):
+    hb, supervisor = _bridge_supervisor(tmp_path, monkeypatch)
+    rec = telemetry.Recorder(clock=FakeClock())
+    monkeypatch.setattr(telemetry, "_recorder", rec)
+    run_id = supervisor.log.create(task="t", friday_run_id="", bundle_chars=1,
+                                   token_budget=0)
+    supervisor.log.update(run_id, status=hb.COMPLETE)
+    monkeypatch.setattr(supervisor, "_delegate", lambda bundle, **kw: {
+        "work_run_id": run_id, "result": {"status": hb.COMPLETE}})
+    supervisor.delegate(hb.TaskBundle(goal="g"), wait=True)
+    assert not [s for s in rec.spans() if s.name == "hermes.background_run"]
+
+
+def test_the_run_wall_time_equals_the_parts_when_a_background_span_outlives_the_root():
+    clock = FakeClock()
+    rec = telemetry.Recorder(clock=clock)
+    with rec.span("invoke_agent friday", component="runtime") as root:
+        clock.tick(5)
+        bg = rec.start("hermes.background_run", component="hermes")
+    clock.tick(300)
+    bg.end()
+    times = rec.component_time_ms(root.trace_id)
+    assert rec.duration_ms(root.trace_id) == 305.0
+    assert sum(times.values()) == rec.duration_ms(root.trace_id)
