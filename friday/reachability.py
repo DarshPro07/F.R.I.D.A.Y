@@ -202,6 +202,10 @@ DECLARED = {
                              " failures inside a size cap with the full output in"
                              " the vault; the worker-result caller is the next"
                              " wiring step, run by tests/test_output_router.py"),
+    "friday/evolution_governor": (FUTURE,
+                                  "EVO-006: evolution admission and stop under the existing "
+                                  "governors; the evolution controller that calls it is a later "
+                                  "slice, run by tests/test_evolution_governor.py"),
     "friday/shadow": (PRODUCTION,
                       "observes every turn from watch_from_the_side"),
     "friday/system_one": (FUTURE,
