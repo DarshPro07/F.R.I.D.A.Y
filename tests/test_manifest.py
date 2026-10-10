@@ -457,8 +457,10 @@ def test_health_report_probes_once_and_names_what_failed(monkeypatch):
     failing = {row["id"]: row for row in report["unhealthy"]}
     assert failing["files_read"]["state"] == fabric.UNAVAILABLE
     assert "dead" in failing["files_read"]["detail"]
-    # The counts describe the probed rows, so a failure is in them.
-    assert report["by_state"][fabric.UNAVAILABLE] >= len(failing)
+    # The counts describe the probed rows, so each failure is counted under its own
+    # state (an active provider whose probe has not run yet is DEGRADED, unhealthy too).
+    for state in {row["state"] for row in failing.values()}:
+        assert report["by_state"][state] >= sum(row["state"] == state for row in failing.values())
     assert sum(report["by_state"].values()) == report["total"]
 
 

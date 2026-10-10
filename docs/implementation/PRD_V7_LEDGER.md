@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `3730d8f9e31f9f54480e753feb2f57f17cd74a7702e813001724e6ab0d673bbb`
 - PRD size: 8353 lines, 326432 bytes
-- Repository HEAD: `da0c217d3f7af573481806ff12fc401b886333f1`
-- Uncommitted paths at generation: 46
-- Generated: 2026-10-10T08:54:49+05:30
+- Repository HEAD: `927b66571a5f48c052ef7f1c88ffca8534008833`
+- Uncommitted paths at generation: 45
+- Generated: 2026-10-10T09:12:20+05:30
 
 ## Status vocabulary
 
@@ -273,7 +273,7 @@ Unresolved P1: 158 (INTENT-002, CTX-004, COG-002, COG-003, MODEL-003, MODEL-004,
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| PRO-001 | P1 | **PARTIAL** | Proactive runtime is event-driven. | Idle system has no unnecessary inference loop. | FR-PRO-001, PRD-GATE-023 | `friday/toolsets/schedules.py`, `friday/world_monitor.py:10-58`, `friday/toolsets/automations.py` | EXTEND friday/toolsets/automations.py + friday/world_monitor.py with anomaly detectors feeding a new Opportunities Inbox store. |
+| PRO-001 | P1 | **PARTIAL** | Proactive runtime is event-driven. | Idle system has no unnecessary inference loop. | FR-PRO-001, PRD-GATE-023 | `friday/toolsets/schedules.py`, `friday/world_monitor.py:10-58`, `friday/toolsets/automations.py` | GAPS: No live caller: nothing schedules scan() yet (declared FUTURE in reachability), and there is no MCP tool to list or resolve inbox rows. A later slice should add the scheduled call and a thin friday/tools wrapper.; Detectors cover automation failures and stalls only; health.py and world_monitor signals have no detector yet.; Reads of the opportunities table are filtered by workspace_id in Store, but the automations they scan are not workspace-filtered (the table is declared stamped-only upstream).; Controller: integrated as PARTIAL (no live caller or a path not yet covered); a confirm can judge the row's acceptance afterwards.; implementer did not claim acceptance met |
 
 ## PRD section 59
 
