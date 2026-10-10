@@ -155,6 +155,37 @@ def record_offline(provider: str, host: str, action: str, output: dict, *,
     rec["digest"] = _digest(rec)
     return LabEvidence(**rec)
 
+def record_refusal(provider: str, tier: str, host: str, action: str, reason: str, *,
+                   intensity: str = T.PASSIVE, approval_id: str = "",
+                   now: datetime | None = None) -> LabEvidence:
+    """Hash-bound evidence that a request was refused before any provider ran.
+
+    For refusals the contract gate does not make itself (BIN-004: a provider
+    tier a sample may not use, or a request to run on the host). `tier` is the
+    provider's declared tier, or "" when there is no provider.
+    """
+    rec = LabEvidence(
+        provider=provider, tier=tier, host=host, action=action, intensity=intensity,
+        allowed=False, reason=reason, approval_id=approval_id,
+        at=(now or datetime.now(timezone.utc)).isoformat(timespec="seconds"),
+    ).to_dict()
+    rec["digest"] = _digest(rec)
+    return LabEvidence(**rec)
+
+
+def record_withheld(evidence: LabEvidence, reason: str) -> LabEvidence:
+    """The same run's evidence with its output replaced by a marker, re-bound.
+
+    For a run that happened but whose output must not be released (BIN-004: it
+    touched a canary). Provider, tier, host, intensity, `allowed` and approval
+    stay as the run recorded them, so the record still says the lab ran.
+    """
+    rec = evidence.to_dict()
+    rec["output"] = {"withheld": reason}
+    rec["digest"] = _digest(rec)
+    return LabEvidence(**rec)
+
+
 def verify_evidence(rec: LabEvidence) -> bool:
     return rec.digest == _digest(rec.to_dict())
 

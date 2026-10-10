@@ -249,6 +249,10 @@ DECLARED = {
                                   "slice, run by tests/test_evolution_governor.py"),
     "friday/shadow": (PRODUCTION,
                       "observes every turn from watch_from_the_side"),
+    "friday/binary_lab": (FUTURE,
+                          "BIN-004: refusal policy for dynamic analysis of a sample, through an "
+                          "offline Cyber Lab provider only; no MCP tool calls it yet, run by "
+                          "tests/test_binary_lab.py"),
     "friday/system_one": (FUTURE,
                           "S1-001: the System One decision gateway and its "
                           "mock backend; a Laya/Jev backend and a live caller "
@@ -466,6 +470,7 @@ KNOWN: dict[str, tuple[str, str]] = {
     '_spawn': (PRODUCTION, 'objective_cli subcommand, dispatched by name'),
     'stall_steps': (FUTURE, 'COG-006: the stall detector is not yet wired into the executor loops (slice 2), run by tests/test_trajectory.py'),
     'fit_baseline': (FUTURE, 'LAB-003: the benchmark baseline, fitted on the NEURAL-002 candidate path; reached only through lab_benchmark.run_task, which has no production caller yet, run by tests/test_lab_benchmark.py'),
+    'record_withheld': (FUTURE, 'BIN-004: evidence for a lab run whose output is withheld; reached only through binary_lab.dynamic_analysis, which has no production caller yet, run by tests/test_binary_lab.py'),
     'is_terminal': (DEAD, 'no reader; run state is compared directly'),
     'PlanProblem': (DEAD, 'never raised; the planner returns problems as data'),
     'FailedToAcquire': (DEAD, 'never raised; acquisition returns a bool'),

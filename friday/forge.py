@@ -803,8 +803,13 @@ VERIFIED = "VERIFIED"
 REGISTERED = "REGISTERED"
 ENABLED = "ENABLED"
 REJECTED = "REJECTED"
+#: A network-attack candidate (BIN-004). Held out of the registry: it is not
+#: scanned, verified or enabled, and leaves only through `Registry.release`.
+EXCLUDED = "EXCLUDED"
 
-LIFECYCLE = (CANDIDATE, VERIFIED, REGISTERED, ENABLED, REJECTED)
+LIFECYCLE = (CANDIDATE, VERIFIED, REGISTERED, ENABLED, REJECTED, EXCLUDED)
+#: The action a SecurityAuthorization must allow, for the skill's own name, to release it.
+RELEASE_ACTION = "release_skill"
 
 #: Passing tests does not mean "always on". Each step is a separate decision,
 #: and the one that matters - ENABLED, with the scopes it is enabled for - is
@@ -815,7 +820,84 @@ PROMOTIONS = {
     REGISTERED: (ENABLED, REJECTED),
     ENABLED: (REGISTERED, REJECTED),
     REJECTED: (),
+    EXCLUDED: (CANDIDATE, REJECTED),
 }
+
+#: What marks a scanner, exploit or command-and-control tool, read from the
+#: spec and the source with `_` and `-` as spaces. Deliberately specific so an
+#: ordinary skill is not swept in ("mix c2 and c3 colour channels", "the cache
+#: exploits locality"); a false positive costs one `release`. Bare `c2` and
+#: `exploit` count only beside a word that makes them an attack tool.
+_ATTACK_SIGNALS = (
+    r"port ?scan(s|ner|ners|ning)?", r"scans? (the )?(open )?ports", r"open ports",
+    r"nmap", r"masscan", r"zmap", r"network scanner", r"vulnerability scanner",
+    r"syn (scan|flood)", r"shellcode", r"(reverse|bind) shell", r"metasploit",
+    r"command and control", r"c&c", r"c ?& ?c (server|client|channel|beacon|framework)",
+    r"c2 (server|client|channel|beacon|beaconing|framework|infrastructure|callback|"
+    r"traffic|agent|implant|domain)",
+    r"(beacon|beacons|beaconing|call back|calls back|connect|connects|talk|talks|report) "
+    r"(to|with) (a |the |its |an )?(remote )?c2",
+    r"exploit(s|ing|ation)? (a |an |the )?(remote |known |zero day |unpatched )*"
+    r"(payload|kit|framework|code|chain|module|runner|server|vulnerab\w*|cve|rce|"
+    r"buffer overflow)",
+    r"botnet", r"ddos", r"arp spoof(ing)?", r"packet injection",
+    r"credential stuffing", r"password spray(ing)?",
+    # Libraries and sockets whose job is crafting or sending hostile traffic.
+    r"scapy", r"impacket", r"pwntools", r"from pwn import", r"sock raw",
+)
+_ATTACK_RE = re.compile(r"(?<![a-z0-9&])(" + "|".join(_ATTACK_SIGNALS) + r")(?![a-z0-9&])")
+
+#: Calls that open a connection. Made once per item of a loop, with the loop's own
+#: variable in the arguments, they are a sweep of hosts or ports whatever the
+#: candidate calls itself. `connect_ex` is the port-probe call; inside any loop
+#: it is enough.
+_CONNECT_CALLS = {"connect", "connect_ex", "create_connection", "open_connection"}
+_WIDE_HOSTS = 8
+
+
+def _loop_connect_signals(source: str) -> list[str]:
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return ["connect_ex in a loop over hosts or ports"] if "connect_ex" in source else []
+    found: set[str] = set()
+    loops = (ast.For, ast.AsyncFor, ast.While, ast.ListComp, ast.SetComp, ast.GeneratorExp,
+             ast.DictComp)
+    for loop in ast.walk(tree):
+        if not isinstance(loop, loops):
+            continue
+        loop_vars: set[str] = set()
+        if isinstance(loop, (ast.For, ast.AsyncFor)):
+            loop_vars |= {n.id for n in ast.walk(loop.target) if isinstance(n, ast.Name)}
+        elif not isinstance(loop, ast.While):
+            for gen in loop.generators:
+                loop_vars |= {n.id for n in ast.walk(gen.target) if isinstance(n, ast.Name)}
+        for node in ast.walk(loop):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+            if name not in _CONNECT_CALLS:
+                continue
+            args = [a for a in (*node.args, *(k.value for k in node.keywords))]
+            uses_var = any(isinstance(n, ast.Name) and n.id in loop_vars
+                           for a in args for n in ast.walk(a))
+            if name == "connect_ex" or uses_var:
+                found.add(f"{name} in a loop over hosts or ports")
+    return sorted(found)
+
+
+def network_attack_signals(spec: "CapabilitySpec", source: str) -> list[str]:
+    """The attack-tool signals found in a candidate; empty when it reads as ordinary."""
+    text = " ".join((spec.name, spec.goal, *spec.side_effects, source)).lower()
+    text = text.replace("_", " ").replace("-", " ")
+    found = {m.group(0) for m in _ATTACK_RE.finditer(text)}
+    found.update(_loop_connect_signals(source))
+    if spec.network == SCOPED and (
+            len(spec.allowed_hosts) > _WIDE_HOSTS
+            or any(("*" in h or "/" in h) for h in spec.allowed_hosts)):
+        found.add("scoped network with a wide allowed_hosts")
+    return sorted(found)
 
 
 def digest(source: str) -> str:
@@ -960,11 +1042,13 @@ class Registry:
         from friday.contracts import now_iso
 
         existing = store().get_forged_skill(spec.name)
+        signals = network_attack_signals(spec, source)
+        state = EXCLUDED if signals else CANDIDATE
         path = self.dir / f"{spec.name}.py"
         path.write_text(source, encoding="utf-8")
         record = {
             "name": spec.name,
-            "state": CANDIDATE,
+            "state": state,
             "version": (existing["version"] + 1) if existing else 1,
             "spec": json.dumps(spec.to_dict()),
             "source_sha256": digest(source),
@@ -981,15 +1065,19 @@ class Registry:
         }
         store().save_forged_skill(record)
         store().record_forged_transition(
-            spec.name, existing["state"] if existing else None, CANDIDATE,
-            f"submitted (version {record['version']})", provenance)
+            spec.name, existing["state"] if existing else None, state,
+            f"submitted (version {record['version']})" if not signals else
+            f"excluded as a network-attack candidate ({', '.join(signals)[:200]})",
+            provenance)
         return self.get(spec.name)
 
     def get(self, name: str) -> dict | None:
         return store().get_forged_skill(name)
 
     def list(self, state: str | None = None) -> list[dict]:
-        return store().forged_skills(state)
+        """Registry entries; EXCLUDED ones appear only when asked for by state."""
+        rows = store().forged_skills(state)
+        return rows if state else [r for r in rows if r["state"] != EXCLUDED]
 
     def history(self, name: str) -> list[dict]:
         return store().forged_skill_history(name)
@@ -1052,6 +1140,10 @@ class Registry:
         record = store().get_forged_skill(name)
         if record is None:
             raise ForgeError(f"no forged skill named {name!r}")
+        if record["state"] == EXCLUDED:
+            raise ForgeError(
+                f"{name!r} is excluded as a network-attack candidate; it is not "
+                "scanned or verified until the owner releases it")
         source = Path(record["source_path"]).read_text(encoding="utf-8")
         if digest(source) != record["source_sha256"]:
             return self._transition(
@@ -1150,6 +1242,33 @@ class Registry:
         return self._transition(name, ENABLED, actor=actor,
                                 reason=f"enabled for {', '.join(scopes)}",
                                 scopes=json.dumps(list(scopes)))
+
+    def release(self, name: str, *, actor: str, authorization, owner_confirmed: bool) -> dict:
+        """
+        Take a network-attack candidate out of exclusion, as a fresh CANDIDATE.
+
+        It needs an unexpired authorized scope (CYBER-001) that names this skill
+        and allows `RELEASE_ACTION`, and the owner's confirmation; neither is the
+        forge's to give. The skill then goes through the ordinary scan,
+        verification and enabling like any other.
+        """
+        if actor == "forge":
+            raise ForgeError("the forge does not release what it excluded")
+        from friday import trust as T
+
+        verdict = T.target_guard(authorization, host=name, action=RELEASE_ACTION,
+                                 intensity=T.PASSIVE)
+        if not verdict["allowed"]:
+            raise ForgeError(
+                f"{name!r} is a network-attack candidate; releasing it needs an "
+                f"unexpired authorized scope (SecurityAuthorization) that names it "
+                f"and allows {RELEASE_ACTION!r}: {verdict['reason']}")
+        if not owner_confirmed:
+            raise ForgeError(f"releasing {name!r} needs the owner's confirmation")
+        return self._transition(
+            name, CANDIDATE, actor=actor,
+            reason=(f"released by {actor}: owner confirmed, authorization "
+                    f"{authorization.approval_id} until {authorization.expires_at}"))
 
     def reject(self, name: str, reason: str, *, actor: str) -> dict:
         return self._transition(name, REJECTED, actor=actor, reason=reason)
