@@ -769,6 +769,10 @@ class FridayAgent(Agent):
         # The session-side continuity plane, wired in the entrypoint once the
         # AgentSession exists. None in a bare unit context.
         self._continuity = None
+        # COG-005: the model transport (`complete(state) -> (text, tokens,
+        # cost_usd)`) the simple loop proposes with. None until one is wired;
+        # with none, a SIMPLE turn takes the same path as every other turn.
+        self._simple_complete = None
         self._input_gate = None                # FR-038 mute gate, attached in entrypoint
         super().__init__(
             instructions=build_instructions(),
@@ -1545,6 +1549,12 @@ class FridayAgent(Agent):
         await settle_what_he_answered(
             turn_ctx, text,
             say=lambda note: self.session.say(note, allow_interruptions=True))
+        # getattr: the unit-test stand-ins that borrow this turn entry have
+        # no transport attribute.
+        if await route_simple_turn(
+                getattr(self, "_simple_complete", None), text,
+                say=lambda note: self.session.say(note, allow_interruptions=True)):
+            raise StopResponse()
         # The owner's words for THIS turn. `use_capability` licenses a
         # Friday-own write against these and nothing else (A-036): a page
         # the model reads mid-turn cannot become his instruction.
@@ -2068,6 +2078,41 @@ async def stop_or_resume(text: str, *, say, interrupt) -> bool:
         await say("Resumed, sir." if resumed else "Nothing was stopped, sir.")
         return True
     return False
+
+
+async def route_simple_turn(complete, text: str, *, say) -> bool:
+    """
+    COG-005: run a turn the complexity classifier marks SIMPLE through the
+    bounded simple loop. True means the loop answered and the turn is over;
+    False leaves the turn on its existing path (not SIMPLE, no transport
+    wired, or the transport failed before the loop could act).
+    """
+    if complete is None:
+        return False
+    from friday import capability_runtime, simple_loop
+
+    port = []
+
+    async def dispatch(capability, arguments, *, run=None):
+        if not port:
+            port.append(capability_runtime.build_dispatch())
+        return await port[0](capability, arguments, run=run)
+
+    try:
+        result = await simple_loop.route_simple(
+            text, dispatch, simple_loop.model_proposer(complete))
+    except Exception:                                        # noqa: BLE001
+        # The model path is what every turn had before the loop existed.
+        logger.exception("simple loop failed; answering normally")
+        return False
+    if result is None:
+        return False
+    lead = {simple_loop.DONE: "Done, boss. ",
+            simple_loop.ESCALATED: ("That is bigger than a quick job, so I "
+                                    "handed it to the objective engine. "),
+            simple_loop.BLOCKED: "I stopped: "}[result.outcome]
+    await say(lead + result.reason)
+    return True
 
 
 async def settle_what_he_answered(turn_ctx, text: str, *, say) -> None:

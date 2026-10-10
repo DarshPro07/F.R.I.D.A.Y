@@ -2550,7 +2550,7 @@ PROGRESS_V7: list[tuple[str, dict]] = [
             "suspends. Gaps: nothing in a live path calls inspect for a server Hermes or Claude Code workers "
             "configure, so the external lifecycle runs from the CLI and tests only, never yet against a live "
             "Hermes."),
-        "files": ["friday/mcp_firewall.py:149,225,241,303,336,360,474,538,718,752,862,932", "agent_friday.py:743,1361"],
+        "files": ["friday/mcp_firewall.py:149,225,241,303,336,360,474,538,718,752,862,932", "agent_friday.py:743,1365"],
         "tests": ["tests/test_mcp_firewall.py::test_a_new_server_is_pinned_and_admitted",
                   "tests/test_mcp_firewall.py::test_an_unexpected_change_suspends_the_server",
                   "tests/test_mcp_firewall.py::test_a_description_that_instructs_the_model_is_refused_before_pinning",
@@ -4014,7 +4014,7 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "next_action": '',
         "evidence": 'build run MCP-001, commit c264fd2c5; RED (assertion) at f5c035f5c and GREEN at the commit for tests/test_mcp_firewall.py; affected tests passed; fresh verifier PASS ($0.47)',
         "tests": ['tests/test_mcp_firewall.py::test_a_changed_server_name_suspends_the_server_but_a_new_sdk_version_does_not', 'tests/test_mcp_firewall.py::test_the_voice_agent_withholds_a_suspended_servers_tools'],
-        "files": ['friday/mcp_firewall.py:149,225,241,303,336,360,474,538,718,752,862,932', 'agent_friday.py:743,1361'],
+        "files": ['friday/mcp_firewall.py:149,225,241,303,336,360,474,538,718,752,862,932', 'agent_friday.py:743,1365'],
     }),
     ('CODE-001', {
         "status": VERIFIED,
