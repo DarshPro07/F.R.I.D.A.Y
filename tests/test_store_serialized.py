@@ -82,3 +82,35 @@ def test_rows_look_like_the_cursor_callers_use(tmp_path):
     store._conn.commit()
     assert store._conn.execute("SELECT COUNT(*) FROM memories").fetchall()[0][0] == 3
     store.close()
+
+
+def test_stores_opened_at_once_on_a_new_database_migrate_it_once(tmp_path):
+    """Every process opens its own Store; at startup several open the same file together
+    (the MCP server and the voice agent, a test and its tool). The added-column migration
+    reads the columns and then adds the missing ones; two openers interleaving there both
+    added `provenance` and one died on "duplicate column name" (SIDE-002's gate, 2026-10-10)."""
+    import threading
+    from friday.store import Store
+
+    for attempt in range(6):
+        path = tmp_path / f"race{attempt}.sqlite3"
+        start = threading.Barrier(8)
+        errors: list[BaseException] = []
+        opened: list[Store] = []
+
+        def open_one():
+            start.wait()
+            try:
+                opened.append(Store(path))
+            except BaseException as exc:  # recorded and asserted below, never swallowed
+                errors.append(exc)
+
+        threads = [threading.Thread(target=open_one) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(60)
+        for store in opened:
+            store.close()
+        assert errors == [], errors
+        assert len(opened) == 8

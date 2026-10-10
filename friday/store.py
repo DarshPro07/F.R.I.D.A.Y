@@ -28,6 +28,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -151,6 +152,21 @@ DEFAULT_DB = DATA_DIR / "ada.sqlite3"
 #: objective-ledger transaction on a loaded host; anything longer is a
 #: hung writer and should surface as an error rather than a silent wait.
 BUSY_TIMEOUT_S = 10.0
+
+
+def _use_wal(conn) -> None:
+    """PRAGMA journal_mode=WAL, waiting as busy_timeout would. Switching a new file's
+    journal needs an exclusive lock, and SQLite answers "database is locked" at once,
+    without calling the busy handler, while another opener holds the file."""
+    deadline = time.monotonic() + BUSY_TIMEOUT_S
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc) or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
 
 # Memory kinds. An INFERENCE must never be reported as a FACT.
 FACT = "FACT"
@@ -1213,7 +1229,7 @@ class Store:
         #              the last transactions, never corrupt the file.
         # In-memory databases have no WAL; the pragmas are no-ops there.
         if str(self.path) != ":memory:":
-            self._conn.execute("PRAGMA journal_mode=WAL")
+            _use_wal(self._conn)
             self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute(f"PRAGMA busy_timeout={int(BUSY_TIMEOUT_S * 1000)}")
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -1224,7 +1240,12 @@ class Store:
         # "cannot commit - no transaction is active". _tx holds this lock for
         # the whole transaction so a commit only ever ends the transaction it
         # opened. RLock so a future nested _tx does not self-deadlock.
-        self._conn.executescript(SCHEMA)
+        # Schema and migration run in one IMMEDIATE transaction: several processes open
+        # this file at once, and the migration reads a table's columns and then adds the
+        # missing ones. Interleaved, two openers both added a column ("duplicate column
+        # name") or one hit SQLITE_BUSY upgrading a deferred read lock, which no busy
+        # timeout waits out. IMMEDIATE takes the write lock first, under busy_timeout.
+        self._conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         self._migrate()
         self._conn.commit()
 
@@ -1431,7 +1452,8 @@ class Store:
                 rows, aside)
         self._conn.execute(
             "DROP INDEX IF EXISTS idx_shadow_fingerprint")
-        self._conn.executescript(SCHEMA)
+        # executescript commits first; take the write lock back for the rest of the migration.
+        self._conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
 
     def close(self) -> None:
         self._conn.close()
