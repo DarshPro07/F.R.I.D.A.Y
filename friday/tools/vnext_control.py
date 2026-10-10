@@ -227,8 +227,9 @@ def register(mcp):
     def failure_lookup(symptom: str, task_class: str = "",
                        environment: str = "") -> dict:
         """Prior root-caused failures that look like this symptom, best
-        first, each with the repair that worked. Check its `applicability`
-        conditions hold before applying a repair."""
+        first, each with the repair that worked. A repair whose checkable
+        conditions (e.g. `os == windows`) fail here is not returned; check
+        the ones listed under `conditions.unverified` before applying it."""
         try:
             return {"status": "succeeded",
                     "matches": fg.FailureGenome().matches(

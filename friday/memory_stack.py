@@ -315,6 +315,20 @@ def hermes_outcomes(task="", limit=3):
 # tier 8: failures -- the root-caused failures this task has already hit
 # ---------------------------------------------------------------------------
 
+def render_failure(f):
+    """One bundle line for a retrieved failure. A record a worker reported
+    and nobody verified says so (`source`)."""
+    detail = "- %s | cause: %s | repair: %s" % (
+        f["symptom"][:160], f["root_cause"][:160], f["repair"][:200])
+    if f["prevention"]:
+        detail += " | prevention: %s" % f["prevention"][:120]
+    if f["applicability"]:
+        detail += " | only when: %s" % "; ".join(f["applicability"])[:120]
+    if f.get("source"):
+        detail += " | source: %s" % f["source"][:60]
+    return detail
+
+
 def failures(task="", limit=2):
     """Prior root-caused failures whose symptom matches this request (§36).
 
@@ -432,12 +446,7 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
         # (PRD §36) is only true if the lines survive the budget.
         lines.append("FAILURES ALREADY ROOT-CAUSED (read before retrying):")
         for f in t8["items"]:
-            detail = "- %s | cause: %s | repair: %s" % (
-                f["symptom"][:160], f["root_cause"][:160], f["repair"][:200])
-            if f["prevention"]:
-                detail += " | prevention: %s" % f["prevention"][:120]
-            if f["applicability"]:
-                detail += " | only when: %s" % "; ".join(f["applicability"])[:120]
+            detail = render_failure(f)
             if not take("failure", detail, "failures", kind=context_health.KNOWN_FAILURE):
                 break
     if t1["items"]:

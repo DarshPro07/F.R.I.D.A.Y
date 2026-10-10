@@ -37,6 +37,9 @@ from __future__ import annotations
 
 import json
 import os
+import platform
+import re
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,6 +58,7 @@ CREATE TABLE IF NOT EXISTS failure_genome (
     regression_test  TEXT NOT NULL DEFAULT '',
     skill_candidate  TEXT NOT NULL DEFAULT '',
     applicability    TEXT NOT NULL DEFAULT '[]', -- conditions, as JSON strings
+    source           TEXT NOT NULL DEFAULT '',   -- '' = a caller vouched; else provenance
     hits             INTEGER NOT NULL DEFAULT 0, -- times retrieval surfaced it
     created_at       REAL NOT NULL,
     updated_at       REAL NOT NULL
@@ -68,6 +72,9 @@ _INDEX = ("CREATE INDEX IF NOT EXISTS failure_genome_class"
 #: Tuned against the scoring below: a differently worded recurrence of one
 #: failure clears it; a different failure in the same task class does not.
 MATCH_AT = float(os.getenv("FRIDAY_FAILURE_MATCH", "0.35"))
+#: Provenance of a record written by the handoff hook, not by a person or the
+#: model that root-caused it: shown wherever the record is shown.
+SOURCE_WORKER = "worker-reported, unverified"
 #: At or above this, a new capture is the SAME failure being recorded again,
 #: so it updates the row instead of adding a near-duplicate.
 DUPLICATE_AT = 0.85
@@ -93,6 +100,9 @@ class FailureRecord:
     regression_test: str = ""
     skill_candidate: str = ""
     applicability: list[str] = field(default_factory=list)
+    #: '' when a caller vouches for the record; `SOURCE_WORKER` when a worker
+    #: report produced it with nobody checking.
+    source: str = ""
 
 
 def _lexical(text: str) -> set[str]:
@@ -103,17 +113,147 @@ def _lexical(text: str) -> set[str]:
     return set(_tokens(text))
 
 
-def _similarity(a: str, b: str) -> float:
-    """Jaccard overlap of the two token sets.
+#: Two stems this alike (character-bigram Dice) count as the same word, so a
+#: typo or a derived form ("handle"/"handler") still matches.
+FUZZY_AT = 0.8
+_SUFFIXES = ("ing", "ed", "es", "s")
 
-    Jaccard rather than "share of the query's tokens" on purpose: the latter
-    lets one verbose stored record match every query, which is exactly the
-    failure mode that makes retrieved context untrustworthy.
+
+def _stem(token: str) -> str:
+    """Strip one inflectional suffix: timed/times/timing -> tim,
+    restarted/restarts -> restart. Deliberately crude and symmetric -- both
+    sides of a comparison go through it, so consistency matters, not
+    linguistic correctness."""
+    for suffix in _SUFFIXES:
+        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+            return token[:-len(suffix)]
+    return token
+
+
+def _bigrams(word: str) -> set[str]:
+    return {word[i:i + 2] for i in range(len(word) - 1)}
+
+
+_NEGATING = ("un", "in", "dis", "non", "im", "ir", "il")
+
+
+def _opposed(a: str, b: str) -> bool:
+    """One word is the other with a negating prefix: unauthorized/authorized,
+    unavailable/available, invalid/valid. Close in spelling, opposite in
+    meaning -- the one pair a fuzzy match must never join."""
+    short, long_ = sorted((a, b), key=len)
+    return any(long_ == p + short for p in _NEGATING)
+
+
+def _word_match(a: str, b: str) -> float:
+    if a == b:
+        return 1.0
+    # Digits are identifiers (port 8000 vs 8001, error 404 vs 405): exact only.
+    if any(ch.isdigit() for ch in a + b) or _opposed(a, b):
+        return 0.0
+    ba, bb = _bigrams(a), _bigrams(b)
+    if not ba or not bb:
+        return 0.0
+    dice = 2 * len(ba & bb) / (len(ba) + len(bb))
+    return dice if dice >= FUZZY_AT else 0.0
+
+
+def _tokens_of(text: str) -> list[str]:
+    return sorted({_stem(t) for t in _lexical(text)})
+
+
+def _similarity(a: str, b: str, *, fuzzy: bool = True) -> float:
+    """Overlap of the two symptoms, beyond the exact token.
+
+    Words are stemmed and a near-identical pair counts as a (partial) match,
+    then the soft Dice is expressed on the Jaccard scale -- which it equals
+    when every match is exact, so MATCH_AT and DUPLICATE_AT keep their
+    meaning. Jaccard-shaped rather than "share of the query's tokens" on
+    purpose: the latter lets one verbose stored record match every query,
+    which is exactly the failure mode that makes retrieved context
+    untrustworthy.
+
+    This is morphological, not semantic: two symptoms that share no words
+    ("hangs" vs "never returns") still do not match. A fuzzy pair never joins
+    a word to its negation or one number to another. `fuzzy=False` is exact
+    stemmed-token Jaccard, which de-duplication uses so two distinct failures
+    are never merged on spelling alone.
     """
-    ta, tb = _lexical(a), _lexical(b)
+    ta, tb = set(_tokens_of(a)), set(_tokens_of(b))
     if not ta or not tb:
         return 0.0
-    return len(ta & tb) / len(ta | tb)
+    match = _word_match if fuzzy else (lambda x, y: 1.0 if x == y else 0.0)
+    got = (sum(max(match(x, y) for y in tb) for x in ta)
+           + sum(max(match(y, x) for x in ta) for y in tb))
+    dice = got / (len(ta) + len(tb))
+    return dice / (2 - dice)
+
+
+# -- applicability ----------------------------------------------------------
+
+_CONDITION = re.compile(r"^\s*([A-Za-z][\w.\-]*)\s*(==|!=|>=|<=|>|<)\s*(\S.*?)\s*$")
+_VERSION = re.compile(r"\d+(?:\.\d+)*")
+
+
+def runtime_facts() -> dict[str, str]:
+    """What this process can state about its own world: `os` (windows, linux
+    or darwin) and `python` (x.y.z). Anything else a condition names is not
+    known here, and is reported unverified rather than guessed."""
+    plat = sys.platform
+    name = ("windows" if plat.startswith("win") else
+            "darwin" if plat == "darwin" else
+            "linux" if plat.startswith("linux") else plat)
+    return {"os": name, "python": platform.python_version()}
+
+
+def _version(text: str) -> tuple[int, ...] | None:
+    return tuple(int(p) for p in text.split(".")) if _VERSION.fullmatch(text) else None
+
+
+def _holds(condition: str, facts: dict[str, str]) -> bool | None:
+    """True/False when `key <op> value` can be checked against `facts`, None
+    when it is prose, names a fact nobody supplied, or orders non-versions."""
+    m = _CONDITION.match(condition or "")
+    if m is None:
+        return None
+    key, op, want = m.group(1).lower(), m.group(2), m.group(3).strip()
+    have = {str(k).lower(): str(v).strip() for k, v in facts.items()}.get(key)
+    if have is None:
+        return None
+    hv, wv = _version(have), _version(want)
+    if hv is not None and wv is not None:
+        if op in ("==", "!="):
+            # Equal at the precision written: "== 3.11" is any 3.11.x.
+            left, right = hv[:len(wv)], wv
+        else:
+            width = max(len(hv), len(wv))
+            left = hv + (0,) * (width - len(hv))
+            right = wv + (0,) * (width - len(wv))
+    elif op in ("==", "!="):
+        left, right = have.lower(), want.lower()
+    else:
+        return None
+    return {"==": left == right, "!=": left != right, ">=": left >= right,
+            "<=": left <= right, ">": left > right, "<": left < right}[op]
+
+
+def evaluate_conditions(conditions: list[str],
+                        facts: dict[str, str] | None = None) -> dict[str, list[str]]:
+    """Sort a record's applicability conditions into met / unmet /
+    unverified against `facts` (default: `runtime_facts()`).
+
+    A condition is checkable when it reads `<fact> <op> <value>` with op one
+    of == != >= <= > < and the fact is known; versions compare numerically.
+    Everything else is prose about the world and stays `unverified` -- shown
+    to the caller, never silently treated as satisfied or as violated.
+    """
+    known = runtime_facts() if facts is None else facts
+    out: dict[str, list[str]] = {"met": [], "unmet": [], "unverified": []}
+    for condition in conditions:
+        verdict = _holds(condition, known)
+        out["unverified" if verdict is None else
+            "met" if verdict else "unmet"].append(condition)
+    return out
 
 
 def _score(row, symptom: str, task_class: str, environment: str) -> float:
@@ -144,6 +284,10 @@ class FailureGenome:
         self._path = str(db_path)
         with self._connect() as db:
             db.execute(_TABLE)
+            if "source" not in {r[1] for r in
+                                db.execute("PRAGMA table_info(failure_genome)")}:
+                db.execute("ALTER TABLE failure_genome ADD COLUMN source"
+                           " TEXT NOT NULL DEFAULT ''")
             db.execute(_INDEX)
 
     def _connect(self):
@@ -152,8 +296,12 @@ class FailureGenome:
 
     # -- writing -----------------------------------------------------------
 
-    def capture(self, record: FailureRecord) -> dict:
+    def capture(self, record: FailureRecord, *, replace: bool = True) -> dict:
         """Store a root-caused failure, or refuse and say what is missing.
+
+        `replace=False` makes the call insert-only: a restatement of a record
+        already on file is skipped and never overwrites it (the handoff hook
+        uses this -- unverified worker text must not displace what is stored).
 
         Refusal is the rule, not an edge case. "It broke and I do not know
         why" is a bug report; promoting it to retrievable knowledge means a
@@ -180,7 +328,11 @@ class FailureGenome:
                   record.wrong_assumption, record.root_cause.strip(),
                   record.repair.strip(), record.prevention,
                   record.regression_test, record.skill_candidate,
-                  json.dumps(list(record.applicability)))
+                  json.dumps(list(record.applicability)), record.source)
+        if existing is not None and not replace:
+            return {"status": "skipped", "id": existing,
+                    "note": "duplicate of a failure already on record; an "
+                            "insert-only capture does not replace it"}
         if existing is not None:
             with self._connect() as db:
                 db.execute(
@@ -188,8 +340,8 @@ class FailureGenome:
                     " task_class = ?, failed_approach = ?,"
                     " wrong_assumption = ?, root_cause = ?, repair = ?,"
                     " prevention = ?, regression_test = ?,"
-                    " skill_candidate = ?, applicability = ?, updated_at = ?"
-                    " WHERE id = ?", values + (now, existing))
+                    " skill_candidate = ?, applicability = ?, source = ?,"
+                    " updated_at = ? WHERE id = ?", values + (now, existing))
             return {"status": "updated", "id": existing,
                     "note": "same failure already on record; the newer "
                             "root cause and repair replace it"}
@@ -198,8 +350,8 @@ class FailureGenome:
                 "INSERT INTO failure_genome (symptom, environment,"
                 " task_class, failed_approach, wrong_assumption, root_cause,"
                 " repair, prevention, regression_test, skill_candidate,"
-                " applicability, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", values + (now, now))
+                " applicability, source, created_at, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", values + (now, now))
             new_id = cur.lastrowid
         return {"status": "captured", "id": new_id}
 
@@ -208,7 +360,8 @@ class FailureGenome:
         for row in self._rows():
             if row["task_class"] != record.task_class:
                 continue
-            if _similarity(record.symptom, row["symptom"]) >= DUPLICATE_AT:
+            if _similarity(record.symptom, row["symptom"],
+                           fuzzy=False) >= DUPLICATE_AT:
                 return row["id"]
         return None
 
@@ -221,8 +374,15 @@ class FailureGenome:
 
     def matches(self, symptom: str, *, task_class: str = "",
                 environment: str = "", limit: int = 3,
-                threshold: float | None = None) -> list[dict]:
+                threshold: float | None = None,
+                facts: dict[str, str] | None = None) -> list[dict]:
         """Prior failures that look like this one, best first.
+
+        A failure whose applicability conditions are evaluated against
+        `facts` (default: `runtime_facts()`) and any of which is unmet is not
+        offered: its repair is for a world this is not. Each result carries
+        `conditions` (met / unmet / unverified) so the caller still checks
+        the ones that are prose.
 
         `hits` is bumped on everything returned. Retrieved-and-ignored and
         never-retrieved are different problems, and only the count tells them
@@ -233,11 +393,15 @@ class FailureGenome:
         scored = []
         for row in self._rows():
             score = _score(row, symptom, task_class, environment)
-            if score >= bar:
-                scored.append((score, row))
-        scored.sort(key=lambda pair: (-pair[0], -pair[1]["id"]))
-        out = [dict(row, score=score, applicability=_loads(row["applicability"]))
-               for score, row in scored[:max(0, limit)]]
+            if score < bar:
+                continue
+            conditions = evaluate_conditions(_loads(row["applicability"]), facts)
+            if not conditions["unmet"]:
+                scored.append((score, row, conditions))
+        scored.sort(key=lambda item: (-item[0], -item[1]["id"]))
+        out = [dict(row, score=score, applicability=_loads(row["applicability"]),
+                    conditions=conditions)
+               for score, row, conditions in scored[:max(0, limit)]]
         if out:
             with self._connect() as db:
                 db.executemany(
@@ -247,17 +411,19 @@ class FailureGenome:
 
     def retrieve(self, symptom: str, *, task_class: str = "",
                  environment: str = "",
-                 threshold: float | None = None) -> dict | None:
+                 threshold: float | None = None,
+                 facts: dict[str, str] | None = None) -> dict | None:
         """The one prior repair to read before trying this again, or None.
 
-        `applicability` comes back as captured, unevaluated: the conditions
-        are prose about the world ("only on Windows", "only with the broker
-        running"), so the caller checks them. Returning a repair whose
-        conditions do not hold is the retrieval equivalent of a quick fix.
+        A repair whose checkable conditions fail is never returned (see
+        `matches`); `conditions["unverified"]` lists the prose ones ("only
+        with the broker running") the caller must still check. Returning a
+        repair whose conditions do not hold is the retrieval equivalent of a
+        quick fix.
         """
         found = self.matches(symptom, task_class=task_class,
                              environment=environment, limit=1,
-                             threshold=threshold)
+                             threshold=threshold, facts=facts)
         return found[0] if found else None
 
     def listing(self, task_class: str = "") -> list[dict]:

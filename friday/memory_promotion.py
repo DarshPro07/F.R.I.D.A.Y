@@ -11,6 +11,7 @@ already wrote.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,8 @@ from pathlib import Path
 from friday import contracts as c
 from friday.brain import _sensitive
 from friday.store import FACT, PREFERENCE, Store
+
+_log = logging.getLogger("friday.memory_promotion")
 
 #: Below this a candidate is recorded as observed, but never promoted.
 MIN_CONFIDENCE = 0.6
@@ -217,8 +220,14 @@ def _to_skill_candidate(candidate: Candidate) -> Decision:
     return Decision(True, f"routed to skill candidate {path.name}", target="skill")
 
 
-def promote_handoff(handoff, *, store: Store | None = None) -> list[Decision]:
-    """Run everything a work-run handed back through the gate."""
+def promote_handoff(handoff, *, store: Store | None = None,
+                    genome=None) -> list[Decision]:
+    """Run everything a work-run handed back through the gate.
+
+    A failed handoff that reports its root cause and repair is also recorded
+    in the Failure Genome (`handoff.capture_failure`, FAIL-001): this is the
+    one seam every terminal work run already passes through.
+    """
     decisions = []
     for text in handoff.memory_candidates:
         candidate = Candidate(
@@ -234,4 +243,14 @@ def promote_handoff(handoff, *, store: Store | None = None) -> list[Decision]:
             evidence=[handoff.summary or text], provenance=c.READ_MATERIAL,
         )
         decisions.append(promote(candidate, store=store))
+    from friday.handoff import capture_failure
+    outcome = capture_failure(handoff, genome=genome)
+    status = outcome.get("status")
+    if status in ("skipped", "refused") and (
+            (handoff.status or "").strip().lower() in ("failed", "blocked")):
+        # Field names only, never contents: show whether auto-capture fires.
+        _log.log(logging.WARNING if status == "refused" else logging.INFO,
+                 "failure capture %s for %s: missing=%s",
+                 status, handoff.task_id,
+                 ",".join(outcome.get("missing") or []) or "-")
     return decisions

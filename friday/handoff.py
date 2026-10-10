@@ -21,12 +21,14 @@ RECORD_TOKEN_CAP = 400
 
 _ITEM_CHARS = 120
 _ITEMS = 5
+_CAUSE_CHARS = 300
 _REPORT_LABELS = {
     "commit": "commit", "files changed": "files", "tests": "tests",
     "tests run": "tests", "evidence": "evidence", "blockers": "blockers",
+    "root cause": "root_cause", "repair": "repair",
 }
 _LABELLED = re.compile(r"^\s*(status|commit|files changed|tests run|tests|"
-                       r"evidence|blockers)\s*:\s*(.*)$", re.I)
+                       r"evidence|blockers|root cause|repair)\s*:\s*(.*)$", re.I)
 _NOTHING = {"", "none", "n/a", "na", "-", "no", "nothing"}
 _SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
 
@@ -37,7 +39,8 @@ def _parse_report(text: str) -> tuple[dict[str, list[str] | str], str]:
     it did not write stays empty, never guessed."""
     from friday.brain import _sensitive
     found: dict[str, list[str] | str] = {
-        "commit": "", "files": [], "tests": [], "evidence": [], "blockers": []}
+        "commit": "", "files": [], "tests": [], "evidence": [], "blockers": [],
+        "root_cause": "", "repair": ""}
     prose: list[str] = []
     for line in (text or "").splitlines():
         m = _LABELLED.match(line)
@@ -51,6 +54,9 @@ def _parse_report(text: str) -> tuple[dict[str, list[str] | str], str]:
         if key == "commit":
             sha = _SHA.search(value)
             found["commit"] = sha.group(0) if sha else ""
+            continue
+        if key in ("root_cause", "repair"):
+            found[key] = "" if _sensitive(value) else value[:_CAUSE_CHARS]
             continue
         parts = value.split("," if key == "files" else ";")
         found[key] = [p.strip()[:_ITEM_CHARS] for p in parts
@@ -82,6 +88,11 @@ class Handoff:
     #: Where the full transcript lives (the Hermes stored session id); read
     #: on demand, never carried in the record.
     transcript_ref: str = ""
+    #: FAIL-001: what the worker established about a failure and what fixed
+    #: it, from the report's `Root cause:` / `Repair:` lines. Both empty means
+    #: the failure was not root caused, not that it had no cause.
+    root_cause: str = ""
+    repair: str = ""
 
     def to_json(self) -> str:
         return json.dumps(asdict(self))
@@ -129,6 +140,8 @@ class Handoff:
             evidence_refs=tuple(report["evidence"]),
             transcript_ref=(record.get("hermes_stored_session_id")
                             or record.get("hermes_session_id") or ""),
+            root_cause=report["root_cause"],
+            repair=report["repair"],
         )
 
 
@@ -160,3 +173,38 @@ def work_run_record(record: dict) -> dict:
             out["summary"] = ""
             break
     return out
+
+
+def capture_failure(handoff: Handoff, genome=None) -> dict:
+    """FAIL-001: a FAILED or BLOCKED handoff that names its root cause and
+    its repair becomes a Failure Genome pattern, with nobody calling
+    `failure_capture`.
+
+    The genome's rule stands: a failure with no root cause or no repair is a
+    bug report, so it is skipped, not stored. The symptom is what stopped the
+    worker (its blockers), else the summary; `failed_attempts` is the failed
+    approach. Secret refusal stays in `FailureGenome.capture`. The handoff's
+    fields are untrusted worker output: stored as data, marked
+    `SOURCE_WORKER`, insert-only (a restatement of a record already on file
+    is skipped, never overwritten), and only when a test or evidence backs
+    the repair.
+    """
+    status = (handoff.status or "").strip().lower()
+    if status not in ("failed", "blocked"):
+        return {"status": "skipped", "missing": [],
+                "note": f"handoff status {handoff.status!r} is not a failure"}
+    missing = [name for name in ("root_cause", "repair")
+               if not (getattr(handoff, name) or "").strip()]
+    if missing:
+        return {"status": "skipped", "missing": missing,
+                "note": "the worker did not report a root cause and a repair"}
+    if not (handoff.tests_run or handoff.evidence_refs):
+        return {"status": "skipped", "missing": ["tests_run or evidence_refs"],
+                "note": "the worker named no test or evidence for the repair"}
+    from friday.failure_genome import SOURCE_WORKER, FailureGenome, FailureRecord
+    symptom = "; ".join(handoff.blockers) or handoff.summary
+    return (genome or FailureGenome()).capture(FailureRecord(
+        symptom=symptom, root_cause=handoff.root_cause, repair=handoff.repair,
+        failed_approach="; ".join(handoff.failed_attempts),
+        regression_test="; ".join(handoff.tests_run),
+        source=SOURCE_WORKER), replace=False)
