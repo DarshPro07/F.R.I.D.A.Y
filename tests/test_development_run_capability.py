@@ -274,6 +274,37 @@ def test_a_conflicting_promotion_comes_back_as_an_integration_task(finished):
     assert _git(repo, "rev-parse", branch) == before
 
 
+def test_a_conflict_is_persisted_as_a_durable_integration_objective(finished):
+    store, repo, branch = finished
+    (repo / "calc.py").write_text("def add(a, b):\n    return a * b\n", encoding="utf-8")
+    _git(repo, "commit", "-qam", "make add multiply")
+    run = c.Run.create("promote", capability="development_promote")
+    result = DT.development_promote(run, str(repo), "r1", branch,
+                                    "add subtract to calc.py")
+    assert result.status == c.FAILED
+    objective_id = result.output["integration_objective"]
+    row = store.objective_run(objective_id)
+    assert row is not None and row["status"] not in O.RUN_TERMINAL
+    (task,) = store.objective_tasks(objective_id)
+    assert task["capability"] == "development_run"
+    arguments = task["arguments"]
+    assert arguments["root"] == str(repo.resolve())
+    for needed in ("calc.py", "make add multiply", "add subtract to calc.py"):
+        assert needed in arguments["work"]
+    (event,) = store.objective_events_named(objective_id, (DT.EVENT_INTEGRATION_TASK,))
+    detail = json.loads(event["detail"]) if isinstance(event["detail"], str) else event["detail"]
+    assert detail == result.output["integration_task"]
+
+
+def test_a_clean_promotion_persists_no_integration_objective(finished):
+    store, repo, branch = finished
+    run = c.Run.create("promote", capability="development_promote")
+    result = DT.development_promote(run, str(repo), "r1", branch, "add subtract")
+    assert result.status == c.SUCCEEDED
+    assert "integration_objective" not in result.output
+    assert store.objective_runs() == []
+
+
 # --- commands, facts and the envelope ----------------------------------------
 
 

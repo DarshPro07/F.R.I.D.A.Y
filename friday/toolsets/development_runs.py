@@ -23,10 +23,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from friday import capabilities
 from friday import compaction as K
 from friday import contracts as c
 from friday import development
 from friday import model_gateway as mg
+from friday import objectives as O
 from friday.executors import worktrees as W
 
 #: Why a run that needs command execution does not start. It names the
@@ -37,6 +39,10 @@ NO_SANDBOX = (
     "and a run never falls back to unrestricted host commands")
 
 _RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+#: The objective event that carries a conflict's full integration task (both
+#: sides' requirements and diffs); the task's own arguments hold the summary.
+EVENT_INTEGRATION_TASK = "development.integration_task"
 
 
 def _objective_store():
@@ -56,6 +62,33 @@ def _scope(run: c.Run, root: str) -> tuple[Path | None, str]:
     if envelope is not None and not envelope.writes(str(folder)):
         return None, f"ENVELOPE: {folder} is outside this run's write roots"
     return folder, ""
+
+
+def _integration_work(task: dict) -> str:
+    """The work a conflict leaves, as the request a development run takes."""
+    asked = task["requirements"]
+    lines = [f"Resolve the merge conflict between {task['branch']} and {task['target']} "
+             f"in: {', '.join(task['conflicts'])}.",
+             "Keep both requirements.",
+             f"Requirements on {task['target']}: {'; '.join(asked['target']) or '(none)'}.",
+             f"Requirements on {task['branch']}: {'; '.join(asked['worker']) or '(none)'}.",
+             f"Acceptance: {task['acceptance']}."]
+    return " ".join(lines)
+
+
+def _persist_integration_task(run: c.Run, folder: Path, task: dict) -> str:
+    """A conflict's integration task as its own durable objective, so the
+    engine owns it and it survives this call. Returns the objective's run id;
+    raises `O.CompileError` when it cannot be admitted."""
+    store = _objective_store()
+    work = _integration_work(task)
+    created = O.compile_objective(
+        store, request=work, objective_summary=work, manifest=capabilities.as_dicts(),
+        tasks=[{"capability": "development_run",
+                "arguments": {"work": work, "root": str(folder)}}],
+        provenance=run.provenance, attended=run.attended)
+    store.append_objective_event(created["run_id"], EVENT_INTEGRATION_TASK, detail=task)
+    return created["run_id"]
 
 
 def development_run(run: c.Run, work: str, root: str, objective_id: str = "",
@@ -136,8 +169,15 @@ def development_promote(run: c.Run, root: str, run_id: str, branch: str,
         if promotion.conflicts:
             # A conflict is not a dead end: it comes back as the task that
             # resolves it, with both sides' requirements and diffs.
-            failure = failure.finish(output={
-                "integration_task": manager.integration_task(promotion)})
+            task = manager.integration_task(promotion)
+            output = {"integration_task": task}
+            try:
+                output["integration_objective"] = _persist_integration_task(
+                    run, folder, task)
+            except O.CompileError as exc:
+                failure = failure.finish(error=(
+                    f"{failure.error}; the integration task was not persisted: {exc}"))
+            failure = failure.finish(output=output)
         return run.record(failure)
     return run.record(c.succeeded(
         started,
