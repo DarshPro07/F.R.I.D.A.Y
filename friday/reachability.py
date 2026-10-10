@@ -284,6 +284,10 @@ DECLARED = {
                                  "profiler, built and tested against a scripted gateway; its "
                                  "caller is the onboarding trigger for a newly seen route, "
                                  "run by tests/test_gateway_completer.py"),
+    "friday/deliberation": (FUTURE,
+                            "FAB-009: multi-model deliberation, built and tested against "
+                            "deterministic stand-in models; its caller is a model_gateway-backed "
+                            "model factory, the next wiring step, run by tests/test_deliberation.py"),
     "friday/model_scout": (FUTURE,
                            "FAB-006: the model scout, built and tested against scripted "
                            "routes; its callers are a gateway-backed probe completer and "
