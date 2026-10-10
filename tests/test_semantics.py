@@ -123,6 +123,24 @@ def test_target_nouns_beat_application_names():
     """
     assert S.target_for_request("show me my files") == "FILE"
     assert S.target_for_request("open Paint") == "APPLICATION"
+
+
+def test_binary_artifacts_are_file_content_not_system_state():
+    """
+    A new file-content reader must not enter the SYSTEM shortlist just because
+    its prefix is new to the semantic vocabulary. That silently displaced
+    more specific machine-status tools from the planner's fixed candidate
+    window.
+    """
+    assert S.for_capability("binary_analyze") == (S.READ, "FILE")
+    assert S.target_for_request("inspect this exe") == "FILE"
+    assert S.target_for_request("what does this dll import") == "FILE"
+
+
+def test_network_status_keeps_its_machine_state_route(router):
+    hits = top(router, "show my network status", n=6)
+    assert hits and hits[0] == "system_network", (
+        f"'show my network status' -> {hits}")
 ROUTES = [('open Paint', 'apps_open'), ('what windows are open?', 'windows_list'), ('move Paint to the second monitor', 'windows_arrange'), ('what is playing?', 'music_current'), ('pause it', 'music_pause'), ('stop it', 'music_stop'), ('remove the temporary file', 'files_recycle'), ('show me my files', 'files_list'), ('run that automation again', 'automations_run'), ('when did that automation run?', 'automations_history'), ('forget that', 'memory_forget'), ('delete that file', 'files_recycle')]
 
 
