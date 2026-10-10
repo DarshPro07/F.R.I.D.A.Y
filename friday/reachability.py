@@ -166,6 +166,10 @@ DECLARED = {
                      "same: resolved by id at call time"),
     "friday/platform": (PRODUCTION,
                         "OS-specific implementations chosen at runtime"),
+    "friday/computer_use_sessions": (FUTURE,
+                                     "CUA-008: session registry (owner, lease, window set) not yet "
+                                     "opened by computer_use.py, run by "
+                                     "tests/test_computer_use_sessions.py"),
     "friday/resources": (INTENTIONALLY_INTERNAL, "data, not behaviour"),
     "friday/specialist": (FUTURE,
                           "FAB-005: composes a temporary specialist (role + "
