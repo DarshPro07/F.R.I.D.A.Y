@@ -267,6 +267,11 @@ DECLARED = {
                                  "rejected-candidate check, kept outside the person's memory; "
                                  "the evolution controller that records into it is a later "
                                  "slice, run by tests/test_evolution_archive.py"),
+    "friday/counterfactuals": (FUTURE,
+                               "CF-001: the decision record comparing a plan with doing "
+                               "nothing, deferring and an experiment, each claim carrying "
+                               "its evidence class; the planner that builds one is a later "
+                               "step, run by tests/test_counterfactuals.py"),
     "friday/dry_run": (FUTURE,
                        "SIDE-002: dry-run stage and blast-radius escalation; the "
                        "live caller (consequential tool dispatch) is the next "
