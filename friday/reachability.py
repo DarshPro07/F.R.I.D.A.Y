@@ -273,6 +273,10 @@ DECLARED = {
                                   "LAB-001 slice 1: the narrow-task fence for the "
                                   "EXPERIMENTAL_LOCAL_MODEL route, run by "
                                   "tests/test_experimental_local.py"),
+    "friday/neural_fabric": (FUTURE,
+                             "NEURAL-001: the PRD 24.11 training-lifecycle skeleton, "
+                             "no network is wired to a caller yet, run by "
+                             "tests/test_neural_fabric.py"),
     "friday/model_profiling": (FUTURE,
                                "MODEL-004: the open-set route profiler, built and "
                                "tested against mock routes; its caller is a real "
