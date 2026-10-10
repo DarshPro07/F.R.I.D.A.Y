@@ -13,10 +13,12 @@ that the language brain is offline. It never claims to have done what it did not
 from __future__ import annotations
 
 import datetime
+import functools
 import json
 import logging
 import os
 import re
+import threading
 import uuid
 
 logger = logging.getLogger("friday.voice")
@@ -1322,6 +1324,15 @@ def _try_command(text):
     # ...and to FRIDAY's own status: "the status of my social integrations" and
     # "a project status update" got the canned line too (end-to-end test of
     # FRIDAY.exe, 2026-10-09), so a bare "status" counts only alone or as hers.
+    # FAB-008: the time and the date are read off the clock, never asked of a
+    # model. Anchored to the bare question: "what time is it in Tokyo" is not
+    # answerable from the local clock, so it falls through to the model.
+    if re.match(r"^\W*(?:friday\W+)?(?:what(?:'s| is) (?:the )?(?:current )?(?:time|date|day)"
+                r"(?: today| now| right now)?|what time is it(?: now| right now)?|"
+                r"what day is it(?: today)?|what(?:'s| is) today'?s date|"
+                r"tell me the time)\W*$", low):
+        return {"reply": "It is %s, sir." % _run_clock("now", {})["result"], "action": "clock"}
+
     if len(low.split()) <= 12 and re.search(r"^\W*status\W*$|\b(your status|friday'?s status|status report|"
                  r"how are you|are you (?:up|online|ok)|all systems|"
                  r"systems? (?:nominal|status|ok|online|up|report)|"
@@ -1329,10 +1340,14 @@ def _try_command(text):
         from friday.ui_server import build_state
         s = build_state()
         c = s["connections"]
-        return {"reply": "Online. GBrain %s, Hermes %s, %s tools, RAM %s%%." % (
+        share = turn_share()
+        said = "Online. GBrain %s, Hermes %s, %s tools, RAM %s%%." % (
             c["gbrain"]["status"], c["hermes"]["status"],
-            s["mcp"].get("total", "?"), s["system"].get("ram_percent", "?")),
-            "action": "status"}
+            s["mcp"].get("total", "?"), s["system"].get("ram_percent", "?"))
+        if share["turns"]:
+            said += " %d of %d turns so far needed a model." % (
+                share["model_turns"], share["turns"])
+        return {"reply": said, "action": "status", "model_share": share["model_share"]}
     return None
 
 
@@ -1605,6 +1620,38 @@ def _cli_reply(text, history, approval_note=""):
             "tools_carried": result.tools_carried}
 
 
+#: FAB-008: how many spoken/typed turns reached a conversational model and how
+#: many were settled by code. In process on purpose - a counter, not a store.
+_TURN_COUNTS = {"model": 0, "no_model": 0}
+_TURN_COUNTS_LOCK = threading.Lock()
+
+
+def turn_share() -> dict:
+    """The measured share of turns that needed a model (None before any turn)."""
+    with _TURN_COUNTS_LOCK:
+        model, no_model = _TURN_COUNTS["model"], _TURN_COUNTS["no_model"]
+    turns = model + no_model
+    return {"turns": turns, "model_turns": model, "no_model_turns": no_model,
+            "model_share": model / turns if turns else None}
+
+
+def _counted(fn):
+    """Mark every reply with `needed_model` and count it. A deterministic path
+    sets it False itself; anything else reached the model door (or failed
+    trying), so it counts as a model turn."""
+    @functools.wraps(fn)
+    def wrapper(text, history=None):
+        out = fn(text, history)
+        if out.get("empty"):
+            return out
+        needed = out.setdefault("needed_model", True)
+        with _TURN_COUNTS_LOCK:
+            _TURN_COUNTS["model" if needed else "no_model"] += 1
+        return out
+    return wrapper
+
+
+@_counted
 def reply(text, history=None):
     text = (text or "").strip()
     if not text:
@@ -1620,17 +1667,18 @@ def reply(text, history=None):
     if _stop.is_stop_phrase(text):
         _stop.emergency_stop(f"said in the control room: {text}", actor="person")
         said = "Stopped, sir. Nothing new starts until you say 'resume everything'."
-        return {"reply": said, "action": "friday.stop",
+        return {"reply": said, "action": "friday.stop", "needed_model": False,
                 "message_id": _remember_turn("assistant", said)}
     if _stop.is_resume_phrase(text):
         resumed = _stop.resume(actor="person")
         said = ("Resumed, sir. Anything that was running is parked; resume it when "
                 "you want it back." if resumed else "Nothing was stopped, sir.")
-        return {"reply": said, "action": "friday.resume",
+        return {"reply": said, "action": "friday.resume", "needed_model": False,
                 "message_id": _remember_turn("assistant", said)}
 
     cmd = _try_command(text)
     if cmd:
+        cmd["needed_model"] = False
         cmd["message_id"] = _remember_turn("assistant", cmd.get("reply", ""))
         return cmd
 
@@ -1649,7 +1697,7 @@ def reply(text, history=None):
                 else "That step did not go through: %s" % (out.get("error") or out.get("result", ""))[:160])
         message_id = _remember_turn("assistant", said)
         return {"reply": said, "action": "desktop.step", "used_capabilities": ["desktop"],
-                "message_id": message_id}
+                "message_id": message_id, "needed_model": False}
     # The offer to take over lapses unless the very next turn is the yes: a
     # bare "ok" three questions later must not spend a stashed nonce (review,
     # 2026-09-03). A new plan in this turn stashes a new one.
@@ -1669,7 +1717,7 @@ def reply(text, history=None):
         # model with an answer that has not been matched to a question yet.
         message_id = _remember_turn("assistant", approval_note)
         return {"reply": approval_note, "action": "approval.ambiguous",
-                "message_id": message_id}
+                "message_id": message_id, "needed_model": False}
 
     cfg = _model()
     if cfg is None:
