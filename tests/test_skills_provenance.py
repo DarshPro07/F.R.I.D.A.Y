@@ -67,6 +67,14 @@ def test_an_activated_community_skill_records_every_provenance_field(world):
     assert row["evaluation"]["content_hash"] == report.content_hash
 
 
+def test_the_provenance_scan_says_a_clean_scan_is_not_runtime_safe(world):
+    skill = staged(world, "ext-static", K.TRUST_COMMUNITY, **full_import())
+    world.lifecycle.evaluate_and_activate(skill.name)
+    scan = world.registry.provenance(skill.name)["scan"]
+    assert scan["status"] == forge.SCAN_CLEAN             # the scanner's verdict is clean ...
+    assert scan["runtime_safe"] is False                  # ... and the row still does not say it is safe to run
+
+
 def test_a_skill_with_no_signature_records_that_explicitly(world):
     skill = staged(world, "ext-unsigned", K.TRUST_COMMUNITY, **full_import(signature="", sbom=None))
     world.lifecycle.evaluate_and_activate(skill.name)
@@ -154,6 +162,22 @@ def test_revalidation_re_gates_an_external_skill_that_has_its_import_but_no_prov
     assert outcome == "FRESH"
     assert world.registry.get(skill.name).state == K.ACTIVE
     assert world.registry.provenance(skill.name)["source_commit"] == COMMIT
+
+
+def test_a_kept_scan_from_before_the_flag_is_never_read_as_runtime_safe(world):
+    skill = staged(world, "ext-old-scan", K.TRUST_COMMUNITY, **full_import())
+    world.lifecycle.evaluate_and_activate(skill.name)
+    kept_path = world.root / "versions" / skill.name / "1.0.0.skillspector.json"
+    kept = json.loads(kept_path.read_text(encoding="utf-8"))
+    del kept["runtime_safe"]                               # a report written before the flag existed
+    kept_path.write_text(json.dumps(kept, indent=2, sort_keys=True), encoding="utf-8")
+    with world.registry._connect() as db:
+        db.execute("DELETE FROM skill_provenance WHERE name = ?", (skill.name,))
+    world.registry.transition(skill.name, K.NEEDS_REVALIDATION, actor="test", reason="a dependency changed")
+    outcome, _ = world.lifecycle.revalidate(skill.name, run_tests=False)
+    assert outcome == "FRESH"
+    scan = world.registry.provenance(skill.name)["scan"]
+    assert scan["status"] == forge.SCAN_CLEAN and scan["runtime_safe"] is False
 
 
 def test_revalidation_keeps_the_fresh_shortcut_when_provenance_is_on_record(world):

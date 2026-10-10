@@ -303,6 +303,7 @@ class SkillLifecycle:
         scan = {key: kept.get(key) for key in ("status", "scanner", "scanner_version", "pinned_release",
                                                "scanned_at", "target_sha256", "report_sha256", "blocking",
                                                "policy_version")}
+        scan["runtime_safe"] = scan_stage.RUNTIME_SAFE      # not read from the file: an older kept scan has no key
         evaluation = {"nonce": report.nonce, "passed": report.passed, "version": report.version,
                       "content_hash": report.content_hash, "at": report.at}
         return {"source": source, "source_url": source_url, "source_commit": source_commit,
