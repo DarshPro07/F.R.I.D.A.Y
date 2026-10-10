@@ -41,6 +41,7 @@ from friday import objective_budget as budget_module
 
 from friday.contracts import now_iso
 from friday import objectives as O
+from friday import signals
 from friday import trajectory
 from friday import waves
 from friday.store import Store
@@ -792,6 +793,22 @@ class ContinuousTaskExecutor:
         worker_id = _pending_worker_id(task)
         if worker_id:
             await self._reconcile_worker(run_id, task, worker_id)
+            return
+
+        # SIGNAL-001: an amendment from any surface raises a barrier. What is
+        # already running is left to finish, but nothing new starts under the
+        # old version of the plan; the run waits until the amendment is
+        # applied or the person says go on.
+        barrier = signals.barrier_up(self.store, run_id)
+        if barrier:
+            detail = barrier.get("detail") or {}
+            self.store.touch_objective_run(
+                run_id, status=O.RunStatus.PAUSED, next_wake=None,
+                blocker=f"amendment from {detail.get('surface', 'another surface')}"
+                        " pending: the old plan's next step is held")
+            self.store.append_objective_event(
+                run_id, O.EVENT_RUN_PAUSED, task_id=task_id,
+                detail={"reason": "amendment barrier"})
             return
 
         # PRD v7 SEC-005 / TRUST-002: each task runs as the objective's own
