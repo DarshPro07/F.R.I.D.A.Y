@@ -315,6 +315,34 @@ def dedupe(pages: list[dict]) -> list[dict]:
     return out
 
 
+def collapse_copies(pages: list[dict]) -> list[dict]:
+    """
+    One page per independent source (RSCH-003), the copies listed under it.
+
+    Near-duplicate pages are clustered by `research_provenance`; the cluster's
+    primary stands for the source and carries `copies`, the other URLs, so five
+    reposts of one article reach the result as one source, not five.
+    Unreadable pages pass through untouched.
+    """
+    from friday import research_provenance
+
+    primaries = {c["primary"]: [u for u in c["members"] if u != c["primary"]]
+                 for c in research_provenance.analyze(pages)["clusters"]}
+    members = {u for copies in primaries.values() for u in copies}
+    out: list[dict] = []
+    seen: set[str] = set()
+    for page in pages:
+        url = page.get("url", "")
+        if page.get("ok"):
+            if url in seen or (url in members and url not in primaries):
+                continue
+            seen.add(url)
+            if primaries.get(url):
+                page = {**page, "copies": primaries[url]}
+        out.append(page)
+    return out
+
+
 def relevance(page: dict, question: str) -> int:
     """
     How much of the question this page actually talks about.
@@ -495,7 +523,11 @@ def explore(inquiry: CanonicalInquiry, depth: str, branches: list[dict], fetch) 
         if more and barren >= GAIN_PATIENCE:
             reason = "no_information_gain"
             break
+    # "sources" is what was fetched (what the budget counts); copies of one
+    # article are one independent source (RSCH-003).
     stop = {"reason": reason, "depth": depth, "sources": len(pages), "chars": spent}
+    pages = collapse_copies(pages)
+    stop["independent_sources"] = len(pages)
     return {"pages": pages, "rejected": rejected, "failed": failed, "stop": stop}
 
 
@@ -728,9 +760,9 @@ async def web_deep_research(
         return run.record(c.failed(started, "search returned no results to read"))
 
     from friday import netguard
-    pages = dedupe(await crawl_all([h["url"] for h in hits],
-                                   max_chars=max_chars_per_source, render=True,
-                                   net=netguard.run_scope(run)))
+    pages = dedupe(collapse_copies(await crawl_all(
+        [h["url"] for h in hits], max_chars=max_chars_per_source, render=True,
+        net=netguard.run_scope(run))))
     kept, dropped = build_corpus(pages, question, budget=budget)
     unreadable = [{"url": p.get("url"), "error": p.get("error")}
                   for p in pages if not p.get("ok")]
@@ -739,12 +771,14 @@ async def web_deep_research(
         "question": question,
         "search_provider": (search.output or {}).get("provider"),
         "considered": len(hits), "read": len(kept),
+        "independent_sources": len(kept),
         "engine": crawl_engine(),
         "corpus_chars": sum(len(p.get("markdown") or "") for p in kept),
         "sources": [
             {"url": p["url"], "title": p.get("title", ""),
              "chars": len(p.get("markdown") or ""),
              "relevance": relevance(p, question),
+             "copies": p.get("copies", []),
              **_offloaded(p.get("markdown"), p["url"])}
             for p in kept
         ],
