@@ -533,6 +533,7 @@ CREATE TABLE IF NOT EXISTS route_outcomes (
     calls         INTEGER NOT NULL DEFAULT 0,
     prompt_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
     duration_s    REAL NOT NULL DEFAULT 0,
     status        TEXT NOT NULL DEFAULT '',
     verification  TEXT NOT NULL DEFAULT '',
@@ -540,6 +541,29 @@ CREATE TABLE IF NOT EXISTS route_outcomes (
     created_at    REAL NOT NULL
 )
 """
+
+_CACHE_READ_KEYS = ("cache_read", "cache_read_tokens",
+                    "cache_read_input_tokens", "cached_tokens")
+
+
+def cache_read_tokens(usage: dict) -> int:
+    """Prompt tokens a provider served from its cache, from a run's reported
+    usage (ORCH-012). Reads the shapes the runs report - Hermes's
+    `session.usage` (flat or under "usage"), Anthropic's
+    `cache_read_input_tokens`, OpenAI's `cached_tokens` - and counts nothing
+    it cannot read as a number: an unreported cache is 0, not an error."""
+    if not isinstance(usage, dict):
+        return 0
+    inner = usage.get("usage")
+    for source in (inner, usage):
+        if not isinstance(source, dict):
+            continue
+        for key in _CACHE_READ_KEYS:
+            value = source.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            return max(0, int(value))
+    return 0
 
 
 class RouteOutcomes:
@@ -552,6 +576,12 @@ class RouteOutcomes:
         self._path = str(db_path)
         with self._connect() as db:
             db.execute(_OUTCOMES_TABLE)
+            # Additive migration for databases created before the cache
+            # column existed.
+            if "cache_read_tokens" not in {r[1] for r in db.execute(
+                    "PRAGMA table_info(route_outcomes)")}:
+                db.execute("ALTER TABLE route_outcomes ADD COLUMN"
+                           " cache_read_tokens INTEGER NOT NULL DEFAULT 0")
 
     def _connect(self):
         from friday.dbconn import ledger_connection
@@ -562,17 +592,34 @@ class RouteOutcomes:
                calls: int = 0, prompt_tokens: int = 0,
                output_tokens: int = 0, duration_s: float = 0,
                status: str = "", verification: str = "",
-               rework: int = 0) -> None:
+               rework: int = 0, cache_read_tokens: int = 0) -> None:
         with self._connect() as db:
             db.execute(
                 "INSERT OR REPLACE INTO route_outcomes (work_run_id,"
                 " task_class, route_level, tier, model, provider, calls,"
-                " prompt_tokens, output_tokens, duration_s, status,"
-                " verification, rework, created_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " prompt_tokens, output_tokens, cache_read_tokens,"
+                " duration_s, status, verification, rework, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (work_run_id, task_class, route_level, tier, model,
-                 provider, calls, prompt_tokens, output_tokens, duration_s,
-                 status, verification, rework, time.time()))
+                 provider, calls, prompt_tokens, output_tokens,
+                 cache_read_tokens, duration_s, status, verification, rework,
+                 time.time()))
+
+    @staticmethod
+    def cache_hit_rate(record: dict) -> float | None:
+        """One worker's prompt-cache hit rate: the share of its prompt tokens
+        the provider served from cache. None when the run reported no prompt
+        tokens, so an unmeasured worker is not read as a cold one."""
+        prompt = record.get("prompt_tokens") or 0
+        if prompt <= 0:
+            return None
+        return min(1.0, (record.get("cache_read_tokens") or 0) / prompt)
+
+    def cache_hit_rates(self, prefix: str = "") -> dict[str, float | None]:
+        """work_run_id -> cache hit rate, for runs whose id starts with
+        `prefix` (all of them by default)."""
+        return {r["work_run_id"]: self.cache_hit_rate(r)
+                for r in self.by_run_prefix(prefix)}
 
     def mark_rework(self, work_run_id: str) -> None:
         """A later run had to repair this one - the decisive cost signal:

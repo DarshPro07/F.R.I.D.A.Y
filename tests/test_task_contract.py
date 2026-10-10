@@ -77,9 +77,12 @@ def test_worker_prompt_has_the_ten_sections_in_order():
     )
     prompt = bundle.render()
 
-    order = ["GOAL", "ACCEPTANCE CRITERIA", "KNOWN FACTS", "ASSUMPTIONS",
-             "CONSTRAINTS", "ALLOWED SCOPE", "PROHIBITED ACTIONS",
-             "ROLE / RESPONSIBILITY", "VERIFICATION", "REPORTING CONTRACT"]
+    # ORCH-012: the standing parts (reporting contract, role, prohibited
+    # actions) lead as the cacheable prefix; the task contract follows.
+    order = ["REPORTING CONTRACT", "ROLE / RESPONSIBILITY",
+             "PROHIBITED ACTIONS", "GOAL", "ACCEPTANCE CRITERIA",
+             "KNOWN FACTS", "ASSUMPTIONS", "CONSTRAINTS", "ALLOWED SCOPE",
+             "VERIFICATION"]
     positions = [prompt.index(title) for title in order]
     assert positions == sorted(positions), prompt
 
