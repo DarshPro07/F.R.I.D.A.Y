@@ -4835,6 +4835,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Design (the packet was a one-line instruction, so this is the smallest slice I chose). Status and direct commands were already answered by code in reply() and _try_command (stop/resume, autonomy, hermes delegate, status, approvals, go-ahead). Two things were missing: a clock turn, and the measuremen (build run, commit ca5592a16)',
         "next_action": "GAPS: The counter is in-process, so it resets on restart; a durable per-day figure would need a store table, which 'no new long-running state' ruled out for this slice.; The LiveKit voice agent (agent_friday.py) does not go through voice_brain.reply, so its turns are not counted; this covers the control-room and typed path only.; ORCH-011 (worker supervision) is not touched.; Controller: integrated as PARTIAL - the LiveKit voice turns (agent_friday.py) are not counted, so 'the share of turns that needed a model' is measured for typed/control-room turns only.; implementer did not claim acceptance met",
     }),
+    ('UX-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Design: a Normal/Developer mode is a pure display projection. observability.py gained parse_mode() (only the word "developer", case/space-insensitive, selects Developer; anything else is Normal) and for_mode(report, mode, kind=...) which trims an already assembled and redacted trace() or diagnostics (build run, commit cf305edb7)',
+        "next_action": "GAPS: No UI toggle in ui/ was added; the mode is an API parameter. Per the row's next_action, only the ui_server flag/endpoint was in scope.; Mode is per-request (query param), not a stored per-user preference.; 6 of the 17 test_impact files were not run: autonomy_and_selfcheck, conversation_memory, gateway_llm, jarvis_screen, memory_poisoning, voice_interruption.",
+    }),
 ]
 
 
