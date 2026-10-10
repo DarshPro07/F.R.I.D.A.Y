@@ -4737,6 +4737,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Design: a new trigger kind "device" ({device_id, event, optional sensor}) in the existing automations engine (validate_trigger; stored without a Windows scheduled task). New friday/toolsets/device_events.dispatch(hub, registry, provider_id, device_id) polls the hub, and routes events only if the Reg (build run, commit 8dc47c351)',
         "next_action": "GAPS: Nothing calls dispatch yet: there is no poll loop or MCP tool wiring it to a running hub (no real backend; hermes-gadget-sdk not pinned).; Dropped events are logged but not persisted as a store row.; Pushed (non-polled) events and the device's assigned policy name are not consulted beyond the ACTIVE state; step-level policy still applies.",
     }),
+    ('FAB-005', {
+        "status": PARTIAL,
+        "current_implementation": 'Design: new friday/specialist.py is the composition seam. compose(role_id, executor_id, model_route, skills, allowed_tools, workspace_policy) returns a frozen Specialist. The role is validated against friday.roles.BY_ID, the registry, so identity and instructions never come from a provider conversat (build run, commit c831e7a64)',
+        "next_action": 'GAPS: No live dispatcher calls specialist.compose/record yet; running the specialist on an executor and attaching the executor result to the ledger run is a later slice (the module is a FUTURE entry in reachability.DECLARED).; The registry is the existing curated friday.roles.CATALOGUE; there is no per-role default skill or tool set yet, so skills and tools are caller inputs.; Skills and allowed tools reach the executor as prompt text (bundle context and constraints), not enforced by the executor; enforcement stays with existing allowed_paths and sandbox.; The model route is a plain input and is validated only by AgentLedger.start (4-part format). Nothing checks it against the model gateway.; Controller: integrated as PARTIAL - the acceptance needs the same role actually run on two executors with both results attributed; this slice composes and records, nothing dispatches yet.; implementer did not claim acceptance met',
+    }),
 ]
 
 
