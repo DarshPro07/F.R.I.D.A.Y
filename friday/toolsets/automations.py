@@ -50,6 +50,7 @@ from pathlib import Path
 from friday import config
 from friday import contracts as c
 from friday import dag
+from friday import opportunities
 from friday.policy import PolicyEngine, default_engine
 from friday.store import Store
 from friday.toolsets import memory, music, research, system, vision, web
@@ -433,6 +434,20 @@ async def _call(tool: str, run: c.Run, args: dict,
     return result
 
 
+def _raise_opportunities() -> None:
+    """
+    PRO-001: a run that did not fully succeed is the event the proactive
+    detectors wait for, so scan now instead of at the next periodic tick.
+    Plain code over the rows just written: no model, no network. A broken
+    detector is logged and never turns a recorded run into a crashed one;
+    the periodic scan stays as the backstop.
+    """
+    try:
+        opportunities.scan(store())
+    except Exception:
+        logger.exception("opportunity scan after a failed automation run failed")
+
+
 async def execute(name: str, *, variables: dict | None = None,
                   fired_by: str = "manual",
                   engine: PolicyEngine = default_engine,
@@ -531,6 +546,9 @@ async def execute(name: str, *, variables: dict | None = None,
         run_id, status=status, steps=records,
         error=None if status == c.SUCCEEDED else
         "; ".join(f"{r['id']}: {r['error']}" for r in records if r["error"]))
+
+    if status != c.SUCCEEDED:
+        _raise_opportunities()
 
     return {"run_id": run_id, "name": name, "status": status,
             "fired_by": fired_by, "steps": records}
