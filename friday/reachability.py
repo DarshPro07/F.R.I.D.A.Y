@@ -184,6 +184,9 @@ DECLARED = {
                                   "RSCH-002: the FridayResearchProvider interface and its web "
                                   "provider, no live caller yet, run by "
                                   "tests/test_research_providers.py"),
+    "friday/research_bench": (FUTURE,
+                              "RSCH-002: the provider benchmark and its cited-report preference "
+                              "gate, no live caller yet, run by tests/test_research_bench.py"),
     "friday/reflex": (FUTURE,
                       "the local fast path, off by default and behind a "
                       "feature flag; reachable when enabled"),
