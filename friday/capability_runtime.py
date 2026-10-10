@@ -47,6 +47,7 @@ import pkgutil
 from dataclasses import dataclass
 
 from friday import capabilities as C
+from friday import confirmation, dry_run
 from friday import contracts as c
 from friday import policy as policy_module
 from friday import privacy
@@ -326,9 +327,16 @@ class CapabilityRuntime:
     """
 
     def __init__(self, *, engine: PolicyEngine | None = None,
-                 principal: str = OBJECTIVE_EXECUTOR) -> None:
+                 principal: str = OBJECTIVE_EXECUTOR, book=None) -> None:
         self.engine = engine or default_engine
         self.principal = principal
+        #: Where a consequential capability's yes is asked and spent
+        #: (SIDE-002); the process-wide book unless a caller owns its own.
+        self._book = book
+
+    @property
+    def book(self):
+        return self._book if self._book is not None else confirmation.book
 
     def execute(self, capability_id: str, arguments: dict | None = None, *,
                 run: c.Run | None = None) -> c.ActionResult:
@@ -412,6 +420,9 @@ class CapabilityRuntime:
         # arguments), the ASK is answered for this call only. CONFIRM /
         # DENY tiers are untouched - they are not ASKs.
         approved_by = str(arguments.pop("approved_by", "") or "")
+        # SIDE-002: the handle of a yes given to this call's dry run. Like
+        # `approved_by` it is a marker, never an argument of the capability.
+        confirmation_nonce = str(arguments.pop("confirmation_nonce", "") or "")
         approved_run = ""
         approved = False
         if approved_by and run.envelope is not None:
@@ -431,10 +442,14 @@ class CapabilityRuntime:
         verdict = self.engine.decide(judged)
         if not verdict.allowed and not (
                 approved and verdict.decision == policy_module.ASK):
-            return run.record(started.finish(
-                status=c.CANCELLED,
-                error=f"APPROVAL_REQUIRED: {verdict.reason} "
-                      f"[{verdict.decision}]"))
+            error = f"APPROVAL_REQUIRED: {verdict.reason} [{verdict.decision}]"
+            if (verdict.needs_approval
+                    and dry_run.is_consequential(capability)):
+                # SIDE-002: the person is asked to approve something, so
+                # what it would do is in front of them when they are asked.
+                error += " | " + dry_run.summary(dry_run.dry_run(
+                    capability_id, arguments, capability=capability))
+            return run.record(started.finish(status=c.CANCELLED, error=error))
         if not verdict.allowed and approved:
             from friday import trust as T
             T.audit().record(
@@ -442,6 +457,13 @@ class CapabilityRuntime:
                 decision="APPROVED_ONCE", target=capability_id,
                 objective_id=approved_run,
                 detail={"arguments": arguments})
+
+        if not approved and dry_run.is_consequential(capability):
+            held = self._dry_run_hold(run, capability, arguments,
+                                      confirmation_nonce)
+            if held:
+                return run.record(started.finish(
+                    status=c.CANCELLED, error=f"APPROVAL_REQUIRED: {held}"))
 
         try:
             result = function(run, **arguments)
@@ -464,6 +486,39 @@ class CapabilityRuntime:
 
             return awaited()
         return self._bind(result, run, started, capability_id)
+
+    def _dry_run_hold(self, run: c.Run, capability: C.Capability,
+                      arguments: dict, nonce: str) -> str:
+        """SIDE-002: dry-run a consequential capability before it acts.
+
+        "" when it may go ahead: the person's yes for exactly this action is
+        spent, or its blast radius is below the floor that needs one. Otherwise the
+        question that was asked, with the expected effects in it and the
+        handle the yes comes back on. A larger blast radius raises an allowing
+        policy to a yes (`dry_run`); it never lowers one.
+        """
+        capability_id = capability.id
+        spent = None
+        if nonce:
+            spent = self.book.consume(nonce, run_id=run.run_id,
+                                      action=capability_id,
+                                      target=capability_id,
+                                      arguments=arguments)
+            if spent.ok:
+                return ""
+        # Policy has already answered for the capability's own flag (the
+        # verdict above was allowed), so the dry run adds only the floor.
+        plan, pending = dry_run.propose(self.book, run.run_id, capability_id,
+                                        arguments, capability=capability,
+                                        floor_only=True)
+        if pending is None:
+            return ""
+        held = (f"{pending.question} [dry run, blast radius {plan.blast_radius}"
+                f"; approve confirmation {pending.nonce}, then run again with "
+                f"confirmation_nonce]")
+        if spent is not None:
+            held = f"the yes given did not apply ({spent.reason}) - {held}"
+        return held
 
     def _approval_on_record(self, capability_id: str, arguments: dict,
                             approved_by: str, objective_id: str) -> str:

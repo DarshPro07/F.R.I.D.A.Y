@@ -306,10 +306,6 @@ DECLARED = {
                                "nothing, deferring and an experiment, each claim carrying "
                                "its evidence class; the planner that builds one is a later "
                                "step, run by tests/test_counterfactuals.py"),
-    "friday/dry_run": (FUTURE,
-                       "SIDE-002: dry-run stage and blast-radius escalation; the "
-                       "live caller (consequential tool dispatch) is the next "
-                       "wiring step, run by tests/test_dry_run.py"),
     "friday/forge_recipes": (FUTURE,
                              "CAP-FORGE-004: recipe templates and the integration plan; "
                              "the generator (CAP-FORGE-005) and the front door "

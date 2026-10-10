@@ -68,6 +68,17 @@ def _effects(cap: capabilities.Capability) -> tuple[str, ...]:
     return tuple(effects)
 
 
+def is_consequential(cap: capabilities.Capability) -> bool:
+    """Whether a call changes anything, so that it takes a dry run at all."""
+    return bool(_effects(cap))
+
+
+def summary(plan: DryRun) -> str:
+    """One line: the radius and what the call would do."""
+    effects = "; ".join(plan.expected_effects) or "no state change"
+    return f"dry run, blast radius {plan.blast_radius}. Expected effects: {effects}"
+
+
 def _unknown(tool_id: str) -> capabilities.Capability:
     """An id the registry has never heard of is unaudited, so worst case."""
     return capabilities.Capability(
@@ -95,15 +106,23 @@ def dry_run(tool_id: str, arguments: dict | None = None, *,
         reasoning_tier=_REASONING[radius], verification=verification)
 
 
-def propose(book, run_id: str, tool_id: str, arguments: dict | None = None):
+def propose(book, run_id: str, tool_id: str, arguments: dict | None = None, *,
+            capability: capabilities.Capability | None = None,
+            floor_only: bool = False):
     """Dry-run, then ask for the yes with the effects in the question.
 
     Returns (plan, confirmation); the confirmation is None when no yes is
     needed. The yes is bound to this exact tool and arguments by
     `confirmation.Book`, so it cannot be spent on a different action.
+
+    `floor_only`: the caller has already put the capability's own
+    confirmation flag to policy and policy said go, so only the blast-radius
+    floor (integration, core) may still ask. A smaller radius asks nothing.
     """
-    plan = dry_run(tool_id, arguments)
-    if not plan.requires_confirmation:
+    plan = dry_run(tool_id, arguments, capability=capability)
+    needs = (plan.blast_radius in _ALWAYS_CONFIRM if floor_only
+             else plan.requires_confirmation)
+    if not needs:
         return plan, None
     effects = "; ".join(plan.expected_effects) or "no state change"
     question = (f"Run {tool_id}? Blast radius {plan.blast_radius}. "
