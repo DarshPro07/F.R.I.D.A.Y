@@ -329,6 +329,9 @@ DECLARED = {
     "friday/federation": (FUTURE,
                           "FED-001 inbound-peer gate, not yet fed by an A2A "
                           "transport adapter"),
+    "friday/lab_dataset": (FUTURE,
+                           "LAB-002: privacy-safe micro-model dataset builder, "
+                           "no caller wired yet, run by tests/test_lab_dataset.py"),
     "friday/prompt_compiler": (FUTURE,
                                "PROMPT-001 instruction compiler, not yet "
                                "called by the voice agent's prompt build"),
