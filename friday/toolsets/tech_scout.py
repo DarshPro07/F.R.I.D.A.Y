@@ -56,6 +56,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+from friday import forge_value_gate
 from friday import provider_states
 
 ARCHIVED = "ARCHIVED"
@@ -77,6 +78,7 @@ _SHA = re.compile(r"^[0-9a-f]{40}$")
 Intake = Callable[["Candidate"], str]
 #: `gate(option, candidate, need) -> GateScore`: the scored value gate (CAP-FORGE-014).
 ValueGate = Callable[[str, "Candidate", "MeasuredNeed"], "GateScore"]
+_DEFAULT_GATE = object()
 
 
 class ScoutStoreError(RuntimeError):
@@ -165,6 +167,22 @@ class AdoptionDecision:
     choice: str
     reason: str
     score: float = 0.0
+
+
+def default_value_gate(option: str, candidate: Candidate, need: MeasuredNeed) -> GateScore:
+    """Adapt CAP-FORGE-014's repository scorer to TechScout's value-gate seam."""
+    fits = {ADOPT: "direct", ADAPT: "hardening", BUILD: "ideas"}
+    fit = fits.get(option, "behind_interface")
+    evaluated = forge_value_gate.assess(
+        forge_value_gate.Candidate(
+            repository=candidate.source,
+            capabilities=(need.metric,),
+            gains={"user_value": 1.0},
+            fit=fit),
+        existing={})
+    admitted = evaluated.decision != forge_value_gate.REJECT
+    return GateScore(admitted=admitted, score=evaluated.net,
+                     reason=f"value gate: {evaluated.decision}; {evaluated.reason}")
 
 
 @dataclass(frozen=True)
@@ -281,7 +299,7 @@ class TechScout:
         return finish(QUARANTINED, f"measured need on {need.metric}; handed to quarantine", ref)
 
     def decide(self, candidate_id: str, *, measurement: QuarantineMeasurement,
-               gate: ValueGate | None) -> AdoptionDecision:
+               gate: ValueGate | None | object = _DEFAULT_GATE) -> AdoptionDecision:
         """Adopt, adapt or build a quarantined candidate. Never installs, never writes."""
         def done(choice, reason, score=0.0):
             return AdoptionDecision(candidate_id, choice, reason, score)
@@ -298,7 +316,9 @@ class TechScout:
         else:
             meets, better = value <= need.required, value < need.observed
         option = ADOPT if meets else ADAPT if better else BUILD
-        if gate is None:
+        if gate is _DEFAULT_GATE:
+            gate = default_value_gate
+        elif gate is None:
             return done(UNAVAILABLE, "no value gate is configured; nothing was decided")
         try:
             verdict = gate(option, rec.candidate, need)

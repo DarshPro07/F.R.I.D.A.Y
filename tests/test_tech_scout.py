@@ -184,6 +184,17 @@ def test_a_candidate_that_meets_the_need_in_quarantine_is_adopted(quarantined):
     assert gate.asked[0][2].metric == "recall@5"
 
 
+def test_decide_defaults_to_the_real_value_gate_without_installing(quarantined):
+    before = quarantined.path.read_bytes()
+    registry = set(fabric.registry())
+    dec = quarantined.decide(repo().candidate_id, measurement=measured(0.85))
+    assert dec.choice == TS.ADOPT
+    assert dec.score > 0
+    assert "value gate" in dec.reason
+    assert quarantined.path.read_bytes() == before
+    assert set(fabric.registry()) == registry
+
+
 def test_a_candidate_that_only_improves_the_metric_is_adapted(quarantined):
     dec = quarantined.decide(repo().candidate_id, measurement=measured(0.70), gate=Gate())
     assert dec.choice == TS.ADAPT
