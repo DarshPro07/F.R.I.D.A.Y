@@ -435,6 +435,7 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
     context_fingerprint TEXT NOT NULL DEFAULT '',
     context_sections  TEXT NOT NULL DEFAULT '',
     input_sources     TEXT NOT NULL DEFAULT '',
+    input_split       TEXT NOT NULL DEFAULT '',
     error             TEXT NOT NULL DEFAULT '',
     created_at        TEXT NOT NULL
 );
@@ -467,6 +468,7 @@ _ADDED_COLUMNS = (
     ("context_sections", "TEXT NOT NULL DEFAULT ''"),
     ("cost_usd", "REAL NOT NULL DEFAULT 0"),
     ("input_sources", "TEXT NOT NULL DEFAULT ''"),
+    ("input_split", "TEXT NOT NULL DEFAULT ''"),
     ("billing_class", "TEXT NOT NULL DEFAULT ''"),
 )
 
@@ -487,6 +489,93 @@ def _input_by_role(messages: list[dict]) -> str:
         role = str(m.get("role") or "unknown")
         by_role[role] = by_role.get(role, 0) + approx_tokens(str(m.get("content", "")))
     return json.dumps(by_role, sort_keys=True)
+
+
+#: ORCH-009: the five sources a call's input is attributed to.
+INPUT_SOURCES = ("instructions", "task", "code", "tool_results", "history")
+
+#: Where each section of a compiled working set (`WorkingSet.sections`) is counted.
+#: `pinned` is what binds the call (objective, constraints) and `tools` is the
+#: callable-tool list, both instructions; `recorded` and `state` are what tools and
+#: the plan recorded; `memory` is carried knowledge, so it is history.
+_SECTION_SOURCE = {
+    "system": "instructions", "pinned": "instructions", "tools": "instructions",
+    "task": "task", "code": "code",
+    "recorded": "tool_results", "state": "tool_results",
+    "history": "history", "memory": "history",
+}
+_FENCED_CODE = re.compile(r"(?s)(`{3,}|~{3,}).*?(?:\1|\Z)")
+_FLATTENED_TOOL_RESULT = "[tool result"
+
+
+def _input_by_kind(messages: list[dict], context_sections: dict | None = None) -> str:
+    """ORCH-009: the call's input by source, as JSON over `INPUT_SOURCES` (approximate
+    tokens, like `approx_tokens`; `input_tokens` stays what the provider billed).
+
+    When the caller compiled a working set (`context_sections` = `WorkingSet.telemetry()`)
+    its own section sizes are the split, mapped by `_SECTION_SOURCE`. Otherwise a fixed
+    rule over the messages: a system message is instructions; a tool message, or a user
+    turn the gateway flattened from one, is a tool result; the last user message is
+    the task and every earlier user or assistant turn is history; a fenced block inside
+    any of those is code and is counted there rather than in the turn that holds it.
+    The task is the last USER turn that is not a flattened tool result, not simply the last
+    message: in a tool loop the final messages are an assistant tool-call turn and its tool
+    results, and the request being answered is the user turn before them. Content that is
+    None counts as empty, and an assistant turn's `tool_calls` (name and arguments) are
+    counted as history."""
+    out = dict.fromkeys(INPUT_SOURCES, 0)
+    sections = (context_sections or {}).get("sections")
+    if isinstance(sections, dict) and sections:
+        for name, tokens in sections.items():
+            try:
+                out[_SECTION_SOURCE.get(str(name), "history")] += int(tokens)
+            except (TypeError, ValueError):
+                continue
+        return json.dumps(out, sort_keys=True)
+    # The task is the last user turn that is not a flattened tool result: the request
+    # being answered. After a tool round the final messages are an assistant tool-call
+    # turn and tool messages, so "the last non-system message" would name the wrong one.
+    last = max((i for i, m in enumerate(messages)
+                if m.get("role") == "user"
+                and not _message_text(m).startswith(_FLATTENED_TOOL_RESULT)), default=-1)
+    for i, m in enumerate(messages):
+        role, text = m.get("role"), _message_text(m)
+        if role == "system":
+            out["instructions"] += approx_tokens(text)
+        elif role == "tool" or text.startswith(_FLATTENED_TOOL_RESULT):
+            out["tool_results"] += approx_tokens(text)
+        else:
+            fenced = [b.group(0) for b in _FENCED_CODE.finditer(text)]
+            out["code"] += sum(approx_tokens(b) for b in fenced)
+            rest = _FENCED_CODE.sub("", text) if fenced else text
+            out["task" if i == last else "history"] += approx_tokens(rest)
+            # What the model asked a tool to do is input to the next call, and it was the
+            # model's own earlier output: history.
+            out["history"] += approx_tokens(_tool_calls_text(m))
+    return json.dumps(out, sort_keys=True)
+
+
+def _message_text(m: dict) -> str:
+    """A message's text: None (an assistant turn that only called tools) is empty, and a
+    list of content parts (multimodal) is its text parts joined."""
+    content = m.get("content")
+    if content is None:
+        return ""
+    if isinstance(content, list):
+        return "\n".join(str(p.get("text", "")) if isinstance(p, dict) else str(p)
+                         for p in content)
+    return str(content)
+
+
+def _tool_calls_text(m: dict) -> str:
+    """The function names and arguments of an assistant message's `tool_calls`."""
+    parts = []
+    for call in m.get("tool_calls") or ():
+        fn = call.get("function", call) if isinstance(call, dict) else {}
+        args = fn.get("arguments", fn.get("input", ""))
+        parts.append(str(fn.get("name", "")) + (
+            args if isinstance(args, str) else json.dumps(args, sort_keys=True, default=str)))
+    return "".join(parts)
 
 
 class GatewayTelemetry:
@@ -1734,6 +1823,7 @@ class ModelGateway:
             if reasoning and reasoning != "none":
                 params["reasoning"] = {"effort": reasoning}
             started = time.monotonic()
+            retried_mark = sum(1 for a in attempts if a["status"] == "retried")
             try:
                 if request.transient_retries > 0:
                     reply = self._infer_retrying(
@@ -1751,9 +1841,12 @@ class ModelGateway:
                 self._record(request, status="failed", provider=provider, model=model,
                              tier=tier, error=last_error, latency_ms=elapsed,
                              input_tokens=input_tokens, failover_count=index,
-                             fingerprint=fingerprint, entitlement_state=last_state)
+                             fingerprint=fingerprint, entitlement_state=last_state,
+                             retries=sum(1 for a in attempts if a["status"] == "retried")
+                             - retried_mark)
                 continue
             elapsed = int((time.monotonic() - started) * 1000)
+            route_retries = sum(1 for a in attempts if a["status"] == "retried") - retried_mark
             if reply.get("ok"):
                 res = reply["result"]
                 usage = res.get("usage") or {}
@@ -1785,11 +1878,23 @@ class ModelGateway:
                                      input_tokens=input_tokens, failover_count=index,
                                      fingerprint=fingerprint, entitlement_state=code)
                         params = {**params, "max_output_tokens": widened, "_retried": True}
+                        route_retries += 1
                         started = time.monotonic()
                         try:
                             reply = self._infer(provider, params, timeout=request.timeout_s)
                         except GatewayUnavailable as exc:
+                            elapsed = int((time.monotonic() - started) * 1000)
                             last_error, last_state = str(exc), "GATEWAY_UNAVAILABLE"
+                            attempts.append({"tier": tier, "provider": provider, "model": model,
+                                             "status": "unavailable", "error": last_error,
+                                             "latency_ms": elapsed})
+                            # The widened retry is a model call of its own: it gets its row,
+                            # carrying the retries this route made (ORCH-009).
+                            self._record(request, status="failed", provider=provider,
+                                         model=model, tier=tier, error=last_error,
+                                         latency_ms=elapsed, input_tokens=input_tokens,
+                                         failover_count=index, fingerprint=fingerprint,
+                                         entitlement_state=last_state, retries=route_retries)
                             continue
                         elapsed = int((time.monotonic() - started) * 1000)
                         if not reply.get("ok"):
@@ -1799,6 +1904,12 @@ class ModelGateway:
                             attempts.append({"tier": tier, "provider": provider, "model": model,
                                              "status": "failed", "code": last_state,
                                              "error": last_error, "latency_ms": elapsed})
+                            self._record(request, status="failed", provider=provider,
+                                         model=model, tier=tier,
+                                         error=f"{last_state}: {last_error}",
+                                         latency_ms=elapsed, input_tokens=input_tokens,
+                                         failover_count=index, fingerprint=fingerprint,
+                                         entitlement_state=last_state, retries=route_retries)
                             self._mark_unhealthy(provider, model, last_state)
                             continue
                         res = reply["result"]
@@ -1819,7 +1930,8 @@ class ModelGateway:
                         self._record(request, status="failed", provider=provider, model=model,
                                      tier=tier, error=f"{code}: {message}", latency_ms=elapsed,
                                      input_tokens=input_tokens, failover_count=index,
-                                     fingerprint=fingerprint, entitlement_state=code)
+                                     fingerprint=fingerprint, entitlement_state=code,
+                                     retries=route_retries)
                         self._mark_unhealthy(provider, model, code)
                         continue
                 if verdict_domain.domain and domain_gate.is_provider_refusal(text):
@@ -1829,7 +1941,7 @@ class ModelGateway:
                     last_error = self._safeguard_refused(
                         request, verdict_domain, tier, provider, model, attempts,
                         index=index, elapsed=elapsed, input_tokens=input_tokens,
-                        fingerprint=fingerprint)
+                        fingerprint=fingerprint, retries=route_retries)
                     last_state, safeguarded = "SAFEGUARD_REFUSED", True
                     continue
                 result = ModelGatewayResult(
@@ -1871,7 +1983,7 @@ class ModelGateway:
                     cached_tokens=result.cached_tokens,
                     reasoning_tokens=result.reasoning_tokens, failover_count=index,
                     fingerprint=fingerprint, entitlement_state="OK", route_kind=kind,
-                    cost_usd=result.cost_usd)
+                    cost_usd=result.cost_usd, retries=route_retries)
                 result.dispatch = self._dispatch_for(routes, index, barred)
                 result.escalations = escalations
                 return result
@@ -1884,7 +1996,7 @@ class ModelGateway:
                 last_error = self._safeguard_refused(
                     request, verdict_domain, tier, provider, model, attempts,
                     index=index, elapsed=elapsed, input_tokens=input_tokens,
-                    fingerprint=fingerprint)
+                    fingerprint=fingerprint, retries=route_retries)
                 last_state, safeguarded = "SAFEGUARD_REFUSED", True
                 continue
             attempts.append({"tier": tier, "provider": provider, "model": model,
@@ -1894,7 +2006,8 @@ class ModelGateway:
             self._record(request, status="failed", provider=provider, model=model,
                          tier=tier, error=f"{code}: {message}", latency_ms=elapsed,
                          input_tokens=input_tokens, failover_count=index,
-                         fingerprint=fingerprint, entitlement_state=code)
+                         fingerprint=fingerprint, entitlement_state=code,
+                         retries=route_retries)
             self._mark_unhealthy(provider, model, code)
             if code in _NO_FAILOVER:
                 break
@@ -1978,7 +2091,7 @@ class ModelGateway:
     def _safeguard_refused(self, request: ModelGatewayRequest,
                            verdict: domain_gate.DomainVerdict, tier: str, provider: str,
                            model: str, attempts: list[dict], *, index: int, elapsed: int,
-                           input_tokens: int, fingerprint: str) -> str:
+                           input_tokens: int, fingerprint: str, retries: int = 0) -> str:
         """Record a provider-safeguard refusal against (route, domain) and return the
         message. The model's own words are not stored: only that, and where, it refused."""
         message = f"provider safeguard refused a {verdict.domain} request on {provider}:{model}"
@@ -1988,7 +2101,8 @@ class ModelGateway:
         self._record(request, status="refused", provider=provider, model=model, tier=tier,
                      error=f"SAFEGUARD_REFUSED: {message}", latency_ms=elapsed,
                      input_tokens=input_tokens, failover_count=index,
-                     fingerprint=fingerprint, entitlement_state="SAFEGUARD_REFUSED")
+                     fingerprint=fingerprint, entitlement_state="SAFEGUARD_REFUSED",
+                     retries=retries)
         domain_gate.record_provider_refusal(
             safeguard_key(provider, model), detail=message, domain=verdict.domain)
         return message
@@ -2037,7 +2151,11 @@ class ModelGateway:
                 reasoning_tokens: int = 0, failover_count: int = 0,
                 fingerprint: str = "", entitlement_state: str = "",
                 route_kind: str = "", credential: str = "",
-                cost_usd: float = 0.0) -> int:
+                cost_usd: float = 0.0, retries: int = 0) -> int:
+        """`retries` is the number of retries the gateway itself made on this row's route
+        before it (transient retries and the one widened retry), counted on the row that
+        ends the route. A 'retried' row is a failed try that was followed by a retry and
+        carries 0, so summing the column over a call counts each retry once."""
         try:
             return self.telemetry.record(
                 objective_id=request.objective_id, worker=request.worker,
@@ -2050,11 +2168,12 @@ class ModelGateway:
                 input_tokens=input_tokens, output_tokens=output_tokens,
                 cached_tokens=cached_tokens, reasoning_tokens=reasoning_tokens,
                 cost_usd=cost_usd,
-                latency_ms=latency_ms, retries=0, failover_count=failover_count,
+                latency_ms=latency_ms, retries=retries, failover_count=failover_count,
                 context_fingerprint=fingerprint,
                 context_sections=(json.dumps(request.context_telemetry, sort_keys=True)
                                   if request.context_telemetry else ""),
                 input_sources=_input_by_role(request.context_package),
+                input_split=_input_by_kind(request.context_package, request.context_telemetry),
                 error=error[:500])
         except Exception:  # noqa: BLE001 - telemetry must never break inference
             logger.warning("gateway telemetry write failed", exc_info=True)

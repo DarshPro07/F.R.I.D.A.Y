@@ -270,3 +270,59 @@ def test_the_success_path_adds_no_sleep_and_no_attempt(gw, clock):
     res = gw.infer(request(transient_retries=3))
     assert res.status == "ok" and res.attempts == [] and clock.slept == []
     assert len(script.calls) == 1
+
+
+# -- ORCH-009: the ledger's retries column is the gateway's own count -------
+
+
+def test_the_answering_row_carries_the_retries_the_gateway_made(gw, clock):
+    Script(gw, clock, {A[0]: [err_reply("PROVIDER_ERROR"), STALL, "ok"]})
+    assert gw.infer(request(transient_retries=2)).status == "ok"
+    rows = gw.telemetry.for_objective("obj-retry")
+    assert [(r["status"], r["retries"]) for r in rows] == [
+        ("retried", 0), ("retried", 0), ("ok", 2)]
+    # Summed over the call, each retry is counted once: the retried rows are the
+    # failed tries, the terminal row is the count of tries that followed them.
+    assert sum(r["retries"] for r in rows) == 2
+
+
+def test_a_route_that_spends_its_retries_then_fails_over_reports_each_route_own(gw, clock):
+    Script(gw, clock, {A[0]: [err_reply("PROVIDER_ERROR")], B[0]: ["ok"]})
+    res = gw.infer(request(transient_retries=2))
+    assert (res.provider, res.failover_count) == (B[0], 1)
+    rows = gw.telemetry.for_objective("obj-retry")
+    assert [(r["status"], r["provider"], r["retries"]) for r in rows] == [
+        ("retried", A[0], 0), ("retried", A[0], 0), ("failed", A[0], 2), ("ok", B[0], 0)]
+
+
+def test_a_call_with_no_retry_records_zero(gw, clock):
+    Script(gw, clock, {A[0]: ["ok"]})
+    gw.infer(request(transient_retries=3))
+    assert [r["retries"] for r in gw.telemetry.for_objective("obj-retry")] == [0]
+
+
+def truncated_reply(provider: str, model: str) -> dict:
+    return {"ok": True, "result": {
+        "response": "", "provider": provider, "model": model,
+        "usage": {"input_tokens": 7, "output_tokens": 0, "reasoning_tokens": 9},
+        "finish_reason": "length"}}
+
+
+def test_a_widened_retry_that_fails_still_gets_its_own_row_with_the_retry_counted(gw, clock):
+    Script(gw, clock, {A[0]: [truncated_reply(*A), err_reply("RATE_LIMITED")]})
+    res = gw.infer(request(allow_failover=False))
+    assert res.status == "failed"
+    rows = gw.telemetry.for_objective("obj-retry")
+    assert [(r["status"], r["entitlement_state"], r["retries"]) for r in rows] == [
+        ("failed", "OUTPUT_TRUNCATED", 0), ("failed", "RATE_LIMITED", 1)]
+    assert sum(r["retries"] for r in rows) == 1
+
+
+def test_a_widened_retry_that_finds_the_worker_unavailable_gets_its_row_too(gw, clock):
+    Script(gw, clock, {A[0]: [truncated_reply(*A), STALL]})
+    res = gw.infer(request(allow_failover=False))
+    assert res.status == "failed"
+    rows = gw.telemetry.for_objective("obj-retry")
+    assert [(r["status"], r["entitlement_state"], r["retries"]) for r in rows] == [
+        ("failed", "OUTPUT_TRUNCATED", 0), ("failed", "GATEWAY_UNAVAILABLE", 1)]
+    assert [a["status"] for a in res.attempts][-1] == "unavailable"

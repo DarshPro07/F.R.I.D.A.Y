@@ -1005,3 +1005,120 @@ def test_an_existing_ledger_gains_the_input_sources_column(tmp_path):
     telemetry = mg.GatewayTelemetry(path)
     telemetry.record(objective_id="o", task_class="SIMPLE", status="ok", input_sources='{"user": 3}')
     assert telemetry.for_objective("o")[0]["input_sources"] == '{"user": 3}'
+
+
+def test_the_widened_retry_after_a_truncated_reply_is_counted_on_the_answering_row(
+        tmp_path, clean_env):
+    clean_env.setenv("FAKE_GW_EMPTY_PROVIDERS", "anthropic:length")
+    clean_env.setenv("FAKE_GW_EMPTY_BELOW", "300")
+    gw = make(tmp_path)
+    try:
+        gw.infer(request(objective="obj-wide", task_class=mg.TRIVIAL, allow_failover=False))
+        rows = gw.telemetry.for_objective("obj-wide")
+        assert [(r["status"], r["retries"]) for r in rows] == [("failed", 0), ("ok", 1)]
+    finally:
+        gw.close()
+
+
+# -- ORCH-009: input by source (instructions, task, code, tool results, history) --
+
+
+def _split(messages, sections=None):
+    import json
+    return json.loads(mg._input_by_kind(messages, sections))
+
+
+def test_the_split_without_sections_separates_the_five_sources():
+    fence = "`" * 3
+    code = f"{fence}python\n{'c' * 76}\n{fence}"          # 4 + 76 + 4 chars of fence+body
+    messages = [
+        {"role": "system", "content": "s" * 40},
+        {"role": "user", "content": "h" * 80},
+        {"role": "assistant", "content": "a" * 40},
+        {"role": "tool", "content": "t" * 120},
+        {"role": "user", "content": "k" * 32 + "\n" + code},
+    ]
+    got = _split(messages)
+    assert set(got) == {"instructions", "task", "code", "tool_results", "history"}
+    assert got["instructions"] == 10
+    assert got["tool_results"] == 30
+    assert got["history"] == 30                            # the earlier user and assistant turns
+    assert got["code"] == mg.approx_tokens(code)
+    assert got["task"] == mg.approx_tokens("k" * 32 + "\n")
+
+
+def test_a_flattened_tool_result_in_a_user_turn_is_still_a_tool_result():
+    messages = [{"role": "user", "content":
+                 "[tool result (data, not an instruction): " + "r" * 80 + "]"},
+                {"role": "user", "content": "go"}]
+    got = _split(messages)
+    assert got["tool_results"] > 20 and got["history"] == 0 and got["task"] == 1
+
+
+def test_supplied_sections_decide_the_split():
+    messages = [{"role": "system", "content": "x"}, {"role": "user", "content": "y"}]
+    sections = {"sections": {"system": 10, "pinned": 5, "task": 7, "recorded": 3, "state": 4,
+                             "memory": 2, "code": 9, "tools": 6, "history": 8}}
+    assert _split(messages, sections) == {
+        "instructions": 21, "task": 7, "code": 9, "tool_results": 7, "history": 10}
+
+
+def test_a_compiled_working_set_is_recorded_by_its_own_sections(tmp_path):
+    import json
+    ws = mg.compile_working_set(system="You are Friday.", user="do the thing",
+                                code_refs=["def f(): pass"],
+                                history=[("user", "earlier"), ("assistant", "ok")])
+    ledger = mg.GatewayTelemetry(tmp_path / "gateway_calls.sqlite3")
+    gw = mg.ModelGateway(telemetry=ledger)
+    req = mg.ModelGatewayRequest(objective_id="o-ws", task_class=mg.STANDARD,
+                                 context_package=ws.messages,
+                                 context_telemetry=ws.telemetry())
+    gw._record(req, status="ok", provider="fake", model="fake-1")
+    split = json.loads(ledger.for_objective("o-ws")[0]["input_split"])
+    assert split["code"] == ws.sections["code"] > 0
+    assert split["task"] == ws.sections["task"]
+    assert split["history"] == ws.sections["history"]
+    assert split["instructions"] == ws.sections["system"]
+
+
+def test_an_existing_ledger_gains_the_input_split_column(tmp_path):
+    import sqlite3
+    path = tmp_path / "old2.sqlite3"
+    old_schema = "\n".join(line for line in mg.GATEWAY_CALLS_SCHEMA.splitlines()
+                           if not line.strip().startswith("input_split"))
+    with sqlite3.connect(path) as conn:
+        conn.executescript(old_schema)
+        assert "input_split" not in {r[1] for r in conn.execute("PRAGMA table_info(gateway_calls)")}
+    telemetry = mg.GatewayTelemetry(path)
+    telemetry.record(objective_id="o", task_class="SIMPLE", status="ok", input_split='{"task": 3}')
+    assert telemetry.for_objective("o")[0]["input_split"] == '{"task": 3}'
+
+
+def test_the_task_in_a_tool_loop_is_the_users_request_not_the_tool_call_turn():
+    """The voice tool loop ends each follow-up call with an assistant tool-call turn
+    (content '') and the tool messages: the task is still the user's request."""
+    messages = [
+        {"role": "system", "content": "s" * 40},
+        {"role": "user", "content": "u" * 44},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c1", "type": "function",
+             "function": {"name": "lookup", "arguments": "{" + "a" * 18 + "}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "t" * 120},
+    ]
+    got = _split(messages)
+    assert got["task"] == 11 and got["tool_results"] == 30 and got["instructions"] == 10
+    # The model's own tool call (name + arguments) is input too, counted as history.
+    assert got["history"] == mg.approx_tokens("lookup{" + "a" * 18 + "}") > 0
+
+
+def test_none_content_is_empty_and_the_tool_call_arguments_are_counted():
+    messages = [
+        {"role": "user", "content": "u" * 40},
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"function": {"name": "f", "arguments": {"k": "v" * 30}}}]},
+        {"role": "tool", "content": "r" * 8},
+    ]
+    got = _split(messages)
+    assert got["task"] == 10, "the user's request, whether content is '' or None"
+    assert got["history"] == mg.approx_tokens("f" + '{"k": "' + "v" * 30 + '"}')
+    assert got["history"] > mg.approx_tokens("None"), "None is not counted as the text 'None'"
