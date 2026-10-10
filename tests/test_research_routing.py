@@ -161,7 +161,7 @@ def live_run(store, monkeypatch):
 
     monkeypatch.setattr(R, "web_search", fake_search)
     monkeypatch.setattr(R, "crawl_all", fake_crawl_all)
-    question = "which local model calls tools best"
+    question = "compare which local model calls tools best"
     result = asyncio.run(R.web_deep_research(
         c.Run.create("test", capability="web"), question))
     yield question, result

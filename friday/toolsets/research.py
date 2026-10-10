@@ -487,16 +487,20 @@ def filter_branches(inquiry: CanonicalInquiry, branches: list[dict]) -> tuple[li
     return kept, rejected
 
 
-def explore(inquiry: CanonicalInquiry, depth: str, branches: list[dict], fetch) -> dict:
+def explore(inquiry: CanonicalInquiry, depth: str, branches: list[dict], fetch, *,
+            budget: DepthBudget | None = None, patience: int | None = GAIN_PATIENCE,
+            guard: bool = True) -> dict:
     """
     Walk on-inquiry branches under the depth's budget, recording why it stopped.
 
     `fetch(branch)` returns a page dict (see `dedupe`). Stop reasons:
-    budget_sources, budget_chars, no_information_gain (GAIN_PATIENCE pages in a
-    row covered no new inquiry term), or exhausted (nothing left to read).
+    budget_sources, budget_chars, no_information_gain (`patience` pages in a
+    row covered no new inquiry term; None turns this stop off), or exhausted
+    (nothing left to read). `budget` overrides the depth's own budget;
+    `guard=False` skips the drift guard for branches the caller already screened.
     """
-    budget = DEPTH_BUDGETS[depth]
-    kept, rejected = filter_branches(inquiry, branches)
+    budget = budget or DEPTH_BUDGETS[depth]
+    kept, rejected = filter_branches(inquiry, branches) if guard else (list(branches), [])
     pages: list[dict] = []
     failed: list[str] = []
     covered: set[str] = set()
@@ -520,7 +524,7 @@ def explore(inquiry: CanonicalInquiry, depth: str, branches: list[dict], fetch) 
         if spent >= budget.max_chars:
             reason = "budget_chars" if more else "exhausted"
             break
-        if more and barren >= GAIN_PATIENCE:
+        if more and patience is not None and barren >= patience:
             reason = "no_information_gain"
             break
     # "sources" is what was fetched (what the budget counts); copies of one
@@ -701,13 +705,20 @@ async def web_crawl(
 
 
 async def web_deep_research(
-    run: c.Run, question: str, *, sources: int = 5,
+    run: c.Run, question: str, *, sources: int | None = None,
     max_chars_per_source: int = DEFAULT_SOURCE_CHARS,
-    budget: int = DEFAULT_CORPUS_CHARS,
+    budget: int | None = None, depth: str | None = None,
     engine: PolicyEngine = default_engine,
 ) -> c.ActionResult:
     """
     Search, read the results properly, and return a ranked, budgeted corpus.
+
+    RSCH-001: the depth (R0-R5) comes from `route_depth`, so a one-fact
+    question stays at R1 whatever `depth` asks for. The depth's budget is the
+    default for `sources` and `budget` and also their ceiling: an explicit
+    value may narrow a depth's budget, never widen it (R1 included). R0 reads
+    nothing: it returns before any search or fetch. The result records the
+    depth, the stop reason and any page that drifted off the inquiry.
 
     Returns sources - not a synthesis. The agent's own model does the
     reasoning; adding a second model here would cost a call and a hop, and
@@ -721,7 +732,31 @@ async def web_deep_research(
 
     if not (question or "").strip():
         return run.record(c.failed(started, "empty question"))
-    sources = max(1, min(int(sources or 5), 10))
+    inquiry = CanonicalInquiry.from_question(question)
+    depth = route_depth(question, depth)
+    depth_budget = DEPTH_BUDGETS[depth]
+    if depth == "R0":
+        # R0 answers from what is already known: no search, no fetch.
+        return run.record(c.succeeded(
+            started,
+            output=_scoped({
+                "question": question, "depth": "R0",
+                "stop": {"depth": "R0", "reason": "depth_r0", "sources": 0,
+                         "chars": 0, "independent_sources": 0},
+                "off_inquiry": [], "considered": 0, "read": 0,
+                "independent_sources": 0, "corpus_chars": 0, "sources": [],
+                "dropped_for_budget": [], "unreadable": [],
+            }),
+            verification=c.Verification(
+                method="depth_r0",
+                evidence="routed to R0: answered from what is known, nothing searched or fetched",
+            ),
+        ))
+    # The depth's budget is the default and the ceiling.
+    sources = (depth_budget.max_sources if sources is None
+               else max(1, min(int(sources), depth_budget.max_sources)))
+    budget = (depth_budget.max_chars if budget is None
+              else max(1, min(int(budget), depth_budget.max_chars)))
 
     from friday import research_cache
     cached = research_cache.lookup(question)
@@ -755,20 +790,45 @@ async def web_deep_research(
         return run.record(c.failed(
             started, f"could not search: {search.error or 'no results'}"))
 
-    hits = (search.output or {}).get("results", [])[:sources]
+    found = (search.output or {}).get("results", [])
+    # Drift guard on what the search said about each result, before anything is
+    # fetched. A result with no title or snippet says nothing to judge, so it
+    # is read rather than assumed off the inquiry.
+    _, drifted = filter_branches(inquiry, [h for h in found if h.get("title") or h.get("snippet")])
+    drifted_urls = {d.get("url") for d in drifted}
+    on_inquiry = [h for h in found if h.get("url") not in drifted_urls]
+    hits = on_inquiry[:sources]
+    if not hits and drifted:
+        return run.record(c.failed(
+            started, f"found {len(found)} result(s) but none stayed on the inquiry"))
     if not hits:
         return run.record(c.failed(started, "search returned no results to read"))
 
     from friday import netguard
-    pages = dedupe(collapse_copies(await crawl_all(
+    crawled = await crawl_all(
         [h["url"] for h in hits], max_chars=max_chars_per_source, render=True,
-        net=netguard.run_scope(run))))
-    kept, dropped = build_corpus(pages, question, budget=budget)
+        net=netguard.run_scope(run))
     unreadable = [{"url": p.get("url"), "error": p.get("error")}
-                  for p in pages if not p.get("ok")]
+                  for p in crawled if not p.get("ok")]
+    # Pages are fetched together, so the information-gain stop would only
+    # discard pages already paid for: it is off here (patience=None). The
+    # source and char budgets apply to what was read; the drift guard has
+    # already screened the results (guard=False).
+    readable = {p["url"]: p for p in crawled if p.get("ok")}
+    walked = explore(inquiry, depth, [{"url": u} for u in readable],
+                     lambda b: readable[b["url"]],
+                     budget=DepthBudget(sources, budget), patience=None, guard=False)
+    stop = walked["stop"]
+    if stop["reason"] == "exhausted" and len(on_inquiry) > len(hits):
+        stop["reason"] = "budget_sources"
+    off_inquiry = [{"url": d.get("url"), "title": d.get("title", ""), "reason": d["reason"]}
+                   for d in drifted]
+    pages = dedupe(walked["pages"])
+    kept, dropped = build_corpus(pages, question, budget=budget)
 
     output = _scoped({
-        "question": question,
+        "question": question, "depth": depth, "stop": stop,
+        "off_inquiry": off_inquiry,
         "search_provider": (search.output or {}).get("provider"),
         "considered": len(hits), "read": len(kept),
         "independent_sources": len(kept),

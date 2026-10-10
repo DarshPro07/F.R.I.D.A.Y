@@ -108,8 +108,9 @@ def register(mcp):
                               max_chars=max_chars, render=render)
 
     @mcp.tool()
-    async def web_deep_research(question: str, sources: int = 5,
-                                max_chars_per_source: int = 3000) -> dict:
+    async def web_deep_research(question: str, sources: int | None = None,
+                                max_chars_per_source: int = 3000,
+                                depth: str | None = None) -> dict:
         """
         Research a question properly: search, read the top results, rank them
         by relevance and return the sources with citations.
@@ -117,10 +118,15 @@ def register(mcp):
         Use for "research X", "compare A B and C", "what are the approaches
         to Y" - anything where one snippet is not an answer. Returns sources,
         not conclusions; the reasoning is yours. Cite the URLs you used.
+
+        `depth` (R0-R5) is optional: the depth is routed from the question,
+        and a one-fact question stays at R1 whatever is asked. `sources`
+        defaults to the depth's own budget and can only narrow it.
         """
         return await _execute(f"research: {question}", R.web_deep_research, question,
                               sources=sources,
-                              max_chars_per_source=max_chars_per_source)
+                              max_chars_per_source=max_chars_per_source,
+                              depth=depth)
 
     @mcp.tool()
     async def web_news(topic: str = "world", limit: int = 12) -> dict:
