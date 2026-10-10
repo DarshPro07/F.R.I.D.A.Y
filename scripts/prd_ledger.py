@@ -5005,6 +5005,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Fixed both major defects at the root in friday/trajectory.py. (1) stall_for_run now reads the critic marker with store.objective_events_named(run_id, (EVENT_STALL_CRITIC,)), which is uncapped, instead of the first 1000 events from objective_events. (2) stall_for_events takes an optional step_count;  (build run, commit 8eea9cf37)',
         "next_action": "GAPS: Row acceptance (product agent and build harness both use the detector) is slices 2 and 3, not done here; stall_steps remains FUTURE in reachability.py until wired.; The whole-run step count sums store.objective_event_counts, which skips events with a NULL task_id, while stall_steps feeds any event of those kinds. Step events always carry a task_id in practice, so the difference is only theoretical.; Assumption: Step events (task.succeeded/failed/retry/blocked) always carry a task_id, so objective_event_counts is a valid whole-run step count.; Assumption: The reviewer's resume-window minor is handled by documentation rather than extra store queries, because a resume older than the newest-500 window cannot have pre-resume events inside that window.; implementer did not claim acceptance met",
     }),
+    ('ULTRA-006', {
+        "status": PARTIAL,
+        "current_implementation": "Repair of the reviewer's major finding. In friday/ultracode/tiers.py, deep is now a ceiling for judge/synthesis/architecture: the new allowed_tiers() permits standard or deep for them, still exactly one tier for economy and standard templates (lookup/check/skeptic -> economy, builder/code/producer - (build run, commit d27ab8544)",
+        "next_action": 'GAPS: The stage runner (ULTRA-002) is not wired to call choose_model yet; per-tier candidate lists and the bench source are supplied by the caller, and the Choice evidence is not persisted.; cheapest_capable and FAB-003 rank_routes/cost_per_completion remain two rankers with different inputs; not unified (documented in the docstring).; The default spec has no check, skeptic or code stages; those templates are covered only by the parametrized tests.; Assumption: Standard is the lowest tier a judge/synthesis/architecture stage may use; economy is rejected for them (the reviewer asked to keep rejecting economy).',
+    }),
 ]
 
 
