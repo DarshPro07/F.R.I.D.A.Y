@@ -17,8 +17,11 @@ Rules, all enforced here and each refusal recorded (`refusals()`):
   * an expired lease frees its windows: the session becomes EXPIRED, its
     governor lease is returned, and a later `authorize()` raises
     `SessionStopped`; a lease the governor took back is REVOKED the same way;
-  * a session may act only on windows in its own set (NOT_IN_SET) and only up
-    to its action limit (ACTION_LIMIT); it may hold at most `max_windows`.
+  * a session may act only on windows in its own set (NOT_IN_SET), only on
+    applications in its own set when it lists any (APP_NOT_IN_SET; an action
+    that names no application is refused then, so the set cannot be skipped by
+    leaving the name out), and only up to its action limit (ACTION_LIMIT); it
+    may hold at most `max_windows`.
 
 The application boundary applies between sessions that both declare the
 application: a session that declares no `apps` is bounded by its windows only.
@@ -36,8 +39,8 @@ data); they are compared normalised (trimmed, case-folded) and never
 interpreted.
 
 The registry is pure bookkeeping: it does not click, type or capture.
-Opening a session before a computer-use step acts, and calling `authorize()`
-for each action, is the wiring step that belongs in `friday/computer_use.py`.
+`friday/computer_use.py` (`route(..., session=...)`) opens no session; it calls
+`authorize()` for each action routed for a session, before any backend starts.
 """
 from __future__ import annotations
 
@@ -62,6 +65,7 @@ REVOKED = "revoked"      # the governor took the lease back
 WINDOW_TAKEN = "window_taken"
 APP_TAKEN = "app_taken"
 NOT_IN_SET = "window_not_in_session"
+APP_NOT_IN_SET = "app_not_in_session"
 WINDOW_LIMIT = "window_limit"
 ACTION_LIMIT = "action_limit"
 NOT_ADMITTED = "governor_did_not_admit"
@@ -228,10 +232,11 @@ class SessionRegistry:
             self._sessions[session_id] = s
             return s
 
-    def authorize(self, session_id: str, window: str) -> None:
-        """Permit one action on `window` by this session, or raise. Counts the
-        action against the session limit."""
+    def authorize(self, session_id: str, window: str, app: str = "") -> None:
+        """Permit one action on `window` (of application `app`) by this
+        session, or raise. Counts the action against the session limit."""
         w = _norm(window)
+        a = str(app).strip().casefold()
         with self._lock:
             self._sweep()
             s = self._get(session_id)
@@ -242,6 +247,10 @@ class SessionRegistry:
                 other = self._holder(w, skip=session_id)
                 raise self._refuse(NOT_IN_SET, f"window {w!r} is not in session {session_id}",
                                    resource=w, held_by=other.session_id if other else "", **who)
+            if s.apps and a not in s.apps:
+                detail = (f"application {a!r} is not in session {session_id}" if a
+                          else f"an action naming no application is not allowed in session {session_id}")
+                raise self._refuse(APP_NOT_IN_SET, detail, resource=a, **who)
             if s.actions >= s.max_actions:
                 raise self._refuse(ACTION_LIMIT, f"session {session_id} used its {s.max_actions} actions",
                                    resource=w, **who)

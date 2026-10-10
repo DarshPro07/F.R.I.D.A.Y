@@ -175,8 +175,9 @@ DECLARED = {
     "friday/platform": (PRODUCTION,
                         "OS-specific implementations chosen at runtime"),
     "friday/computer_use_sessions": (FUTURE,
-                                     "CUA-008: session registry (owner, lease, window set) not yet "
-                                     "opened by computer_use.py, run by "
+                                     "CUA-008/CUA-003: session registry (owner, lease, window and "
+                                     "application set); computer_use.route authorizes each "
+                                     "action, but nothing opens a session yet, run by "
                                      "tests/test_computer_use_sessions.py"),
     "friday/resources": (INTENTIONALLY_INTERNAL, "data, not behaviour"),
     "friday/specialist": (FUTURE,

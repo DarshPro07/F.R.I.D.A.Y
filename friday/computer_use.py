@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from friday import action_path, fabric
+from friday import action_path, computer_use_sessions, fabric
 
 FAMILY = "computer_use"
 
@@ -103,13 +103,26 @@ def unavailable_paths(capability_ids, *,
 
 
 def route(capability_id: str, *,
-          authorized: frozenset[str] | None = None) -> Route | None:
+          authorized: frozenset[str] | None = None,
+          session: str | None = None, window: str = "", app: str = "",
+          sessions: computer_use_sessions.SessionRegistry | None = None,
+          ) -> Route | None:
     """The backend that serves `capability_id`, or None when the capability
     does not act through a computer-use path (a connector, a structured tool).
+
+    An action made for a computer-use `session` (CUA-003) names the `window`
+    and `app` it acts on. The session's registry (the process one unless
+    `sessions` is given) authorizes it first: a window or application outside
+    the session's set raises `SessionRefused`, recorded in the registry's
+    `refusals()`, and a stopped session raises `SessionStopped`, both before
+    any backend is activated. Without a `session` the call only asks which
+    backend would serve the capability, as the planner does.
     """
     path = action_path.path_of(capability_id)
     if path not in PATHS:
         return None
+    if session is not None:
+        (computer_use_sessions.registry() if sessions is None else sessions).authorize(session, window, app)
     return _serve(path, capability_id, authorized)
 
 
