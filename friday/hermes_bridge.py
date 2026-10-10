@@ -1498,6 +1498,9 @@ class HermesSupervisor:
         #: an interrupted run records PARTIAL (never COMPLETE) and creates
         #: no completion delivery - a cancelled job is not a triumph.
         self._interrupted: set[str] = set()
+        #: WorkRuns whose last stop the gateway did not take (the RPC failed).
+        #: `_hold_to_budget` asks again on the next usage tick.
+        self._stop_refused: set[str] = set()
         #: work_run_id -> the timer that stops it at its envelope's expiry.
         self._expiry_timers: dict[str, threading.Timer] = {}
         #: The objective store and gateway ledger a worker's run budget is
@@ -2212,6 +2215,7 @@ class HermesSupervisor:
             # while a run is live; a finished run's record is in the log.
             self._progress.pop(work_run_id, None)
             self._interrupted.discard(work_run_id)
+            self._stop_refused.discard(work_run_id)
         try:
             self._finished_sessions.remove(sid)
         except ValueError:
@@ -2708,8 +2712,9 @@ class HermesSupervisor:
         is stopped here in code. Runs on the reader thread: the reads are
         local SQLite, and the stop, an RPC, goes on its own thread. A budget
         that cannot be read is logged and the worker goes on - the next
-        dispatch's check and the envelope timer still bound it."""
-        if work_run_id in self._interrupted:
+        dispatch's check and the envelope timer still bound it. A stop the
+        gateway refused is asked for again on the next tick."""
+        if work_run_id in self._interrupted and work_run_id not in self._stop_refused:
             return
         record = self.log.get(work_run_id) or {}
         run_id = record.get("friday_run_id") or ""
@@ -2739,19 +2744,22 @@ class HermesSupervisor:
                        "stopping the worker (%s)", work_run_id,
                        verdict.dimension, verdict.reason)
         # Marked before the stop lands so the next tick, which may arrive
-        # first, neither records it again nor asks for a second stop.
+        # first, neither records it again nor asks for a second stop. A
+        # refusal puts the run back in `_stop_refused` when the stop fails.
         self._interrupted.add(work_run_id)
+        self._stop_refused.discard(work_run_id)
         self.log.update(work_run_id, failure_kind=self.BUDGET_EXHAUSTED)
         self._interrupt_async(work_run_id)
 
     def _interrupt_async(self, work_run_id: str) -> None:
         """Stop a worker without blocking the caller (the governor's stop
-        callback). A failure is logged; the run stays visible and the
-        envelope timer retries."""
+        callback). A failure is logged; the run stays visible, the envelope
+        timer retries and a budget hold asks again on its next usage tick."""
         def _run() -> None:
             try:
                 self.interrupt(work_run_id)
             except Exception as exc:  # noqa: BLE001 - no caller to raise to on a daemon thread
+                self._stop_refused.add(work_run_id)
                 logger.warning("governor stop of %s failed: %s", work_run_id, exc)
         threading.Thread(target=_run, name=f"hermes-stop-{work_run_id}",
                          daemon=True).start()

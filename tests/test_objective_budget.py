@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -401,9 +402,9 @@ def test_a_running_call_is_judged_only_on_what_it_can_still_spend(tmp_path):
     store.close()
 
 
-def _running_worker(tmp_path, monkeypatch, store, run_id):
+def _running_worker(tmp_path, monkeypatch, store, run_id, *, real_stop=False):
     """A Hermes supervisor with one WORKING run on `run_id`; the stop it asks
-    for is recorded instead of sent."""
+    for is recorded instead of sent (`real_stop` keeps the stop thread)."""
     from friday import hermes_bridge as hb
 
     log = hb.WorkRunLog(tmp_path / "w.sqlite3")
@@ -414,7 +415,8 @@ def _running_worker(tmp_path, monkeypatch, store, run_id):
     log.update(wid, status=hb.WORKING)
     sup._session_runs["s1"] = wid
     stops: list[str] = []
-    monkeypatch.setattr(sup, "_interrupt_async", stops.append)
+    if not real_stop:
+        monkeypatch.setattr(sup, "_interrupt_async", stops.append)
     return sup, log, wid, stops
 
 
@@ -445,6 +447,44 @@ def test_a_runaway_worker_is_stopped_mid_run_by_code_and_the_ledger_says_why(tmp
     _tick(sup, total=ceiling + 500, calls=3)
     assert stops == [wid], "one stop per worker, however many ticks arrive before it lands"
     assert len(store.objective_events_named(run_id, (B.EVENT_BUDGET_EXHAUSTED,))) == 1
+    store.close()
+
+
+def test_a_budget_stop_the_gateway_refused_is_asked_again_on_the_next_tick(tmp_path, monkeypatch):
+    from friday import hermes_bridge as hb
+
+    store = Store(tmp_path / "b.sqlite3")
+    run_id = _run(store, [{"capability": "hermes_delegate", "arguments": {}}])
+    ceiling = int(store.objective_run(run_id)["cost_budget_tokens"])
+    sup, log, wid, _ = _running_worker(tmp_path, monkeypatch, store, run_id, real_stop=True)
+    asked: list[str] = []
+
+    def interrupt(work_run_id):
+        asked.append(work_run_id)
+        if len(asked) == 1:
+            raise hb.HermesUnavailable("session.interrupt was refused")
+        return {}
+
+    monkeypatch.setattr(sup, "interrupt", interrupt)
+
+    def settle():
+        for thread in threading.enumerate():
+            if thread.name == f"hermes-stop-{wid}":
+                thread.join(timeout=5)
+
+    _tick(sup, total=ceiling, calls=1)
+    settle()
+    assert asked == [wid]
+
+    _tick(sup, total=ceiling + 10, calls=2)
+    settle()
+    assert asked == [wid, wid], "a stop the gateway refused is asked for again, by code"
+    assert len(store.objective_events_named(run_id, (B.EVENT_BUDGET_EXHAUSTED,))) == 1, \
+        "one ledger row per worker, however many stops it took"
+
+    _tick(sup, total=ceiling + 20, calls=3)
+    settle()
+    assert asked == [wid, wid], "a stop that landed is not asked for a third time"
     store.close()
 
 

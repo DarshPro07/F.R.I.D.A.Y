@@ -318,11 +318,17 @@ def hold_running(store, run_id: str, work_run_id: str, *, telemetry=None, work_l
     the worker's usage ticks. A soft limit crossed is reported once, as at
     dispatch. A hard limit crossed is recorded as `run.budget_exhausted` and
     the refusing verdict is returned for the caller to stop the worker with -
-    in code, no model asked. None when the worker may go on."""
+    in code, no model asked. None when the worker may go on.
+
+    The exhaustion is recorded once per worker: a stop the gateway refused
+    is asked for again on the next tick, which returns the verdict again
+    without a second ledger row."""
     verdict = check(store, run_id, telemetry=telemetry, work_log=work_log, now=now,
                     in_flight=True)
     if verdict.allowed:
         record_soft_limits(store, run_id, verdict)
         return None
-    record_exhausted(store, run_id, verdict, work_run_id=work_run_id)
+    if not any((e.get("detail") or {}).get("work_run_id") == work_run_id
+               for e in store.objective_events_named(run_id, (EVENT_BUDGET_EXHAUSTED,))):
+        record_exhausted(store, run_id, verdict, work_run_id=work_run_id)
     return verdict
