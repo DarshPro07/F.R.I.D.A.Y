@@ -4747,6 +4747,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'health() now runs the probe in a daemon thread and joins it for PROBE_TIMEOUT_S, a new module constant of 10.0 read at call time. A probe still running after that returns UNAVAILABLE with "health probe timed out after Ns". A raising probe still returns UNAVAILABLE "health probe raised: ...". The unk (build run, commit 68bc61036)',
         "next_action": "GAPS: Acceptance 'An installed but failing capability reports unhealthy' is only met for tools someone probes. No production code registers a probe, so all 195 native capabilities still read REGISTERED. Registering real probes is out of scope for this slice.; Native tool calls are not gated on health; that is an owner decision at the policy seam.; fabric.health() is unchanged and fabric and capability ids are disjoint.; version and last_verified are not back-filled.; Other direct subprocess spawners (about 20 modules) run known programs; they rely on the process-wide mode being set by the first of these calls rather than calling it themselves.; implementer did not claim acceptance met",
     }),
+    ('ACT-001', {
+        "status": PARTIAL,
+        "current_implementation": "A plain list of removed files ('foo.txt and bar.txt to the Recycle Bin') is now one removal claim, and a removal claim needs every file it names shown removed. Failure-claim correlation was already enforced via in_scope; pinned with a test. Repair after the verifier (folded in): Three changes in fri (build run, commit ec30ccbfc)",
+        "next_action": "GAPS: The full 4-chunk suite was not run, only the 7 files that import friday.honesty.; Controller: integrated as PARTIAL; a confirm will judge the whole row's acceptance next.; implementer did not claim acceptance met",
+    }),
 ]
 
 
