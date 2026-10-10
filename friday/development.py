@@ -388,7 +388,7 @@ class DevelopmentRun:
             run_id=bundle.run_id, tool_id="hermes_team",
             status="failed" if failed else "partial",
             started_at=now_iso(), completed_at=now_iso(),
-            output=statuses,
+            output=hermes_team.bounded(board_ref, statuses),
             error=f"profiles not done: {failed}" if failed else None,
             verification=None)
 

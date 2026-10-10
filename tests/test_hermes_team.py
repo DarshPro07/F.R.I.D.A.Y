@@ -128,7 +128,7 @@ def test_gateway_cap_stops_lru(_fake_cli, monkeypatch):
     started, stopped = [], []
 
     class FakeSup:
-        def __init__(self, *, profile, cwd):
+        def __init__(self, *, profile, cwd, log=None):
             self.profile = profile
         def start(self):
             started.append(self.profile)

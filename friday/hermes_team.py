@@ -22,6 +22,7 @@ from pathlib import Path
 
 from friday import hermes_bridge as hb
 from friday import roles
+from friday.record_delivery import RecordDeliveryLog
 
 logger = logging.getLogger("friday-agent")
 
@@ -236,6 +237,30 @@ def poll(board_ref: dict) -> dict:
     return out
 
 
+def bounded(board_ref: dict, statuses: dict) -> dict:
+    """
+    ORCH-004: what FRIDAY receives for the team, per profile - the status, the
+    bounded worker record and the kanban task id - never the worker's full
+    kanban result. `poll()` stays the raw board reader; the full result is
+    read on demand with `kanban show <kanban_task_id>`.
+    """
+    from friday.handoff import work_run_record
+
+    tasks = board_ref.get("tasks") or {}
+    out = {}
+    for profile, row in statuses.items():
+        task_id = str(tasks.get(profile) or "")
+        status = str(row.get("status", ""))
+        text = row.get("result")
+        text = text if isinstance(text, str) else (
+            "" if text is None else str(text))
+        out[profile] = {
+            "status": status, "kanban_task_id": task_id,
+            "record": work_run_record({"work_run_id": task_id,
+                                       "status": status, "result": text})}
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Gateways (dispatch is per-profile, so a specialist needs its own)
 # ---------------------------------------------------------------------------
@@ -265,7 +290,10 @@ def gateway_for(profile: str) -> "hb.HermesSupervisor":
         lru_profile = min(_gateways, key=lambda p: _gateways[p][1])
         _gateways.pop(lru_profile)[0].stop()
     home = hb.profile_home(profile)
-    sup = hb.HermesSupervisor(profile=profile, cwd=home or None)
+    # ORCH-004: a late finish is delivered as the bounded record, not the
+    # transcript (the same log hermes_control's shared supervisor uses).
+    sup = hb.HermesSupervisor(profile=profile, cwd=home or None,
+                              log=RecordDeliveryLog())
     sup.start()
     _gateways[profile] = (sup, now)
     return sup

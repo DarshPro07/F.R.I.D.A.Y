@@ -373,3 +373,38 @@ def test_team_poll_does_not_block_the_event_loop(project, monkeypatch):
     """
     import inspect
     assert 'asyncio.to_thread' in inspect.getsource(D.DevelopmentRun.execute)
+
+
+def test_team_result_reaches_the_output_as_the_bounded_record(project, monkeypatch):
+    """
+    ORCH-004: each team worker's kanban result is a full transcript. What
+    `_execute_via_team` puts in ActionResult.output is the bounded record
+    (status plus record fields and the kanban task id for an on-demand
+    read), never the result's long tail.
+    """
+    import json
+    from friday import hermes_team
+    from friday.executors.claude_code import TaskBundle
+    from friday.handoff import RECORD_TOKEN_CAP
+
+    tail = "END-OF-KANBAN-TRANSCRIPT"
+    long_result = ("COMMIT: abc1234\nTESTS: 3 passed\n"
+                   + "kanban transcript noise line. " * 400 + tail)
+    run = D.for_goal('add a shrink method', project)
+    bundle = TaskBundle(goal=run.goal, workspace=str(project))
+    board_ref = {"objective_task_id": bundle.run_id,
+                 "tasks": {"dev": "T-77"}}
+    monkeypatch.setattr(hermes_team, "submit", lambda **kw: board_ref)
+    monkeypatch.setattr(hermes_team, "gateway_for", lambda profile: None)
+    monkeypatch.setattr(hermes_team, "poll", lambda ref: {
+        "dev": {"status": "done", "result": long_result}})
+
+    result = run._execute_via_team(bundle, ("dev",))
+    assert result.status == "partial"
+    blob = json.dumps(result.output)
+    assert tail not in blob
+    assert len(blob) // 4 <= RECORD_TOKEN_CAP + 100
+    row = result.output["dev"]
+    assert row["status"] == "done"
+    assert row["kanban_task_id"] == "T-77"
+    assert row["record"]["commit"] == "abc1234"

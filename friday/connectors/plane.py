@@ -519,6 +519,7 @@ class ConnectorControlPlane:
             connector.models[0] if connector.models else "")
         try:
             from friday.hermes_bridge import TaskBundle
+            from friday.handoff import work_run_record
             from friday.tools import hermes_control
 
             supervisor = hermes_control.supervisor()
@@ -540,6 +541,11 @@ class ConnectorControlPlane:
         status = str(inner.get("status") or outcome.get("status") or "")
         effective_provider = str(inner.get("provider") or "")
         effective_model = str(inner.get("model") or "")
+        # ORCH-004: what this hands on is the bounded record; the transcript
+        # stays in the work-run row (hermes_status(work_run_id, full=true)).
+        work_record = work_run_record(
+            {**inner, "work_run_id": (outcome.get("work_run_id")
+                                      or inner.get("work_run_id", ""))})
         ok = status == "COMPLETE"
         fallback = bool(inner.get("fallback_to"))
         model_matches = (not chosen or chosen in effective_model
@@ -555,7 +561,8 @@ class ConnectorControlPlane:
                 f"live response, boss.",
                 {"connector": connector.id, "state": "READY",
                  "effective_provider": effective_provider,
-                 "effective_model": effective_model})
+                 "effective_model": effective_model,
+                 "record": work_record})
         self.state.upsert(
             connector.id, status="DEGRADED",
             health=f"smoke status={status} fallback={fallback} "
@@ -570,7 +577,8 @@ class ConnectorControlPlane:
             {"connector": connector.id, "status": status,
              "fallback": fallback,
              "effective_provider": effective_provider,
-             "effective_model": effective_model})
+             "effective_model": effective_model,
+             "record": work_record})
 
     # -- status / repair ---------------------------------------------------
 
