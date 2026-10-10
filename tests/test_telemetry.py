@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -290,6 +291,15 @@ def test_the_executor_span_has_governor_and_tool_children(tmp_path, monkeypatch)
     out = tmp_path / "exec.jsonl"
     rec = telemetry.configure(path=out)
 
+    # What each tool really took, on the spans' own clock: asyncio.sleep may wake up to one
+    # clock tick (15.6 ms on Windows) early, so the request is no floor for the duration.
+    took_ms: list[float] = []
+
+    async def tool(seconds):
+        start = time.perf_counter_ns()
+        await asyncio.sleep(seconds)
+        took_ms.append((time.perf_counter_ns() - start) / 1e6)
+
     class FakeRun:
         process = None
 
@@ -299,10 +309,10 @@ def test_the_executor_span_has_governor_and_tool_children(tmp_path, monkeypatch)
         async def events(self, timeout=None):
             yield cli.Event("init", {"session_id": "s1"})
             yield cli.Event("tool", {}, name="Edit")
-            await asyncio.sleep(0.03)            # the tool, or a permission wait
+            await tool(0.03)                     # the tool, or a permission wait
             yield cli.Event("tool_result", {})
             yield cli.Event("tool", {}, name="Bash")
-            await asyncio.sleep(0.02)
+            await tool(0.02)
             yield cli.Event("tool_result", {})
             yield cli.Event("result", {"result": "done"})
 
@@ -329,7 +339,9 @@ def test_the_executor_span_has_governor_and_tool_children(tmp_path, monkeypatch)
     assert [s.name for s in tools] == ["execute_tool", "execute_tool"]
     assert [s.attributes["gen_ai.tool.name"] for s in tools] == ["Edit", "Bash"]
     assert all(s.attributes["gen_ai.operation.name"] == "execute_tool" for s in tools)
-    assert tools[0].duration_ms >= 25 and tools[1].duration_ms >= 15
+    # Each span opens before its tool starts and closes after it ends, so it covers the whole tool.
+    assert len(took_ms) == 2 and all(ms > 0 for ms in took_ms)
+    assert tools[0].duration_ms >= took_ms[0] and tools[1].duration_ms >= took_ms[1]
 
     times = rec.component_time_ms(root.trace_id)
     assert {"executor.claude_code", "governor", "claude_code.tool"} <= set(times)
