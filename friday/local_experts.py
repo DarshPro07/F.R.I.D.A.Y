@@ -25,6 +25,11 @@ other, and a vision model is unloaded once it has sat idle.
 
 A load that cannot be made is reported as UNAVAILABLE with the reason, never
 raised: an absent local expert is a route that fails over, not a crash.
+
+`load_chain` is that failover for a preferred model (MODEL-010): the preferred
+expert first, then each smaller one, then a remote route the caller has already
+found permitted. Every step that did not serve is kept with its reason, on the
+`Resolution` and in the pool's `degrades` log, so a degrade is never silent.
 """
 from __future__ import annotations
 
@@ -33,7 +38,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Sequence
 
 from friday import confirmation
 from friday import governor as G
@@ -48,6 +53,11 @@ OVERRIDE_RUN = "local-experts"
 
 LOADED = "LOADED"
 UNAVAILABLE = "UNAVAILABLE"
+
+#: Where `load_chain` found a route: a local expert, the caller's remote route, or nowhere.
+LOCAL = "local"
+REMOTE = "remote"
+NONE = "none"
 
 
 class OnboardingRefused(ValueError):
@@ -90,6 +100,41 @@ class Outcome:
         return self.status == LOADED
 
 
+@dataclass(frozen=True)
+class Attempt:
+    """One expert `load_chain` tried and could not use, and why."""
+
+    name: str
+    status: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """What `load_chain` settled on. `route` says where the request goes:
+    LOCAL (`outcome` is the loaded expert), REMOTE (`name` is the caller's
+    remote route) or NONE. `attempts` is every preferred model that did not
+    serve, in order; a non-empty one is a degrade."""
+
+    route: str
+    name: str
+    reason: str
+    attempts: tuple[Attempt, ...] = ()
+    outcome: Outcome | None = None
+
+    @property
+    def available(self) -> bool:
+        return self.route != NONE
+
+    @property
+    def loaded(self) -> bool:
+        return self.route == LOCAL
+
+    @property
+    def degraded(self) -> bool:
+        return bool(self.attempts)
+
+
 @dataclass
 class _Resident:
     lease: str
@@ -119,6 +164,8 @@ class ExpertPool:
         self._busy = False
         #: Unloads that raised: the expert is still accounted for, and still resident.
         self.failures: list[dict] = []
+        #: Every `load_chain` that did not get its first choice, newest last.
+        self.degrades: list[dict] = []
         self.gov.add_observer(self.reconcile)
 
     def close(self) -> None:
@@ -202,6 +249,7 @@ class ExpertPool:
         with self._lock:
             return {"registered": sorted(self._experts), "resident": self.resident(),
                     "resident_gb": self.resident_gb(), "unload_failures": list(self.failures),
+                    "degrades": list(self.degrades),
                     "overrides": self.overrides(), "policy": self.policy.to_dict()}
 
     # -- use ----------------------------------------------------------------
@@ -232,6 +280,51 @@ class ExpertPool:
                 return self._load(expert)
             finally:
                 self._busy = False
+
+    def load_chain(self, preferred: Sequence[str], remote: str = "") -> Resolution:
+        """Make the first expert of `preferred` that can run resident. The
+        chain runs largest first and each step must be smaller than the one
+        before (`ValueError` otherwise: a fallback that is not smaller frees
+        nothing). A step that fails to load, or that the machine has no room
+        for, is kept as an `Attempt` with the reason and the next is tried.
+        When none can run, `remote` (a route name the caller has already found
+        permitted for this data; the pool does not judge permission) is the
+        answer, else the route is NONE. A degrade is logged in `degrades`."""
+        chain = list(preferred)
+        if not chain:
+            raise ValueError("a chain needs at least one expert")
+        with self._lock:
+            sizes = [self._experts[n].size_gb for n in chain if n in self._experts]
+            if any(later >= earlier for earlier, later in zip(sizes, sizes[1:])):
+                raise ValueError(f"a chain must get smaller at each step: {chain}")
+            attempts: list[Attempt] = []
+            for name in chain:
+                outcome = self.load(name)
+                if outcome.loaded:
+                    return self._resolved(chain, Resolution(
+                        LOCAL, name, f"{name} serves" + (f" after {self._tried(attempts)}" if attempts else ""),
+                        tuple(attempts), outcome))
+                attempts.append(Attempt(name, outcome.status, outcome.reason))
+            if remote:
+                return self._resolved(chain, Resolution(
+                    REMOTE, remote, f"no local expert could run ({self._tried(attempts)}); {remote} serves",
+                    tuple(attempts)))
+            return self._resolved(chain, Resolution(
+                NONE, "", f"no local expert could run ({self._tried(attempts)}) and no remote route was given",
+                tuple(attempts)))
+
+    @staticmethod
+    def _tried(attempts: list[Attempt]) -> str:
+        return "; ".join(f"{a.name}: {a.reason}" for a in attempts)
+
+    def _resolved(self, chain: list[str], res: Resolution) -> Resolution:
+        if res.degraded:
+            logger.warning("degraded from %s: %s", chain[0], res.reason)
+            self.degrades.append({"preferred": chain[0], "served": res.name, "route": res.route,
+                                  "reason": res.reason, "at": time.time(),
+                                  "attempts": [dataclasses.asdict(a) for a in res.attempts]})
+            del self.degrades[:-50]
+        return res
 
     def unload(self, name: str) -> bool:
         """Unload one expert and release its lease. False when it was not
