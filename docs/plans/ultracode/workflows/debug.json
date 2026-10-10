@@ -1,0 +1,88 @@
+{
+  "workflow_id": "friday.debug",
+  "version": 1,
+  "budget_tokens": 200000,
+  "steps": [
+    {
+      "id": "reproduce", "role": "reproducer", "kind": "deterministic", "executor": "reproduce",
+      "depends_on": [], "inputs": [],
+      "outputs": {
+        "type": "object",
+        "required": ["reproduced", "failing", "trace", "output"],
+        "properties": {
+          "reproduced": {"type": "boolean"},
+          "failing": {"type": "array", "items": {"type": "string"}},
+          "trace": {"type": "array", "items": {"type": "object"}},
+          "output": {"type": "string"}
+        }
+      }
+    },
+    {
+      "id": "locate", "role": "locator", "kind": "deterministic", "executor": "locate",
+      "depends_on": ["reproduce"],
+      "inputs": [{"from": "reproduce", "fields": ["trace"]}],
+      "outputs": {
+        "type": "object",
+        "required": ["located", "failure_step", "task_id", "invariant", "root_cause"],
+        "properties": {
+          "located": {"type": "boolean"},
+          "failure_step": {"type": "integer"},
+          "task_id": {"type": "string"},
+          "invariant": {"type": "string"},
+          "root_cause": {"type": "string"}
+        }
+      }
+    },
+    {
+      "id": "hypothesize", "role": "diagnostician", "kind": "agent", "template": "analysis",
+      "tier": "standard", "effort": "medium", "cap": 30000,
+      "depends_on": ["reproduce", "locate"],
+      "inputs": [{"from": "reproduce", "fields": ["output"]},
+                 {"from": "locate", "fields": ["task_id", "root_cause", "failure_step"]}],
+      "outputs": {
+        "type": "object",
+        "required": ["hypotheses"],
+        "properties": {
+          "hypotheses": {
+            "type": "array",
+            "items": {"type": "object", "required": ["cause"],
+                      "properties": {"cause": {"type": "string"}, "file": {"type": "string"},
+                                     "confidence": {"type": "number"}}}
+          }
+        }
+      }
+    },
+    {
+      "id": "fix", "role": "fixer", "kind": "agent", "template": "builder",
+      "tier": "standard", "effort": "medium", "cap": 60000,
+      "depends_on": ["hypothesize"],
+      "inputs": [{"from": "hypothesize", "fields": ["hypotheses"]}],
+      "outputs": {
+        "type": "object",
+        "required": ["hypothesis", "files", "regression_tests"],
+        "properties": {
+          "hypothesis": {"type": "string"},
+          "files": {"type": "array", "items": {"type": "string"}},
+          "regression_tests": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "id": "verify", "role": "verifier", "kind": "deterministic", "executor": "verify",
+      "depends_on": ["fix"],
+      "inputs": [{"from": "fix", "fields": ["regression_tests"]}],
+      "outputs": {
+        "type": "object",
+        "required": ["accepted", "code", "reason", "failing_after"],
+        "properties": {
+          "accepted": {"type": "boolean"},
+          "code": {"type": "string"},
+          "reason": {"type": "string"},
+          "failing_after": {"type": "integer"},
+          "red": {"type": "object"},
+          "green": {"type": "object"}
+        }
+      }
+    }
+  ]
+}

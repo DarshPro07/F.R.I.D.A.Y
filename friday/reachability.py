@@ -197,6 +197,9 @@ DECLARED = {
                             "operator entry point is scripts/harness_sync.py, run "
                             "by tests/test_harness_sync.py"),
     "friday/audit_fixtures": (TEST_ONLY, "fixtures for the audit suite"),
+    "friday/ultracode/debug_workflow": (FUTURE,
+                                        "UCW-005: the friday.debug v1 autonomous debugging "
+                                        "workflow, run by tests/test_workflow_debug.py"),
     "friday/intake": (FUTURE,
                       "INTAKE-001 slice 1: the repository intake front door "
                       "(URL parse, SHA pin, stage order), run by "
