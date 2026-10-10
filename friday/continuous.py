@@ -540,7 +540,14 @@ class ContinuousTaskExecutor:
             except Exception:
                 logger.exception("could not schedule recovery wake for %s",
                                  run_id)
-            self.release(run_id)
+            try:
+                self.release(run_id)
+            except Exception:
+                # A held write lock must not mask the failure above (CHAOS-001):
+                # the lease then stays until it expires, and the original error
+                # is the one raised.
+                logger.exception("could not release the lease on %s after the "
+                                 "failure above; it expires on its own", run_id)
             raise
         finally:
             self._driving.discard(run_id)
