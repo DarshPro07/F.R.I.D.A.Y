@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 97284b9 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T16:18:31+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 70, "PARKED_BY_OWNER": 1, "PARTIAL": 117, "VERIFIED": 72}
+- HEAD: 5864990 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T19:16:10+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 62, "PARKED_BY_OWNER": 1, "PARTIAL": 125, "VERIFIED": 72}
 - Unresolved P0: 5
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (364): ORCH-003=FAILED_INTEGRATION, FAB-003=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), SIDE-001 (merge queue busy), AGENT-002 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CAP-FORGE-011 (blocked), FAB-007 (stale worktree), CAP-FORGE-007 (REBASE_REQUIRED), OTEL-001 (stale worktree), SKILL-006 (launch failed), BIN-002 (merge queue busy), ULTRA-004 (stale worktree), UCW-002 (stale worktree), UCW-005 (stale worktree), UCW-006 (stale worktree), UCW-008 (stale worktree), BIN-004 (stale worktree), EVO-004 (stale worktree), FAIL-001 (stale worktree), ORCH-006 (stale worktree), SIDE-002 (stale worktree), PRO-001 (stale worktree), CUA-003 (merge queue busy), COG-006 (cascade exhausted), ORCH-002 (blocked)
-- Open escalations: 398
-  - ORCH-006 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-006 already exists
-  - SIDE-002 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\side-002 already exists
-  - PRO-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\pro-001 already exists
-  - LAB-004 resolved: controller unpark: controller build integrated: INTEGRATED
-  - EVOLAB-002 resolved: controller unpark: controller build integrated: INTEGRATED
-  - ORCH-009 resolved: controller unpark: controller build integrated: INTEGRATED
-  - ORCH-004 resolved: controller unpark: controller build integrated: INTEGRATED
-  - CUA-003 integration_queue: merge queue: CUA-003 waited 1800s behind AGENT-002
-  - COG-006 cascade: 3 repairs spent
-  - ORCH-002 blocked: OWNER QUESTION (blocks the PARALLEL seam): spawn_reason is single-valued on the TaskBundle and the l
+- Last wave (376): EVAL-005=SCOUT_DONE
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CAP-FORGE-011 (blocked), OTEL-001 (stale worktree), SKILL-006 (launch failed), BIN-002 (merge queue busy), ULTRA-004 (stale worktree), SIDE-002 (stale worktree), PRO-001 (stale worktree), CUA-003 (merge queue busy), COG-006 (cascade exhausted), ORCH-002 (blocked), SIDE-001 (REBASE_REQUIRED), ORCH-003 (partial x4)
+- Open escalations: 413
+  - UCW-008 resolved: controller unpark: controller build integrated: INTEGRATED
+  - UCW-005 resolved: controller unpark: controller build integrated: INTEGRATED
+  - BIN-004 resolved: controller unpark: controller build integrated: INTEGRATED
+  - FAIL-001 resolved: controller unpark: controller build integrated: INTEGRATED
+  - ORCH-006 integration_queue: merge queue: ORCH-006 waited 1800s behind SIDE-001
+  - - docs_commit: skipped: merge queue: program:10348 waited 1800s behind SIDE-001
+  - ORCH-006 resolved: controller unpark: controller build integrated: INTEGRATED
+  - CAP-FORGE-007 resolved: controller unpark: controller build integrated: INTEGRATED
+  - SIDE-001 rebase: {"requirement": "SIDE-001", "result": "REBASE_REQUIRED", "red_green": {}, "verifier": null, "integra
+  - ORCH-003 partial: integrated without closing its gaps
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
