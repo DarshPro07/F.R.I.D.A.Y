@@ -30,8 +30,15 @@ Seams, so an absent one is reported rather than faked:
     need        the caller owns the measurement. The scout checks the shortfall
                 and that evidence is named; it cannot verify the evidence itself.
 
+After quarantine, `TechScout.decide()` picks adopt, adapt or build from what the
+candidate measured in quarantine against the same metric as the need (meets the
+requirement: ADOPT; improves on today but falls short: ADAPT; no better than
+today: BUILD) and asks a value gate (CAP-FORGE-014's scored gate, a seam) to
+admit that one option. A refusal is DEFER, never a fallback to another option.
+The decision is advice: it installs nothing and writes nothing.
+
 Not built yet (SCOUT-001 slices): the detect and search front end, the research
-step, the post-quarantine adopt/adapt/build decision, and the scheduler.
+step, persisting decisions, and the scheduler.
 
 Assumptions (revisit if wrong): the ledger is a JSON file like `model_scout`'s;
 a licence is recognised if it is a common permissive SPDX id or a GPL/AGPL one;
@@ -40,6 +47,7 @@ LGPL, MPL and the like are rejected as unrecognised until the owner rules.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
@@ -55,6 +63,11 @@ REJECTED = "REJECTED"
 QUARANTINED = "QUARANTINED"
 UNAVAILABLE = "UNAVAILABLE"
 
+ADOPT = "ADOPT"
+ADAPT = "ADAPT"
+BUILD = "BUILD"
+DEFER = "DEFER"
+
 KINDS = ("repo", "model", "cli", "context_method", "memory", "skill", "mcp")
 
 _PERMISSIVE = frozenset({"mit", "apache-2.0", "bsd-2-clause", "bsd-3-clause", "isc"})
@@ -62,6 +75,8 @@ _COPYLEFT = re.compile(r"^a?gpl-[23]")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 
 Intake = Callable[["Candidate"], str]
+#: `gate(option, candidate, need) -> GateScore`: the scored value gate (CAP-FORGE-014).
+ValueGate = Callable[[str, "Candidate", "MeasuredNeed"], "GateScore"]
 
 
 class ScoutStoreError(RuntimeError):
@@ -112,6 +127,44 @@ class MeasuredNeed:
         if self.higher_is_better:
             return self.observed < self.required
         return self.observed > self.required
+
+
+def _is_finite_number(value) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+@dataclass(frozen=True)
+class QuarantineMeasurement:
+    """What the candidate scored on the need's metric while in quarantine."""
+
+    value: float
+    evidence: str
+
+    def __post_init__(self):
+        if not _is_finite_number(self.value):
+            raise ValueError("a quarantine measurement is a finite number, not NaN, inf or a bool")
+        if not isinstance(self.evidence, str) or not self.evidence.strip():
+            raise ValueError("a quarantine measurement names its evidence")
+
+
+@dataclass(frozen=True)
+class GateScore:
+    """The value gate's verdict on one option."""
+
+    admitted: bool
+    score: float
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class AdoptionDecision:
+    """ADOPT / ADAPT / BUILD, or DEFER (not admitted / not decidable) or UNAVAILABLE."""
+
+    candidate_id: str
+    choice: str
+    reason: str
+    score: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -226,3 +279,35 @@ class TechScout:
         except Exception as exc:  # the intake is a seam; its failure is reported, then retried
             return finish(UNAVAILABLE, f"quarantine intake failed: {exc}")
         return finish(QUARANTINED, f"measured need on {need.metric}; handed to quarantine", ref)
+
+    def decide(self, candidate_id: str, *, measurement: QuarantineMeasurement,
+               gate: ValueGate | None) -> AdoptionDecision:
+        """Adopt, adapt or build a quarantined candidate. Never installs, never writes."""
+        def done(choice, reason, score=0.0):
+            return AdoptionDecision(candidate_id, choice, reason, score)
+
+        rec = self.record(candidate_id)
+        if rec is None or rec.outcome != QUARANTINED:
+            return done(DEFER, "not in quarantine; only a quarantined candidate is decided")
+        need = rec.need
+        if need is None or not need.unmet:
+            return done(DEFER, "no measured need on record; nothing to decide against")
+        value = measurement.value
+        if need.higher_is_better:
+            meets, better = value >= need.required, value > need.observed
+        else:
+            meets, better = value <= need.required, value < need.observed
+        option = ADOPT if meets else ADAPT if better else BUILD
+        if gate is None:
+            return done(UNAVAILABLE, "no value gate is configured; nothing was decided")
+        try:
+            verdict = gate(option, rec.candidate, need)
+        except Exception as exc:  # the gate is a seam; its failure is reported, then retried
+            return done(UNAVAILABLE, f"value gate failed: {exc}")
+        if (not isinstance(verdict, GateScore) or not isinstance(verdict.admitted, bool)
+                or not _is_finite_number(verdict.score)):
+            return done(UNAVAILABLE, "value gate returned a malformed verdict; nothing was decided")
+        if verdict.admitted is not True:
+            return done(DEFER, f"value gate did not admit {option}: {verdict.reason}", verdict.score)
+        return done(option, f"{need.metric} {value} in quarantine vs {need.observed} now, "
+                            f"{need.required} required; {verdict.reason}", verdict.score)
