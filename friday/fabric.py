@@ -43,6 +43,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from friday import contracts as c
+from friday import forge_value_gate as value_gate
 
 logger = logging.getLogger(__name__)
 
@@ -383,7 +384,12 @@ def find_overlaps(provider: Provider,
 
 def _recorded_by_overlap(provider: Provider,
                          overlaps: list[tuple[str, str]]) -> Provider:
-    """`provider` as REFERENCE_ONLY, with the overlap written into its notes."""
+    """`provider` as REFERENCE_ONLY, with the overlap written into its notes.
+
+    The notes also carry the CAP-FORGE-014 value-gate verdict for the fully
+    covered provider (always REJECT here); the provider is still kept, as a
+    reference record only, so the note says so rather than implying removal.
+    """
     covering: dict[str, list[str]] = {}
     for existing_id, op in overlaps:
         covering.setdefault(existing_id, []).append(op)
@@ -394,9 +400,15 @@ def _recorded_by_overlap(provider: Provider,
     rejected = (f" Its stated BENCHMARK_IMPROVEMENT was not honoured: "
                 f"{_evidence_problem(claim, provider, covering)}."
                 if claim else "")
+    value = value_gate.assess(
+        value_gate.Candidate(provider.upstream or provider.id,
+                             provider.operations),
+        covering)
     note = (f"OVERLAP: recorded {REFERENCE_ONLY} (declared "
             f"{provider.integration_mode}); every operation is already "
-            f"answered by a registered provider - {evidence}. Imported only "
+            f"answered by a registered provider - {evidence}. VALUE_GATE: "
+            f"{value.decision} (kept as a {REFERENCE_ONLY} record) overlap={value.overlap_ratio:.0%} "
+            f"net={value.net:.2f}. Imported only "
             f"when notes state `BENCHMARK_IMPROVEMENT` with the measurement "
             f"and its `evidence:` path.{rejected}")
     return replace(provider, integration_mode=REFERENCE_ONLY,
