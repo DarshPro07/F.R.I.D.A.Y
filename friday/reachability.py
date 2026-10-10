@@ -212,6 +212,10 @@ DECLARED = {
                           "S1-001: the System One decision gateway and its "
                           "mock backend; a Laya/Jev backend and a live caller "
                           "are later slices, run by tests/test_system_one.py"),
+    "friday/trace_debugger": (FUTURE,
+                              "TRAJ-002: names the first invariant violation in a run's black-box "
+                              "trace and feeds the failure genome; a caller that captures its "
+                              "failure_record is a later slice, run by tests/test_trace_debugger.py"),
     "friday/system_one_calibration": (FUTURE,
                                       "S1-002: empirical confidence calibration and "
                                       "System Two escalation over System One; a live "
