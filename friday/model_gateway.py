@@ -191,9 +191,10 @@ class ModelGatewayRequest:
     #: worker call (UCW-001), spread inside `timeout_s`. 0 = none: fail over at once.
     transient_retries: int = 0
     #: Order the fit routes by measured cost per verified completed task for
-    #: this task class (FAB-003). Off by default: the voice path asks no
-    #: question of the outcome store, and a route with no record keeps its place.
-    rank_by_outcomes: bool = False
+    #: this task class (FAB-003; the owner's ruling 2026-10-08c is that routing
+    #: is automatic). On by default; a route with too few runs keeps its place.
+    #: The store is read once per window, not per request. False opts out.
+    rank_by_outcomes: bool = True
 
     def input_tokens(self) -> int:
         return sum(approx_tokens(str(m.get("content", "")))
@@ -1209,6 +1210,8 @@ class ModelGateway:
         self._tier_table = tier_table
         self._unhealthy: dict[tuple[str, str], float] = {}
         self._providers_cache: tuple[float, dict] | None = None
+        #: task class -> (read at, route cost per completion), see `_rank_by_outcomes`.
+        self._route_costs: dict[str, tuple[float, dict]] = {}
         self._lock = threading.Lock()
         #: Where an objective's DURABLE token ceiling is read from before any
         #: provider is touched (invariant A-048 "budget"). The GrowthGuard
@@ -1401,23 +1404,32 @@ class ModelGateway:
 
     #: The route outcome store behind `rank_by_outcomes`; opened on first use.
     _outcomes = None
+    #: Seconds one read of the store is reused for a task class.
+    _OUTCOME_CACHE_S = 60.0
 
     def _rank_by_outcomes(self, request: ModelGatewayRequest,
                           routes: list[tuple[str, str, str]]
                           ) -> list[tuple[str, str, str]]:
         """Cheapest cost per verified completed task first (FAB-003). An
         outcome store that cannot be read leaves the order as it was: ranking
-        is an optimisation of a route list that is already valid."""
+        is an optimisation of a route list that is already valid. The read,
+        or its failure, is held for `_OUTCOME_CACHE_S`, so a request does not
+        wait on the store and a dead one is warned about once per window."""
         from friday import execution_economics as ee
-        try:
-            if self._outcomes is None:
-                self._outcomes = ee.RouteOutcomes()
-            costs = self._outcomes.cost_per_completion(request.task_class)
-        except Exception:  # noqa: BLE001 - see docstring
-            logger.warning("gateway: route outcomes unreadable; keeping route order",
-                           exc_info=True)
-            return routes
-        return ee.rank_routes(routes, costs)
+        now = time.monotonic()
+        held = self._route_costs.get(request.task_class)
+        if held is None or now - held[0] >= self._OUTCOME_CACHE_S:
+            try:
+                if self._outcomes is None:
+                    self._outcomes = ee.RouteOutcomes()
+                costs = self._outcomes.cost_per_completion(
+                    request.task_class, min_runs=ee.MIN_RANKED_RUNS)
+            except Exception:  # noqa: BLE001 - see docstring
+                logger.warning("gateway: route outcomes unreadable; keeping route order",
+                               exc_info=True)
+                costs = {}
+            held = self._route_costs[request.task_class] = (now, costs)
+        return ee.rank_routes(routes, held[1])
 
     def _route_carries_tools(self, provider: str, model: str) -> bool:
         """False for a signed-in CLI route (pure completion) and for a model

@@ -2542,8 +2542,9 @@ class HermesSupervisor:
         requests. Failures here never disturb delivery.
         """
         try:
+            from friday import task_class as TC
             from friday.execution_economics import RouteOutcomes, \
-                cache_read_tokens, classify_task
+                cache_read_tokens
             usage = {}
             cached = 0
             try:
@@ -2552,13 +2553,16 @@ class HermesSupervisor:
                 cached = cache_read_tokens(reported)
             except (ValueError, AttributeError):
                 pass
-            econ = classify_task(record.get("task", ""))
+            # The gateway's task classes, not `classify_task` kinds: a request
+            # can only carry a class `budget_for` knows, and FAB-003 ranks
+            # routes from the rows written under that class.
+            task_class = TC.classify(record.get("task", "")).task_class
             reason = record.get("route_reason", "")
             level = reason.split("/", 1)[0] if "/" in reason else ""
             tier = (reason.split("/", 1)[1].split(":", 1)[0]
                     if "/" in reason else "")
             RouteOutcomes(self.log._path).record(
-                record["work_run_id"], task_class=econ.kind,
+                record["work_run_id"], task_class=task_class,
                 route_level=level, tier=tier,
                 model=record.get("model", ""),
                 provider=record.get("provider", ""),

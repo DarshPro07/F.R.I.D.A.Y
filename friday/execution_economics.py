@@ -566,6 +566,11 @@ def cache_read_tokens(usage: dict) -> int:
     return 0
 
 
+#: Runs a route needs on record, for one task class, before the gateway ranks
+#: it (FAB-003). One lucky cheap completion is not a measurement.
+MIN_RANKED_RUNS = 3
+
+
 class RouteOutcomes:
     """Durable H6 records. Same database file as the WorkRun log."""
 
@@ -671,22 +676,26 @@ class RouteOutcomes:
         cost += (record.get("duration_s") or 0) * 100     # latency weight
         return cost
 
-    def cost_per_completion(self, task_class: str, limit: int = 500
-                            ) -> dict[tuple[str, str], float]:
+    def cost_per_completion(self, task_class: str, limit: int = 500,
+                            min_runs: int = 1) -> dict[tuple[str, str], float]:
         """FAB-003: per (provider, model), everything the route spent on this
         task class divided by the runs it verifiably completed. Failed runs
         are paid for by the completions, so a cheap route that fails often
         costs more per task than a dear one that completes; a route with no
         completion is infinity. Two providers serving one model are two keys.
         A run counts as completed when its status is COMPLETE, the same test
-        `execution_value` applies."""
+        `execution_value` applies. A route with fewer than `min_runs` runs on
+        record is left out: too few to rank on."""
         spent: dict[tuple[str, str], float] = {}
         done: dict[tuple[str, str], int] = {}
+        runs: dict[tuple[str, str], int] = {}
         for rec in self.by_class(task_class, limit):
             key = (rec["provider"], rec["model"])
             spent[key] = spent.get(key, 0.0) + self.run_cost(rec)
             done[key] = done.get(key, 0) + (rec["status"] == "COMPLETE")
-        return {k: (spent[k] / done[k] if done[k] else math.inf) for k in spent}
+            runs[key] = runs.get(key, 0) + 1
+        return {k: (spent[k] / done[k] if done[k] else math.inf)
+                for k in spent if runs[k] >= min_runs}
 
 
 def rank_routes(routes: list[tuple[str, str, str]],
