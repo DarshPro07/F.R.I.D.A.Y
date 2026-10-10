@@ -21,6 +21,7 @@ Verification. "Done" with no diff and no passing test is a claim, not a result.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 
 import logging
@@ -34,6 +35,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from friday import contracts as c
+
+from friday import telemetry
 
 from friday.executors import cli, cli_prompts
 
@@ -238,6 +241,23 @@ class Progress:
                          for name, n in sorted(counts.items())) or "nothing"
 
 
+def _traced_run(fn):
+    """One run, as one `invoke_agent` span (OTEL-001). The goal is prompt-like
+    content, so it is recorded only when content capture is on."""
+    @functools.wraps(fn)
+    async def wrapper(self, bundle, **kwargs):
+        with telemetry.span(
+                "invoke_agent claude_code", component="executor.claude_code",
+                attributes={"gen_ai.operation.name": "invoke_agent",
+                            "gen_ai.agent.name": "claude_code",
+                            "gen_ai.request.model": self.model or ""}) as sp:
+            sp.set("gen_ai.prompt", bundle.goal)
+            result = await fn(self, bundle, **kwargs)
+            sp.set("friday.result.status", result.status)
+            return result
+    return wrapper
+
+
 class ClaudeCodeExecutor:
     """
     One development run, from bundle to verified result.
@@ -329,6 +349,7 @@ class ClaudeCodeExecutor:
         launch.settings = {**launch.settings, "permissions": dict(terms.permissions)}
         return launch
 
+    @_traced_run
     async def execute(self, bundle: TaskBundle, *, profile: Profile | None = None,
                       resume: str | None = None,
                       timeout: float = DEFAULT_TIMEOUT,
