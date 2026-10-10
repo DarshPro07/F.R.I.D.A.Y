@@ -4855,6 +4855,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Design: new stdlib-only friday/research_provenance.py. analyze(pages, claims, today) clusters ok pages by 5-word shingle Jaccard >= 0.7 (single-link union-find, input-order deterministic; short pages match only if identical). Each cluster is one independent source; the earliest-dated member (else fi (build run, commit d8c9867a3)',
         "next_action": "GAPS: Not yet called from the live research path (explore/web_research); a later wiring step.; Quality is a documented simple rubric (0.5 ok + 0.25 dated + 0.25 https), not a content-quality judgement.; Supersession relies on a fetcher-supplied `supersedes` field; nothing populates it yet.; research_providers.py / research_routing.py named in the task are absent from the base commit 00b2893.; Controller: integrated as PARTIAL (no live caller or a path not yet covered); a confirm can judge the row's acceptance afterwards.; implementer did not claim acceptance met",
     }),
+    ('ORCH-009', {
+        "status": PARTIAL,
+        "current_implementation": "Audit: gateway_calls already recorded per call objective, worker, task_class, tier, provider/model, status, input/output/cached/reasoning tokens, cost, latency, failover and (only when the caller passed context_telemetry) context_sections; 'retried' attempts are their own rows; the retries column is (build run, commit 24d408638)",
+        "next_action": "GAPS: The by-source breakdown is by message role (approximate tokens), not by finer section, for callers that give no working set; finer sections still come from context_sections when supplied.; The legacy retries column in gateway_calls is still always 0; retries are reported from the 'retried' rows (model_calls.retried).; productivity.report has no production caller yet (still FUTURE in reachability); wall time is the worker-measured duration, model latency is reported separately in model_calls.latency_s.; tests/test_reachability.py passes; no DECLARED/KNOWN edits were needed.; Controller: integrated as PARTIAL (no live caller or a path not yet covered); a confirm can judge the row's acceptance afterwards.; implementer did not claim acceptance met",
+    }),
 ]
 
 
