@@ -52,6 +52,7 @@ from friday import evolution_archive as A
 from friday import evolution_governor as E
 from friday import governor as G
 from friday import objectives as O
+from friday import productivity
 from friday.config import DATA_DIR
 
 MONEY = "money"
@@ -265,6 +266,7 @@ def yield_to_foreground(store, gov: G.Governor, *, stop=None) -> list[dict]:
             if run is not None and run["status"] not in O.RUN_TERMINAL:
                 store.finish_objective_run(run_id, status=O.RUN_CANCELLED,
                                            summary={"evolution_stop": evidence})
+                productivity.report_finished_run(store, run_id)
             gov.release(owned["lease"])
         stopped.append({"run_id": run_id, "lease": owned["lease"],
                         "seconds": time.monotonic() - started})

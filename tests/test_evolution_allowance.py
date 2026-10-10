@@ -7,6 +7,7 @@ injected as numbers; nothing reads the machine's clock for the period.
 """
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -126,6 +127,20 @@ def test_a_running_evolution_lease_never_makes_a_foreground_task_wait(tmp_path):
     assert store.objective_run(run_id)["status"] == "CANCELLED"
     assert store.objective_events_named(run_id, (E.EVENT_STOPPED,))
     assert W.yield_to_foreground(store, gov) == []        # nothing left to stop
+    store.close()
+
+
+def test_a_run_preempted_by_a_foreground_task_writes_its_productivity_report(tmp_path):
+    store, gov = Store(tmp_path / "e.sqlite3"), _gov()
+    run_id, _ = _running_experiment(store, gov)
+
+    W.yield_to_foreground(store, gov)
+
+    assert store.objective_run(run_id)["status"] == "CANCELLED"
+    path = tmp_path / "productivity" / f"{run_id}.json"
+    assert path.is_file(), "the preempted run left no productivity report"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["run_id"] == run_id and data["run_status"] == "CANCELLED"
     store.close()
 
 
