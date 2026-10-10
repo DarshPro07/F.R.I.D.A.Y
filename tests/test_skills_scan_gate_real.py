@@ -116,7 +116,9 @@ def staged(world: World, name: str, trust: str, depends=(), **files: str):
     skill = world.write_skill(name, depends=depends, tests=("pytest -k test_ok",))
     for filename, text in files.items():
         (skill.dir / filename.replace("__", ".")).write_text(text, encoding="utf-8")
-    world.lifecycle.register(skill, tier=K.PROJECT_TIER, trust=trust)
+    # SKILL-006: an agent or community skill activates only with its provenance; the import supplies it.
+    world.lifecycle.register(skill, tier=K.PROJECT_TIER, trust=trust, source="test-import",
+                             source_url="https://example.invalid/pack.git", source_commit="a" * 40)
     world.lifecycle.stage(name)
     return skill
 

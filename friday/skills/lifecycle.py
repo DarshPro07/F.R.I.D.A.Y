@@ -28,6 +28,7 @@ from pathlib import Path
 from friday.skills import contracts as K
 from friday.skills import files as F
 from friday.skills import lint as L
+from friday.skills import scan as scan_stage
 from friday.skills.evaluator import SkillEvaluator
 
 #: Below this the skill is DEGRADED; with a verified previous version, it
@@ -35,6 +36,9 @@ from friday.skills.evaluator import SkillEvaluator
 QUALITY_FLOOR = 0.4
 
 #: States from which `activate` may proceed once evidence is on record.
+#: Where a provenance row's source_commit came from: the import (upstream), FRIDAY's own
+#: codebase commit (agent skills, which have no upstream), or nowhere.
+COMMIT_UPSTREAM, COMMIT_CODEBASE, COMMIT_NONE = "upstream", "codebase", "none"
 ACTIVATABLE = (K.STAGED, K.TESTING, K.NEEDS_REVALIDATION, K.DEGRADED, K.DISABLED, K.STALE, K.BROKEN)
 
 #: What "clean" means for the SkillSpector gate: no high or critical finding,
@@ -113,14 +117,22 @@ class SkillLifecycle:
     # -- registration -------------------------------------------------------------
 
     def register(self, skill: F.SkillFiles, *, tier: str, trust: str, scope: str | None = None,
-                 source: str = "", author: str = "", actor: str = "friday") -> K.SkillRecord:
+                 source: str = "", author: str = "", actor: str = "friday", source_url: str = "",
+                 source_commit: str = "", signature: str = "", sbom=None) -> K.SkillRecord:
         """Bring a skill on disk under management. Owner-written and built-in
         skills start as DRAFT; anything an agent wrote or that came from
-        outside starts QUARANTINED until lint clears it."""
+        outside starts QUARANTINED until lint clears it. `source_url`,
+        `source_commit`, `signature` and `sbom` are what the import says about
+        an external skill; they are recorded as given, a later register
+        without them keeps them, and activation turns them into provenance."""
         if not skill.exists():
             raise K.SkillError(f"{skill.skill_md} does not exist")
         existing = self.registry.get(skill.name)
         record = record_from_skill(skill, tier=tier, trust=trust, scope=scope, source=source, author=author)
+        if source_url or source_commit or signature or sbom:
+            self.registry.record_import(skill.name, source=source, source_url=source_url,
+                                        source_commit=source_commit, signature=signature, sbom=sbom)
+        record.source_url = (self.registry.import_record(skill.name) or {}).get("source_url", "")
         if existing is not None:
             record.state = existing.state
             record.created_at = existing.created_at
@@ -193,11 +205,24 @@ class SkillLifecycle:
         record.version = report.version or record.version
         record.content_hash = current_hash
         self._require_clean_scan(record, skill, actor)
+        provenance = self._require_provenance(record, report, actor)
         if self.graph is not None:
             # The codebase fingerprint: which repository, at which commit,
             # this version was verified against. Empty outside git.
             record.codebase_id, record.codebase_commit = self.graph.identity()
         self.registry.upsert(record)
+        if provenance is not None:
+            # Written before the ACTIVE transition, so a failed write leaves the skill
+            # inactive instead of active without its provenance.
+            if provenance["source_commit"]:
+                provenance["source_commit_kind"] = COMMIT_UPSTREAM
+            elif record.codebase_commit:
+                # Agent skills have no upstream commit; FRIDAY's own commit is kept but marked as such.
+                provenance["source_commit"] = record.codebase_commit
+                provenance["source_commit_kind"] = COMMIT_CODEBASE
+            else:
+                provenance["source_commit_kind"] = COMMIT_NONE
+            self.registry.record_provenance(name, record.version, **provenance)
         record = self.registry.transition(name, K.ACTIVE, actor=actor, reason=f"evaluation {report.nonce} passed; skillspector scan clean")
         snapshot = F.snapshot(skill, self.snapshots_dir / name / record.version)
         self.registry.record_version(name, record.version, current_hash, snapshot_path=str(snapshot),
@@ -246,6 +271,43 @@ class SkillLifecycle:
             self.registry.note(record.name, reason, actor=actor)
         raise K.TransitionRefused(f"{record.name}: {reason}")
 
+    def _require_provenance(self, record: K.SkillRecord, report: K.EvaluationReport, actor: str) -> dict | None:
+        """An agent or community skill activates only with its provenance on
+        hand: where it came from (and, for a community skill, the upstream
+        URL and commit), the content hash, the scan kept for this version and
+        the evaluation. Signature and SBOM are recorded as given or as absent,
+        never invented. Returns the row to keep once the skill is ACTIVE, or
+        None for built-in and owner skills. A gap refuses, with the reason."""
+        if record.trust not in scan_stage.EXTERNALLY_SCANNED:
+            return None
+        imported = self.registry.import_record(record.name) or {}
+        source = record.source or imported.get("source", "") or imported.get("source_url", "")
+        source_url = imported.get("source_url", "") or record.source_url
+        source_commit = imported.get("source_commit", "")
+        try:
+            kept = json.loads((self.snapshots_dir / record.name / f"{record.version}.skillspector.json")
+                              .read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            kept = None
+        required = [("source", source), ("content_hash", record.content_hash),
+                    ("scan", kept.get("report_sha256") if isinstance(kept, dict) else ""),
+                    ("evaluation", report.nonce)]
+        if record.trust == K.TRUST_COMMUNITY:
+            required[1:1] = [("source_url", source_url), ("source_commit", source_commit)]
+        missing = [label for label, value in required if not value]
+        if missing:
+            reason = "provenance incomplete, not activated: missing " + ", ".join(missing)
+            self.registry.note(record.name, reason, actor=actor)
+            raise K.TransitionRefused(f"{record.name}: {reason}")
+        scan = {key: kept.get(key) for key in ("status", "scanner", "scanner_version", "pinned_release",
+                                               "scanned_at", "target_sha256", "report_sha256", "blocking",
+                                               "policy_version")}
+        evaluation = {"nonce": report.nonce, "passed": report.passed, "version": report.version,
+                      "content_hash": report.content_hash, "at": report.at}
+        return {"source": source, "source_url": source_url, "source_commit": source_commit,
+                "content_hash": record.content_hash, "signature": imported.get("signature", ""),
+                "sbom": imported.get("sbom", ""), "scan": scan, "evaluation": evaluation}
+
     @staticmethod
     def _kept_scan_still_holds(kept: Path, tree_digest: str) -> bool:
         """The kept report is CLEAN for this tree, under this policy, from the pinned scanner."""
@@ -292,7 +354,11 @@ class SkillLifecycle:
         record = self._require(name)
         if record.state != K.NEEDS_REVALIDATION:
             return record.state, None
-        if self.graph is not None and self.graph.check(name)["fresh"]:
+        # An external skill that is active without a provenance row (activated before SKILL-006
+        # recorded it) is not "fresh" for this purpose: it goes back through the activation gate.
+        lacks_provenance = (record.trust in scan_stage.EXTERNALLY_SCANNED
+                            and self.registry.provenance(name, record.version) is None)
+        if not lacks_provenance and self.graph is not None and self.graph.check(name)["fresh"]:
             self.registry.transition(name, K.ACTIVE, actor=actor, reason="dependencies match the verified fingerprints")
             return "FRESH", None
         report, record = self.evaluate_and_activate(name, run_tests=run_tests, actor=actor)

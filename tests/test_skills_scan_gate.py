@@ -38,7 +38,9 @@ def staged(world: World, name: str, trust: str, helper: str | None = None):
     skill = world.write_skill(name)
     if helper is not None:
         (skill.dir / "helper.sh").write_text(helper, encoding="utf-8")
-    world.lifecycle.register(skill, tier=K.PROJECT_TIER, trust=trust)
+    # SKILL-006: an agent or community skill activates only with its provenance; the import supplies it.
+    world.lifecycle.register(skill, tier=K.PROJECT_TIER, trust=trust, source="test-import",
+                             source_url="https://example.invalid/pack.git", source_commit="a" * 40)
     world.lifecycle.stage(name)
     return skill
 

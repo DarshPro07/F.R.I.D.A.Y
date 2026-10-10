@@ -114,7 +114,41 @@ CREATE TABLE IF NOT EXISTS skill_evaluations (
     report        TEXT NOT NULL,
     at            TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS skill_imports (
+    name          TEXT PRIMARY KEY,
+    source        TEXT NOT NULL DEFAULT '',
+    source_url    TEXT NOT NULL DEFAULT '',
+    source_commit TEXT NOT NULL DEFAULT '',
+    signature     TEXT NOT NULL DEFAULT '',
+    sbom          TEXT NOT NULL DEFAULT '',
+    imported_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS skill_provenance (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT NOT NULL,
+    version          TEXT NOT NULL,
+    source           TEXT NOT NULL DEFAULT '',
+    source_url       TEXT NOT NULL DEFAULT '',
+    source_commit    TEXT NOT NULL DEFAULT '',
+    source_commit_kind TEXT NOT NULL DEFAULT 'none',
+    content_hash     TEXT NOT NULL,
+    signature        TEXT NOT NULL DEFAULT '',
+    signature_status TEXT NOT NULL,
+    sbom             TEXT NOT NULL DEFAULT '',
+    sbom_status      TEXT NOT NULL,
+    scan             TEXT NOT NULL DEFAULT '{}',
+    evaluation       TEXT NOT NULL DEFAULT '{}',
+    activated_at     TEXT NOT NULL,
+    UNIQUE(name, version)
+);
 """
+
+#: FRIDAY has no signature verifier, so a supplied signature is only ever
+#: "declared-unverified"; a missing one is "unsigned". Neither reads as assurance.
+SIGNATURE_DECLARED = "declared-unverified"
+SIGNATURE_UNSIGNED = "unsigned"
+SBOM_DECLARED = "declared"
+SBOM_NONE = "none"
 
 _LIST_FIELDS = ("tags", "platforms", "permissions", "dependencies", "tests", "triggers", "never_for")
 
@@ -303,6 +337,63 @@ class SkillRegistry:
                     and row["version"] == report.version)
 
     # -- usage ---------------------------------------------------------------
+
+    # -- provenance (SKILL-006) ---------------------------------------------------
+
+    def record_import(self, name: str, *, source: str = "", source_url: str = "", source_commit: str = "",
+                      signature: str = "", sbom=None) -> None:
+        """What the import said about where a skill came from. The SBOM is
+        kept as canonical JSON; nothing here is verified, only recorded."""
+        sbom_text = "" if sbom in (None, "", [], {}) else json.dumps(sbom, sort_keys=True)
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO skill_imports (name, source, source_url, source_commit, signature, sbom, imported_at)"
+                " VALUES (?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET source = excluded.source,"
+                " source_url = excluded.source_url, source_commit = excluded.source_commit,"
+                " signature = excluded.signature, sbom = excluded.sbom, imported_at = excluded.imported_at",
+                (name, source, source_url, source_commit, signature, sbom_text, K.now_iso()))
+
+    def import_record(self, name: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM skill_imports WHERE name = ?", (name,)).fetchone()
+        return dict(row) if row else None
+
+    def record_provenance(self, name: str, version: str, *, source: str, source_url: str, source_commit: str,
+                          content_hash: str, signature: str, sbom: str, scan: dict, evaluation: dict,
+                          source_commit_kind: str = "none") -> None:
+        """One row per activated version. A missing signature or SBOM is
+        recorded as such, never filled in."""
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO skill_provenance (name, version, source, source_url, source_commit, source_commit_kind,"
+                " content_hash, signature, signature_status, sbom, sbom_status, scan, evaluation, activated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name, version) DO UPDATE SET"
+                " source = excluded.source, source_url = excluded.source_url,"
+                " source_commit = excluded.source_commit, source_commit_kind = excluded.source_commit_kind,"
+                " content_hash = excluded.content_hash,"
+                " signature = excluded.signature, signature_status = excluded.signature_status,"
+                " sbom = excluded.sbom, sbom_status = excluded.sbom_status, scan = excluded.scan,"
+                " evaluation = excluded.evaluation, activated_at = excluded.activated_at",
+                (name, version, source, source_url, source_commit, source_commit_kind, content_hash,
+                 signature, SIGNATURE_DECLARED if signature else SIGNATURE_UNSIGNED,
+                 sbom, SBOM_DECLARED if sbom else SBOM_NONE,
+                 json.dumps(scan, sort_keys=True), json.dumps(evaluation, sort_keys=True), K.now_iso()))
+
+    def provenance(self, name: str, version: str | None = None) -> dict | None:
+        """The provenance of one version; by default the skill's current version
+        (so after a rollback it is the restored version's, not the newest one's)."""
+        if version is None:
+            current = self.get(name)
+            version = current.version if current else None
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM skill_provenance WHERE name = ?", (name,)).fetchall()
+        found = [dict(row) for row in rows if version is None or row["version"] == version]
+        if not found:
+            return None
+        row = found[0]
+        for key in ("scan", "evaluation"):
+            row[key] = json.loads(row[key] or "{}")
+        return row
 
     def record_usage(self, name: str, outcome: str, *, version: str = "", latency_ms: int = 0,
                      cost: float = 0.0, tokens_loaded: int = 0, objective: str = "") -> None:
