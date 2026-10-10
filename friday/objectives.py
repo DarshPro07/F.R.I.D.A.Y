@@ -140,6 +140,8 @@ EVENT_RUN_STARTED = "run.started"
 #: ASSUME-001: a high-impact assumption must be validated before work starts.
 EVENT_ASSUMPTION_DUE = "assumption.validation_due"
 EVENT_ASSUMPTION_RESOLVED = "assumption.resolved"
+#: ORCH-013: a finished task's result refuted an assumption others rest on.
+EVENT_ASSUMPTION_INVALIDATED = "assumption.invalidated"
 EVENT_TASK_STARTED = "task.started"
 EVENT_TASK_SUCCEEDED = "task.succeeded"
 EVENT_TASK_FAILED = "task.failed"
@@ -396,6 +398,9 @@ class CompiledTask:
     #: ORCH-001: paths this task will touch, as the plan declared them. Empty
     #: is unknown, and the executor runs an unknown task alone.
     surface: tuple[str, ...] = ()
+    #: ORCH-013: keys of the assumption-register entries this task was built
+    #: on; `invalidate_assumption` cancels it while it runs if one is refuted.
+    assumes: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -405,6 +410,7 @@ class CompiledTask:
             "max_attempts": self.max_attempts,
             "children": [child.to_dict() for child in self.children],
             **({"surface": list(self.surface)} if self.surface else {}),
+            **({"assumes": list(self.assumes)} if self.assumes else {}),
         }
 
 
@@ -840,6 +846,7 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
                 )
                 for child in spec.get("children") or ()),
             surface=tuple(sorted(waves.surface_of(spec.get("surface")))),
+            assumes=tuple(sorted({str(k) for k in spec.get("assumes") or ()})),
         ))
 
     task_ids = [f"t{index}" for index in range(1, len(compiled) + 1)]
@@ -1009,6 +1016,9 @@ def compile_objective(store: Store, *, request: str, tasks: list[dict],
         if task.surface:
             store.update_objective_task(
                 task_id, detail={"surface": list(task.surface)})
+        if task.assumes:
+            store.update_objective_task(
+                task_id, detail={"assumes": list(task.assumes)})
     store.touch_objective_run(run_id)
     return store.objective_run(run_id) or {"run_id": run_id}
 
@@ -1062,6 +1072,80 @@ def resolve_assumption(store: Store, run_id: str, key: str, state: str) -> bool:
     store.touch_objective_run(run_id, status=RUN_RUNNING, next_wake=now_iso(),
                               blocker="")
     return True
+
+
+#: ORCH-013: `blocked_by` on a task cancelled because an assumption it rested on
+#: was refuted ("assumption_invalidated:<key>"). INTERRUPTED alone also means
+#: "the watchdog stopped this, run it again", so the scheduler tells the two
+#: apart by this marker. It is written in the same statement as the status.
+INVALIDATED_BY_PREFIX = "assumption_invalidated:"
+
+
+def invalidated_assumption(task: dict) -> str:
+    """The refuted assumption key a task was cancelled for, or "" if none."""
+    marker = str(task.get("blocked_by") or "")
+    return marker[len(INVALIDATED_BY_PREFIX):] if marker.startswith(
+        INVALIDATED_BY_PREFIX) else ""
+
+
+def invalidate_assumption(store: Store, run_id: str, key: str, *, by_task: str,
+                          reason: str, executor_id: str) -> list[str]:
+    """
+    A finished task's result refuted an assumption (ORCH-013): cancel the
+    tasks still running that were built on it, and say why.
+
+    The assumption becomes REFUTED. Each task whose compile-time `assumes`
+    names `key` and that is RUNNING, or WAITING on a worker it handed work to -
+    except `by_task`, the one that found the problem - becomes INTERRUPTED with
+    the reason as evidence and `blocked_by` set to `assumption_invalidated:<key>`
+    (see `invalidated_assumption`). The claim is compare-and-set, so a task
+    that finished in the meantime is left alone. Queued, ready and finished
+    tasks, and every task resting on some other premise, are untouched. Returns
+    the cancelled task ids, which the `assumption.invalidated` event also
+    carries with `replan: True` for whatever replans them. A key the run never
+    registered changes nothing, and a repeat call changes and records nothing.
+
+    This records the cancellation; stopping the in-flight coroutine or worker
+    and keeping the scheduler from re-running the task are the executor's job.
+    """
+    previous = {row["key"]: row["state"] for row in store.list_assumptions(run_id)}
+    if key not in previous:
+        return []
+    first_time = previous[key] != REQ.REFUTED
+    if first_time:
+        resolve_assumption(store, run_id, key, REQ.REFUTED)
+    cancelled: list[str] = []
+    for task in store.objective_tasks(run_id):
+        detail = task.get("detail")
+        assumes = detail.get("assumes") if isinstance(detail, dict) else None
+        if task["task_id"] == by_task or key not in (assumes or ()):
+            continue
+        result = task.get("result")
+        worker_in_flight = (task["status"] == TASK_WAITING
+                            and isinstance(result, dict)
+                            and bool(result.get("work_run_id")))
+        if task["status"] != TASK_RUNNING and not worker_in_flight:
+            continue
+        if not store.update_objective_task_if(
+                task["task_id"], expect=(TASK_RUNNING, TASK_WAITING),
+                status=TASK_INTERRUPTED, finished_at=now_iso(),
+                blocked_by=f"{INVALIDATED_BY_PREFIX}{key}",
+                evidence=f"cancelled: assumption invalidated by {by_task}: {reason}"):
+            continue
+        store.update_objective_task(
+            task["task_id"],
+            detail={"invalidated_by": by_task, "assumption": key})
+        cancelled.append(task["task_id"])
+        store.append_objective_event(
+            run_id, EVENT_TASK_INTERRUPTED, task_id=task["task_id"],
+            detail={"reason": reason, "by": executor_id, "assumption": key,
+                    "invalidated_by": by_task})
+    if cancelled or first_time:
+        store.append_objective_event(
+            run_id, EVENT_ASSUMPTION_INVALIDATED, task_id=by_task,
+            detail={"key": key, "reason": reason, "by": executor_id,
+                    "cancelled": cancelled, "replan": bool(cancelled)})
+    return cancelled
 
 
 def _why_it_cannot_run(capability: str, arguments: dict) -> str:
