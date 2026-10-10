@@ -247,6 +247,11 @@ DECLARED = {
                        "SIDE-002: dry-run stage and blast-radius escalation; the "
                        "live caller (consequential tool dispatch) is the next "
                        "wiring step, run by tests/test_dry_run.py"),
+    "friday/forge_recipes": (FUTURE,
+                             "CAP-FORGE-004: recipe templates and the integration plan; "
+                             "the generator (CAP-FORGE-005) and the front door "
+                             "(CAP-FORGE-001) are its callers, run by "
+                             "tests/test_forge_recipes.py"),
     "friday/forge_runtime": (FUTURE, "same"),
     "friday/evolution_controller": (FUTURE,
                                     "EVO-001: the event-driven Evolution Controller; the callers "
