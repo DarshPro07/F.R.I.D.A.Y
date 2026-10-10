@@ -1023,7 +1023,9 @@ def test_no_delegation_under_an_envelope_gets_a_gateway_after_one_ignored_its_to
             supervisor.delegate(hb.TaskBundle(goal="again"), workspace=str(area.workspace),
                                 scope=_envelope(area), expires_in=3600)
         assert len(_gateway_envs(dump)) == 1            # no second gateway was started
-        assert S.active() == []
+        # The terminal hook releases the lease after the status turns terminal; wait for it
+        # as the test above does (a bare check raced it under a loaded merge gate).
+        assert _until(lambda: S.active() == [])
     finally:
         supervisor.stop()
 
