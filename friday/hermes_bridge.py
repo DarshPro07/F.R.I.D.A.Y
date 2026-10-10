@@ -2760,6 +2760,11 @@ class HermesSupervisor:
                 self.interrupt(work_run_id)
             except Exception as exc:  # noqa: BLE001 - no caller to raise to on a daemon thread
                 self._stop_refused.add(work_run_id)
+                # Added, then checked: a session forgotten while the stop was
+                # in flight has no usage tick left to retry on or to discard
+                # the id, and `_forget_session` may have run before the add.
+                if work_run_id not in self._session_runs.values():
+                    self._stop_refused.discard(work_run_id)
                 logger.warning("governor stop of %s failed: %s", work_run_id, exc)
         threading.Thread(target=_run, name=f"hermes-stop-{work_run_id}",
                          daemon=True).start()

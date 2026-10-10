@@ -488,6 +488,29 @@ def test_a_budget_stop_the_gateway_refused_is_asked_again_on_the_next_tick(tmp_p
     store.close()
 
 
+def test_a_refused_stop_that_fails_after_the_session_was_forgotten_leaves_nothing_behind(
+        tmp_path, monkeypatch):
+    from friday import hermes_bridge as hb
+
+    store = Store(tmp_path / "b.sqlite3")
+    run_id = _run(store, [{"capability": "hermes_delegate", "arguments": {}}])
+    ceiling = int(store.objective_run(run_id)["cost_budget_tokens"])
+    sup, log, wid, _ = _running_worker(tmp_path, monkeypatch, store, run_id, real_stop=True)
+
+    def interrupt(work_run_id):
+        sup._forget_session("s1")           # the session ended while the stop was in flight
+        raise hb.HermesUnavailable("session.interrupt was refused")
+
+    monkeypatch.setattr(sup, "interrupt", interrupt)
+    _tick(sup, total=ceiling, calls=1)
+    for thread in threading.enumerate():
+        if thread.name == f"hermes-stop-{wid}":
+            thread.join(timeout=5)
+
+    assert wid not in sup._stop_refused, "nothing will tick again to retry it or discard it"
+    store.close()
+
+
 def test_a_worker_that_keeps_calling_its_model_is_stopped_at_the_turn_ceiling(tmp_path, monkeypatch):
     store = Store(tmp_path / "b.sqlite3")
     run_id = _run(store, [{"capability": "hermes_delegate", "arguments": {}}])
