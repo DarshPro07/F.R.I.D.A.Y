@@ -1500,6 +1500,10 @@ class HermesSupervisor:
         self._interrupted: set[str] = set()
         #: work_run_id -> the timer that stops it at its envelope's expiry.
         self._expiry_timers: dict[str, threading.Timer] = {}
+        #: The objective store and gateway ledger a worker's run budget is
+        #: read from (`_hold_to_budget`); opened lazily on the first usage tick.
+        self._objective_store = None
+        self._gateway_telemetry = None
         #: Structured activity per session, for the stall classifier.
         #: Timestamps of the LAST event of each class - never wall-clock
         #: guesses about what Hermes might be doing.
@@ -2112,6 +2116,8 @@ class HermesSupervisor:
                 record = None                       # broker updates the log
             if record is not None:
                 self.log.update(work_run_id, progress=prog, **updates)
+                if kind == "session.usage":
+                    self._hold_to_budget(work_run_id)
                 # Terminal transition => durable delivery, created here at
                 # the moment of truth (the startup sweep covers crashes
                 # that land between the update above and this insert).
@@ -2637,6 +2643,54 @@ class HermesSupervisor:
             return False
         self.log.update(work_run_id, failure_kind=self.ENVELOPE_EXPIRED)
         return True
+
+    #: ... and one stopped for spending its run's budget (ORCH-003).
+    BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
+
+    def _hold_to_budget(self, work_run_id: str) -> None:
+        """Stop this worker if it has spent its run's budget (ORCH-003).
+
+        `objective_budget.check` judges the next call; one delegation is a
+        single long call, so on each `session.usage` tick the worker's own
+        spend is judged against the run's ceilings and, past one, the worker
+        is stopped here in code. Runs on the reader thread: the reads are
+        local SQLite, and the stop, an RPC, goes on its own thread. A budget
+        that cannot be read is logged and the worker goes on - the next
+        dispatch's check and the envelope timer still bound it."""
+        if work_run_id in self._interrupted:
+            return
+        record = self.log.get(work_run_id) or {}
+        run_id = record.get("friday_run_id") or ""
+        if not run_id or record.get("status") in TERMINAL:
+            return
+        try:
+            if self._objective_store is None:
+                from friday.toolsets.memory import store as _store
+                self._objective_store = _store()
+            if self._objective_store.objective_run(run_id) is None:
+                return                  # an id that names no run has no budget
+            if self._gateway_telemetry is None:
+                from friday.model_gateway import GatewayTelemetry
+                self._gateway_telemetry = GatewayTelemetry()
+            from friday import objective_budget
+            verdict = objective_budget.hold_running(
+                self._objective_store, run_id, work_run_id,
+                telemetry=self._gateway_telemetry, work_log=self.log)
+        except Exception:                                    # noqa: BLE001
+            logger.warning("hermes.budget_unreadable work_run=%s: not held "
+                           "to its budget on this tick", work_run_id,
+                           exc_info=True)
+            return
+        if verdict is None:
+            return
+        logger.warning("hermes.budget_exhausted work_run=%s dimension=%s: "
+                       "stopping the worker (%s)", work_run_id,
+                       verdict.dimension, verdict.reason)
+        # Marked before the stop lands so the next tick, which may arrive
+        # first, neither records it again nor asks for a second stop.
+        self._interrupted.add(work_run_id)
+        self.log.update(work_run_id, failure_kind=self.BUDGET_EXHAUSTED)
+        self._interrupt_async(work_run_id)
 
     def _interrupt_async(self, work_run_id: str) -> None:
         """Stop a worker without blocking the caller (the governor's stop

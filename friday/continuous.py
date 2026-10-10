@@ -838,10 +838,7 @@ class ContinuousTaskExecutor:
             self.store.touch_objective_run(
                 run_id, status=O.RunStatus.PAUSED, next_wake=None,
                 blocker=f"budget exhausted ({verdict.dimension}): {verdict.reason}")
-            self.store.append_objective_event(
-                run_id, budget_module.EVENT_BUDGET_EXHAUSTED, task_id=task_id,
-                detail={"dimension": verdict.dimension, "reason": verdict.reason,
-                        "limit": verdict.limit, "spend": vars(verdict.spend)})
+            budget_module.record_exhausted(self.store, run_id, verdict, task_id=task_id)
             return
         # ORCH-003: past the soft limit the run goes on, but reports once.
         budget_module.record_soft_limits(self.store, run_id, verdict, task_id=task_id)

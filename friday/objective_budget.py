@@ -29,7 +29,9 @@ that crosses one is still allowed; the engine records `run.budget_soft_limit`
 once per dimension with a progress / blocker / why-more-budget report built
 from recorded task state, so no model has to notice or be asked. The hard
 limit is the ceiling above, enforced by `check` in code; raising the ceiling
-on the run row is the only way past it.
+on the run row is the only way past it. A worker already running is held to
+the same ceilings on each of its usage ticks (`hold_running`), so a runaway
+is stopped mid-call rather than at the next dispatch.
 """
 from __future__ import annotations
 
@@ -189,20 +191,27 @@ def _envelope_of(run: dict):
 
 
 def check(store, run_id: str, *, next_capability: str = "", next_task_id: str | None = None,
-          telemetry=None, work_log=None, now: datetime | None = None) -> Verdict:
+          telemetry=None, work_log=None, now: datetime | None = None,
+          in_flight: bool = False) -> Verdict:
     """May the run make one more call? Decided from recorded spend.
 
     The run's execution envelope only tightens this: its token and tool-call
     limits lower the ceilings, never raise them, and once it has expired
-    nothing more runs until the person re-issues it."""
+    nothing more runs until the person re-issues it.
+
+    `in_flight` asks instead whether a call that is already running may go
+    on (ORCH-003): only what that call can still spend - tokens, wall time,
+    turns - is judged. Its tool call, its worker slot and the replans were
+    charged when it was dispatched, and the envelope's end is the
+    supervisor's own timer, so none of those stop a worker half way."""
     run = store.objective_run(run_id) or {}
     limits = CLASS_LIMITS.get(str(run.get("task_class") or ""), _DEFAULT_LIMITS)
     spend = measure(store, run_id, telemetry=telemetry, work_log=work_log, now=now)
 
     envelope, unreadable = _envelope_of(run)
-    if unreadable:
+    if unreadable and not in_flight:
         return Verdict(False, "envelope", unreadable, spend, 0)
-    if envelope is not None and envelope.expired(now):
+    if envelope is not None and not in_flight and envelope.expired(now):
         return Verdict(False, "envelope_expiry",
                        f"the execution envelope expired at {envelope.expires_at}; "
                        f"the person re-issues it", spend, 0)
@@ -217,7 +226,7 @@ def check(store, run_id: str, *, next_capability: str = "", next_task_id: str | 
     max_calls = limits["max_tool_calls"]
     if envelope is not None and envelope.tool_call_limit:
         max_calls = min(max_calls, envelope.tool_call_limit)
-    if spend.tool_calls >= max_calls:
+    if spend.tool_calls >= max_calls and not in_flight:
         return Verdict(False, "tool_calls", f"{spend.tool_calls} tool calls of {max_calls} allowed",
                        spend, max_calls)
     if spend.turns >= limits["max_turns"]:
@@ -237,7 +246,7 @@ def check(store, run_id: str, *, next_capability: str = "", next_task_id: str | 
             return Verdict(False, "workers",
                            f"{spend.workers} worker delegations of {limits['max_workers']} allowed",
                            spend, limits["max_workers"])
-    if spend.replans > limits["max_replans"]:
+    if spend.replans > limits["max_replans"] and not in_flight:
         return Verdict(False, "replans", f"{spend.replans} strategy changes of {limits['max_replans']} allowed",
                        spend, limits["max_replans"])
     soft = tuple(
@@ -287,3 +296,33 @@ def record_soft_limits(store, run_id: str, verdict: Verdict, *, task_id: str | N
         if entry["dimension"] not in reported:
             store.append_objective_event(run_id, EVENT_BUDGET_SOFT, task_id=task_id,
                                          detail=soft_report(store, run_id, entry))
+
+
+def record_exhausted(store, run_id: str, verdict: Verdict, *, task_id: str | None = None,
+                     work_run_id: str = "") -> None:
+    """Record `run.budget_exhausted`: the dimension, the reason and the numbers."""
+    detail = {"dimension": verdict.dimension, "reason": verdict.reason,
+              "limit": verdict.limit, "spend": vars(verdict.spend)}
+    if work_run_id:
+        detail["work_run_id"] = work_run_id
+    store.append_objective_event(run_id, EVENT_BUDGET_EXHAUSTED, task_id=task_id, detail=detail)
+
+
+def hold_running(store, run_id: str, work_run_id: str, *, telemetry=None, work_log=None,
+                 now: datetime | None = None) -> Verdict | None:
+    """Hold a worker that is already running to its run's budget (ORCH-003).
+
+    `check` runs before a dispatch and before a gateway call, but one
+    delegation is a single long call: without this a runaway worker spends
+    past the ceiling until it ends on its own. The caller runs it on each of
+    the worker's usage ticks. A soft limit crossed is reported once, as at
+    dispatch. A hard limit crossed is recorded as `run.budget_exhausted` and
+    the refusing verdict is returned for the caller to stop the worker with -
+    in code, no model asked. None when the worker may go on."""
+    verdict = check(store, run_id, telemetry=telemetry, work_log=work_log, now=now,
+                    in_flight=True)
+    if verdict.allowed:
+        record_soft_limits(store, run_id, verdict)
+        return None
+    record_exhausted(store, run_id, verdict, work_run_id=work_run_id)
+    return verdict

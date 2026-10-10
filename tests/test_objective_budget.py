@@ -383,3 +383,102 @@ def test_raising_the_budget_lets_a_stopped_run_continue(tmp_path):
                      (ceiling * 2, run_id))
     assert B.check(store, run_id, telemetry=tel).allowed
     store.close()
+
+
+# ORCH-003: a worker already running is held to the budget on every usage tick.
+
+def test_a_running_call_is_judged_only_on_what_it_can_still_spend(tmp_path):
+    store = Store(tmp_path / "b.sqlite3")
+    run_id = _run(store, [{"capability": "system_get_info", "arguments": {}}])
+    limits = B.CLASS_LIMITS[store.objective_run(run_id)["task_class"]]
+    task = store.objective_tasks(run_id)[0]
+    store.update_objective_task(task["task_id"], attempts=limits["max_tool_calls"])
+    assert B.check(store, run_id).dimension == "tool_calls", "the next call is refused"
+    assert B.check(store, run_id, in_flight=True).allowed, "the call already counted may go on"
+    log = _worker_usage(tmp_path, run_id, total=1, calls=limits["max_turns"])
+    running = B.check(store, run_id, work_log=log, in_flight=True)
+    assert not running.allowed and running.dimension == "turns"
+    store.close()
+
+
+def _running_worker(tmp_path, monkeypatch, store, run_id):
+    """A Hermes supervisor with one WORKING run on `run_id`; the stop it asks
+    for is recorded instead of sent."""
+    from friday import hermes_bridge as hb
+
+    log = hb.WorkRunLog(tmp_path / "w.sqlite3")
+    sup = hb.HermesSupervisor(log=log, profile="")
+    sup._objective_store = store
+    sup._gateway_telemetry = GatewayTelemetry(tmp_path / "gw.sqlite3")
+    wid = log.create(task="runaway", friday_run_id=run_id, bundle_chars=10, token_budget="NORMAL")
+    log.update(wid, status=hb.WORKING)
+    sup._session_runs["s1"] = wid
+    stops: list[str] = []
+    monkeypatch.setattr(sup, "_interrupt_async", stops.append)
+    return sup, log, wid, stops
+
+
+def _tick(sup, **usage):
+    """One Hermes `session.usage` event, in the shape the real gateway sends."""
+    sup._handle_event({"type": "session.usage", "session_id": "s1", "payload": {"usage": usage}})
+
+
+def test_a_runaway_worker_is_stopped_mid_run_by_code_and_the_ledger_says_why(tmp_path, monkeypatch):
+    store = Store(tmp_path / "b.sqlite3")
+    run_id = _run(store, [{"capability": "hermes_delegate", "arguments": {}}])
+    ceiling = int(store.objective_run(run_id)["cost_budget_tokens"])
+    sup, log, wid, stops = _running_worker(tmp_path, monkeypatch, store, run_id)
+
+    _tick(sup, total=int(ceiling * B.SOFT_FRACTION), calls=1)
+    assert stops == [], "the soft limit reports, it does not stop"
+    soft = store.objective_events_named(run_id, (B.EVENT_BUDGET_SOFT,))
+    assert [e["detail"]["dimension"] for e in soft] == ["tokens"]
+    assert {"progress", "blocker", "why_more_budget"} <= set(soft[0]["detail"])
+
+    _tick(sup, total=ceiling, calls=2)
+    assert stops == [wid]
+    assert log.get(wid)["failure_kind"] == sup.BUDGET_EXHAUSTED
+    exhausted = store.objective_events_named(run_id, (B.EVENT_BUDGET_EXHAUSTED,))
+    assert [e["detail"]["dimension"] for e in exhausted] == ["tokens"]
+    assert exhausted[0]["detail"]["work_run_id"] == wid
+
+    _tick(sup, total=ceiling + 500, calls=3)
+    assert stops == [wid], "one stop per worker, however many ticks arrive before it lands"
+    assert len(store.objective_events_named(run_id, (B.EVENT_BUDGET_EXHAUSTED,))) == 1
+    store.close()
+
+
+def test_a_worker_that_keeps_calling_its_model_is_stopped_at_the_turn_ceiling(tmp_path, monkeypatch):
+    store = Store(tmp_path / "b.sqlite3")
+    run_id = _run(store, [{"capability": "hermes_delegate", "arguments": {}}])
+    limit = B.CLASS_LIMITS[store.objective_run(run_id)["task_class"]]["max_turns"]
+    sup, log, wid, stops = _running_worker(tmp_path, monkeypatch, store, run_id)
+    _tick(sup, total=1, calls=limit - 1)
+    assert stops == []
+    _tick(sup, total=1, calls=limit)
+    assert stops == [wid]
+    exhausted = store.objective_events_named(run_id, (B.EVENT_BUDGET_EXHAUSTED,))
+    assert exhausted[0]["detail"]["dimension"] == "turns"
+    store.close()
+
+
+def test_a_worker_is_not_stopped_once_the_budget_was_raised(tmp_path, monkeypatch):
+    store = Store(tmp_path / "b.sqlite3")
+    run_id = _run(store, [{"capability": "hermes_delegate", "arguments": {}}])
+    ceiling = int(store.objective_run(run_id)["cost_budget_tokens"])
+    with store._tx() as conn:
+        conn.execute("UPDATE objective_runs SET cost_budget_tokens=? WHERE run_id=?",
+                     (ceiling * 2, run_id))
+    sup, log, wid, stops = _running_worker(tmp_path, monkeypatch, store, run_id)
+    _tick(sup, total=ceiling, calls=1)
+    assert stops == [] and log.get(wid)["failure_kind"] == ""
+    store.close()
+
+
+@pytest.mark.parametrize("run_id", ["", "no-such-run"])
+def test_a_delegation_that_belongs_to_no_run_is_not_held_to_a_budget(tmp_path, monkeypatch, run_id):
+    store = Store(tmp_path / "b.sqlite3")
+    sup, log, wid, stops = _running_worker(tmp_path, monkeypatch, store, run_id)
+    _tick(sup, total=10 ** 9, calls=10 ** 6)
+    assert stops == [] and log.get(wid)["failure_kind"] == ""
+    store.close()
