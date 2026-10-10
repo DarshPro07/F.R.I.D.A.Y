@@ -212,6 +212,11 @@ DECLARED = {
     "friday/research_bench": (FUTURE,
                               "RSCH-002: the provider benchmark and its cited-report preference "
                               "gate, no live caller yet, run by tests/test_research_bench.py"),
+    "friday/ultracode/workflow_author": (FUTURE,
+                                         "UCW-008: drafts, validates and dry-runs a workflow "
+                                         "definition from a described process; the Command Center "
+                                         "is its caller, run by "
+                                         "tests/test_ultracode_workflow_author.py"),
     "friday/reflex": (FUTURE,
                       "the local fast path, off by default and behind a "
                       "feature flag; reachable when enabled"),
