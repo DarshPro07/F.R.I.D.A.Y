@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -279,6 +280,22 @@ def test_an_expired_envelope_allows_nothing_and_runs_nothing(area):
         assert _refused(bridge.bridge_run_command("python --version"))
     finally:
         S.release("lease-x")
+
+
+@pytest.mark.skipif(not WINDOWS, reason="a sharing violation is how Windows refuses to delete an open file")
+def test_a_lease_is_released_while_a_reader_briefly_holds_it(area):
+    # The bridge, the runner and anyone listing delegations read lease files while a run ends; a
+    # release that met one of those reads used to fail (WinError 32) and leave the bridge held.
+    S.register("lease-r", _envelope(area), str(area.workspace))
+    lease = Path(os.environ[S.ENV_DIR]) / "lease-r.json"
+    reader = lease.open("rb")
+    closer = threading.Timer(0.3, reader.close)
+    closer.start()
+    try:
+        S.release("lease-r")
+    finally:
+        closer.join()
+    assert not lease.exists() and S.active() == []
 
 
 def test_a_registry_that_cannot_be_read_refuses_everything(area):

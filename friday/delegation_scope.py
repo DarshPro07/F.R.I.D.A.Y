@@ -57,6 +57,11 @@ REFUSALS = "refusals.jsonl"
 STALE_AFTER = 900.0
 #: An entry that cannot be read has no expiry to go by.
 UNREADABLE_AFTER = 86_400.0
+#: Windows refuses to delete or replace a file that another thread or process
+#: has open (a sharing violation). The bridge, the runner and anyone listing
+#: delegations hold a lease file only for one read, so a release or a
+#: registration retries for this long before the error stands.
+SHARING_RETRY_S = 2.0
 #: A listing stops here; the walk is over a tree the worker chose.
 LISTING_LIMIT = 20_000
 
@@ -111,6 +116,20 @@ def active() -> list[Entry]:
     return entries
 
 
+def _while_shared(operation) -> None:
+    """Run a delete or replace of a lease file, waiting out a reader's open
+    handle (PermissionError on Windows) for at most SHARING_RETRY_S."""
+    deadline = time.monotonic() + SHARING_RETRY_S
+    while True:
+        try:
+            operation()
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
+
+
 def _prune() -> None:
     """Drop entries nothing is running under any more. Only a registering
     process prunes: a reader (the bridge) never deletes what it is held to."""
@@ -123,14 +142,14 @@ def _prune() -> None:
         except (OSError, ValueError, KeyError, TypeError, c.ContractError):
             try:
                 if now - path.stat().st_mtime > UNREADABLE_AFTER:
-                    path.unlink(missing_ok=True)
+                    _while_shared(lambda: path.unlink(missing_ok=True))
             except OSError:
                 logger.warning("delegation_scope.prune could not drop %s", path.name)
             continue
         seconds_left = entry.envelope.seconds_left()
         lapsed = seconds_left is not None and -seconds_left > STALE_AFTER
         if lapsed or not owner_alive(entry.owner):
-            path.unlink(missing_ok=True)
+            _while_shared(lambda: path.unlink(missing_ok=True))
 
 
 def register(key: str, envelope: c.Envelope, workspace: str) -> None:
@@ -164,11 +183,11 @@ def register(key: str, envelope: c.Envelope, workspace: str) -> None:
     scratch.write_text(json.dumps({
         "key": key, "workspace": workspace, "owner": process_owner(),
         "envelope": envelope.to_dict()}), encoding="utf-8")
-    os.replace(scratch, target)
+    _while_shared(lambda: os.replace(scratch, target))
 
 
 def release(key: str) -> None:
-    _file(key).unlink(missing_ok=True)
+    _while_shared(lambda: _file(key).unlink(missing_ok=True))
 
 
 def _absolute(raw: str) -> bool:
