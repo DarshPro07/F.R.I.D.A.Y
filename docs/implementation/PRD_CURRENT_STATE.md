@@ -153,15 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 68bc610 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T01:03:42+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 3, "MISSING": 113, "PARKED_BY_OWNER": 1, "PARTIAL": 74, "VERIFIED": 70}
+- HEAD: 6399388 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T01:17:03+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 3, "MISSING": 111, "PARKED_BY_OWNER": 1, "PARTIAL": 76, "VERIFIED": 70}
 - Unresolved P0: 6
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (334): SANDBOX-001=SCOUT_DONE, ULTRA-005=SCOUT_DONE
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), CAP-003 (merge queue busy), ACT-001 (VERIFIER_FAIL), CAP-MKT-002 (stale worktree), CAP-FORGE-011 (stale worktree), ORCH-002 (stale worktree), FAB-003 (stale worktree), SKILL-004 (stale worktree), EVO-003 (stale worktree), EVO-006 (stale worktree), UX-001 (stale worktree), EVOLAB-001 (stale worktree), CTX-004 (stale worktree), FAB-008 (stale worktree), ORCH-007 (stale worktree), RSCH-002 (stale worktree), RSCH-004 (stale worktree), S1-002 (stale worktree), SKILL-006 (blocked), CHAOS-001 (merge queue busy), ULTRA-001 (blocked)
-- Open escalations: 261
-  - EVOLAB-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\evolab-001 already exists
-  - CTX-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ctx-004 already exists
+- Last wave (335): none
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), ACT-001 (VERIFIER_FAIL), CAP-MKT-002 (stale worktree), CAP-FORGE-011 (stale worktree), ORCH-002 (stale worktree), FAB-003 (stale worktree), SKILL-004 (stale worktree), EVO-003 (stale worktree), EVO-006 (stale worktree), UX-001 (stale worktree), EVOLAB-001 (stale worktree), CTX-004 (stale worktree), FAB-008 (stale worktree), ORCH-007 (stale worktree), RSCH-002 (stale worktree), RSCH-004 (stale worktree), S1-002 (stale worktree), SKILL-006 (blocked), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed)
+- Open escalations: 263
   - FAB-008 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\fab-008 already exists
   - ORCH-007 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-007 already exists
   - RSCH-002 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-002 already exists
@@ -170,5 +168,7 @@ That is the first implementation target of this program.
   - SKILL-006 blocked: Owner decision needed: for an activated external skill, (1) what is the signature - who signs, over 
   - CHAOS-001 integration_queue: merge queue: CHAOS-001 waited 1800s behind CAP-003
   - ULTRA-001 blocked: HARN-001 (the FRIDAY engineering harness in Hermes and Claude Code, P1, ledger status MISSING) is un
+  - CAP-003 resolved: controller unpark: controller retry integrated CAP-003 (68bc610, PARTIAL) at 06:41; the merge-queue-
+  - EXEC-SBX-001 repair: EXEC-SBX-001 has no recorded session to repair
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
