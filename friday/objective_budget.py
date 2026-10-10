@@ -16,6 +16,7 @@ actually recorded, never estimated:
     workers     delegations recorded as hermes_delegate / hermes_team tasks
     replans     strategy_changes across the run's tasks
     turns       GatewayTelemetry rows for the objective (one per model call)
+                plus the model calls a Hermes worker made itself (`calls`)
     research    attempts of the research capabilities (ORCH-003)
     wall time   now - created_at
 
@@ -149,7 +150,7 @@ def measure(store, run_id: str, *, telemetry=None, work_log=None,
             spend.sources["gateway_calls"] = len(rows)
         except Exception as exc:  # noqa: BLE001 - a missing ledger is not a free pass; recorded
             spend.sources["gateway_error"] = f"{type(exc).__name__}: {exc}"
-    worker_tokens = 0
+    worker_tokens = worker_calls = 0
     if work_log is not None:
         try:
             for record in work_log.for_friday_run(run_id):
@@ -157,12 +158,19 @@ def measure(store, run_id: str, *, telemetry=None, work_log=None,
                 if isinstance(usage, str):
                     import json
                     usage = json.loads(usage or "{}")
+                # Hermes' `session.usage` event carries the counters under
+                # `usage`; reading the top level counted a worker as free.
+                if isinstance(usage.get("usage"), dict):
+                    usage = usage["usage"]
                 worker_tokens += int(usage.get("total") or
                                      (int(usage.get("prompt") or 0) + int(usage.get("completion") or 0)))
+                worker_calls += int(usage.get("calls") or 0)
         except Exception as exc:  # noqa: BLE001
             spend.sources["worker_error"] = f"{type(exc).__name__}: {exc}"
     spend.tokens = gateway_tokens + worker_tokens
-    spend.sources.update({"gateway_tokens": gateway_tokens, "worker_tokens": worker_tokens})
+    spend.turns += worker_calls
+    spend.sources.update({"gateway_tokens": gateway_tokens, "worker_tokens": worker_tokens,
+                          "worker_calls": worker_calls})
     return spend
 
 
@@ -237,7 +245,9 @@ def check(store, run_id: str, *, next_capability: str = "", next_task_id: str | 
         for name, spent, limit in (
             ("tokens", spend.tokens, ceiling), ("wall_time", spend.wall_s, wall),
             ("tool_calls", spend.tool_calls, max_calls), ("turns", spend.turns, limits["max_turns"]),
-            ("research_calls", spend.research_calls, limits["max_research_calls"]))
+            ("research_calls", spend.research_calls, limits["max_research_calls"]),
+            ("workers", spend.workers, limits["max_workers"]),
+            ("replans", spend.replans, limits["max_replans"]))
         if limit and spent >= limit * SOFT_FRACTION)
     return Verdict(True, spend=spend, soft=soft)
 

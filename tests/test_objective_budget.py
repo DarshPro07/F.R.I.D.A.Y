@@ -10,6 +10,7 @@ dimension - never to trim work silently and never to guess.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -298,6 +299,75 @@ async def test_a_run_at_its_soft_limit_keeps_running_and_reports_once(tmp_path, 
     assert len(soft) == 1, "one report per dimension, not one per call"
     assert soft[0]["detail"]["dimension"] == "tokens"
     assert {"progress", "blocker", "why_more_budget"} <= set(soft[0]["detail"])
+    store.close()
+
+
+def _worker_usage(tmp_path, run_id, **usage):
+    """A Hermes work run on `run_id`, with its `session.usage` payload stored
+    the way the bridge stores it: the counters nested under `usage`."""
+    from friday.hermes_bridge import WorkRunLog
+
+    log = WorkRunLog(tmp_path / "w.sqlite3")
+    log.update(log.create(task="probe", friday_run_id=run_id),
+               usage_json=json.dumps({"usage": usage}))
+    return log
+
+
+def test_a_delegated_workers_hermes_usage_counts_toward_tokens_and_turns(tmp_path):
+    store = Store(tmp_path / "b.sqlite3")
+    tel = GatewayTelemetry(tmp_path / "gw.sqlite3")
+    run_id = _run(store, [{"capability": "system_get_info", "arguments": {}}])
+    _spend_tokens(tel, run_id, 10)
+    log = _worker_usage(tmp_path, run_id, input=100, output=50, prompt=100,
+                        completion=50, total=150, calls=7)
+    spend = B.measure(store, run_id, telemetry=tel, work_log=log)
+    assert spend.tokens == 160 and spend.sources["worker_tokens"] == 150
+    assert spend.turns == 8 and spend.sources["worker_calls"] == 7
+    store.close()
+
+
+def test_a_runaway_worker_is_stopped_by_code_and_a_raised_ceiling_lets_it_go_on(tmp_path):
+    store = Store(tmp_path / "b.sqlite3")
+    run_id = _run(store, [{"capability": "system_get_info", "arguments": {}}])
+    ceiling = int(store.objective_run(run_id)["cost_budget_tokens"])
+    log = _worker_usage(tmp_path, run_id, prompt=ceiling, completion=0, total=ceiling, calls=1)
+    verdict = B.check(store, run_id, work_log=log)
+    assert not verdict.allowed and verdict.dimension == "tokens"
+    with store._tx() as conn:
+        conn.execute("UPDATE objective_runs SET cost_budget_tokens=? WHERE run_id=?",
+                     (ceiling * 2, run_id))
+    assert B.check(store, run_id, work_log=log).allowed
+    store.close()
+
+
+def test_a_worker_that_keeps_calling_its_model_hits_the_turn_ceiling(tmp_path):
+    store = Store(tmp_path / "b.sqlite3")
+    run_id = _run(store, [{"capability": "system_get_info", "arguments": {}}])
+    limit = B.CLASS_LIMITS[store.objective_run(run_id)["task_class"]]["max_turns"]
+    log = _worker_usage(tmp_path, run_id, total=1, calls=limit)
+    verdict = B.check(store, run_id, work_log=log)
+    assert not verdict.allowed and verdict.dimension == "turns" and verdict.limit == limit
+    store.close()
+
+
+def test_workers_and_replans_report_at_their_soft_limit_before_the_hard_one(tmp_path):
+    store = Store(tmp_path / "b.sqlite3")
+    run_id = _run(store, [{"capability": "system_get_info", "arguments": {"n": i}} for i in range(6)])
+    limits = B.CLASS_LIMITS[store.objective_run(run_id)["task_class"]]
+    tasks = store.objective_tasks(run_id)
+    started = limits["max_workers"]
+    assert 0 < started <= len(tasks)
+    with store._tx() as conn:
+        for task in tasks[:started]:
+            conn.execute("UPDATE objective_tasks SET capability='hermes_delegate', attempts=1 "
+                         "WHERE task_id=?", (task["task_id"],))
+    store.update_objective_task(tasks[-1]["task_id"],
+                                detail={"strategy_changes": limits["max_replans"]})
+    verdict = B.check(store, run_id, next_capability="system_get_info")
+    assert verdict.allowed, "the soft limit asks for a report, it does not stop"
+    assert {s["dimension"] for s in verdict.soft} == {"workers", "replans"}
+    refused = B.check(store, run_id, next_capability="hermes_delegate")
+    assert not refused.allowed and refused.dimension == "workers"
     store.close()
 
 
