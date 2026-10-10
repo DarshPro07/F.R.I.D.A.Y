@@ -265,6 +265,11 @@ DECLARED = {
                               "tests/test_lab_specialist.py"),
     "friday/research_routing": (PRODUCTION,
                                 "web_deep_research routes every completed run through it"),
+    "friday/evolution_allowance": (FUTURE,
+                                   "EVOLAB-002: evolution's own money, RAM and time allowance, "
+                                   "its spend ledger and the foreground yield; the experiment "
+                                   "runner that draws on it is a later slice, run by "
+                                   "tests/test_evolution_allowance.py"),
     "friday/forge": (FUTURE, "skill authoring, frozen by the product rescue"),
     "friday/evolution_archive": (FUTURE,
                                  "EVO-002: the Evolution Archive of experiments and the "

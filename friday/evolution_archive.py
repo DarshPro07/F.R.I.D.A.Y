@@ -59,7 +59,11 @@ except ImportError:       # POSIX: advisory flock on the lock file
 
 PROMOTE = "PROMOTE"
 REJECT = "REJECT"
-DECISIONS = (PROMOTE, REJECT)
+#: The experiment step was refused before it ran (EVOLAB-002: an evolution
+#: allowance was used up). It is archived, but the experiment did not lose, so
+#: it never counts as a rejection and never lifts one.
+REFUSED = "REFUSED"
+DECISIONS = (PROMOTE, REJECT, REFUSED)
 
 #: One lock for the process: threads and archives on one file must not interleave.
 #: The cross-process half is an OS file lock on `<root>/.archive.lock` (see
@@ -229,11 +233,11 @@ class EvolutionArchive:
     def find_rejected(self, *, parent_version: str, hypothesis: str, scope) -> dict | None:
         """The archived rejection of this experiment, or None. The latest record
         of the experiment decides, so a later promotion lifts an earlier
-        rejection."""
+        rejection; a REFUSED record says nothing about the experiment."""
         key = fingerprint(parent_version=parent_version, hypothesis=hypothesis, scope=scope)
         latest = None
         for row in self._load():
-            if row["fingerprint"] == key:
+            if row["fingerprint"] == key and row.get("decision") != REFUSED:
                 latest = row
         return latest if latest and latest.get("decision") == REJECT else None
 
