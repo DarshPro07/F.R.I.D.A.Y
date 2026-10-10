@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 6399388 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T01:17:03+00:00
+- HEAD: 8157176 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T03:09:11+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 3, "MISSING": 111, "PARKED_BY_OWNER": 1, "PARTIAL": 76, "VERIFIED": 70}
 - Unresolved P0: 6
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (335): none
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), ACT-001 (VERIFIER_FAIL), CAP-MKT-002 (stale worktree), CAP-FORGE-011 (stale worktree), ORCH-002 (stale worktree), FAB-003 (stale worktree), SKILL-004 (stale worktree), EVO-003 (stale worktree), EVO-006 (stale worktree), UX-001 (stale worktree), EVOLAB-001 (stale worktree), CTX-004 (stale worktree), FAB-008 (stale worktree), ORCH-007 (stale worktree), RSCH-002 (stale worktree), RSCH-004 (stale worktree), S1-002 (stale worktree), SKILL-006 (blocked), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed)
-- Open escalations: 263
-  - FAB-008 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\fab-008 already exists
-  - ORCH-007 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-007 already exists
-  - RSCH-002 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-002 already exists
-  - RSCH-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-004 already exists
-  - S1-002 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\s1-002 already exists
-  - SKILL-006 blocked: Owner decision needed: for an activated external skill, (1) what is the signature - who signs, over 
-  - CHAOS-001 integration_queue: merge queue: CHAOS-001 waited 1800s behind CAP-003
-  - ULTRA-001 blocked: HARN-001 (the FRIDAY engineering harness in Hermes and Claude Code, P1, ledger status MISSING) is un
-  - CAP-003 resolved: controller unpark: controller retry integrated CAP-003 (68bc610, PARTIAL) at 06:41; the merge-queue-
-  - EXEC-SBX-001 repair: EXEC-SBX-001 has no recorded session to repair
+- Last wave (341): ORCH-003=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), ACT-001 (VERIFIER_FAIL), CAP-MKT-002 (stale worktree), CAP-FORGE-011 (stale worktree), ORCH-002 (stale worktree), SKILL-004 (stale worktree), EVO-003 (stale worktree), EVO-006 (stale worktree), UX-001 (stale worktree), EVOLAB-001 (stale worktree), CTX-004 (stale worktree), FAB-008 (stale worktree), ORCH-007 (stale worktree), RSCH-002 (stale worktree), RSCH-004 (stale worktree), S1-002 (stale worktree), SKILL-006 (blocked), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), FAB-003 (merge queue busy), ORCH-004 (stale worktree), ORCH-009 (stale worktree), PRO-001 (stale worktree), RSCH-003 (stale worktree), SIGNAL-001 (stale worktree), SANDBOX-001 (blocked), WF-001 (blocked), EXP-001 (stale worktree), FAB-009 (stale worktree), ORCH-008 (stale worktree), OTEL-001 (stale worktree)
+- Open escalations: 275
+  - ORCH-009 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-009 already exists
+  - PRO-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\pro-001 already exists
+  - RSCH-003 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-003 already exists
+  - SIGNAL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\signal-001 already exists
+  - SANDBOX-001 blocked: Question for owner: should a skill that REACHES for a host outside its network allowlist (refused by
+  - WF-001 blocked: PIN: no clone, lock row or NEW_UPSTREAM_SET row exists for activepieces, n8n or windmill (grep of th
+  - EXP-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\exp-001 already exists
+  - FAB-009 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\fab-009 already exists
+  - ORCH-008 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-008 already exists
+  - OTEL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\otel-001 already exists
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
