@@ -73,6 +73,21 @@ class Span:
             return
         self.attributes[key] = _clean(key, value)
 
+    def fail(self, exc: BaseException) -> None:
+        self.status = ERROR
+        self.set("error.type", type(exc).__name__)
+        self.set("error.message", str(exc))
+
+    def end(self, error: BaseException | None = None) -> None:
+        """Close the span and hand it to the recorder. Ending twice is a no-op."""
+        rec = self._recorder
+        if self.end_ns is not None or rec is None:
+            return
+        if error is not None:
+            self.fail(error)
+        self.end_ns = rec._clock()
+        rec._finish(self)
+
     @property
     def duration_ms(self) -> float:
         return ((self.end_ns if self.end_ns is not None else self.start_ns)
@@ -113,8 +128,10 @@ class Recorder:
     def _new_id(self, width: int) -> str:
         return os.urandom(width).hex()
 
-    @contextmanager
-    def span(self, name: str, *, component: str, attributes: dict | None = None):
+    def start(self, name: str, *, component: str, attributes: dict | None = None) -> Span:
+        """Open a span under the current one WITHOUT making it current, for an
+        interval that opens and closes in different places (a tool call that
+        starts on one event and ends on another). Close it with `Span.end`."""
         parent = _current.get()
         sp = Span(name=name,
                   trace_id=parent.trace_id if parent else self._new_id(16),
@@ -126,18 +143,20 @@ class Recorder:
         sp.set(COMPONENT, component)
         for key, value in (attributes or {}).items():
             sp.set(key, value)
+        return sp
+
+    @contextmanager
+    def span(self, name: str, *, component: str, attributes: dict | None = None):
+        sp = self.start(name, component=component, attributes=attributes)
         token = _current.set(sp)
         try:
             yield sp
         except BaseException as exc:
-            sp.status = ERROR
-            sp.set("error.type", type(exc).__name__)
-            sp.set("error.message", str(exc))
+            sp.fail(exc)
             raise
         finally:
             _current.reset(token)
-            sp.end_ns = self._clock()
-            self._finish(sp)
+            sp.end()
 
     def _finish(self, sp: Span) -> None:
         with self._lock:
@@ -164,18 +183,32 @@ class Recorder:
         return sum(s.duration_ms for s in self.trace(trace_id) if s.parent_id is None)
 
     def component_time_ms(self, trace_id: str) -> dict[str, float]:
-        """Wall time per component: each span's own time (its duration minus
-        its children's), summed by component, so the parts add up to the run."""
-        spans = self.trace(trace_id)
-        child_ms: dict[str, float] = {}
-        for s in spans:
-            if s.parent_id:
-                child_ms[s.parent_id] = child_ms.get(s.parent_id, 0.0) + s.duration_ms
-        out: dict[str, float] = {}
-        for s in spans:
-            own = max(s.duration_ms - child_ms.get(s.span_id, 0.0), 0.0)
-            out[s.component] = out.get(s.component, 0.0) + own
-        return out
+        """Wall time per component. Every instant of the run is counted once:
+        it goes to the innermost spans open at that instant (those with no open
+        descendant), split evenly when several are open together, such as
+        parallel tool calls. The parts therefore add up to the run, however the
+        spans overlap."""
+        spans = [s for s in self.trace(trace_id) if s.end_ns is not None]
+        by_id = {s.span_id: s for s in spans}
+        cuts = sorted({t for s in spans for t in (s.start_ns, s.end_ns)})
+        ns: dict[str, float] = {}
+        for lo, hi in zip(cuts, cuts[1:]):
+            active = [s for s in spans if s.start_ns <= lo and s.end_ns >= hi]
+            if not active:
+                continue
+            covered = set()
+            for s in active:
+                seen = {s.span_id}
+                parent = by_id.get(s.parent_id)
+                while parent is not None and parent.span_id not in seen:
+                    covered.add(parent.span_id)
+                    seen.add(parent.span_id)
+                    parent = by_id.get(parent.parent_id)
+            inner = [s for s in active if s.span_id not in covered]
+            share = (hi - lo) / len(inner)
+            for s in inner:
+                ns[s.component] = ns.get(s.component, 0.0) + share
+        return {k: v / 1e6 for k, v in ns.items()}
 
 
 _recorder: Recorder | None = None
@@ -206,3 +239,7 @@ def recorder() -> Recorder:
 
 def span(name: str, *, component: str, attributes: dict | None = None):
     return recorder().span(name, component=component, attributes=attributes)
+
+
+def start(name: str, *, component: str, attributes: dict | None = None) -> Span:
+    return recorder().start(name, component=component, attributes=attributes)

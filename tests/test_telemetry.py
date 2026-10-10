@@ -240,3 +240,185 @@ def test_a_refused_gateway_call_is_an_error_span(tmp_path):
     finally:
         gw.close()
         telemetry.reset()
+
+
+# -- the Hermes bridge and the claude_code executor nest their parts ---------
+
+
+def test_a_hermes_run_is_a_span_tree_with_time_per_component(tmp_path, monkeypatch):
+    import sys
+    from pathlib import Path
+    from friday import hermes_bridge as hb
+    for key in ("FAKE_HERMES_CLARIFY", "FAKE_HERMES_HANG", "FAKE_HERMES_DIE"):
+        monkeypatch.delenv(key, raising=False)
+    out = tmp_path / "hermes.jsonl"
+    rec = telemetry.configure(path=out)
+    fake = str(Path(__file__).parent / "fake_hermes_gateway.py")
+    supervisor = hb.HermesSupervisor(log=hb.WorkRunLog(tmp_path / "bridge.sqlite3"),
+                                     command=[sys.executable, fake], profile="")
+    supervisor.READY_TIMEOUT = 20
+    try:
+        with telemetry.span("invoke_agent friday", component="runtime") as root:
+            result = supervisor.delegate(
+                hb.TaskBundle(goal=f"{PROMPT_TEXT} {DUMMY_SECRET}"),
+                wait=True, turn_timeout=30)
+        assert result["result"]["status"] == hb.COMPLETE
+    finally:
+        supervisor.stop()
+        telemetry.reset()
+
+    spans = rec.trace(root.trace_id)
+    by_name = {s.name: s for s in spans}
+    run = by_name["invoke_agent hermes"]
+    assert run.parent_id == root.span_id and run.component == "hermes_bridge"
+    assert run.attributes["gen_ai.operation.name"] == "invoke_agent"
+    assert run.attributes["gen_ai.agent.name"] == "hermes"
+    assert by_name["governor.admit"].parent_id == run.span_id
+    assert by_name["hermes.turn"].parent_id == run.span_id
+
+    times = rec.component_time_ms(root.trace_id)
+    assert {"runtime", "hermes_bridge", "governor", "hermes"} <= set(times)
+    assert times["hermes"] > 0
+    assert sum(times.values()) == pytest.approx(rec.duration_ms(root.trace_id))
+    # Content is off by default and the planted secret never reaches the export.
+    dumped = out.read_text(encoding="utf-8")
+    assert PROMPT_TEXT not in dumped and DUMMY_SECRET not in dumped
+
+
+def test_the_executor_span_has_governor_and_tool_children(tmp_path, monkeypatch):
+    from friday import governor as G
+    out = tmp_path / "exec.jsonl"
+    rec = telemetry.configure(path=out)
+
+    class FakeRun:
+        process = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        async def events(self, timeout=None):
+            yield cli.Event("init", {"session_id": "s1"})
+            yield cli.Event("tool", {}, name="Edit")
+            await asyncio.sleep(0.03)            # the tool, or a permission wait
+            yield cli.Event("tool_result", {})
+            yield cli.Event("tool", {}, name="Bash")
+            await asyncio.sleep(0.02)
+            yield cli.Event("tool_result", {})
+            yield cli.Event("result", {"result": "done"})
+
+    monkeypatch.setattr(cli, "available", lambda: True)
+    monkeypatch.setattr(cli, "Run", FakeRun)
+    monkeypatch.setattr(ClaudeCodeExecutor, "finish",
+                        lambda self, b, started, final: started.finish(status=c.PARTIAL))
+    store = Store(tmp_path / "exec.sqlite3")
+    try:
+        bundle = TaskBundle(goal=f"{PROMPT_TEXT} {DUMMY_SECRET}",
+                            workspace=str(tmp_path), project="halo",
+                            acceptance=("tests pass",))
+        result = asyncio.run(ClaudeCodeExecutor(store).execute(bundle))
+    finally:
+        store.close()
+        telemetry.reset()
+    assert result.status == c.PARTIAL, result.error
+
+    spans = rec.spans()
+    (root,) = [s for s in spans if s.name == "invoke_agent claude_code"]
+    kids = [s for s in spans if s.parent_id == root.span_id]
+    assert [s.name for s in kids if s.component == "governor"] == ["governor.admit"]
+    tools = [s for s in kids if s.component == "claude_code.tool"]
+    assert [s.name for s in tools] == ["execute_tool", "execute_tool"]
+    assert [s.attributes["gen_ai.tool.name"] for s in tools] == ["Edit", "Bash"]
+    assert all(s.attributes["gen_ai.operation.name"] == "execute_tool" for s in tools)
+    assert tools[0].duration_ms >= 25 and tools[1].duration_ms >= 15
+
+    times = rec.component_time_ms(root.trace_id)
+    assert {"executor.claude_code", "governor", "claude_code.tool"} <= set(times)
+    assert sum(times.values()) == pytest.approx(rec.duration_ms(root.trace_id))
+    dumped = out.read_text(encoding="utf-8")
+    assert PROMPT_TEXT not in dumped and DUMMY_SECRET not in dumped
+
+
+def test_a_tool_left_open_when_the_run_dies_is_closed_as_an_error(tmp_path, monkeypatch):
+    rec = telemetry.configure()
+
+    class FakeRun:
+        process = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        async def events(self, timeout=None):
+            yield cli.Event("tool", {}, name="Bash")
+            raise TimeoutError("claude exceeded 1s")
+
+    monkeypatch.setattr(cli, "available", lambda: True)
+    monkeypatch.setattr(cli, "Run", FakeRun)
+    store = Store(tmp_path / "exec.sqlite3")
+    try:
+        bundle = TaskBundle(goal="long job", workspace=str(tmp_path),
+                            project="halo", acceptance=("tests pass",))
+        result = asyncio.run(ClaudeCodeExecutor(store).execute(bundle))
+    finally:
+        store.close()
+        telemetry.reset()
+    assert result.status == c.FAILED
+    (tool,) = [s for s in rec.spans() if s.component == "claude_code.tool"]
+    assert tool.status == telemetry.ERROR and tool.end_ns is not None
+
+
+def test_overlapping_tool_calls_do_not_double_count_time():
+    """Two tools open together (0-50 and 0-60 ms) inside a 100 ms run: every
+    instant is counted once, so the parts still add up to the run."""
+    now = [0]
+    rec = telemetry.Recorder(clock=lambda: now[0])
+    ms = 1_000_000
+    with rec.span("invoke_agent x", component="executor.x") as root:
+        a = rec.start("execute_tool", component="tool")
+        b = rec.start("execute_tool", component="tool")
+        now[0] = 50 * ms
+        a.end()
+        now[0] = 60 * ms
+        b.end()
+        now[0] = 100 * ms
+    times = rec.component_time_ms(root.trace_id)
+    assert sum(times.values()) == pytest.approx(rec.duration_ms(root.trace_id))
+    assert times["tool"] == pytest.approx(60.0)
+    assert times["executor.x"] == pytest.approx(40.0)
+
+
+def test_parallel_tool_calls_in_a_real_executor_run_sum_to_the_run(tmp_path, monkeypatch):
+    rec = telemetry.configure()
+
+    class FakeRun:
+        process = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        async def events(self, timeout=None):
+            yield cli.Event("tool", {}, name="Read")
+            yield cli.Event("tool", {}, name="Grep")      # both open at once
+            await asyncio.sleep(0.03)
+            yield cli.Event("tool_result", {})
+            await asyncio.sleep(0.02)
+            yield cli.Event("tool_result", {})
+            yield cli.Event("result", {"result": "done"})
+
+    monkeypatch.setattr(cli, "available", lambda: True)
+    monkeypatch.setattr(cli, "Run", FakeRun)
+    monkeypatch.setattr(ClaudeCodeExecutor, "finish",
+                        lambda self, b, started, final: started.finish(status=c.PARTIAL))
+    store = Store(tmp_path / "exec.sqlite3")
+    try:
+        bundle = TaskBundle(goal="read things", workspace=str(tmp_path),
+                            project="halo", acceptance=("tests pass",))
+        asyncio.run(ClaudeCodeExecutor(store).execute(bundle))
+    finally:
+        store.close()
+        telemetry.reset()
+    (root,) = [s for s in rec.spans() if s.name == "invoke_agent claude_code"]
+    tools = [s for s in rec.spans() if s.component == "claude_code.tool"]
+    assert len(tools) == 2
+    assert sum(t.duration_ms for t in tools) > tools[0].duration_ms   # they overlap
+    times = rec.component_time_ms(root.trace_id)
+    assert sum(times.values()) == pytest.approx(rec.duration_ms(root.trace_id))

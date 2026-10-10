@@ -262,6 +262,33 @@ def _traced_run(fn):
     return wrapper
 
 
+class _ToolSpans:
+    """The tool calls of one run as child spans (OTEL-001). A call opens on its
+    `tool` event and closes on the next `tool_result`, so the span covers the
+    tool and any permission wait in front of it. The CLI's `tool_result` events
+    carry no id, so results close calls oldest first. Arguments and results are
+    never recorded; only the tool's name is."""
+
+    def __init__(self) -> None:
+        self._open: list = []
+
+    def begin(self, name: str) -> None:
+        self._open.append(telemetry.start(
+            "execute_tool", component="claude_code.tool",
+            attributes={"gen_ai.operation.name": "execute_tool",
+                        "gen_ai.tool.name": name}))
+
+    def finish(self) -> None:
+        if self._open:
+            self._open.pop(0).end()
+
+    def close_all(self) -> None:
+        """A run that ended with calls still open ends them as errors."""
+        for sp in self._open:
+            sp.end(error=RuntimeError("the run ended before the tool returned"))
+        self._open.clear()
+
+
 class ClaudeCodeExecutor:
     """
     One development run, from bundle to verified result.
@@ -398,9 +425,12 @@ class ClaudeCodeExecutor:
         # secondary worker under pressure is refused with the measured
         # reason, recorded as a failed action - never silently started.
         from friday import governor as G
-        decision = G.governor().admit(G.WORKER, label=f"claude:{bundle.goal[:40]}",
-                                      objective_id=bundle.run_id, owner="claude_code",
-                                      spawn_reason=bundle.spawn_reason)
+        with telemetry.span("governor.admit", component="governor") as admit_span:
+            decision = G.governor().admit(
+                G.WORKER, label=f"claude:{bundle.goal[:40]}",
+                objective_id=bundle.run_id, owner="claude_code",
+                spawn_reason=bundle.spawn_reason)
+            admit_span.set("friday.governor.decision", decision.decision)
         if not decision.admitted:
             return run_ctx.record(c.failed(
                 started, f"governor {decision.decision}: {decision.reason}; "
@@ -437,11 +467,15 @@ class ClaudeCodeExecutor:
         final: dict = {}
         limit = envelope.tool_call_limit if envelope is not None else 0
         tool_calls = 0
+        tool_spans = _ToolSpans()
 
         try:
             async for event in self.run.events(timeout=timeout):
                 G.governor().heartbeat(lease)
+                if event.kind == "tool_result":
+                    tool_spans.finish()
                 if event.kind == "tool":
+                    tool_spans.begin(event.name)
                     tool_calls += 1
                     if limit and tool_calls > limit:
                         await self.run.cancel()
@@ -485,6 +519,8 @@ class ClaudeCodeExecutor:
             self._close_sandbox()
             G.governor().release(lease)
             return result
+        finally:
+            tool_spans.close_all()
 
         result = run_ctx.record(self.finish(bundle, started, final))
         self.runs.close(bundle.run_id, result)

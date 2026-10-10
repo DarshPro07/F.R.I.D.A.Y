@@ -2253,12 +2253,28 @@ class HermesSupervisor:
 
     # -- work ---------------------------------------------------------------
 
-    def delegate(self, bundle: TaskBundle, *, friday_run_id: str = "",
-                 model: str = "", provider: str = "", workspace: str = "",
-                 route_reason: str = "", wait: bool = False,
-                 turn_timeout: float = 900.0, reasoning_effort: str = "",
-                 share_memory: bool = True,
-                 expires_in: float | None = None, scope=None) -> dict:
+    def delegate(self, bundle: TaskBundle, **kwargs) -> dict:
+        """One delegation, as one `invoke_agent hermes` span (OTEL-001) nested
+        under the caller's span, so a Hermes run's wall time is attributed per
+        component. The goal is prompt-like content: recorded only when content
+        capture is on. See `_delegate` for what a delegation does."""
+        from friday import telemetry
+        with telemetry.span(
+                "invoke_agent hermes", component="hermes_bridge",
+                attributes={"gen_ai.operation.name": "invoke_agent",
+                            "gen_ai.agent.name": "hermes",
+                            "gen_ai.request.model": kwargs.get("model") or ""}) as sp:
+            sp.set("gen_ai.prompt", bundle.goal)
+            out = self._delegate(bundle, **kwargs)
+            sp.set("friday.work_run_id", out.get("work_run_id", ""))
+            return out
+
+    def _delegate(self, bundle: TaskBundle, *, friday_run_id: str = "",
+                  model: str = "", provider: str = "", workspace: str = "",
+                  route_reason: str = "", wait: bool = False,
+                  turn_timeout: float = 900.0, reasoning_effort: str = "",
+                  share_memory: bool = True,
+                  expires_in: float | None = None, scope=None) -> dict:
         """
         Send one bounded task to a fresh Hermes session.
 
@@ -2288,7 +2304,7 @@ class HermesSupervisor:
         if scope is not None and self._owner is None:
             gateway = self._lease_scoped_gateway()
             try:
-                return gateway.delegate(
+                return gateway._delegate(
                     bundle, friday_run_id=friday_run_id, model=model,
                     provider=provider, workspace=workspace,
                     route_reason=route_reason, wait=wait,
@@ -2311,9 +2327,13 @@ class HermesSupervisor:
         # A refusal is a structured answer, not an exception the model
         # cannot read: the caller reports "queued under pressure" honestly.
         from friday import governor as G
-        decision = G.governor().admit(G.WORKER, label=f"hermes:{bundle.goal[:40]}",
-                                      objective_id=friday_run_id, owner="hermes_bridge",
-                                      spawn_reason=bundle.spawn_reason)
+        from friday import telemetry
+        with telemetry.span("governor.admit", component="governor") as admit_span:
+            decision = G.governor().admit(
+                G.WORKER, label=f"hermes:{bundle.goal[:40]}",
+                objective_id=friday_run_id, owner="hermes_bridge",
+                spawn_reason=bundle.spawn_reason)
+            admit_span.set("friday.governor.decision", decision.decision)
         if not decision.admitted:
             raise G.Refused(decision)
         if scope is not None:
@@ -2426,7 +2446,11 @@ class HermesSupervisor:
         done = self._turn_done.get(sid)
         finished = True
         if done is not None:
-            finished = done.wait(timeout)
+            from friday import telemetry
+            with telemetry.span("hermes.turn", component="hermes",
+                                attributes={"friday.work_run_id": work_run_id}) as turn:
+                finished = done.wait(timeout)
+                turn.set("friday.turn.finished", finished)
         final = self.log.get(work_run_id) or {}
         final["result_payload"] = self._results.get(sid, {})
         if finished:
