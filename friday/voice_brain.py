@@ -1511,6 +1511,32 @@ def _capability_call(call: dict) -> tuple[str, str, dict]:
             arguments if isinstance(arguments, dict) else {})
 
 
+_MCP_TOOL_PREFIX = "mcp__friday__"
+
+
+def _record_routed_calls(result, ledger, acted, used) -> int:
+    """Put the tool calls a route ran itself (`result.tool_runs`) where this turn's own
+    calls go: the ledger, `acted` and `used`. Each is recorded from what the tool
+    returned (an error stays an error), so the honesty gate can back or refuse a claim
+    by the same rules. Returns how many calls it recorded."""
+    runs = getattr(result, "tool_runs", None) or []
+    for run in runs:
+        name = str(run.get("name") or "")
+        short = name[len(_MCP_TOOL_PREFIX):] if name.startswith(_MCP_TOOL_PREFIX) else name
+        fam, op, arguments = _capability_call(
+            {"name": short, "arguments": json.dumps(run.get("arguments") or {})})
+        fam, op = fam or short, op or "mcp"
+        output = run.get("output") or ""
+        if run.get("is_error"):
+            ledger.record(f"{fam}_{op}", arguments, error=str(output or "tool reported an error"),
+                          operation=f"{fam}.{op}")
+            continue
+        used.append(fam)
+        acted.append((fam, op))
+        ledger.record(f"{fam}_{op}", arguments, output, operation=f"{fam}.{op}")
+    return len(runs)
+
+
 def _cli_reply(text, history, approval_note=""):
     """A typed turn through the model gateway (MODEL-012).
 
@@ -1603,6 +1629,10 @@ def _cli_reply(text, history, approval_note=""):
     except (model_gateway.BudgetExceeded, model_gateway.GrowthStopped) as exc:
         return {"reply": "My language brain refused this turn: %s" % str(exc)[:140],
                 "degraded": True}
+    if result.status == "ok":
+        # FAB-007: a route that ran FRIDAY's tools itself (Claude Code over MCP) did the
+        # calls this turn; they are judged like any other, from what each returned.
+        calls_made += _record_routed_calls(result, ledger, acted, used)
     answer = result.response.strip() if result.status == "ok" else ""
     if not answer and not (result.status == "ok" and calls_made):
         detail = "; ".join(result.warnings)[:140] or result.status

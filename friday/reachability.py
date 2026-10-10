@@ -362,10 +362,11 @@ DECLARED = {
                                "model_capabilities.get falls back to stored profiles"),
     "friday/claude_mcp_route": (FUTURE,
                                 "FAB-007: the signed-in Claude Code CLI acting through FRIDAY's "
-                                "MCP server, built and tested against an injected runner; its caller "
-                                "is the typed-request path that consults "
-                                "executor_router.choose_for_capability, the next wiring step, "
-                                "run by tests/test_claude_mcp_route.py"),
+                                "MCP server. gateway() hands run_request to ModelGateway, which "
+                                "calls it when every API route is unavailable; kept FUTURE only "
+                                "until a live run on a real claude CLI is recorded; "
+                                "run by tests/test_claude_mcp_route.py and "
+                                "tests/test_gateway_mcp_route.py"),
     "friday/gateway_completer": (FUTURE,
                                  "MODEL-004: the gateway-backed Completer for the open-set "
                                  "profiler, built and tested against a scripted gateway; its "

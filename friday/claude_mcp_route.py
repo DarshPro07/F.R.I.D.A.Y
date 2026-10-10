@@ -44,6 +44,10 @@ class RouteResult:
     tools_used: tuple[str, ...] = ()
     outside_friday: tuple[str, ...] = ()
     session_id: str = ""
+    #: Each tool call the CLI made, in order: {name, arguments, output, is_error}, where
+    #: `output` is what the tool returned. Best effort: a stream that does not pair a
+    #: result with its call leaves `output` empty. The caller's evidence for what ran.
+    calls: tuple[dict, ...] = ()
 
 
 def write_mcp_config(directory, *, url: str | None = None) -> str:
@@ -118,29 +122,61 @@ async def _stderr_tail(run: cli.Run) -> str:
     return data.decode("utf-8", errors="replace").strip()[-300:]
 
 
+def _calls_of(events) -> tuple[dict, ...]:
+    """The tool calls in the stream, each joined to what its tool returned."""
+    calls: dict[str, dict] = {}
+    seen: set[int] = set()
+    for event in events:
+        if event.kind not in ("tool", "tool_result") or id(event.raw) in seen:
+            continue
+        seen.add(id(event.raw))        # one envelope can carry several blocks
+        content = (event.raw.get("message") or {}).get("content")
+        for block in content if isinstance(content, list) else ():
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                args = block.get("input")
+                calls[str(block.get("id") or f"#{len(calls)}")] = {
+                    "name": str(block.get("name") or ""),
+                    "arguments": args if isinstance(args, dict) else {},
+                    "output": "", "is_error": False}
+            elif block.get("type") == "tool_result":
+                call = calls.get(str(block.get("tool_use_id") or ""))
+                if call is not None:
+                    body = block.get("content")
+                    if isinstance(body, list):
+                        body = "\n".join(str(b.get("text") or "") for b in body
+                                         if isinstance(b, dict))
+                    call["output"] = str(body or "")
+                    call["is_error"] = bool(block.get("is_error"))
+    return tuple(calls.values())
+
+
 def _judge(events, *, failure: str, code, stderr: str) -> RouteResult:
     tools = tuple(e.name for e in events if e.kind == "tool")
+    calls = _calls_of(events)
     outside = tuple(t for t in tools if not t.startswith(TOOL_PREFIX))
     if failure:
         return RouteResult(False, tools_used=tools, outside_friday=outside,
-                           error=failure)
+                           error=failure, calls=calls)
     result = next((e for e in reversed(events) if e.kind == "result"), None)
     if result is None:
         return RouteResult(False, tools_used=tools, outside_friday=outside,
                            error=(f"the CLI gave no result (exit {code})"
-                                  + (f": {stderr}" if stderr else "")))
+                                  + (f": {stderr}" if stderr else "")),
+                           calls=calls)
     session = result.session_id
     if result.raw.get("is_error"):
         return RouteResult(False, text=result.text, error=result.text or
                            "the CLI reported an error", tools_used=tools,
-                           outside_friday=outside, session_id=session)
+                           outside_friday=outside, session_id=session, calls=calls)
     if outside:
         return RouteResult(False, text=result.text, tools_used=tools,
                            outside_friday=outside, session_id=session, error=(
-            f"the CLI used tools outside FRIDAY's MCP server: {', '.join(outside)}"))
+            f"the CLI used tools outside FRIDAY's MCP server: {', '.join(outside)}"), calls=calls)
     if code not in (0, None):
         return RouteResult(False, text=result.text, tools_used=tools,
                            session_id=session,
-                           error=f"the CLI exited {code}: {stderr}")
+                           error=f"the CLI exited {code}: {stderr}", calls=calls)
     return RouteResult(True, text=result.text, tools_used=tools,
-                       session_id=session)
+                       session_id=session, calls=calls)

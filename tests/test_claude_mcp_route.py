@@ -264,3 +264,24 @@ def test_the_worker_never_inherits_friday_secrets(pinned_cli, monkeypatch, tmp_p
               "str('FRIDAY_TEST_SECRET_FAB007' in os.environ)}))\n")
     out = asyncio.run(route.run_request("x", timeout_s=60))
     assert out.ok and out.text == "False"
+
+
+def test_each_call_comes_back_with_its_input_and_what_the_tool_returned(
+        pinned_cli, monkeypatch, tmp_path):
+    use = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "t1", "name": "mcp__friday__use_capability",
+         "input": {"family": "files", "operation": "read"}},
+        {"type": "tool_use", "id": "t2", "name": "mcp__friday__clock_now", "input": {}}]}}
+    back = {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "t1",
+         "content": [{"type": "text", "text": "file text"}]},
+        {"type": "tool_result", "tool_use_id": "t2", "content": "noon",
+         "is_error": True}]}}
+    _fake_cli(monkeypatch, tmp_path, _emitting(_stream(use, back, _result("ok"))))
+    out = asyncio.run(route.run_request("read it", timeout_s=60))
+    assert out.ok and out.calls == (
+        {"name": "mcp__friday__use_capability", "is_error": False, "output": "file text",
+         "arguments": {"family": "files", "operation": "read"}},
+        {"name": "mcp__friday__clock_now", "is_error": True, "output": "noon",
+         "arguments": {}})
+    assert out.tools_used == ("mcp__friday__use_capability", "mcp__friday__clock_now")

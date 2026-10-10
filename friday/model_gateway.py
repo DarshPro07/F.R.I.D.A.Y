@@ -42,6 +42,8 @@ What Friday adds on this side:
 """
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -236,6 +238,12 @@ class ModelGatewayResult:
     #: (ORCH-005): {from_tier, to_tier, from_route, to_route, cause, detail}. Empty when
     #: the first route answered, and for a fallback to an equal or weaker tier.
     escalations: list[dict] = field(default_factory=list)
+    #: FAB-007: tools a route ran ITSELF (Claude Code acting through FRIDAY's MCP server)
+    #: rather than handed back as `tool_calls`. `tool_runs` is {name, arguments, output,
+    #: is_error} per call; the caller records them where it records its own tool calls.
+    tools_used: list[str] = field(default_factory=list)
+    tool_runs: list[dict] = field(default_factory=list)
+    outside_friday: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1125,6 +1133,11 @@ EMPTY_RETRY_MIN_OUTPUT_TOKENS = 1024
 #: Failure codes after which trying ANOTHER route is pointless.
 _NO_FAILOVER = frozenset({"BAD_REQUEST", "UNKNOWN_METHOD"})
 
+#: The signed-in Claude Code CLI as a completion backend, and as the FAB-007 route that
+#: carries FRIDAY's MCP tools (a provider id of its own, so reports keep them apart).
+CLAUDE_CLI = "claude-cli"
+MCP_ROUTE = "claude-mcp"
+
 
 def _flatten_tool_turns(messages: list[dict]) -> list[dict]:
     """The package as plain text turns, for a route that cannot carry tools.
@@ -1176,7 +1189,8 @@ class ModelGateway:
                  tier_table: dict[str, tuple[str, str]] | None = None,
                  max_failover: int = 2,
                  objective_store=None,
-                 cli_backends: tuple = ()) -> None:
+                 cli_backends: tuple = (),
+                 mcp_route=None) -> None:
         self.worker = worker or ModelGatewayWorker()
         #: Signed-in coding-agent CLIs this gateway may think through
         #: (MODEL-012), by provider id. They are a second transport next to
@@ -1184,6 +1198,11 @@ class ModelGateway:
         #: `gateway()` discovers them, so a gateway built directly never
         #: spawns a CLI the caller did not ask for.
         self._cli = {b.id: b for b in cli_backends}
+        #: FAB-007: `async (prompt, *, timeout_s) -> claude_mcp_route.RouteResult`, the
+        #: signed-in Claude Code CLI acting through FRIDAY's MCP tools. A request that
+        #: needs a capability, once every tool-capable API route has failed, is completed
+        #: through it. None unless given: only `gateway()` supplies the live one.
+        self._mcp_route = mcp_route
         self.telemetry = telemetry or GatewayTelemetry()
         self.guard = guard or GrowthGuard()
         self.max_failover = max_failover
@@ -1677,6 +1696,12 @@ class ModelGateway:
         with otel.span("chat", component="model_gateway",
                        attributes={"gen_ai.operation.name": "chat"}) as sp:
             result = self._infer_routed(request)
+            if result.status == "failed" and not any(
+                    a.get("provider") == MCP_ROUTE for a in result.attempts):
+                served = self._via_friday_mcp(request, result.attempts)
+                if served:
+                    served.escalations = result.escalations
+                    result = served
             sp.name = f"chat {result.model}" if result.model else "chat"
             sp.set("gen_ai.request.model", result.model)
             sp.set("gen_ai.provider.name", result.provider)
@@ -1789,6 +1814,12 @@ class ModelGateway:
                 escalations.append(self._record_escalation(
                     request, attempts[-1], tier, provider, model, last_state, last_error))
             tried_rank = max(tried_rank, TIER_RANK[tier])
+            if provider == CLAUDE_CLI and self._needs_capability(request):
+                # FAB-007: the same CLI, with FRIDAY's MCP tools, beats its tool-less run.
+                served = self._via_friday_mcp(request, attempts)
+                if served:
+                    served.escalations = escalations
+                    return served
             messages = request.context_package
             redactions = 0
             if verdict.verdict == "REDACT":
@@ -2023,6 +2054,102 @@ class ModelGateway:
 
     # -- helpers ------------------------------------------------------------
 
+    @staticmethod
+    def _needs_capability(request: ModelGatewayRequest) -> bool:
+        return bool(request.tools) or "tools" in request.required_capabilities
+
+    #: Failure codes that mean the route itself is not there to use, as opposed to the
+    #: request being wrong (`_NO_FAILOVER`) or the answer being bad.
+    _UNAVAILABLE = frozenset({"QUOTA_EXCEEDED", "RATE_LIMITED", "INSUFFICIENT_CREDIT",
+                              "GATEWAY_UNAVAILABLE", "MODEL_UNAVAILABLE", "AUTH_FAILED"})
+
+    def _api_routes_unavailable(self, request: ModelGatewayRequest,
+                                attempts: list[dict]) -> bool:
+        """True when every API route this request could use failed for want of
+        availability (rate limit, quota, credit, auth, gateway down) or is cooling or
+        unhealthy. A wrong request (BAD_REQUEST), a bad answer, or a request that
+        insists on measured routes is not: the unmeasured CLI route must not slip past
+        its limit."""
+        if request.require_measured:
+            return False
+        api = [a for a in attempts if a.get("provider") not in self._cli
+               and a.get("provider") != MCP_ROUTE]
+        if api:
+            return all(a.get("code") in self._UNAVAILABLE for a in api)
+        # No API route was even tried: unavailable if the ones permitted are cooling
+        # or unhealthy now.
+        try:
+            from friday import provider_cooldowns
+            cooling = set(provider_cooldowns.active())
+        except Exception:  # noqa: BLE001 - cooldown file trouble is "no evidence"
+            cooling = set()
+        now = time.time()
+        down = cooling | {k for k, until in self._unhealthy.items() if until > now}
+        allow, deny = request.provider_allowlist, request.provider_denylist
+        return any(p and p not in self._cli and p not in deny and (not allow or p in allow)
+                   for p, _ in down)
+
+    def _via_friday_mcp(self, request: ModelGatewayRequest,
+                        attempts: list[dict]) -> ModelGatewayResult | None:
+        """FAB-007: complete a request that needs a capability through Claude Code
+        calling FRIDAY's MCP tools (FRIDAY's policy gates every call there). Asked only
+        once the API routes have failed. None, with the reason in `attempts`, when it is
+        not allowed, not usable here, or fails: the caller's failure path then stands."""
+        from friday import executor_router
+        allow, deny = request.provider_allowlist, request.provider_denylist
+        if (self._mcp_route is None or not self._needs_capability(request)
+                or not request.allow_failover or request.privacy_policy == "local_only"
+                or MCP_ROUTE in deny or (allow and MCP_ROUTE not in allow)
+                or not self._api_routes_unavailable(request, attempts)):
+            return None
+        if not executor_router.choose_for_capability(
+                request.objective_id, api_route_available=False).via_friday_mcp:
+            return None
+        content_class = data_class.classify(_joined_text(request.context_package))
+        verdict = data_class.decision(content_class, backend=CLAUDE_CLI, mode=privacy.mode())
+        if verdict.verdict == "REFUSE":
+            return None
+        turns, redactions = [], 0
+        for msg in _flatten_tool_turns(request.context_package):
+            body = str(msg.get("content", ""))
+            if verdict.verdict == "REDACT":
+                body, removed = data_class.redact(body, content_class)
+                redactions += removed
+            turns.append(f"[{msg.get('role', 'user')}] {body}")
+        started = time.monotonic()
+        # The route is async, the gateway is not: run it on a thread of its own so a
+        # caller already inside an event loop is not blocked or re-entered.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            done = pool.submit(lambda: asyncio.run(self._mcp_route(
+                "\n\n".join(turns), timeout_s=request.timeout_s))).result()
+        elapsed = int((time.monotonic() - started) * 1000)
+        tokens = request.input_tokens()
+        if not done.ok:
+            attempts.append({"tier": request.preferred_quality_tier, "provider": MCP_ROUTE,
+                             "model": "", "status": "failed", "code": "MCP_ROUTE_FAILED",
+                             "error": done.error[:500], "latency_ms": elapsed})
+            self._record(request, status="failed", provider=MCP_ROUTE, route_kind="cli",
+                         error=f"MCP_ROUTE_FAILED: {done.error}", latency_ms=elapsed,
+                         input_tokens=tokens, failover_count=len(attempts),
+                         entitlement_state="MCP_ROUTE_FAILED")
+            return None
+        result = ModelGatewayResult(
+            status="ok", provider=MCP_ROUTE, model="claude-code", response=done.text,
+            input_tokens=tokens, latency_ms=elapsed, failover_count=len(attempts),
+            entitlement_state="OK", route_kind="cli",
+            billing_class=billing_class_for("cli", MCP_ROUTE), boundary="upstream_cloud",
+            attempts=attempts, data_class=content_class, redactions=redactions,
+            tools_carried=True, dispatch="FALLBACK",
+            tools_used=list(done.tools_used), outside_friday=list(done.outside_friday),
+            tool_runs=[dict(c) for c in done.calls] or [{"name": n} for n in done.tools_used],
+            warnings=[f"completed through Claude Code with FRIDAY's MCP tools "
+                      f"({len(done.tools_used)} tool calls)"])
+        result.call_id = self._record(
+            request, status="ok", provider=MCP_ROUTE, model="claude-code", latency_ms=elapsed,
+            input_tokens=tokens, failover_count=len(attempts), entitlement_state="OK",
+            route_kind="cli")
+        return result
+
     def _infer_retrying(self, request: ModelGatewayRequest, provider: str, params: dict, *,
                         tier: str, model: str, attempts: list[dict], index: int,
                         input_tokens: int, fingerprint: str, refusal_is_final: bool) -> dict:
@@ -2236,8 +2363,10 @@ def gateway() -> ModelGateway:
     global _GATEWAY
     with _GATEWAY_LOCK:
         if _GATEWAY is None:
+            from friday import claude_mcp_route
             _GATEWAY = ModelGateway(
-                cli_backends=cli_model_provider.discover_backends())
+                cli_backends=cli_model_provider.discover_backends(),
+                mcp_route=claude_mcp_route.run_request)
         return _GATEWAY
 
 
