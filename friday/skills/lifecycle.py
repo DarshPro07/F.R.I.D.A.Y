@@ -338,6 +338,12 @@ class SkillLifecycle:
             if stage in ("overlap", "value") and state == "FAIL":
                 # Why it stays inactive is its own history row, not the tail of a truncated list.
                 self.registry.note(name, f"inactive: {stage}: {detail}"[:400], actor=actor)
+        rejected = next((detail for stage, state, detail in report.checks if stage == "scan" and state == "FAIL"), None)
+        if rejected is not None and K.QUARANTINED in K.TRANSITIONS.get(record.state, ()):
+            # A condemning scan finding quarantines, as _require_clean_scan does for the external
+            # scanner; DRAFT would let the same tree be staged and evaluated again as untried.
+            self.registry.transition(name, K.QUARANTINED, actor=actor, reason=f"scan REJECTED: {rejected}"[:400])
+            return report, self.registry.get(name)
         if record.state == K.NEEDS_REVALIDATION:
             record = self.registry.transition(name, K.BROKEN, actor=actor, reason=f"revalidation failed: {failures}")
         elif record.state == K.TESTING:

@@ -54,11 +54,27 @@ def test_a_planted_injection_is_rejected_and_the_scan_is_stored(world):
     report, record = world.lifecycle.evaluate_and_activate("tidy-notes")
     assert not report.passed
     assert any(name == "scan" and state == "FAIL" for name, state, _ in report.checks), report.checks
-    assert record.state != K.ACTIVE
+    assert record.state == K.QUARANTINED
+    last = world.registry.history("tidy-notes")[-1]
+    assert (last["from_state"], last["to_state"]) == (K.TESTING, K.QUARANTINED)
+    assert last["reason"].startswith("scan REJECTED")
     stored = _stored_report(world, "tidy-notes")["scan"]
     assert stored["verdict"] == S.REJECTED and stored["injection"]["findings"]
     assert stored["content_hash"] == skill.content_hash()
     assert stored["runtime_safe"] is False
+
+
+def test_a_quarantined_injection_cannot_skip_the_gate_and_is_rejected_again(world):
+    skill = world.write_skill("tidy-notes", body=INJECTED)
+    world.lifecycle.register(skill, tier=K.PROJECT_TIER, trust=K.TRUST_OWNER)
+    world.lifecycle.stage("tidy-notes")
+    world.lifecycle.evaluate_and_activate("tidy-notes")
+    assert world.registry.get("tidy-notes").state == K.QUARANTINED
+    with pytest.raises(K.TransitionRefused, match="not a legal transition"):
+        world.registry.transition("tidy-notes", K.STAGED, actor="test", reason="skip the release step")
+    world.lifecycle.stage("tidy-notes")                  # lint passes, so the release path is open ...
+    report, record = world.lifecycle.evaluate_and_activate("tidy-notes")
+    assert not report.passed and record.state == K.QUARANTINED     # ... and the same tree is condemned again
 
 
 def test_the_clean_control_passes_and_is_still_not_runtime_safe(world):
