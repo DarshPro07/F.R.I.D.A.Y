@@ -972,3 +972,36 @@ def test_a_fallback_to_a_weaker_tier_is_not_an_escalation(tmp_path, clean_env):
         assert gw.telemetry.escalations("obj-down") == []
     finally:
         gw.close()
+
+
+# -- ORCH-009: every call row carries its input by source ----------------------
+
+
+def test_every_call_row_records_its_input_by_role(tmp_path):
+    import json
+    ledger = mg.GatewayTelemetry(tmp_path / "gateway_calls.sqlite3")
+    gw = mg.ModelGateway(telemetry=ledger)
+    request = mg.ModelGatewayRequest(
+        objective_id="o-src", task_class=mg.STANDARD,
+        context_package=[{"role": "system", "content": "s" * 40},
+                         {"role": "user", "content": "u" * 80},
+                         {"role": "user", "content": "v" * 40}])
+    gw._record(request, status="ok", provider="fake", model="fake-1")
+    gw._record(request, status="refused", error="budget")
+    for row in ledger.for_objective("o-src"):
+        assert json.loads(row["input_sources"]) == {"system": 10, "user": 30}
+
+
+def test_an_existing_ledger_gains_the_input_sources_column(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.sqlite3"
+    old_schema = "\n".join(
+        line for line in mg.GATEWAY_CALLS_SCHEMA.splitlines()
+        if not line.strip().startswith("input_sources")
+        and "idx_gateway_calls_obj" not in line)
+    with sqlite3.connect(path) as conn:
+        conn.executescript(old_schema)
+        assert "input_sources" not in {r[1] for r in conn.execute("PRAGMA table_info(gateway_calls)")}
+    telemetry = mg.GatewayTelemetry(path)
+    telemetry.record(objective_id="o", task_class="SIMPLE", status="ok", input_sources='{"user": 3}')
+    assert telemetry.for_objective("o")[0]["input_sources"] == '{"user": 3}'

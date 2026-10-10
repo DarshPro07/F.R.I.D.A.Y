@@ -185,3 +185,59 @@ def test_write_report_refuses_a_run_id_that_is_not_a_file_name(seeded, tmp_path,
     db, _, _ = seeded
     with pytest.raises(ValueError):
         productivity.write_report(bad, directory=tmp_path / "out", db_path=db)
+
+
+# -- ORCH-009: the same report carries tool calls and the model calls ----------
+
+
+def _seed_gateway(path, objective_id):
+    from friday import model_gateway as mg
+    ledger = mg.GatewayTelemetry(path)
+    ledger.record(objective_id=objective_id, task_class="STANDARD", status="ok",
+                  input_tokens=900, output_tokens=100, latency_ms=2000,
+                  input_sources=json.dumps({"system": 300, "user": 600}))
+    ledger.record(objective_id=objective_id, task_class="STANDARD", status="retried",
+                  input_tokens=900, latency_ms=500,
+                  input_sources=json.dumps({"system": 300, "user": 600}))
+    ledger.record(objective_id=objective_id, task_class="STANDARD", status="failed",
+                  input_tokens=100, latency_ms=250)            # an old row: no sources
+    ledger.record(objective_id=objective_id, task_class="STANDARD", status="refused",
+                  input_tokens=50_000)                         # never sent anywhere
+    ledger.record(objective_id="someone-else", task_class="STANDARD", status="ok",
+                  input_tokens=7, output_tokens=7)
+    return ledger
+
+
+def test_tool_calls_are_the_task_attempts(seeded):
+    db, _, _ = seeded
+    assert productivity.report("obj-a", db_path=db)["tool_calls"] == 3   # 1 + 2
+    assert productivity.report("obj-b", db_path=db)["tool_calls"] == 4   # 1 + 3
+
+
+def test_model_calls_report_the_gateway_ledger_by_source(seeded, tmp_path):
+    db, _, _ = seeded
+    ledger = _seed_gateway(tmp_path / "gateway.sqlite3", "obj-a")
+    rep = productivity.report("obj-a", db_path=db, telemetry=ledger)
+
+    assert rep["model_calls"] == {
+        "calls": 3, "retried": 1, "failed": 1, "refused": 1,
+        "input_tokens": 1_900, "output_tokens": 100, "latency_s": 2.75,
+        "input_by_source": {"system": 600, "user": 1_200},
+        "unattributed_input_tokens": 100,
+    }
+    # The EVAL-005 figures are untouched by it.
+    assert rep["units_per_100k"] == pytest.approx(2.0)
+
+
+def test_an_objective_with_no_model_calls_reports_zeros_not_unmeasured(seeded, tmp_path):
+    db, _, _ = seeded
+    from friday import model_gateway as mg
+    rep = productivity.report("obj-b", db_path=db,
+                              telemetry=mg.GatewayTelemetry(tmp_path / "empty.sqlite3"))
+    assert rep["model_calls"]["calls"] == 0
+    assert rep["model_calls"]["input_by_source"] == {}
+
+
+def test_without_a_gateway_ledger_the_model_calls_are_unmeasured(seeded):
+    db, _, _ = seeded
+    assert productivity.report("obj-a", db_path=db)["model_calls"] == productivity.UNMEASURED

@@ -369,6 +369,7 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
     failover_count    INTEGER NOT NULL DEFAULT 0,
     context_fingerprint TEXT NOT NULL DEFAULT '',
     context_sections  TEXT NOT NULL DEFAULT '',
+    input_sources     TEXT NOT NULL DEFAULT '',
     error             TEXT NOT NULL DEFAULT '',
     created_at        TEXT NOT NULL
 );
@@ -400,6 +401,7 @@ _ADDED_COLUMNS = (
     ("credential", "TEXT NOT NULL DEFAULT ''"),
     ("context_sections", "TEXT NOT NULL DEFAULT ''"),
     ("cost_usd", "REAL NOT NULL DEFAULT 0"),
+    ("input_sources", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: Indexes over columns that may have just been added. Created after the
@@ -408,6 +410,17 @@ _LATE_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_gateway_calls_route"
     " ON gateway_calls(provider, model, credential, id)",
 )
+
+
+def _input_by_role(messages: list[dict]) -> str:
+    """ORCH-009: the call's input by source, as JSON {role: approx tokens}. One pass
+    over the package the caller already built, so it is cheap on the voice path; an
+    estimate like `approx_tokens`, while `input_tokens` stays what the provider billed."""
+    by_role: dict[str, int] = {}
+    for m in messages:
+        role = str(m.get("role") or "unknown")
+        by_role[role] = by_role.get(role, 0) + approx_tokens(str(m.get("content", "")))
+    return json.dumps(by_role, sort_keys=True)
 
 
 class GatewayTelemetry:
@@ -1928,6 +1941,7 @@ class ModelGateway:
                 context_fingerprint=fingerprint,
                 context_sections=(json.dumps(request.context_telemetry, sort_keys=True)
                                   if request.context_telemetry else ""),
+                input_sources=_input_by_role(request.context_package),
                 error=error[:500])
         except Exception:  # noqa: BLE001 - telemetry must never break inference
             logger.warning("gateway telemetry write failed", exc_info=True)
