@@ -35,6 +35,11 @@
           "node_id": "tests/test_hermes_engine.py::test_hermes_executor_reports_unavailable_not_a_crash",
           "cases": 1,
           "result": "PASS"
+        },
+        {
+          "node_id": "tests/test_chaos_suite.py::test_hermes_crash_mid_run_fails_truthfully",
+          "cases": 3,
+          "result": "PASS"
         }
       ]
     },

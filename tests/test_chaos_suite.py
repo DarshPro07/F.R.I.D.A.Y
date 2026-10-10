@@ -19,7 +19,7 @@ names its reason. Never a success that did not happen.
 suites and are named here rather than re-written; six are injected in this
 file: five on the real Store and the real ContinuousTaskExecutor, and an
 invalid model answer at the planner, where it meets the durable engine.
-(invalid_model_response and worker_death also keep the earlier tests.) A fault with no
+(invalid_model_response, hermes_crash and worker_death also keep the earlier tests.) A fault with no
 mapping, or a mapping that points at a test that does not exist, fails the
 suite. `scripts/chaos_report.py` runs exactly this table and writes the
 per-fault report that is CHAOS-001's acceptance evidence.
@@ -47,6 +47,8 @@ from friday.objectives import FailureKind, TaskStatus, compile_objective
 from friday.store import Store
 
 ROOT = Path(__file__).resolve().parents[1]
+REPORT_JSON = ROOT / "docs" / "implementation" / "CHAOS_SUITE_REPORT.json"
+REPORT_MD = ROOT / "docs" / "implementation" / "CHAOS_SUITE_REPORT.md"
 
 PRD_FAULTS = ("browser_crash", "provider_outage", "hermes_crash",
               "invalid_model_response", "db_contention", "network_loss",
@@ -63,6 +65,7 @@ FAULT_MAP = {
     ),
     "hermes_crash": (
         "tests/test_hermes_engine.py::test_hermes_executor_reports_unavailable_not_a_crash",
+        "tests/test_chaos_suite.py::test_hermes_crash_mid_run_fails_truthfully",
     ),
     "invalid_model_response": (
         "tests/test_chaos_suite.py::test_an_invalid_model_answer_leaves_the_deterministic_plan_not_a_crash",
@@ -109,6 +112,11 @@ def test_every_prd_fault_is_mapped_to_a_test_that_exists():
             if not path.is_file() or name.split("[")[0] not in _defined_tests(path):
                 missing.append((fault, node_id))
     assert not missing, f"mapped to tests that do not exist: {missing}"
+    # A crash mid-run is injected here, not only the gateway being down at
+    # the start (which test_hermes_engine.py already covers).
+    assert any(i.startswith("tests/test_chaos_suite.py::")
+               for i in FAULT_MAP["hermes_crash"]), \
+        "hermes_crash has no injection in the chaos suite itself"
 
 
 def _load_report_script():
@@ -145,6 +153,41 @@ def test_the_report_is_green_only_when_every_mapped_test_passed():
         results = {r["fault"]: r["result"] for r in report.judge(FAULT_MAP, broken)}
         assert results["network_loss"] == "FAIL", spoiled
         assert [f for f, v in results.items() if v != "PASS"] == ["network_loss"]
+
+
+def report_disagreements(report: dict) -> list[str]:
+    """Where the committed report and FAULT_MAP disagree. Empty means the
+    artifact is honest evidence for the table this suite actually declares."""
+    bad = []
+    if report.get("pytest_exit") != 0:
+        bad.append(f"pytest_exit {report.get('pytest_exit')!r}")
+    rows = report.get("faults") or []
+    if [r.get("fault") for r in rows] != list(PRD_FAULTS):
+        bad.append(f"faults {[r.get('fault') for r in rows]} != {list(PRD_FAULTS)}")
+        return bad
+    for row in rows:
+        fault = row["fault"]
+        if row.get("result") != "PASS":
+            bad.append(f"{fault} is {row.get('result')!r}")
+        if tuple(t.get("node_id") for t in row.get("tests", ())) != FAULT_MAP[fault]:
+            bad.append(f"{fault} reports "
+                       f"{[t.get('node_id') for t in row.get('tests', ())]}, "
+                       f"map says {list(FAULT_MAP[fault])}")
+        for t in row.get("tests", ()):
+            if t.get("result") != "PASS" or not t.get("cases"):
+                bad.append(f"{fault}: {t.get('node_id')} "
+                           f"{t.get('result')!r} over {t.get('cases')!r} cases")
+    return bad
+
+
+def test_the_committed_report_matches_the_fault_map_and_is_green():
+    """The report is CHAOS-001's acceptance evidence, so it is checked in and
+    checked. A map entry the report does not know about means the artifact was
+    not regenerated, and the evidence is stale."""
+    report = json.loads(REPORT_JSON.read_text(encoding="utf-8"))
+    assert report_disagreements(report) == []
+    assert f"**{len(PRD_FAULTS)}/{len(PRD_FAULTS)} faults green.**" in \
+        REPORT_MD.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +281,43 @@ async def test_browser_crash_mid_task_fails_truthfully(store, port, executor):
     row = store.objective_run(run_id)
     assert row["status"] in O.RUN_TERMINAL and row["status"] != O.RunStatus.COMPLETED
     assert "run.completed" not in event_names(store, run_id)
+
+
+class _CrashedSupervisor:
+    """A Hermes supervisor whose gateway dies after the turn was handed over."""
+
+    def __init__(self, outcome) -> None:
+        self._outcome = outcome
+
+    def delegate(self, *a, **kw):
+        if isinstance(self._outcome, BaseException):
+            raise self._outcome
+        return self._outcome
+
+
+def _hermes_crashes():
+    from friday import hermes_bridge as hb
+    return [
+        ("crashed-status", {"work_run_id": "hermes-9", "result": {"status": "CRASHED"}}),
+        ("process-exited", RuntimeError("gateway process exited")),
+        ("lost-connection", hb.HermesUnavailable("lost connection mid-turn")),
+    ]
+
+
+@pytest.mark.parametrize("name, outcome", _hermes_crashes(),
+                         ids=[n for n, _ in _hermes_crashes()])
+def test_hermes_crash_mid_run_fails_truthfully(tmp_path, name, outcome):
+    from friday.executors.claude_code import TaskBundle
+    from friday.executors.hermes import HermesExecutor
+
+    res = asyncio.run(HermesExecutor(None, supervisor=_CrashedSupervisor(outcome)).execute(
+        TaskBundle(goal="x", workspace=str(tmp_path))))
+
+    assert res.status == c.FAILED
+    assert res.status not in (c.SUCCEEDED, c.PARTIAL)
+    assert "hermes" in res.error.lower()
+    if name == "crashed-status":
+        assert "hermes-9" in res.error
 
 
 NETWORK_LOSS = [
