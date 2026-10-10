@@ -19,9 +19,10 @@ module closes that by never letting the candidate's copy decide:
      that would follow uses the pristine copy anyway; the scan exists so the
      attempt is named and archived rather than silently ignored.
   3. Receipt. A run is recorded as sha256 over (run id, command, exit code,
-     counts, overlay hash) and the record is appended to the lab's own ledger.
-     A claimed receipt that is not in that ledger, or whose digest does not
-     match its own fields, is FABRICATED.
+     counts, overlay hash, full base commit, candidate content hash) and the
+     record is appended to the lab's own ledger. A claimed receipt that is not
+     in that ledger, whose digest does not match its own fields, or that was
+     issued for another base commit or another candidate, is FABRICATED.
   4. The child's environment is built from nothing (`forge.scrubbed_env`), so
      the candidate's tests cannot read Friday's credentials.
 
@@ -39,6 +40,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -97,9 +99,24 @@ class Judgement:
 def receipt_digest(receipt: dict) -> str:
     """sha256 over exactly the fields a receipt vouches for."""
     body = {k: receipt.get(k) for k in
-            ("run_id", "command", "exit_code", "counts", "overlay_hash")}
+            ("run_id", "command", "exit_code", "counts", "overlay_hash",
+             "base_commit", "candidate_hash")}
     return hashlib.sha256(
         json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _tree_hash(root: Path) -> str:
+    """sha256 over every file the lab would copy: relative path and content."""
+    h = hashlib.sha256()
+    for dirpath, dirnames, filenames in os.walk(root):
+        skip = _COPY_IGNORE(dirpath, dirnames + filenames)
+        dirnames[:] = sorted(d for d in dirnames if d not in skip)
+        for name in sorted(f for f in filenames if f not in skip):
+            f = Path(dirpath) / name
+            rel = f.relative_to(root).as_posix()
+            data = os.readlink(f).encode() if f.is_symlink() else f.read_bytes()
+            h.update(f"{rel}\0{hashlib.sha256(data).hexdigest()}\n".encode())
+    return h.hexdigest()
 
 
 def _norm(data: bytes | None) -> bytes | None:
@@ -155,6 +172,16 @@ class Lab:
                              capture_output=True, timeout=_GIT_TIMEOUT)
         return out.stdout if out.returncode == 0 else None
 
+    def _resolve(self, base_commit: str) -> str:
+        """The full commit id `base_commit` names in the live repo; ValueError if none."""
+        out = subprocess.run(["git", "rev-parse", "--verify", "--quiet",
+                              f"{base_commit}^{{commit}}"], cwd=str(self.repo),
+                             capture_output=True, text=True, timeout=_GIT_TIMEOUT)
+        full = out.stdout.strip()
+        if out.returncode != 0 or not _COMMIT.match(full):
+            raise ValueError("base_commit is not a commit in the repository")
+        return full.lower()
+
     # -- the ledger and the archive ---------------------------------------
 
     def _append(self, name: str, row: dict) -> None:
@@ -198,11 +225,19 @@ class Lab:
             p = PurePosixPath(t)
             if not t or p.is_absolute() or ".." in p.parts or "\\" in t or ":" in t:
                 raise ValueError(f"test path must be repo-relative and inside it: {t!r}")
+        base_commit = self._resolve(base_commit)
+        candidate_hash = _tree_hash(sandbox)
         run_id = uuid.uuid4().hex
 
         if claimed is not None:
             if claimed.get("digest") != receipt_digest(claimed) or not self._issued(claimed):
                 return self._reject(FABRICATED, ["evidence has no matching lab receipt"],
+                                    run_id, base_commit, tests)
+            if claimed.get("base_commit") != base_commit:
+                return self._reject(FABRICATED, ["receipt was issued for another base commit"],
+                                    run_id, base_commit, tests)
+            if claimed.get("candidate_hash") != candidate_hash:
+                return self._reject(FABRICATED, ["receipt was issued for another candidate"],
                                     run_id, base_commit, tests)
 
         # the judge's own files: any difference from the base is tampering
@@ -257,7 +292,8 @@ class Lab:
             shutil.rmtree(run_dir, ignore_errors=True)
 
         receipt = {"run_id": run_id, "command": command, "exit_code": result.exit_code,
-                   "counts": dict(result.counts), "overlay_hash": overlay_hash}
+                   "counts": dict(result.counts), "overlay_hash": overlay_hash,
+                   "base_commit": base_commit, "candidate_hash": candidate_hash}
         receipt["digest"] = receipt_digest(receipt)
         self._append("receipts.jsonl", receipt)
         if result.exit_code != 0:

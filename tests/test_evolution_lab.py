@@ -271,3 +271,66 @@ def test_the_judge_is_kernel():
     from friday import self_upgrade
     assert self_upgrade.is_kernel_path("friday/evolution_lab.py")
     assert self_upgrade.is_kernel_path("tests/test_evolution_lab.py")
+
+
+# -- slice 2: receipts are bound to the base commit and the candidate ----------
+
+def test_a_receipt_names_the_full_base_commit_and_the_candidate_hash(world):
+    lab, base, sandbox, _repo, _a = world
+    j = lab.judge(base[:10], sandbox, TEST_ID, Runner())
+    assert j.verdict == "PASS", j.reasons
+    assert j.receipt["base_commit"] == base
+    assert len(j.receipt["candidate_hash"]) == 64
+
+
+def test_a_receipt_for_another_candidate_is_fabricated(world):
+    lab, base, sandbox, _repo, archive = world
+    first = lab.judge(base, sandbox, TEST_ID, Runner())
+    (sandbox / "calc.py").write_text(CALC + "\n\ndef sub(a, b):\n    return a - b\n")
+    runner = Runner()
+    j = lab.judge(base, sandbox, TEST_ID, runner, claimed=first.receipt)
+    assert j.verdict == "FABRICATED"
+    assert "another candidate" in " ".join(j.reasons)
+    assert runner.calls == []
+    assert _archive(archive)[-1]["verdict"] == "FABRICATED"
+
+
+def test_a_receipt_for_another_base_commit_is_fabricated(world):
+    lab, base, sandbox, repo, _a = world
+    first = lab.judge(base, sandbox, TEST_ID, Runner())
+    (repo / "NOTES.md").write_text("later\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "later")
+    later = _git(repo, "rev-parse", "HEAD")
+    runner = Runner()
+    j = lab.judge(later, sandbox, TEST_ID, runner, claimed=first.receipt)
+    assert j.verdict == "FABRICATED"
+    assert "another base commit" in " ".join(j.reasons)
+    assert runner.calls == []
+
+
+def test_a_receipt_rebound_by_hand_is_still_fabricated(world):
+    lab, base, sandbox, _repo, _a = world
+    first = lab.judge(base, sandbox, TEST_ID, Runner())
+    (sandbox / "calc.py").write_text(CALC + "\n# changed\n")
+    other = lab.judge(base, sandbox, TEST_ID, Runner())
+    rebound = dict(first.receipt, candidate_hash=other.receipt["candidate_hash"])
+    rebound["digest"] = lab_mod.receipt_digest(rebound)   # digest recomputed, ledger has no such row
+    assert lab.judge(base, sandbox, TEST_ID, Runner(), claimed=rebound).verdict == "FABRICATED"
+
+
+def test_an_unknown_base_commit_is_refused(world):
+    lab, _base, sandbox, _repo, _a = world
+    with pytest.raises(ValueError):
+        lab.judge("a" * 40, sandbox, TEST_ID, Runner())
+
+
+def test_each_lab_verdict_has_a_registered_negative_control():
+    from negative_controls import CONTROLS
+    registered = {t for c in CONTROLS.values() for t in c.tests}
+    me = "tests/test_evolution_lab.py::"
+    for name in ("test_removed_assert_is_weakened_and_never_run",   # WEAKENED
+                 "test_edited_conftest_is_tampered",                 # TAMPERED
+                 "test_a_forged_receipt_is_fabricated",              # FABRICATED
+                 "test_a_receipt_for_another_candidate_is_fabricated"):
+        assert me + name in registered, name

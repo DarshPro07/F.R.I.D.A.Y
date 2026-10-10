@@ -47,9 +47,15 @@ CONTROLS: dict[str, Control] = {
     "fake action evidence": Control(
         tests=("tests/test_browser_evidence_chain.py::test_a_forged_ok_on_the_step_does_not_survive_verification",
                "tests/test_invariants.py::test_audit_a_completion_claim_the_run_does_not_back_is_refused",
-               "tests/test_invariants.py::test_completion_a_run_cannot_be_completed_without_passing_evidence"),
+               "tests/test_invariants.py::test_completion_a_run_cannot_be_completed_without_passing_evidence",
+               "tests/test_evolution_lab.py::test_a_forged_receipt_is_fabricated",
+               "tests/test_evolution_lab.py::test_an_edited_real_receipt_is_fabricated",
+               "tests/test_evolution_lab.py::test_a_receipt_for_another_candidate_is_fabricated",
+               "tests/test_evolution_lab.py::test_a_receipt_for_another_base_commit_is_fabricated"),
         proves="a hand-set ok, and a completion the run's evidence does not "
-               "back, are refused"),
+               "back, are refused; a lab receipt that was forged, edited, or "
+               "issued for another base commit or candidate is FABRICATED "
+               "(EVOLAB-001)"),
     "stale capability health": Control(
         tests=("tests/test_provider_health.py::test_old_evidence_expires_into_stale_never_into_healthy",),
         proves="health evidence older than its window is STALE, never HEALTHY"),
@@ -101,7 +107,15 @@ CONTROLS: dict[str, Control] = {
                "refuses a capability that is not registered"),
     "evaluator mutant": Control(
         tests=("tests/test_invariants.py::test_every_invariant_guard_is_load_bearing",
-               "tests/test_selfdev.py::test_every_judge_surface_is_kernel"),
+               "tests/test_selfdev.py::test_every_judge_surface_is_kernel",
+               "tests/test_evolution_lab.py::test_removed_assert_is_weakened_and_never_run",
+               "tests/test_evolution_lab.py::test_removed_pytest_raises_is_weakened",
+               "tests/test_evolution_lab.py::test_added_skip_or_xfail_is_weakened",
+               "tests/test_evolution_lab.py::test_edited_conftest_is_tampered",
+               "tests/test_evolution_lab.py::test_edited_evaluator_is_tampered"),
         proves="removing each invariant guard turns its attack red, and a "
-               "run cannot edit the judges that grade it"),
+               "run cannot edit the judges that grade it; the evaluation lab "
+               "judges a deleted assertion or an added skip WEAKENED and an "
+               "edited conftest or verifier TAMPERED (EVOLAB-001, the "
+               "mechanism behind EVO-003)"),
 }
