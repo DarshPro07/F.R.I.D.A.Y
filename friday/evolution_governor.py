@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from friday import governor as G
 from friday import objective_budget as B
 from friday import objectives as O
+from friday import productivity
 from friday import trajectory as T
 
 # -- precedence, highest first -------------------------------------------------
@@ -154,6 +155,7 @@ def _stop(store, gov: G.Governor, run_id: str, lease: str, evidence: dict) -> St
     store.append_objective_event(run_id, EVENT_STOPPED, detail=evidence)
     store.finish_objective_run(run_id, status=O.RUN_CANCELLED,
                                summary={"evolution_stop": evidence})
+    productivity.report_finished_run(store, run_id)
     gov.release(lease)
     return Stop(True, evidence["reason"], evidence.get("dimension", ""), evidence)
 

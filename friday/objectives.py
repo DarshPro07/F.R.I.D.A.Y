@@ -20,7 +20,7 @@ import secrets
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 
-from friday import contracts, dag
+from friday import contracts, dag, productivity
 from friday import requirements as REQ
 from friday import waves
 from friday.contracts import new_run_id, now_iso
@@ -1281,6 +1281,7 @@ def cancel_run(store: Store, *, run_id: str, reason: str,
             "reason": reason,
             "by": executor_id,
         })
+    productivity.report_finished_run(store, run_id)
     release_network_grant(store, run_id, reason=f"objective cancelled: {reason}")
     store.append_objective_event(
         run_id, EVENT_RUN_CANCELLED,

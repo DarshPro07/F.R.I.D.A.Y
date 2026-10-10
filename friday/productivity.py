@@ -40,6 +40,7 @@ The report carries no timestamp, so two runs over the same rows are equal.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -207,3 +208,45 @@ def write_report(run_id: str, *, directory: str | Path | None = None,
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n",
                     encoding="utf-8")
     return path
+
+
+def write_run_report(run_id: str, store_path: str | Path) -> Path:
+    """The report for a run the objective engine just finished.
+
+    `store_path` is the database the finishing Store is on. When it is the
+    default database the report is written with `db_path=None`, so the model
+    gateway's own ledger is joined in as `model_calls` (ORCH-009); any other
+    database is a self-contained one and gets the plain report.
+    """
+    path = Path(store_path)
+    default = _resolve_db(None)
+    try:
+        same = path.resolve() == default.resolve()
+    except OSError:
+        same = False
+    return write_report(run_id, db_path=None if same else path)
+
+
+logger = logging.getLogger("friday-productivity")
+
+
+def report_finished_run(store, run_id: str) -> Path | None:
+    """EVAL-005: write the report for a run that has just been finished.
+
+    The one caller-facing entry point for every place an objective run ends
+    (completed, partial, failed, cancelled). The report observes a run that
+    already has its verdict, so nothing here may change that verdict: a
+    failure is logged with its cause and the run id, never raised and never
+    silent. Returns the report path, or None when none was written.
+    """
+    db_path = getattr(store, "path", None)
+    if db_path is None:
+        logger.warning("productivity report for objective %s is UNAVAILABLE: "
+                       "the store backend has no SQLite file", run_id)
+        return None
+    try:
+        return write_run_report(run_id, db_path)
+    except Exception:
+        logger.warning("productivity report for objective %s not written",
+                       run_id, exc_info=True)
+        return None

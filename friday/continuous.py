@@ -41,6 +41,7 @@ from friday import objective_budget as budget_module
 
 from friday.contracts import now_iso
 from friday import objectives as O
+from friday import productivity
 from friday import signals
 from friday import trajectory
 from friday import waves
@@ -1756,6 +1757,7 @@ class ContinuousTaskExecutor:
             summary["checks_skipped"] = sum(
                 1 for t in leaves if t["status"] == O.TaskStatus.SKIPPED)
         self.store.finish_objective_run(run_id, status=status, summary=summary)
+        productivity.report_finished_run(self.store, run_id)
         # A finished objective keeps no network authority (NET-001).
         O.release_network_grant(self.store, run_id, reason=f"objective {status}")
         self.store.append_objective_event(
@@ -1840,6 +1842,7 @@ class ContinuousTaskExecutor:
                     "failures": [],
                 },
             )
+            productivity.report_finished_run(self.store, run_id)
             self.store.append_objective_event(
                 run_id, O.EVENT_RUN_CANCELLED, detail={"reason": reason})
             O.release_network_grant(self.store, run_id,
