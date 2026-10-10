@@ -1,0 +1,246 @@
+"""
+EVO-001: the Evolution Controller turns a concrete trigger into exactly one
+deduplicated, budgeted proposal that survives a restart.
+
+Real Store on a file (the restart test reopens it), real Governor with a dialled
+sampler. Deciding and deduplicating are plain code, so no model is involved; one
+test holds that by reading the module's imports.
+"""
+from __future__ import annotations
+
+import ast
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+
+from friday import evolution_controller as C
+from friday import evolution_governor as E
+from friday import governor as G
+from friday.store import Store
+from tests.test_governor import make
+
+NOW = datetime(2026, 10, 10, 14, 0, tzinfo=timezone.utc)
+FIELDS = ("benefit", "risk", "cost", "components", "acceptance_tests", "budget", "termination")
+
+
+def _gov():
+    gov, _ = make()
+    gov._context = lambda: G.Context(user_idle_s=3600.0, on_battery=False)
+    return gov
+
+
+def _missing(subject="pdf_extract", **kw):
+    return C.Trigger(C.MISSING_CAPABILITY, subject, evidence={"request": "read this pdf"}, **kw)
+
+
+def test_a_missing_capability_creates_exactly_one_complete_proposal(tmp_path):
+    store = Store(tmp_path / "e.sqlite3")
+    decision = C.consider(store, _missing())
+    assert decision.proposed and decision.created
+    proposal = decision.proposal
+    for name in FIELDS:
+        assert proposal[name], f"proposal has no {name}"
+    assert proposal["trigger_kind"] == C.MISSING_CAPABILITY
+    assert proposal["budget"]["max_usd"] > 0 and proposal["budget"]["max_wall_s"] > 0
+    assert proposal["termination"]["max_wall_s"] == proposal["budget"]["max_wall_s"]
+    assert len(C.proposals(store)) == 1
+
+
+def test_repeats_of_the_same_trigger_deduplicate(tmp_path):
+    store = Store(tmp_path / "e.sqlite3")
+    first = C.consider(store, _missing("pdf_extract"))
+    again = C.consider(store, _missing("  PDF_Extract "))
+    third = C.consider(store, C.Trigger(C.MISSING_CAPABILITY, "pdf_extract",
+                                        evidence={"request": "another file"}))
+    assert first.created and not again.created and not third.created
+    assert {first.proposal["proposal_id"], again.proposal["proposal_id"],
+            third.proposal["proposal_id"]} == {first.proposal["proposal_id"]}
+    rows = C.proposals(store)
+    assert len(rows) == 1 and rows[0]["occurrences"] == 3
+
+
+def test_a_different_subject_or_kind_is_a_different_proposal(tmp_path):
+    store = Store(tmp_path / "e.sqlite3")
+    C.consider(store, _missing("pdf_extract"))
+    C.consider(store, _missing("ocr_scan"))
+    C.consider(store, C.Trigger(C.SLOW_PATH, "pdf_extract", observed=C.SLOW_MS * 2, count=5))
+    assert len(C.proposals(store)) == 3
+
+
+def test_a_proposal_survives_a_restart_and_is_not_proposed_again(tmp_path):
+    path = tmp_path / "e.sqlite3"
+    first = C.consider(Store(path), _missing())
+    reopened = Store(path)
+    rows = C.proposals(reopened)
+    assert [r["proposal_id"] for r in rows] == [first.proposal["proposal_id"]]
+    assert rows[0]["acceptance_tests"] == first.proposal["acceptance_tests"]
+    again = C.consider(reopened, _missing())
+    assert not again.created and len(C.proposals(reopened)) == 1
+
+
+def test_no_trigger_means_no_proposal(tmp_path):
+    store = Store(tmp_path / "e.sqlite3")
+    decision = C.consider(store, None)
+    assert not decision.proposed and "trigger" in decision.reason
+    assert C.proposals(store) == []
+
+
+def test_the_controller_runs_no_model():
+    tree = ast.parse(Path(C.__file__).read_text(encoding="utf-8"))
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            imported.add(node.module or "")
+            imported.update(f"{node.module}.{a.name}" for a in node.names)
+    text = " ".join(imported).lower()
+    for model_word in ("model_gateway", "anthropic", "openai", "gemini", "llm", "requests", "httpx"):
+        assert model_word not in text
+
+
+@pytest.mark.parametrize("count,proposed", [(1, False), (2, False), (3, True), (10, True)])
+def test_a_failure_must_repeat_before_it_is_worth_a_proposal(tmp_path, count, proposed):
+    store = Store(tmp_path / "e.sqlite3")
+    decision = C.consider(store, C.Trigger(C.REPEATED_FAILURE, "fs.read_text", count=count))
+    assert decision.proposed is proposed
+    assert len(C.proposals(store)) == (1 if proposed else 0)
+    if proposed:
+        assert decision.proposal["klass"] == E.RELIABILITY_REPAIR
+    else:
+        assert "repeat" in decision.reason
+
+
+def test_slow_and_costly_paths_need_to_cross_their_threshold(tmp_path):
+    store = Store(tmp_path / "e.sqlite3")
+    assert not C.consider(store, C.Trigger(C.SLOW_PATH, "route.plan", observed=100, count=9)).proposed
+    assert not C.consider(store, C.Trigger(C.COSTLY_PATH, "route.plan", observed=0.01, count=9)).proposed
+    slow = C.consider(store, C.Trigger(C.SLOW_PATH, "route.plan",
+                                       observed=C.SLOW_MS * 2, count=C.MIN_REPEATS))
+    costly = C.consider(store, C.Trigger(C.COSTLY_PATH, "route.plan",
+                                         observed=C.COSTLY_USD * 2, count=C.MIN_REPEATS))
+    assert slow.proposed and costly.proposed
+    assert slow.proposal["klass"] == costly.proposal["klass"] == E.APPROVED_IMPROVEMENT
+
+
+def test_a_malformed_trigger_is_refused_not_guessed(tmp_path):
+    store = Store(tmp_path / "e.sqlite3")
+    with pytest.raises(ValueError):
+        C.consider(store, C.Trigger("vibes", "x"))
+    with pytest.raises(ValueError):
+        C.consider(store, C.Trigger(C.MISSING_CAPABILITY, "   "))
+    with pytest.raises(ValueError):
+        C.consider(store, C.Trigger(C.MISSING_CAPABILITY, "x", evidence={"blob": "a" * 100_000}))
+    assert C.proposals(store) == []
+
+
+def test_a_trust_root_is_proposal_only_and_is_never_admitted(tmp_path):
+    store, gov = Store(tmp_path / "e.sqlite3"), _gov()
+    decision = C.consider(store, C.Trigger(C.REPEATED_FAILURE, "verifier",
+                                           count=5, component="friday/promotion.py"))
+    assert decision.proposal["zone"] == "Z4" and decision.proposal["proposal_only"] is True
+    admission = C.admit(store, gov, decision.proposal["proposal_id"], "run-z4",
+                        mode=E.TRIGGER, now=NOW)
+    assert not admission.admitted and "proposal" in admission.reason.lower()
+
+
+def test_an_ordinary_proposal_is_admitted_through_the_evolution_governor(tmp_path):
+    store, gov = Store(tmp_path / "e.sqlite3"), _gov()
+    decision = C.consider(store, _missing())
+    assert decision.proposal["zone"] == "Z1" and not decision.proposal["proposal_only"]
+    pid = decision.proposal["proposal_id"]
+    admission = C.admit(store, gov, pid, "run-1", mode=E.TRIGGER, now=NOW)
+    assert admission.admitted, admission.reason
+    assert [r["status"] for r in C.proposals(store)] == [C.ADMITTED]
+    assert [r["proposal_id"] for r in C.proposals(store, status=C.ADMITTED)] == [pid]
+
+
+def test_a_higher_class_waiting_holds_a_lower_one_back(tmp_path):
+    store, gov = Store(tmp_path / "e.sqlite3"), _gov()
+    repair = C.consider(store, C.Trigger(C.REPEATED_FAILURE, "fs.read_text", count=4)).proposal
+    improve = C.consider(store, _missing()).proposal
+    assert improve["klass"] == E.APPROVED_IMPROVEMENT
+    held = C.admit(store, gov, improve["proposal_id"], "run-i", mode=E.TRIGGER, now=NOW)
+    assert not held.admitted and held.blocked_by == E.RELIABILITY_REPAIR
+    first = C.admit(store, gov, repair["proposal_id"], "run-r", mode=E.TRIGGER, now=NOW)
+    assert first.admitted, first.reason
+
+
+def test_admitting_an_unknown_or_already_admitted_proposal_is_refused(tmp_path):
+    store, gov = Store(tmp_path / "e.sqlite3"), _gov()
+    assert not C.admit(store, gov, "evo-nope", "run-x", mode=E.TRIGGER, now=NOW).admitted
+    pid = C.consider(store, _missing()).proposal["proposal_id"]
+    assert C.admit(store, gov, pid, "run-1", mode=E.TRIGGER, now=NOW).admitted
+    again = C.admit(store, gov, pid, "run-2", mode=E.TRIGGER, now=NOW)
+    assert not again.admitted and "admitted" in again.reason
+
+
+def test_a_later_trust_root_trigger_escalates_the_stored_zone_and_is_never_admitted(tmp_path):
+    store, gov = Store(tmp_path / "e.sqlite3"), _gov()
+    low = C.consider(store, C.Trigger(C.REPEATED_FAILURE, "verifier", count=3,
+                                      component="skills/x/"))
+    assert low.proposal["zone"] == "Z1"
+    high = C.consider(store, C.Trigger(C.REPEATED_FAILURE, "verifier", count=3,
+                                       component="friday/promotion.py"))
+    assert not high.created
+    assert high.proposal["proposal_id"] == low.proposal["proposal_id"]
+    assert high.proposal["zone"] == "Z4" and high.proposal["proposal_only"] is True
+    assert high.proposal["risk"]["zone"] == "Z4"
+    assert set(high.proposal["components"]) == {"skills/x/", "friday/promotion.py"}
+    # a later, lower-zone repeat never lowers it again
+    low_again = C.consider(store, C.Trigger(C.REPEATED_FAILURE, "verifier", count=3,
+                                            component="skills/x/"))
+    assert low_again.proposal["zone"] == "Z4"
+    assert [r["zone"] for r in C.proposals(store)] == ["Z4"]
+    admission = C.admit(store, gov, low.proposal["proposal_id"], "run-z4",
+                        mode=E.TRIGGER, now=NOW)
+    assert not admission.admitted and "proposal" in admission.reason.lower()
+
+
+def test_a_path_like_subject_counts_toward_the_zone_even_with_a_component(tmp_path):
+    store = Store(tmp_path / "e.sqlite3")
+    got = C.consider(store, C.Trigger(C.REPEATED_FAILURE, "friday/policy.py",
+                                      count=3, component="skills/x/"))
+    assert got.proposal["zone"] == "Z4"
+
+
+@pytest.mark.parametrize("trigger", [
+    C.Trigger(C.MISSING_CAPABILITY, "x", evidence={"x": {1}}),
+    C.Trigger(C.MISSING_CAPABILITY, "x", evidence=["not", "a", "dict"]),
+    C.Trigger(C.MISSING_CAPABILITY, "x", evidence={"n": float("nan")}),
+    C.Trigger(C.SLOW_PATH, "x", count=3, observed="9999"),
+    C.Trigger(C.SLOW_PATH, "x", count=3, observed=float("inf")),
+    C.Trigger(C.SLOW_PATH, "x", count=3, observed=True),
+    C.Trigger(C.MISSING_CAPABILITY, "x", component="c" * 100_000),
+    C.Trigger(C.MISSING_CAPABILITY, "x", component=5),
+    C.Trigger(C.MISSING_CAPABILITY, 5),
+    C.Trigger(C.MISSING_CAPABILITY, "x", count=2.5),
+])
+def test_every_malformed_trigger_raises_value_error(tmp_path, trigger):
+    store = Store(tmp_path / "e.sqlite3")
+    with pytest.raises(ValueError):
+        C.consider(store, trigger)
+    assert C.proposals(store) == []
+
+
+def test_the_proposal_id_is_the_whole_dedupe_key(tmp_path):
+    store = Store(tmp_path / "e.sqlite3")
+    got = C.consider(store, _missing()).proposal
+    assert got["proposal_id"] == "evo-" + got["dedupe_key"] and len(got["dedupe_key"]) == 32
+
+
+def test_an_admitted_proposal_keeps_its_run_and_lease_across_a_restart(tmp_path):
+    path = tmp_path / "e.sqlite3"
+    store, gov = Store(path), _gov()
+    pid = C.consider(store, _missing()).proposal["proposal_id"]
+    admission = C.admit(store, gov, pid, "run-keep", mode=E.TRIGGER, now=NOW)
+    assert admission.admitted and admission.lease
+    store.close() if hasattr(store, "close") else None
+    row = C.proposals(Store(path), status=C.ADMITTED)[0]
+    assert row["run_id"] == "run-keep" and row["lease"] == admission.lease
+    # a refused admission leaves no link behind
+    other = C.consider(Store(path), _missing("other_cap")).proposal["proposal_id"]
+    refused = C.admit(Store(path), gov, other, "run-no", mode=E.TRIGGER, now=NOW)
+    assert not refused.admitted
+    assert C.proposals(Store(path), status=C.PENDING)[0]["run_id"] == ""

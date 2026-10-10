@@ -293,5 +293,7 @@ UNSCOPED = {
     "devices": "paired physical devices: a property of this install, like fabric_outcomes; "
                "a device's trust comes from the owner's pairing approval, and what it "
                "senses lands in scoped tables",
+    "evolution_proposals": "FRIDAY's own self-evolution proposals, like `promotions`; "
+                           "a trigger names a capability or path, not a tenant's data",
     "workspaces": "the registry itself",
 }

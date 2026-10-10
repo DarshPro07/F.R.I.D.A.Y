@@ -1116,6 +1116,25 @@ CREATE TABLE IF NOT EXISTS opportunities (
     resolved_at   TEXT,
     UNIQUE (workspace_id, kind, subject, evidence_key)
 );
+
+-- PRD v7 EVO-001: the Evolution Controller's proposals. `dedupe_key` is what
+-- makes a repeated trigger the same proposal; `body` carries benefit, risk,
+-- cost, components, acceptance tests, budget and termination condition.
+CREATE TABLE IF NOT EXISTS evolution_proposals (
+    proposal_id   TEXT PRIMARY KEY,
+    dedupe_key    TEXT NOT NULL UNIQUE,
+    trigger_kind  TEXT NOT NULL,
+    subject       TEXT NOT NULL,
+    klass         TEXT NOT NULL,
+    zone          TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    occurrences   INTEGER NOT NULL DEFAULT 1,
+    body          TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    run_id        TEXT NOT NULL DEFAULT '',
+    lease         TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -1173,6 +1192,8 @@ class Store:
     #: added separately - the alternative is a fresh database, and losing what
     #: Friday has learned to gain a column is not a trade worth making.
     _ADDED_COLUMNS = (
+        ("evolution_proposals", "run_id", "TEXT NOT NULL DEFAULT ''"),
+        ("evolution_proposals", "lease", "TEXT NOT NULL DEFAULT ''"),
         # PRD v7 SEC-005 / TRUST-002: where an objective came from, whether a
         # person is there to answer, and the envelope it runs inside. NULL on
         # rows written before envelopes existed; such a run waits for the
@@ -2342,6 +2363,78 @@ class Store:
                 "UPDATE opportunities SET status=?, resolved_at=? "
                 "WHERE id=? AND workspace_id=? AND status='open'",
                 (status, now_iso(), opportunity_id, workspace_id)).rowcount > 0
+
+    # -- evolution proposals (EVO-001) --------------------------------------
+
+    def evolution_proposal_raise(self, proposal_id: str, dedupe_key: str, *,
+                                 trigger_kind: str, subject: str, klass: str,
+                                 zone: str, body: dict) -> tuple[dict, bool]:
+        """Record one proposal. A second raise with the same `dedupe_key` adds
+        no row: it counts one more occurrence, and it can only RAISE the zone
+        (Z1 < ... < Z4, so a trust root seen later is never absorbed into a
+        lower-zone row), adopting the new risk and uniting the components.
+        Returns (row, created)."""
+        now = now_iso()
+        with self._tx() as conn:
+            created = conn.execute(
+                "INSERT INTO evolution_proposals "
+                "(proposal_id, dedupe_key, trigger_kind, subject, klass, zone, body, "
+                "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(dedupe_key) DO NOTHING",
+                (proposal_id, dedupe_key, trigger_kind, subject, klass, zone,
+                 json.dumps(body, sort_keys=True), now, now)).rowcount > 0
+            if not created:
+                old = conn.execute("SELECT zone, body FROM evolution_proposals "
+                                   "WHERE dedupe_key=?", (dedupe_key,)).fetchone()
+                kept = json.loads(old["body"])
+                kept["components"] = list(dict.fromkeys(
+                    [*kept.get("components", []), *body.get("components", [])]))
+                kept["cost"] = {**kept.get("cost", {}), "components": len(kept["components"])}
+                new_zone = max(old["zone"], zone)
+                if new_zone != old["zone"]:
+                    kept["risk"] = body["risk"]
+                conn.execute(
+                    "UPDATE evolution_proposals SET occurrences=occurrences+1, zone=?, "
+                    "body=?, updated_at=? WHERE dedupe_key=?",
+                    (new_zone, json.dumps(kept, sort_keys=True), now, dedupe_key))
+            row = conn.execute("SELECT * FROM evolution_proposals WHERE dedupe_key=?",
+                               (dedupe_key,)).fetchone()
+        return self._evolution_proposal(row), created
+
+    @staticmethod
+    def _evolution_proposal(row) -> dict:
+        got = dict(row)
+        got["body"] = json.loads(got["body"])
+        return got
+
+    def evolution_proposal(self, proposal_id: str) -> dict | None:
+        row = self._conn.execute("SELECT * FROM evolution_proposals WHERE proposal_id=?",
+                                 (proposal_id,)).fetchone()
+        return self._evolution_proposal(row) if row else None
+
+    def evolution_proposals(self, status: str | None = None) -> list[dict]:
+        sql, args = "SELECT * FROM evolution_proposals", ()
+        if status is not None:
+            sql, args = sql + " WHERE status=?", (status,)
+        return [self._evolution_proposal(r)
+                for r in self._conn.execute(sql + " ORDER BY created_at, proposal_id", args)]
+
+    def evolution_proposal_move(self, proposal_id: str, from_status: str, to_status: str) -> bool:
+        """Change status only from the one the caller saw; False when it moved."""
+        with self._tx() as conn:
+            return conn.execute(
+                "UPDATE evolution_proposals SET status=?, updated_at=? "
+                "WHERE proposal_id=? AND status=?",
+                (to_status, now_iso(), proposal_id, from_status)).rowcount > 0
+
+    def evolution_proposal_link(self, proposal_id: str, run_id: str, lease: str) -> bool:
+        """Remember which run and governor lease an admitted proposal holds, so
+        a restart can still find and release them."""
+        with self._tx() as conn:
+            return conn.execute(
+                "UPDATE evolution_proposals SET run_id=?, lease=?, updated_at=? "
+                "WHERE proposal_id=? AND status='admitted'",
+                (run_id, lease, now_iso(), proposal_id)).rowcount > 0
 
     # -- contacts -----------------------------------------------------------
 

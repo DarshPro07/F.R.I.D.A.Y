@@ -245,6 +245,10 @@ DECLARED = {
                        "live caller (consequential tool dispatch) is the next "
                        "wiring step, run by tests/test_dry_run.py"),
     "friday/forge_runtime": (FUTURE, "same"),
+    "friday/evolution_controller": (FUTURE,
+                                    "EVO-001: the event-driven Evolution Controller; the callers "
+                                    "that raise triggers are a later wiring step, run by "
+                                    "tests/test_evolution_controller.py"),
     "friday/evolution_lab": (FUTURE,
                              "EVOLAB-001 slice 1: the protected evaluation lab core; "
                              "selfdev wiring is a later slice, run by "
