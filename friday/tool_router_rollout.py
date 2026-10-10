@@ -16,8 +16,10 @@ Rollout of the staged tool router behind capability search (PRD v7 19.3, CTX-002
           that request; a CLARIFY decision keeps the shortlist and tells the caller to ask.
 
 Promotion from shadow to staged is an owner decision backed by evidence
-(docs/plans/ctx-002/PLAN.md); `Metrics` carries the numbers it needs. A record
-holds a hash of the request, never its text.
+(docs/plans/ctx-002/PLAN.md); `Metrics` carries the numbers it needs. The
+evidence is an arena report (friday/arena.py, kind capability_path, candidate
+`staged_router`) named by FRIDAY_TOOL_ROUTER_REPORT: `staged` without a passing
+one runs as `shadow`. A record holds a hash of the request, never its text.
 """
 from __future__ import annotations
 
@@ -33,9 +35,9 @@ from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Callable, Mapping
 
-from friday import tool_router
+from friday import arena, tool_router
 
-log = logging.getLogger("friday.tool_router.rollout")
+log =logging.getLogger("friday.tool_router.rollout")
 
 LEGACY, SHADOW, STAGED = "legacy", "shadow", "staged"
 MODES = (LEGACY, SHADOW, STAGED)
@@ -71,13 +73,26 @@ class Config:
     log_path: str = ""           # optional JSON-lines copy of every record
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str] | None = None) -> "Config":
-        """A bad value never stops boot: it is logged and the safe default is used."""
+    def from_env(cls, env: Mapping[str, str] | None = None,
+                 store: "arena.ArenaStore | None" = None) -> "Config":
+        """A bad value never stops boot: it is logged and the safe default is used.
+
+        `staged` is a promotion, so it needs a passing capability_path arena report
+        for `staged_router`, named by FRIDAY_TOOL_ROUTER_REPORT; without one the
+        router runs as `shadow`, which still gathers the evidence a report is made of."""
         env = os.environ if env is None else env
         mode = (env.get("FRIDAY_TOOL_ROUTER_MODE") or LEGACY).strip().lower()
         if mode not in MODES:
             log.warning("FRIDAY_TOOL_ROUTER_MODE=%r is not one of %s; using legacy", mode, MODES)
             mode = LEGACY
+        if mode == STAGED:
+            try:
+                arena.promote(arena.ArenaKind.CAPABILITY_PATH, "staged_router",
+                              report_id=(env.get("FRIDAY_TOOL_ROUTER_REPORT") or "").strip(),
+                              store=store)
+            except arena.PromotionRefused as exc:
+                log.warning("FRIDAY_TOOL_ROUTER_MODE=staged is not promoted (%s); using shadow", exc)
+                mode = SHADOW
         return cls(
             mode=mode,
             timeout_s=_number(env, "FRIDAY_TOOL_ROUTER_TIMEOUT_S", 2.0, float, 0.05, 30.0),

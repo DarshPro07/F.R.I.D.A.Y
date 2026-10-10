@@ -8,10 +8,12 @@ import time
 
 import pytest
 
+from friday import arena
 from friday import capability_router as R
 from friday import tool_router, tool_router_rollout as RO
 
-IDS = ["music_search", "music_play_mood", "files_read", "files_info"]
+PROVENANCE = {"commit": "abc1234", "date": "2026-10-05T00:00:00+00:00"}
+IDS =["music_search", "music_play_mood", "files_read", "files_info"]
 TEXTS = ["find songs by name", "play a song for a mood", "read a text file", "size of a file"]
 RANKING = ["music_search", "music_play_mood", "files_read"]
 ALWAYS_STAGE_TWO = tool_router.Thresholds(agree=2.0, margin=2.0)     # what the shipped defaults amount to
@@ -71,8 +73,77 @@ def test_a_bad_setting_never_stops_boot_and_falls_back_to_the_safe_value():
 
 
 def test_each_mode_is_read_from_the_environment():
-    for mode in RO.MODES:
+    for mode in (RO.LEGACY, RO.SHADOW):         # staged needs an arena report: see below
         assert RO.Config.from_env({"FRIDAY_TOOL_ROUTER_MODE": f" {mode.upper()} "}).mode == mode
+
+
+# -- staged is promoted by an arena report (EVAL-004) ------------------------
+
+
+def _score(*, ok: bool = True, cases: int = 20, score: float = 0.9) -> arena.Score:
+    return arena.Score(gates={"success_rate": ok, "minimum_cases": cases >= 10},
+                       cases=cases, score=score, metrics={"success_rate": score})
+
+
+def _scorer(table: dict[str, arena.Score]):
+    return lambda candidate_id: table[candidate_id]
+
+
+def _report(table, kind=arena.ArenaKind.CAPABILITY_PATH, **prov):
+    return arena.compare(kind, list(table), _scorer(table), provenance={**PROVENANCE, **prov})
+
+
+@pytest.fixture
+def store(tmp_path):
+    return arena.ArenaStore(tmp_path / "arena_reports.json")
+
+
+@pytest.fixture
+def default_store(store):
+    """The process's arena store, pointed at a scratch file so nothing reads data/."""
+    arena.reset_store(store)
+    yield store
+    arena.reset_store()
+
+
+@pytest.fixture
+def promoted(default_store, monkeypatch):
+    """A passing stored capability_path report for the staged router, named by the env."""
+    report = default_store.record(_report({"staged_router": _score()}))
+    monkeypatch.setenv("FRIDAY_TOOL_ROUTER_REPORT", report.report_id)
+    return report
+
+
+def test_staged_without_an_arena_report_id_runs_as_shadow(default_store, caplog):
+    config = RO.Config.from_env({"FRIDAY_TOOL_ROUTER_MODE": "staged"})
+    assert config.mode == RO.SHADOW
+    assert "arena report id is required" in caplog.text
+
+
+def test_staged_with_a_passing_capability_path_report_is_staged(store):
+    report = store.record(_report({"staged_router": _score(), "other_path": _score(score=0.5)}))
+    env = {"FRIDAY_TOOL_ROUTER_MODE": " STAGED ", "FRIDAY_TOOL_ROUTER_REPORT": f" {report.report_id} "}
+    assert RO.Config.from_env(env, store=store).mode == RO.STAGED
+
+
+@pytest.mark.parametrize("kind, ok", [(arena.ArenaKind.CAPABILITY_PATH, False),
+                                      (arena.ArenaKind.SKILL, True)],
+                         ids=["measured-below-target", "report-from-another-arena"])
+def test_staged_is_held_at_shadow_by_a_report_that_does_not_qualify(store, caplog, kind, ok):
+    report = store.record(_report({"staged_router": _score(ok=ok)}, kind=kind))
+    env = {"FRIDAY_TOOL_ROUTER_MODE": "staged", "FRIDAY_TOOL_ROUTER_REPORT": report.report_id}
+    assert RO.Config.from_env(env, store=store).mode == RO.SHADOW
+    assert report.report_id in caplog.text            # the reason is logged, not swallowed
+
+
+def test_staged_with_an_unknown_report_id_runs_as_shadow(store):
+    env = {"FRIDAY_TOOL_ROUTER_MODE": "staged", "FRIDAY_TOOL_ROUTER_REPORT": "no-such-report"}
+    assert RO.Config.from_env(env, store=store).mode == RO.SHADOW
+
+
+def test_legacy_and_shadow_need_no_arena_report(store):
+    for mode in (RO.LEGACY, RO.SHADOW):
+        assert RO.Config.from_env({"FRIDAY_TOOL_ROUTER_MODE": mode}, store=store).mode == mode
 
 
 # -- legacy -----------------------------------------------------------------
@@ -488,6 +559,7 @@ class FakeTool:
 @pytest.fixture
 def router(monkeypatch):
     monkeypatch.delenv("FRIDAY_TOOL_ROUTER_MODE", raising=False)
+    monkeypatch.delenv("FRIDAY_TOOL_ROUTER_REPORT", raising=False)
 
     def model_free(ids, texts, descriptions, *, shipped, chooser):
         return tool_router.StagedRouter(ids, texts, shipped=shipped, chooser=chooser,
@@ -519,11 +591,20 @@ def test_in_shadow_mode_the_router_still_returns_the_legacy_answer(router, monke
     assert {r["query_sha"]: r["legacy_choice"] for r in routes(router.rollout)} == legacy_first
 
 
-def test_in_staged_mode_the_router_answers_from_the_staged_ranking(router, monkeypatch):
+def test_in_staged_mode_the_router_answers_from_the_staged_ranking(router, promoted, monkeypatch):
     monkeypatch.setenv("FRIDAY_TOOL_ROUTER_MODE", "staged")
     found = router.search("play some music")
     assert found and all(set(m) == set(router.legacy_search("play some music")[0]) for m in found)
     assert router.rollout.last_decision is not None and not router.needs_clarification()
+
+
+def test_staged_mode_without_an_arena_report_leaves_the_router_in_shadow(router, default_store, monkeypatch):
+    monkeypatch.setenv("FRIDAY_TOOL_ROUTER_MODE", "staged")
+    for text in REQUESTS:
+        assert router.search(text) == router.legacy_search(text)
+    router.rollout.drain()
+    assert router.rollout.config.mode == RO.SHADOW
+    assert router.rollout.last_decision is None and routes(router.rollout)
 
 
 def _broken_build(monkeypatch):
@@ -533,7 +614,7 @@ def _broken_build(monkeypatch):
     monkeypatch.setattr(RO, "_build_staged", broken)
 
 
-def test_in_staged_mode_the_router_falls_back_to_the_legacy_answer_on_error(router, monkeypatch):
+def test_in_staged_mode_the_router_falls_back_to_the_legacy_answer_on_error(router, promoted, monkeypatch):
     _broken_build(monkeypatch)
     monkeypatch.setenv("FRIDAY_TOOL_ROUTER_MODE", "staged")
     for text in REQUESTS:
@@ -572,7 +653,7 @@ def test_note_turn_stops_the_router_pairing_an_earlier_search(router, monkeypatc
     assert not [r for r in router.rollout.records if r["event"] == "observed"]
 
 
-def test_loading_tools_resets_the_staged_index(router, monkeypatch):
+def test_loading_tools_resets_the_staged_index(router, promoted, monkeypatch):
     monkeypatch.setenv("FRIDAY_TOOL_ROUTER_MODE", "staged")
     router.search("play some music")
     assert router.rollout._staged is not None
@@ -589,7 +670,7 @@ def chooser():
 
 
 @pytest.fixture
-def staged_agent(router, chooser, monkeypatch):
+def staged_agent(router, promoted, chooser, monkeypatch):
     """The real FridayAgent.search_capabilities over a real Router in staged mode, with a
     scripted chooser standing in for the model (no paid call)."""
     import agent_friday
