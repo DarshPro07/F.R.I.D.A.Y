@@ -413,6 +413,10 @@ DECLARED = {
                             "EVAL-005: the continuous executor's _finish writes "
                             "each finished run's verified-units-per-100K-tokens "
                             "report"),
+    "friday/capability_sources": (FUTURE,
+                                  "CAP-MKT-001: capability source interface and scanned-"
+                                  "quarantine harvest, no caller wired yet, run by "
+                                  "tests/test_capability_sources.py"),
     "friday/federation": (FUTURE,
                           "FED-001 inbound-peer gate, not yet fed by an A2A "
                           "transport adapter"),
