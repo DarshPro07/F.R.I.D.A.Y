@@ -199,6 +199,11 @@ def test_the_ui_health_refresher_scans_but_infers_nothing(store, calls, monkeypa
         monkeypatch.setattr(U, "_probe_hermes", lambda: {"status": "unavailable"})
         monkeypatch.setitem(U._PROACTIVE_CACHE, "at", 0.0)
         monkeypatch.setitem(U._PROACTIVE_CACHE, "value", None)
+        # The refresher also writes these; restore them so the stub snapshot and probes
+        # cannot leak into a later test that reads the cache (test_ui_server's snapshot test).
+        for cache in (U._MEM_CACHE, U._GBRAIN_CACHE, U._HERMES_CACHE):
+            for key in list(cache):
+                monkeypatch.setitem(cache, key, cache[key])
         # Replace the module's `time` with a copy whose sleep ends the loop,
         # so the process-wide time.sleep other threads use is untouched.
         shim = types.SimpleNamespace(**{k: getattr(time, k) for k in dir(time)})

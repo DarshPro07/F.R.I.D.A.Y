@@ -33,6 +33,11 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setattr(U, "_probe_hermes", lambda: {"status": "unavailable"})
     monkeypatch.setitem(U._PROACTIVE_CACHE, "at", 0.0)
     monkeypatch.setitem(U._PROACTIVE_CACHE, "value", None)
+    # The refresher also writes these; restore them so the stub snapshot and probes
+    # cannot leak into a later test that reads the cache (test_ui_server's snapshot test).
+    for cache in (U._MEM_CACHE, U._GBRAIN_CACHE, U._HERMES_CACHE):
+        for key in list(cache):
+            monkeypatch.setitem(cache, key, cache[key])
 
     def stop(_seconds):
         raise _StopLoop
