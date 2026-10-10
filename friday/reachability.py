@@ -233,6 +233,10 @@ DECLARED = {
                              "EVOLAB-001 slice 1: the protected evaluation lab core; "
                              "selfdev wiring is a later slice, run by "
                              "tests/test_evolution_lab.py"),
+    "friday/research_provenance": (FUTURE,
+                                   "RSCH-003: source-independence clustering and provenance; the live"
+                                   "caller (the deep research path) is the next wiring step, run by"
+                                   "tests/test_research_provenance.py"),
     "friday/repo_classifier": (FUTURE,
                                "CAP-FORGE-002 classification only; the sandboxed "
                                "analysis (CAP-FORGE-003) and the integration "
