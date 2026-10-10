@@ -52,6 +52,10 @@ VERSION_TIMEOUT = 10.0
 DEFAULT = "hermes"
 FALLBACK = "claude"
 
+#: `Choice.executor` when a tool-capable API route can do the work and no
+#: executor is needed.
+ROUTE_API = "api"
+
 
 @dataclass(frozen=True)
 class Executor:
@@ -194,12 +198,16 @@ class Choice:
     #: True when a measurement decided rather than a default.
     from_evidence: bool = False
     considered: dict = field(default_factory=dict)
+    #: True when the executor must act through FRIDAY's own MCP server
+    #: (`friday.claude_mcp_route`) rather than its own tools.
+    via_friday_mcp: bool = False
 
     def as_dict(self) -> dict:
         return {"executor": self.executor, "because": self.because,
                 "alternatives": list(self.alternatives),
                 "from_evidence": self.from_evidence,
-                "considered": self.considered}
+                "considered": self.considered,
+                "via_friday_mcp": self.via_friday_mcp}
 
 
 def installed() -> tuple[str, ...]:
@@ -279,6 +287,42 @@ def choose(task: str = "", *, record=None, minimum: int = 3,
         alternatives=tuple(c for c in choices if c != fallback),
         because=(f"not enough evidence yet on {task!r} - fewer than {minimum} "
                  f"decided attempts - so the default was used"))
+
+
+def choose_for_capability(task: str = "", *,
+                          api_route_available: bool,
+                          hermes_route_available: bool | None = None) -> Choice:
+    """
+    Who completes a typed request that needs a capability (FAB-007).
+
+    Order: a tool-capable API route, then Hermes (the mandatory execution
+    engine), then the signed-in Claude Code CLI acting through FRIDAY's own
+    MCP server - so when every API route is rate-limited the request is still
+    completed, with FRIDAY's tools and policy, instead of answered without
+    tools. `api_route_available` is the caller's verdict on the API routes;
+    this module does not guess it. Hermes being installed is not enough: it
+    runs on model routes too. `hermes_route_available` is the caller's verdict
+    on Hermes's own route; left None it is assumed to share the API verdict
+    (rate-limited API routes mean a rate-limited Hermes).
+    """
+    if api_route_available:
+        return Choice(executor=ROUTE_API, because=(
+            "a tool-capable API route is available"))
+    choices = usable()
+    hermes_ok = (api_route_available if hermes_route_available is None
+                 else hermes_route_available)
+    if "hermes" in choices and hermes_ok:
+        return Choice(executor="hermes", alternatives=tuple(
+            c for c in choices if c != "hermes"), because=(
+            "no tool-capable API route is available; Hermes is the "
+            "execution engine"))
+    if "claude" in choices:
+        return Choice(executor="claude", via_friday_mcp=True, because=(
+            "no tool-capable API route or Hermes is available; the "
+            "signed-in Claude Code CLI acts through FRIDAY's MCP tools"))
+    return Choice(executor="", because=(
+        "no tool-capable route: every API route is unavailable and neither "
+        "Hermes nor the Claude Code CLI is usable here"))
 
 
 def build(executor_id: str, store, **kwargs):

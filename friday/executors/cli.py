@@ -144,6 +144,9 @@ class Launch:
     disallowed_tools: tuple[str, ...] = ()
     mcp_config: str | None = None
     strict_mcp: bool = True
+    #: `--tools` value: "" switches every built-in tool (shell, editor, web) off,
+    #: leaving only MCP tools. None leaves the CLI's defaults alone.
+    builtin_tools: str | None = None
     model: str | None = None
     settings: dict = field(default_factory=lambda: {"disableAllHooks": True})
     #: Extra environment variables this launch needs to cross to the worker
@@ -189,6 +192,8 @@ class Launch:
             argv += ["--mcp-config", self.mcp_config]
             if self.strict_mcp:
                 argv.append("--strict-mcp-config")
+        if self.builtin_tools is not None:
+            argv += ["--tools", self.builtin_tools]
         # Variadic flags go last, and the prompt never joins them on the
         # command line - see the module docstring. It is written to stdin.
         if self.add_dirs:
