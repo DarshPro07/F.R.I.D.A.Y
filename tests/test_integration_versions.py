@@ -24,6 +24,17 @@ def _fail(path: Path) -> iv.Check:
     return iv.Check(False, "3 tests failed")
 
 
+def _passing_capability(installed: Path):
+    def call(operation, **args):
+        Path(args["path"]).write_text(args["content"], encoding="utf-8")
+    return call
+
+
+#: A fixture capability whose journey passes; the rollback and pointer tests
+#: are about versions, not about the capability.
+_JOURNEY = iv.JourneySpec("filesystem", _passing_capability)
+
+
 @pytest.fixture
 def versions(tmp_path):
     return iv.IntegrationVersions(tmp_path / "integrations")
@@ -31,7 +42,7 @@ def versions(tmp_path):
 
 def _promote(versions, tmp_path, version, label=None):
     return versions.update("acme", version, _source(tmp_path, label or version),
-                           run_tests=_ok, health_check=_ok)
+                           journey=_JOURNEY, run_tests=_ok, health_check=_ok)
 
 
 def test_first_good_update_becomes_current_and_known_good(versions, tmp_path):
@@ -60,14 +71,14 @@ def test_the_pointer_does_not_move_until_tests_pass(versions, tmp_path):
         return iv.Check(True, "ok")
 
     versions.update("acme", "1.1.0", _source(tmp_path, "b"),
-                    run_tests=runner, health_check=_ok)
+                    journey=_JOURNEY, run_tests=runner, health_check=_ok)
     assert seen == ["1.0.0", "1.0.0"]
 
 
 def test_failed_tests_roll_back_and_mark_the_version_bad(versions, tmp_path):
     _promote(versions, tmp_path, "1.0.0")
     result = versions.update("acme", "1.1.0", _source(tmp_path, "b"),
-                             run_tests=_fail, health_check=_ok)
+                             journey=_JOURNEY, run_tests=_fail, health_check=_ok)
     assert result.status == iv.ROLLED_BACK
     assert result.stage == "tests"
     assert "3 tests failed" in result.reason
@@ -86,7 +97,7 @@ def test_failed_health_check_rolls_back_after_the_switch(versions, tmp_path):
         return iv.Check(False, "port 8080 not answering")
 
     result = versions.update("acme", "1.1.0", _source(tmp_path, "b"),
-                             run_tests=_ok, health_check=health)
+                             journey=_JOURNEY, run_tests=_ok, health_check=health)
     assert switched == ["1.1.0"]
     assert result.status == iv.ROLLED_BACK
     assert result.stage == "health"
@@ -98,7 +109,7 @@ def test_failed_health_check_rolls_back_after_the_switch(versions, tmp_path):
 def test_a_bad_version_is_not_retried(versions, tmp_path):
     _promote(versions, tmp_path, "1.0.0")
     versions.update("acme", "1.1.0", _source(tmp_path, "b"),
-                    run_tests=_fail, health_check=_ok)
+                    journey=_JOURNEY, run_tests=_fail, health_check=_ok)
     calls = []
 
     def runner(path):
@@ -106,7 +117,7 @@ def test_a_bad_version_is_not_retried(versions, tmp_path):
         return iv.Check(True, "ok")
 
     result = versions.update("acme", "1.1.0", _source(tmp_path, "c"),
-                             run_tests=runner, health_check=_ok)
+                             journey=_JOURNEY, run_tests=runner, health_check=_ok)
     assert result.status == iv.REJECTED
     assert result.stage == "known_bad"
     assert calls == []
@@ -120,7 +131,7 @@ def test_a_raising_runner_is_a_failed_update_with_the_reason_recorded(versions, 
         raise RuntimeError("runner crashed")
 
     result = versions.update("acme", "1.1.0", _source(tmp_path, "b"),
-                             run_tests=boom, health_check=_ok)
+                             journey=_JOURNEY, run_tests=boom, health_check=_ok)
     assert result.status == iv.ROLLED_BACK
     assert "RuntimeError" in result.reason and "runner crashed" in result.reason
     assert versions.current("acme").name == "1.0.0"
@@ -129,7 +140,7 @@ def test_a_raising_runner_is_a_failed_update_with_the_reason_recorded(versions, 
 
 def test_first_install_failing_leaves_no_current_version(versions, tmp_path):
     result = versions.update("acme", "1.0.0", _source(tmp_path, "a"),
-                             run_tests=_fail, health_check=_ok)
+                             journey=_JOURNEY, run_tests=_fail, health_check=_ok)
     assert result.status == iv.ROLLED_BACK
     assert versions.current("acme") is None
     assert versions.known_good("acme") is None
@@ -169,7 +180,7 @@ def test_a_healthy_version_is_not_rolled_back(versions, tmp_path):
 def test_state_survives_a_new_instance(versions, tmp_path):
     _promote(versions, tmp_path, "1.0.0")
     versions.update("acme", "1.1.0", _source(tmp_path, "b"),
-                    run_tests=_fail, health_check=_ok)
+                    journey=_JOURNEY, run_tests=_fail, health_check=_ok)
     again = iv.IntegrationVersions(tmp_path / "integrations")
     assert again.known_good("acme") == "1.0.0"
     assert again.is_bad("acme", "1.1.0")
@@ -180,7 +191,7 @@ def test_a_failed_update_leaves_the_known_good_files_untouched(versions, tmp_pat
     good = versions.current("acme")
     before = (good / "mod.py").read_bytes()
     versions.update("acme", "1.1.0", _source(tmp_path, "b", "x = 2\n"),
-                    run_tests=_fail, health_check=_ok)
+                    journey=_JOURNEY, run_tests=_fail, health_check=_ok)
     assert (good / "mod.py").read_bytes() == before
 
 
@@ -188,23 +199,23 @@ def test_a_failed_update_leaves_the_known_good_files_untouched(versions, tmp_pat
 def test_unsafe_names_and_versions_are_refused(versions, tmp_path, bad):
     with pytest.raises(iv.VersionError):
         versions.update(bad, "1.0.0", _source(tmp_path, "a"),
-                        run_tests=_ok, health_check=_ok)
+                        journey=_JOURNEY, run_tests=_ok, health_check=_ok)
     with pytest.raises(iv.VersionError):
         versions.update("acme", bad, _source(tmp_path, "b"),
-                        run_tests=_ok, health_check=_ok)
+                        journey=_JOURNEY, run_tests=_ok, health_check=_ok)
 
 
 def test_reinstalling_an_existing_version_is_refused(versions, tmp_path):
     _promote(versions, tmp_path, "1.0.0")
     with pytest.raises(iv.VersionError):
         versions.update("acme", "1.0.0", _source(tmp_path, "b"),
-                        run_tests=_ok, health_check=_ok)
+                        journey=_JOURNEY, run_tests=_ok, health_check=_ok)
 
 
 def test_a_missing_source_is_refused_and_leaves_no_trace(versions, tmp_path):
     with pytest.raises(iv.VersionError):
         versions.update("acme", "1.0.0", tmp_path / "nope",
-                        run_tests=_ok, health_check=_ok)
+                        journey=_JOURNEY, run_tests=_ok, health_check=_ok)
     assert versions.current("acme") is None
     assert not (tmp_path / "integrations" / "acme" / "versions" / "1.0.0").exists()
 
@@ -212,7 +223,7 @@ def test_a_missing_source_is_refused_and_leaves_no_trace(versions, tmp_path):
 def test_the_state_file_records_the_history(versions, tmp_path):
     _promote(versions, tmp_path, "1.0.0")
     versions.update("acme", "1.1.0", _source(tmp_path, "b"),
-                    run_tests=_fail, health_check=_ok)
+                    journey=_JOURNEY, run_tests=_fail, health_check=_ok)
     state = json.loads((tmp_path / "integrations" / "acme" / "state.json")
                        .read_text(encoding="utf-8"))
     assert [h["event"] for h in state["history"]] == ["promoted", "rolled_back"]
@@ -225,7 +236,7 @@ def test_a_partial_suffixed_version_is_not_clobbered_by_staging(versions, tmp_pa
     live = versions.current("acme")
     before = (live / "mod.py").read_bytes()
     result = versions.update("acme", "1.0.0", _source(tmp_path, "b", "x = 9\n"),
-                             run_tests=_fail, health_check=_ok)
+                             journey=_JOURNEY, run_tests=_fail, health_check=_ok)
     assert result.status == iv.ROLLED_BACK
     assert live.exists() and (live / "mod.py").read_bytes() == before
     assert versions.current("acme") == live
@@ -242,7 +253,7 @@ def test_a_crash_during_the_health_check_is_rolled_back_on_restart(versions, tmp
 
     with pytest.raises(SystemExit):
         versions.update("acme", "1.1.0", _source(tmp_path, "b"),
-                        run_tests=_ok, health_check=dies)
+                        journey=_JOURNEY, run_tests=_ok, health_check=dies)
     fresh = iv.IntegrationVersions(tmp_path / "integrations")
     assert fresh.current("acme").name == "1.0.0"
     assert fresh.known_good("acme") == "1.0.0"
@@ -261,7 +272,7 @@ def test_a_crash_during_the_tests_marks_the_version_bad_on_restart(versions, tmp
 
     with pytest.raises(KeyboardInterrupt):
         versions.update("acme", "1.1.0", _source(tmp_path, "b"),
-                        run_tests=dies, health_check=_ok)
+                        journey=_JOURNEY, run_tests=dies, health_check=_ok)
     fresh = iv.IntegrationVersions(tmp_path / "integrations")
     assert fresh.current("acme").name == "1.0.0"
     assert fresh.is_bad("acme", "1.1.0")
@@ -273,7 +284,7 @@ def test_a_crashed_first_install_leaves_no_current_version(versions, tmp_path):
 
     with pytest.raises(SystemExit):
         versions.update("acme", "1.0.0", _source(tmp_path, "a"),
-                        run_tests=_ok, health_check=dies)
+                        journey=_JOURNEY, run_tests=_ok, health_check=dies)
     fresh = iv.IntegrationVersions(tmp_path / "integrations")
     assert fresh.current("acme") is None
     assert fresh.known_good("acme") is None
@@ -291,14 +302,14 @@ def test_a_stale_outcome_from_the_old_version_is_ignored(versions, tmp_path):
 
 def test_names_and_versions_are_case_insensitive(versions, tmp_path):
     versions.update("Acme", "V1", _source(tmp_path, "a"),
-                    run_tests=_ok, health_check=_ok)
+                    journey=_JOURNEY, run_tests=_ok, health_check=_ok)
     versions.update("acme", "V2", _source(tmp_path, "b"),
-                    run_tests=_fail, health_check=_ok)
+                    journey=_JOURNEY, run_tests=_fail, health_check=_ok)
     result = versions.update("ACME", "v2", _source(tmp_path, "c"),
-                             run_tests=_ok, health_check=_ok)
+                             journey=_JOURNEY, run_tests=_ok, health_check=_ok)
     assert result.status == iv.REJECTED and result.stage == "known_bad"
     assert versions.is_bad("acme", "V2")
     with pytest.raises(iv.VersionError):
         versions.update("acme", "v1", _source(tmp_path, "d"),
-                        run_tests=_ok, health_check=_ok)
+                        journey=_JOURNEY, run_tests=_ok, health_check=_ok)
     assert versions.current("ACME").name == "v1"

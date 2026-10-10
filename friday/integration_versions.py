@@ -26,6 +26,14 @@ known-good version, so an unvalidated version is never left live.
 Names and versions are case-insensitive: they are lowercased before they reach
 the state or a path, so they cannot collide on a case-insensitive filesystem.
 
+`update` is the one install and update path, and it requires a `JourneySpec`
+(CAP-FORGE-007): after the health check it runs forge_journeys.complete()
+against the installed copy, and only a journey whose post-state somebody else
+observed keeps the version. A journey that fails, raises or goes unobserved
+rolls back exactly like a failed health check; a first install is then never
+admitted. There is no journey-less path, so no version reaches the known-good
+list without one.
+
 The test runner and the health check are injected callables returning a
 `Check`; this module never runs a repository's code itself. Names and version
 strings come from outside, so they are validated before they reach a path.
@@ -40,7 +48,9 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
+
+from friday import forge_journeys
 
 PROMOTED = "PROMOTED"
 ROLLED_BACK = "ROLLED_BACK"
@@ -69,6 +79,22 @@ class UpdateResult:
     stage: str          # "tests" | "health" | "known_bad" | "" when promoted
     reason: str
     current: str | None  # the version live after the call
+
+
+@dataclass(frozen=True)
+class JourneySpec:
+    """What admission needs to prove an installed version does its job.
+
+    `call_for` runs the installed capability's code in this process with
+    FRIDAY's privileges. A production caller must therefore return a `call`
+    that routes through the quarantine or the scoped runner, never import the
+    installed code directly."""
+    capability_class: str
+    #: Given the installed version directory, the capability's
+    #: `call(operation, **args)` entry point.
+    call_for: Callable[[Path], Callable[..., Any]]
+    #: The independent post-state reader; required for a desktop_driver.
+    observer: Callable[[Path], Any] | None = None
 
 
 def _now() -> str:
@@ -164,9 +190,17 @@ class IntegrationVersions:
     # -- writes ------------------------------------------------------------
     def update(self, name: str, version: str, source: Path, *,
                run_tests: Callable[[Path], Check],
-               health_check: Callable[[Path], Check]) -> UpdateResult:
+               health_check: Callable[[Path], Check],
+               journey: JourneySpec) -> UpdateResult:
         """Install `version` beside the current one, switch only if its tests
-        pass, and roll back if the health check after the switch fails."""
+        pass, roll back if the health check fails, then run a representative
+        journey (CAP-FORGE-007). The version becomes known-good only if the
+        journey passed against a post-state the capability did not report
+        itself; otherwise it is rolled back. `journey` is required: there is no
+        way to admit a version without one."""
+        if not isinstance(journey, JourneySpec):
+            raise VersionError("admission requires a journey (JourneySpec), "
+                               f"got {type(journey).__name__}")
         name = _safe("integration name", name)
         version = _safe("version", version)
         with self._lock:
@@ -195,9 +229,18 @@ class IntegrationVersions:
                 if not health.ok:
                     return self._fail(name, state, version, "health", health.detail)
 
+                state["pending"] = {"version": version, "stage": "journey"}
+                self._save(name, state)
+                proof = _run(lambda path: self._journey(name, version, path,
+                                                        journey),
+                             target, "journey")
+                if not proof.ok:
+                    return self._fail(name, state, version, "journey",
+                                      proof.detail)
+
                 state["good"].append(version)
                 state["pending"] = None
-                self._event(state, "promoted", version, "")
+                self._event(state, "promoted", version, proof.detail)
                 self._save(name, state)
                 return UpdateResult(name, version, PROMOTED, "", "", version)
             finally:
@@ -263,6 +306,25 @@ class IntegrationVersions:
         staging.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source, staging, symlinks=True)
         os.replace(staging, target)
+
+    def _journey(self, name: str, version: str, installed: Path,
+                 spec: JourneySpec) -> Check:
+        workdir = self._dir(name) / "journeys" / version
+        if workdir.exists():
+            shutil.rmtree(workdir)  # a stale post-state would hide the capability
+        workdir.mkdir(parents=True)
+        status = forge_journeys.complete(
+            f"{name}@{version}", spec.capability_class,
+            spec.call_for(installed), workdir=workdir, observer=spec.observer)
+        if status["status"] != forge_journeys.COMPLETE:
+            return Check(False, status["reason"])
+        seen = status["journey"]
+        # The evidence kept with the promotion: what was expected and what
+        # somebody else observed, not just that it passed.
+        return Check(True, json.dumps(
+            {"class": seen["capability_class"],
+             "expected": (seen["expected"] or "")[:100],
+             "observed": (seen["observed"] or "")[:100]}, sort_keys=True))
 
     def _demote(self, state: dict, version: str, reason: str) -> None:
         state["bad"][version] = {"reason": _clip(reason), "at": _now()}
