@@ -278,6 +278,10 @@ DECLARED = {
     "friday/quarantine_guard": (FUTURE,
                                 "copied into a quarantine root and run as the "
                                 "child's entry script, never imported"),
+    "friday/lab_benchmark": (FUTURE,
+                             "LAB-003: the narrow-task benchmark of routing, a linear "
+                             "classifier and MiniMind on the frozen set, run by "
+                             "tests/test_lab_benchmark.py"),
     "friday/experimental_local": (FUTURE,
                                   "LAB-001 slice 1: the narrow-task fence for the "
                                   "EXPERIMENTAL_LOCAL_MODEL route, run by "
