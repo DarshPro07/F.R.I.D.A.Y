@@ -4875,6 +4875,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Audit (at HEAD): a worker's stored result is free text capped at 4000 chars (~1000 tokens). The hermes_delegate terminal return carried all of it; hermes_status returns the full row. Handoff (friday/handoff.py) had no commit or evidence field, and files_changed/tests_run/blockers were never filled.  (build run, commit 1042ff0ff)",
         "next_action": "GAPS: The record's commit/tests/evidence depend on the worker following the labelled-line contract; an unlabelled worker yields empty fields (never guessed), with the summary carrying the prose.; hermes_status(run) still returns the whole row including usage_json/progress_json; not changed, because it is the on-demand read.; supervisor.delegate(wait=True)/wait_for still returns the full row plus result_payload; the MCP tool path does not use wait=True.; Controller: integrated as PARTIAL (no live caller or a path not yet covered); a confirm can judge the row's acceptance afterwards.; implementer did not claim acceptance met",
     }),
+    ('PRO-001', {
+        "status": PARTIAL,
+        "current_implementation": "Design: the row's next_action was one line, so I built the smallest slice. friday/opportunities.py holds two deterministic detectors over automation_runs, which the automation engine already writes. automation_failing fires on 3 or more consecutive failed runs; its evidence_key is the oldest run of  (build run, commit 717067a7c)",
+        "next_action": "GAPS: No live caller: nothing schedules scan() yet (declared FUTURE in reachability), and there is no MCP tool to list or resolve inbox rows. A later slice should add the scheduled call and a thin friday/tools wrapper.; Detectors cover automation failures and stalls only; health.py and world_monitor signals have no detector yet.; Reads of the opportunities table are filtered by workspace_id in Store, but the automations they scan are not workspace-filtered (the table is declared stamped-only upstream).; Controller: integrated as PARTIAL (no live caller or a path not yet covered); a confirm can judge the row's acceptance afterwards.; implementer did not claim acceptance met",
+    }),
 ]
 
 
