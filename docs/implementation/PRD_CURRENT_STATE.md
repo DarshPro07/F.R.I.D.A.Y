@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 56a0e46 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T13:06:08+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 78, "PARKED_BY_OWNER": 1, "PARTIAL": 109, "VERIFIED": 72}
+- HEAD: 3e5b275 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T14:49:27+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 75, "PARKED_BY_OWNER": 1, "PARTIAL": 112, "VERIFIED": 72}
 - Unresolved P0: 5
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (355): COG-006=SCOUT_DONE
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), BIN-002 (stale worktree), SIDE-001 (merge queue busy), AGENT-002 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CHAOS-001 (stale worktree), CTX-004 (stale worktree), CAP-FORGE-011 (blocked), UCW-002 (stale worktree), ULTRA-003 (stale worktree), EVOLAB-002 (stale worktree), LAB-004 (stale worktree), FAB-007 (stale worktree), CAP-FORGE-007 (REBASE_REQUIRED), ORCH-004 (stale worktree), ORCH-009 (stale worktree), OTEL-001 (stale worktree), SKILL-006 (launch failed)
-- Open escalations: 375
-  - RSCH-002 resolved: controller unpark: controller build integrated: INTEGRATED
-  - SKILL-006 resolved: controller unpark: controller build integrated: INTEGRATED
-  - RSCH-001 resolved: controller unpark: controller build integrated: INTEGRATED
-  - ORCH-001 resolved: controller unpark: controller build integrated: INTEGRATED
-  - HARN-001 resolved: controller unpark: controller build integrated: INTEGRATED
-  - CAP-FORGE-007 rebase: {"requirement": "CAP-FORGE-007", "result": "REBASE_REQUIRED", "red_green": {}, "verifier": null, "in
-  - ORCH-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-004 already exists
-  - ORCH-009 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-009 already exists
-  - OTEL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\otel-001 already exists
-  - SKILL-006 launch: git worktree add -b build/skill-006 F:\F.R.I.D.A.Y\.worktrees\skill-006 HEAD failed in F:\F.R.I.D.A.
+- Last wave (358): COG-006=ADVISED, FAB-003=FAILED_INTEGRATION
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), SIDE-001 (merge queue busy), AGENT-002 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CAP-FORGE-011 (blocked), EVOLAB-002 (stale worktree), LAB-004 (stale worktree), FAB-007 (stale worktree), CAP-FORGE-007 (REBASE_REQUIRED), ORCH-004 (stale worktree), ORCH-009 (stale worktree), OTEL-001 (stale worktree), SKILL-006 (launch failed), BIN-002 (merge queue busy), ULTRA-004 (stale worktree), UCW-002 (stale worktree), UCW-005 (stale worktree), UCW-006 (stale worktree), UCW-008 (stale worktree), BIN-004 (stale worktree), EVO-004 (stale worktree), FAIL-001 (stale worktree), ORCH-006 (stale worktree), SIDE-002 (stale worktree), PRO-001 (stale worktree)
+- Open escalations: 391
+  - UCW-002 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ucw-002 already exists
+  - UCW-005 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ucw-005 already exists
+  - UCW-006 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ucw-006 already exists
+  - UCW-008 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ucw-008 already exists
+  - BIN-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\bin-004 already exists
+  - EVO-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\evo-004 already exists
+  - FAIL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\fail-001 already exists
+  - ORCH-006 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-006 already exists
+  - SIDE-002 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\side-002 already exists
+  - PRO-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\pro-001 already exists
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
