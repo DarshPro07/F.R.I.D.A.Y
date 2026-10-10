@@ -153,15 +153,13 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 5864990 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T19:16:10+00:00
+- HEAD: 734e88f on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T19:42:20+00:00
 - Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 62, "PARKED_BY_OWNER": 1, "PARTIAL": 125, "VERIFIED": 72}
 - Unresolved P0: 5
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (376): EVAL-005=SCOUT_DONE
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CAP-FORGE-011 (blocked), OTEL-001 (stale worktree), SKILL-006 (launch failed), BIN-002 (merge queue busy), ULTRA-004 (stale worktree), SIDE-002 (stale worktree), PRO-001 (stale worktree), CUA-003 (merge queue busy), COG-006 (cascade exhausted), ORCH-002 (blocked), SIDE-001 (REBASE_REQUIRED), ORCH-003 (partial x4)
-- Open escalations: 413
-  - UCW-008 resolved: controller unpark: controller build integrated: INTEGRATED
-  - UCW-005 resolved: controller unpark: controller build integrated: INTEGRATED
+- Last wave (382): EVO-001=SCOUT_DONE
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CAP-FORGE-011 (blocked), OTEL-001 (stale worktree), SKILL-006 (launch failed), BIN-002 (merge queue busy), ULTRA-004 (stale worktree), SIDE-002 (stale worktree), PRO-001 (stale worktree), CUA-003 (merge queue busy), COG-006 (cascade exhausted), ORCH-002 (blocked), SIDE-001 (REBASE_REQUIRED), ORCH-003 (partial x4), FAB-003 (blocked), EVAL-004 (blocked)
+- Open escalations: 415
   - BIN-004 resolved: controller unpark: controller build integrated: INTEGRATED
   - FAIL-001 resolved: controller unpark: controller build integrated: INTEGRATED
   - ORCH-006 integration_queue: merge queue: ORCH-006 waited 1800s behind SIDE-001
@@ -170,5 +168,7 @@ That is the first implementation target of this program.
   - CAP-FORGE-007 resolved: controller unpark: controller build integrated: INTEGRATED
   - SIDE-001 rebase: {"requirement": "SIDE-001", "result": "REBASE_REQUIRED", "red_green": {}, "verifier": null, "integra
   - ORCH-003 partial: integrated without closing its gaps
+  - FAB-003 blocked: Q1 (owner): what makes a run 'verified' for ranking? Candidates: an objective-engine evaluation/hone
+  - EVAL-004 blocked: Q1 (research): research promotion = research_providers.set_preferred (research_providers.py:85-98), 
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
