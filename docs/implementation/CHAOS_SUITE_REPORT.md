@@ -1,17 +1,17 @@
 # Chaos suite report (CHAOS-001)
 
-Generated 2026-10-10T00:28:08+00:00 with `F:/F.R.I.D.A.Y/.venv-build/Scripts/python.exe` in 26s; pytest exit 0.
+Generated 2026-10-10T11:00:12+00:00 with `F:/F.R.I.D.A.Y/.venv-build/Scripts/python.exe` in 36s; pytest exit 0.
 
 **9/9 faults green.**
 
-| Fault | Result | Tests (cases) |
-|---|---|---|
-| browser_crash | PASS | `tests/test_chaos_suite.py::test_browser_crash_mid_task_fails_truthfully` (1) PASS |
-| provider_outage | PASS | `tests/test_provider_outage.py::test_an_outage_does_not_end_the_run` (1) PASS<br>`tests/test_provider_outage.py::test_the_task_succeeds_once_the_provider_comes_back` (1) PASS |
-| hermes_crash | PASS | `tests/test_hermes_engine.py::test_hermes_executor_reports_unavailable_not_a_crash` (1) PASS<br>`tests/test_chaos_suite.py::test_hermes_crash_mid_run_fails_truthfully` (3) PASS |
-| invalid_model_response | PASS | `tests/test_chaos_suite.py::test_an_invalid_model_answer_leaves_the_deterministic_plan_not_a_crash` (9) PASS<br>`tests/test_resilience.py::test_the_empty_completion_is_recognised` (1) PASS<br>`tests/test_resilience.py::test_the_exhausted_form_is_recognised_too` (1) PASS |
-| db_contention | PASS | `tests/test_store_durability.py::test_kill_during_write_leaves_a_consistent_database` (1) PASS<br>`tests/test_store_durability.py::test_two_processes_write_concurrently_without_lock_errors` (1) PASS |
-| network_loss | PASS | `tests/test_chaos_suite.py::test_network_loss_marks_the_task_degraded_and_recovers` (4) PASS<br>`tests/test_chaos_suite.py::test_network_loss_that_never_ends_fails_truthfully` (1) PASS |
-| malformed_tool_output | PASS | `tests/test_chaos_suite.py::test_malformed_tool_output_is_a_failure_not_success` (4) PASS |
-| worker_death | PASS | `tests/test_chaos_restart.py::test_control_plane_killed_mid_task_resumes_in_a_fresh_process` (1) PASS<br>`tests/test_chaos_suite.py::test_worker_death_with_two_runs_in_flight_resumes_both_exactly_once` (1) PASS |
-| reboot | PASS | `tests/test_chaos_suite.py::test_cold_boot_sweeps_stale_leases_and_names_the_orphan` (1) PASS |
+| Fault | Result | Evidence | Tests (cases) |
+|---|---|---|---|
+| browser_crash | PASS | injects a Playwright-style TargetClosedError at the capability port mid-task; asserts the task fails naming the crash and downstream work is skipped | `tests/test_chaos_suite.py::test_browser_crash_mid_task_fails_truthfully` (1) PASS |
+| provider_outage | PASS | injects a 503 UNAVAILABLE from the model provider; asserts the run survives with a future and the task succeeds once the provider returns | `tests/test_provider_outage.py::test_an_outage_does_not_end_the_run` (1) PASS<br>`tests/test_provider_outage.py::test_the_task_succeeds_once_the_provider_comes_back` (1) PASS |
+| hermes_crash | PASS | injects a crashed, raising and connection-lost Hermes supervisor mid-run; asserts the executor reports failed with the engine named, never success | `tests/test_hermes_engine.py::test_hermes_executor_reports_unavailable_not_a_crash` (1) PASS<br>`tests/test_chaos_suite.py::test_hermes_crash_mid_run_fails_truthfully` (3) PASS |
+| invalid_model_response | PASS | injects empty, non-JSON, wrongly shaped and provider-error model answers at the planner; asserts the deterministic plan is kept and nothing crashes | `tests/test_chaos_suite.py::test_an_invalid_model_answer_leaves_the_deterministic_plan_not_a_crash` (9) PASS<br>`tests/test_resilience.py::test_the_empty_completion_is_recognised` (1) PASS<br>`tests/test_resilience.py::test_the_exhausted_form_is_recognised_too` (1) PASS |
+| db_contention | PASS | injects a second process writing, a writer killed mid-write, a write lock held beyond the busy timeout before the run starts, and the same lock taken while a finished tool's result is recorded; asserts a consistent database and a typed lock error, a clean finish after the early lock, and for the late lock recovery only after lease expiry via the watchdog with the tool run a SECOND time (known defect in friday/continuous.py, fenced, listed in gaps) | `tests/test_store_durability.py::test_kill_during_write_leaves_a_consistent_database` (1) PASS<br>`tests/test_store_durability.py::test_two_processes_write_concurrently_without_lock_errors` (1) PASS<br>`tests/test_chaos_suite.py::test_a_write_lock_held_before_the_run_starts_stalls_it_and_it_finishes_after` (1) PASS<br>`tests/test_chaos_suite.py::test_a_write_lock_held_while_a_result_is_recorded_recovers_after_lease_expiry_but_reruns_the_tool` (1) PASS |
+| network_loss | PASS | injects connection reset, refused, DNS failure and an unreachable-gateway envelope at the port; asserts a CONNECTIVITY retry then success, and a bounded typed failure when the link stays down | `tests/test_chaos_suite.py::test_network_loss_marks_the_task_degraded_and_recovers` (4) PASS<br>`tests/test_chaos_suite.py::test_network_loss_that_never_ends_fails_truthfully` (1) PASS |
+| malformed_tool_output | PASS | injects non-result tool output at the port; asserts a STRUCTURAL failure, downstream tasks skipped, never a success | `tests/test_chaos_suite.py::test_malformed_tool_output_is_a_failure_not_success` (4) PASS |
+| worker_death | PASS | injects the loss of the process that holds the leases, with one and two runs in flight; asserts a fresh process resumes each run exactly once | `tests/test_chaos_restart.py::test_control_plane_killed_mid_task_resumes_in_a_fresh_process` (1) PASS<br>`tests/test_chaos_suite.py::test_worker_death_with_two_runs_in_flight_resumes_both_exactly_once` (1) PASS |
+| reboot | PASS | injects a cold boot with only the database left; asserts stale leases are swept and the orphaned task is named | `tests/test_chaos_suite.py::test_cold_boot_sweeps_stale_leases_and_names_the_orphan` (1) PASS |

@@ -75,6 +75,8 @@ FAULT_MAP = {
     "db_contention": (
         "tests/test_store_durability.py::test_kill_during_write_leaves_a_consistent_database",
         "tests/test_store_durability.py::test_two_processes_write_concurrently_without_lock_errors",
+        "tests/test_chaos_suite.py::test_a_write_lock_held_before_the_run_starts_stalls_it_and_it_finishes_after",
+        "tests/test_chaos_suite.py::test_a_write_lock_held_while_a_result_is_recorded_recovers_after_lease_expiry_but_reruns_the_tool",
     ),
     "network_loss": (
         "tests/test_chaos_suite.py::test_network_loss_marks_the_task_degraded_and_recovers",
@@ -90,6 +92,50 @@ FAULT_MAP = {
     "reboot": (
         "tests/test_chaos_suite.py::test_cold_boot_sweeps_stale_leases_and_names_the_orphan",
     ),
+}
+
+
+def test_every_fault_states_what_was_injected_and_what_was_asserted():
+    """The report carries evidence per fault, not only a verdict: the seam
+    that was faulted and the end state that was asserted."""
+    assert set(FAULT_EVIDENCE) == set(PRD_FAULTS)
+    for fault, line in FAULT_EVIDENCE.items():
+        assert line.strip() and "injects" in line and "asserts" in line,             f"{fault}: evidence must say what it injects and what it asserts"
+
+
+# Literal on purpose, like FAULT_MAP: the report copies it into each row.
+FAULT_EVIDENCE = {
+    "browser_crash": (
+        "injects a Playwright-style TargetClosedError at the capability port "
+        "mid-task; asserts the task fails naming the crash and downstream work is skipped"),
+    "provider_outage": (
+        "injects a 503 UNAVAILABLE from the model provider; asserts the run "
+        "survives with a future and the task succeeds once the provider returns"),
+    "hermes_crash": (
+        "injects a crashed, raising and connection-lost Hermes supervisor mid-run; "
+        "asserts the executor reports failed with the engine named, never success"),
+    "invalid_model_response": (
+        "injects empty, non-JSON, wrongly shaped and provider-error model answers at the planner; "
+        "asserts the deterministic plan is kept and nothing crashes"),
+    "db_contention": (
+        "injects a second process writing, a writer killed mid-write, a write lock "
+        "held beyond the busy timeout before the run starts, and the same lock taken "
+        "while a finished tool's result is recorded; asserts a consistent database and "
+        "a typed lock error, a clean finish after the early lock, and for the late "
+        "lock recovery only after lease expiry via the watchdog with the tool run a "
+        "SECOND time (known defect in friday/continuous.py, fenced, listed in gaps)"),
+    "network_loss": (
+        "injects connection reset, refused, DNS failure and an unreachable-gateway envelope at the port; "
+        "asserts a CONNECTIVITY retry then success, and a bounded typed failure when the link stays down"),
+    "malformed_tool_output": (
+        "injects non-result tool output at the port; asserts a STRUCTURAL failure, "
+        "downstream tasks skipped, never a success"),
+    "worker_death": (
+        "injects the loss of the process that holds the leases, with one and two runs in flight; "
+        "asserts a fresh process resumes each run exactly once"),
+    "reboot": (
+        "injects a cold boot with only the database left; asserts stale leases "
+        "are swept and the orphaned task is named"),
 }
 
 
@@ -141,6 +187,8 @@ def test_the_report_is_green_only_when_every_mapped_test_passed():
             rel, _, name = node_id.partition("::")
             outcomes[(Path(rel).stem, name)] = ["PASS"]
     assert {r["result"] for r in report.judge(FAULT_MAP, outcomes)} == {"PASS"}
+    judged = report.judge(FAULT_MAP, outcomes, FAULT_EVIDENCE)
+    assert {r["fault"]: r["evidence"] for r in judged} == FAULT_EVIDENCE
 
     rel, _, name = FAULT_MAP["network_loss"][0].partition("::")
     key = (Path(rel).stem, name)
@@ -169,6 +217,9 @@ def report_disagreements(report: dict) -> list[str]:
         fault = row["fault"]
         if row.get("result") != "PASS":
             bad.append(f"{fault} is {row.get('result')!r}")
+        if row.get("evidence") != FAULT_EVIDENCE.get(fault):
+            bad.append(f"{fault} evidence {row.get('evidence')!r} is not the "
+                       "suite's declared evidence")
         if tuple(t.get("node_id") for t in row.get("tests", ())) != FAULT_MAP[fault]:
             bad.append(f"{fault} reports "
                        f"{[t.get('node_id') for t in row.get('tests', ())]}, "
@@ -673,3 +724,112 @@ def test_an_invalid_model_answer_leaves_the_deterministic_plan_not_a_crash(
     assert list(plan.unresolved) == list(deterministic.unresolved)
     # And the unusable answer was not kept to fail again on the next read.
     assert PM._RECENT == {}
+
+
+# ---------------------------------------------------------------------------
+# DB contention inside one process: another connection holds the write lock
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_write_lock_held_before_the_run_starts_stalls_it_and_it_finishes_after(
+        tmp_path, monkeypatch):
+    """Another connection owns the write lock for longer than the busy
+    timeout BEFORE the run starts. The first write (the lease) fails with a
+    typed error, no tool has run yet and nothing is reported as done; once
+    the lock is released the same run completes with the tool run once. The
+    risky moment, a lock taken after the tool ran, is the next test."""
+    import sqlite3
+
+    from friday import store as S
+    monkeypatch.setattr(S, "BUSY_TIMEOUT_S", 0.3)
+    db = S.Store(tmp_path / "contended.sqlite3")
+    port = ScriptedPort()
+    try:
+        run_id = compile_chain(db, ["web_fetch"])
+        rival = sqlite3.connect(str(db.path), timeout=0.3, isolation_level=None)
+        rival.execute("BEGIN IMMEDIATE")
+        try:
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                await ContinuousTaskExecutor(db, port, executor_id="chaos").start(run_id)
+        finally:
+            rival.execute("ROLLBACK")
+            rival.close()
+        assert db.objective_run(run_id)["status"] not in O.RUN_TERMINAL, \
+            "a run that could not record its work was reported finished"
+        assert by_capability(db, run_id)["web_fetch"]["status"] != TaskStatus.SUCCEEDED
+
+        bring_every_wake_forward(db, run_id)
+        await ContinuousTaskExecutor(db, port, executor_id="chaos").start(run_id)
+
+        assert db.objective_run(run_id)["status"] == O.RunStatus.COMPLETED
+        assert by_capability(db, run_id)["web_fetch"]["status"] == TaskStatus.SUCCEEDED
+        assert port.calls.count("web_fetch") == 1, \
+            f"the tool ran {port.calls.count('web_fetch')} times for one task"
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_a_write_lock_held_while_a_result_is_recorded_recovers_after_lease_expiry_but_reruns_the_tool(
+        tmp_path, monkeypatch):
+    """The rival takes the write lock inside the tool call, so the tool has
+    already run when its result cannot be recorded. What the product does
+    today, pinned honestly: start() raises a typed lock error (from the
+    release() in its own error path, which hides the original), the lease
+    stays held so another executor cannot take the run, nothing is marked
+    done, and only after the lease expires does the watchdog recover the
+    run to COMPLETED. The tool is run a SECOND time. That duplicate side
+    effect is a product defect in friday/continuous.py (fenced for this
+    build, see the build's gaps); when it is fixed this test must change
+    to expect one call."""
+    import sqlite3
+    from datetime import datetime, timedelta
+
+    from friday import store as S
+    monkeypatch.setattr(S, "BUSY_TIMEOUT_S", 0.3)
+    db = S.Store(tmp_path / "contended_mid.sqlite3")
+    holder: dict = {}
+
+    class LockingPort(ScriptedPort):
+        async def __call__(self, capability, arguments):
+            result = await super().__call__(capability, arguments)
+            if "rival" not in holder:
+                rival = sqlite3.connect(str(db.path), timeout=0.3, isolation_level=None)
+                rival.execute("BEGIN IMMEDIATE")
+                holder["rival"] = rival
+            return result
+
+    port = LockingPort()
+    try:
+        run_id = compile_chain(db, ["web_fetch"])
+        try:
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                await ContinuousTaskExecutor(db, port, executor_id="chaos").start(run_id)
+        finally:
+            holder["rival"].execute("ROLLBACK")
+            holder["rival"].close()
+
+        # The tool ran once, its result was lost, and nothing claims success.
+        assert port.calls == ["web_fetch"]
+        assert db.objective_run(run_id)["status"] not in O.RUN_TERMINAL
+        assert by_capability(db, run_id)["web_fetch"]["status"] != TaskStatus.SUCCEEDED
+
+        # The lease is still held: a second executor cannot take the run yet.
+        other = ContinuousTaskExecutor(db, port, executor_id="other")
+        assert await other.start(run_id) is False
+        assert port.calls == ["web_fetch"]
+
+        # Recovery needs the lease to expire; the watchdog then finishes it.
+        db.touch_objective_run(
+            run_id, lease_expiry=(datetime.now() - timedelta(hours=1)).isoformat())
+        assert await RunWatchdog(other).sweep_once() == [run_id]
+        bring_every_wake_forward(db, run_id)
+        await other.start(run_id)
+
+        assert db.objective_run(run_id)["status"] == O.RunStatus.COMPLETED
+        assert by_capability(db, run_id)["web_fetch"]["status"] == TaskStatus.SUCCEEDED
+        # Pinned defect: one task, two side effects.
+        assert port.calls == ["web_fetch", "web_fetch"], port.calls
+    finally:
+        db.close()

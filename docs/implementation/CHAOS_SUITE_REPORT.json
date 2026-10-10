@@ -3,6 +3,7 @@
     {
       "fault": "browser_crash",
       "result": "PASS",
+      "evidence": "injects a Playwright-style TargetClosedError at the capability port mid-task; asserts the task fails naming the crash and downstream work is skipped",
       "tests": [
         {
           "node_id": "tests/test_chaos_suite.py::test_browser_crash_mid_task_fails_truthfully",
@@ -14,6 +15,7 @@
     {
       "fault": "provider_outage",
       "result": "PASS",
+      "evidence": "injects a 503 UNAVAILABLE from the model provider; asserts the run survives with a future and the task succeeds once the provider returns",
       "tests": [
         {
           "node_id": "tests/test_provider_outage.py::test_an_outage_does_not_end_the_run",
@@ -30,6 +32,7 @@
     {
       "fault": "hermes_crash",
       "result": "PASS",
+      "evidence": "injects a crashed, raising and connection-lost Hermes supervisor mid-run; asserts the executor reports failed with the engine named, never success",
       "tests": [
         {
           "node_id": "tests/test_hermes_engine.py::test_hermes_executor_reports_unavailable_not_a_crash",
@@ -46,6 +49,7 @@
     {
       "fault": "invalid_model_response",
       "result": "PASS",
+      "evidence": "injects empty, non-JSON, wrongly shaped and provider-error model answers at the planner; asserts the deterministic plan is kept and nothing crashes",
       "tests": [
         {
           "node_id": "tests/test_chaos_suite.py::test_an_invalid_model_answer_leaves_the_deterministic_plan_not_a_crash",
@@ -67,6 +71,7 @@
     {
       "fault": "db_contention",
       "result": "PASS",
+      "evidence": "injects a second process writing, a writer killed mid-write, a write lock held beyond the busy timeout before the run starts, and the same lock taken while a finished tool's result is recorded; asserts a consistent database and a typed lock error, a clean finish after the early lock, and for the late lock recovery only after lease expiry via the watchdog with the tool run a SECOND time (known defect in friday/continuous.py, fenced, listed in gaps)",
       "tests": [
         {
           "node_id": "tests/test_store_durability.py::test_kill_during_write_leaves_a_consistent_database",
@@ -77,12 +82,23 @@
           "node_id": "tests/test_store_durability.py::test_two_processes_write_concurrently_without_lock_errors",
           "cases": 1,
           "result": "PASS"
+        },
+        {
+          "node_id": "tests/test_chaos_suite.py::test_a_write_lock_held_before_the_run_starts_stalls_it_and_it_finishes_after",
+          "cases": 1,
+          "result": "PASS"
+        },
+        {
+          "node_id": "tests/test_chaos_suite.py::test_a_write_lock_held_while_a_result_is_recorded_recovers_after_lease_expiry_but_reruns_the_tool",
+          "cases": 1,
+          "result": "PASS"
         }
       ]
     },
     {
       "fault": "network_loss",
       "result": "PASS",
+      "evidence": "injects connection reset, refused, DNS failure and an unreachable-gateway envelope at the port; asserts a CONNECTIVITY retry then success, and a bounded typed failure when the link stays down",
       "tests": [
         {
           "node_id": "tests/test_chaos_suite.py::test_network_loss_marks_the_task_degraded_and_recovers",
@@ -99,6 +115,7 @@
     {
       "fault": "malformed_tool_output",
       "result": "PASS",
+      "evidence": "injects non-result tool output at the port; asserts a STRUCTURAL failure, downstream tasks skipped, never a success",
       "tests": [
         {
           "node_id": "tests/test_chaos_suite.py::test_malformed_tool_output_is_a_failure_not_success",
@@ -110,6 +127,7 @@
     {
       "fault": "worker_death",
       "result": "PASS",
+      "evidence": "injects the loss of the process that holds the leases, with one and two runs in flight; asserts a fresh process resumes each run exactly once",
       "tests": [
         {
           "node_id": "tests/test_chaos_restart.py::test_control_plane_killed_mid_task_resumes_in_a_fresh_process",
@@ -126,6 +144,7 @@
     {
       "fault": "reboot",
       "result": "PASS",
+      "evidence": "injects a cold boot with only the database left; asserts stale leases are swept and the orphaned task is named",
       "tests": [
         {
           "node_id": "tests/test_chaos_suite.py::test_cold_boot_sweeps_stale_leases_and_names_the_orphan",

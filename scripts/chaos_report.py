@@ -68,7 +68,8 @@ def collect_outcomes(junit: Path) -> dict[tuple[str, str], list[str]]:
 
 
 def judge(fault_map: dict[str, tuple[str, ...]],
-          outcomes: dict[tuple[str, str], list[str]]) -> list[dict]:
+          outcomes: dict[tuple[str, str], list[str]],
+          evidence: dict[str, str] | None = None) -> list[dict]:
     rows = []
     for fault, node_ids in fault_map.items():
         tests, green = [], True
@@ -80,8 +81,10 @@ def judge(fault_map: dict[str, tuple[str, ...]],
                        "FAIL" if "FAIL" in seen else "SKIP")
             green = green and verdict == "PASS"
             tests.append({"node_id": node_id, "cases": len(seen), "result": verdict})
-        rows.append({"fault": fault, "result": "PASS" if green else "FAIL",
-                     "tests": tests})
+        row = {"fault": fault, "result": "PASS" if green else "FAIL"}
+        if evidence is not None:
+            row["evidence"] = evidence.get(fault, "")
+        rows.append({**row, "tests": tests})
     return rows
 
 
@@ -92,12 +95,13 @@ def render(rows: list[dict], *, python: str, seconds: float, pytest_exit: int) -
         f"Generated {datetime.now(timezone.utc).isoformat(timespec='seconds')} "
         f"with `{python}` in {seconds:.0f}s; pytest exit {pytest_exit}.", "",
         f"**{green}/{len(rows)} faults green.**", "",
-        "| Fault | Result | Tests (cases) |", "|---|---|---|",
+        "| Fault | Result | Evidence | Tests (cases) |", "|---|---|---|---|",
     ]
     for row in rows:
         tests = "<br>".join(f"`{t['node_id']}` ({t['cases']}) {t['result']}"
                             for t in row["tests"])
-        lines.append(f"| {row['fault']} | {row['result']} | {tests} |")
+        lines.append(f"| {row['fault']} | {row['result']} | "
+                     f"{row.get('evidence', '')} | {tests} |")
     return "\n".join(lines) + "\n"
 
 
@@ -119,7 +123,8 @@ def main(argv: list[str] | None = None) -> int:
         if not junit.is_file():
             print(f"pytest produced no results (exit {exit_code})", file=sys.stderr)
             return 1
-        rows = judge(fault_map, collect_outcomes(junit))
+        rows = judge(fault_map, collect_outcomes(junit),
+                     dict(_literal("FAULT_EVIDENCE")))
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
