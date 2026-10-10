@@ -300,5 +300,7 @@ UNSCOPED = {
                "senses lands in scoped tables",
     "evolution_proposals": "FRIDAY's own self-evolution proposals, like `promotions`; "
                            "a trigger names a capability or path, not a tenant's data",
+    "side_effect_ledger": "child rows of `runs`; carries the run and objective id, "
+                          "so the owner is read through the scoped `objective_runs` row",
     "workspaces": "the registry itself",
 }

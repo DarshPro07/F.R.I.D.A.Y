@@ -38,6 +38,7 @@ from friday.fsjail import FileJail, JailError, is_reparse_point
 
 from friday.policy import PolicyEngine, default_engine
 
+from friday import side_effects
 from friday.toolsets import artifacts
 from friday.toolsets.system import APPROVAL_PREFIX
 
@@ -434,6 +435,24 @@ def files_search(
     ))
 
 
+def _unledgered(run: c.Run, started: c.ActionResult, *, capability: str,
+                target: Path, effect: str, reversibility: str,
+                output: dict) -> c.ActionResult | None:
+    """Write the SIDE-001 ledger row for a change that has happened.
+
+    None when the row is written. When it cannot be, the change is real but
+    unrecorded, which the verifier refuses - so say partial, not succeeded.
+    """
+    try:
+        side_effects.record(run, capability=capability, target=str(target),
+                            effect=effect, reversibility=reversibility)
+    except Exception as exc:  # noqa: BLE001
+        return run.record(c.partial(
+            started, f"{effect}, but the side-effect ledger row could not be "
+                     f"written: {exc}", output=output))
+    return None
+
+
 def _write_and_verify(
     run: c.Run, started: c.ActionResult, target: Path, content: str, *,
     tool: str, existed: bool,
@@ -463,12 +482,21 @@ def _write_and_verify(
         ),
         metadata={"overwrote_existing": existed},
     )
+    effect = f"{'overwrote' if existed else 'created'} {target}"
+    output = _scoped({"path": str(target), "bytes": len(payload),
+                      "overwrote_existing": existed})
+    # An overwrite destroys the old content; a new file is undone by deleting it.
+    unrecorded = _unledgered(
+        run, started, capability=tool, target=target, effect=effect, output=output,
+        reversibility=(side_effects.IRREVERSIBLE if existed
+                       else side_effects.COMPENSABLE))
+    if unrecorded:
+        return unrecorded
     return run.record(c.succeeded(
         started,
-        output=_scoped({"path": str(target), "bytes": len(payload),
-                        "overwrote_existing": existed}),
+        output=output,
         artifacts=(artifact,),
-        side_effects=(f"{'overwrote' if existed else 'created'} {target}",),
+        side_effects=(effect,),
         verification=c.Verification(
             method="write_readback",
             evidence=f"{target.name}: {len(payload)} bytes written and read back "
@@ -815,9 +843,15 @@ def files_delete(run: c.Run, path: str, *, permanent: bool = False,
                 f"{target.name} was sent to the Recycle Bin but is still on disk",
                 output=_scoped({"result": FAILED, "path": str(target),
                                 "restorable": True, "confirm": None})))
-        return run.record(c.succeeded(started, output=_scoped(
-            {"result": RECYCLED, "mode": "recycle", "path": str(target),
-             "bytes": size, "restorable": True, "confirm": None}),
+        output = _scoped({"result": RECYCLED, "mode": "recycle", "path": str(target),
+                          "bytes": size, "restorable": True, "confirm": None})
+        unrecorded = _unledgered(
+            run, started, capability=tool_id, target=target,
+            effect=f"recycled {target.name}", output=output,
+            reversibility=side_effects.REVERSIBLE)
+        if unrecorded:
+            return unrecorded
+        return run.record(c.succeeded(started, output=output,
             side_effects=(f"recycled {target.name}",),
             verification=c.Verification(method="path_absent_after_recycle",
                 evidence=f"{target.name} ({size} bytes) went to the Recycle Bin and can be restored; "
@@ -849,9 +883,15 @@ def files_delete(run: c.Run, path: str, *, permanent: bool = False,
             started,
             f"{target.name} could not be removed; it is still on disk",
             output=_scoped({"result": FAILED, "path": str(target), "confirm": None})))
-    return run.record(c.succeeded(started, output=_scoped(
-        {"result": DELETED, "mode": "permanent", "path": str(target),
-         "bytes": size, "restorable": False, "confirm": None}),
+    output = _scoped({"result": DELETED, "mode": "permanent", "path": str(target),
+                      "bytes": size, "restorable": False, "confirm": None})
+    unrecorded = _unledgered(
+        run, started, capability=tool_id, target=target,
+        effect=f"permanently deleted {target.name}", output=output,
+        reversibility=side_effects.IRREVERSIBLE)
+    if unrecorded:
+        return unrecorded
+    return run.record(c.succeeded(started, output=output,
         side_effects=(f"permanently deleted {target.name}",),
         verification=c.Verification(method="path_absent_after_delete",
             evidence=f"{target.name} ({size} bytes) is permanently gone from {target}; "

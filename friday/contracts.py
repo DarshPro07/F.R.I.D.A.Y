@@ -424,6 +424,12 @@ class Run:
     #: claim is audited against it by default rather than only when a caller
     #: remembers to ask.
     correlation: Correlation | None = None
+    #: The store holding the durable state this run belongs to (an object
+    #: with `record_side_effect`), when an objective executor built the run.
+    #: The side-effect ledger row must land where the completion verifier
+    #: will read it - the objective's own store - not in whatever store a
+    #: capability happens to resolve by itself.
+    ledger: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.state not in RUN_STATES:

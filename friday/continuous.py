@@ -1301,7 +1301,8 @@ class ContinuousTaskExecutor:
                      request=str(row.get("request") or "")[:240],
                      capability=task["capability"],
                      provenance=envelope.provenance,
-                     attended=envelope.attended, envelope=envelope)
+                     attended=envelope.attended, envelope=envelope,
+                     ledger=self.store)
 
     async def _dispatch(self, capability_id: str, arguments: dict,
                         run: c.Run, task_id: str = "") -> dict:

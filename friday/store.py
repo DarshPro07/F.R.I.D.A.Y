@@ -1115,6 +1115,23 @@ CREATE TABLE IF NOT EXISTS network_grants (
     revoked_reason TEXT
 );
 
+-- PRD v7 SIDE-001: one row per meaningful external change a capability made,
+-- with how it could be undone. Written by the capability on its success path
+-- and read back by the completion verifier (completion_evidence_gap).
+CREATE TABLE IF NOT EXISTS side_effect_ledger (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id         TEXT NOT NULL,
+    objective_id   TEXT NOT NULL DEFAULT '',
+    capability     TEXT NOT NULL,
+    target         TEXT NOT NULL,
+    effect         TEXT NOT NULL,
+    reversibility  TEXT NOT NULL
+        CHECK (reversibility IN ('reversible', 'compensable', 'irreversible')),
+    recorded_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_side_effect_ledger_run ON side_effect_ledger(run_id);
+CREATE INDEX IF NOT EXISTS idx_side_effect_ledger_objective ON side_effect_ledger(objective_id);
+
 CREATE TABLE IF NOT EXISTS confirmations (
     nonce        TEXT PRIMARY KEY,
     asker        TEXT NOT NULL,
@@ -2897,6 +2914,49 @@ class Store:
                 "WHERE revoked_at IS NULL", (now, reason))
         return live
 
+    # -- side-effect ledger (PRD v7 SIDE-001) ----------------------------------
+
+    def record_side_effect(self, *, run_id: str, objective_id: str, capability: str,
+                           target: str, effect: str, reversibility: str) -> int:
+        from friday.side_effects import REVERSIBILITIES
+        if reversibility not in REVERSIBILITIES:
+            raise ValueError(f"reversibility must be one of {REVERSIBILITIES}, "
+                             f"not {reversibility!r}")
+        with self._tx() as conn:
+            return conn.execute(
+                "INSERT INTO side_effect_ledger (run_id, objective_id, capability, "
+                "target, effect, reversibility, recorded_at) VALUES (?,?,?,?,?,?,?)",
+                (run_id, objective_id or "", capability, target, effect,
+                 reversibility, now_iso())).lastrowid
+
+    def side_effects_for(self, *, run_id: str | None = None,
+                         objective_id: str | None = None) -> list[dict]:
+        """The ledger rows for an action run and/or an objective, oldest first."""
+        clauses, params = [], []
+        for column, value in (("run_id", run_id), ("objective_id", objective_id)):
+            if value is not None:
+                clauses.append(f"{column}=?")
+                params.append(value)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        return [dict(row) for row in self._conn.execute(
+            f"SELECT * FROM side_effect_ledger{where} ORDER BY id", params)]
+
+    def _unledgered_tasks(self, tasks: list[dict]) -> set[str]:
+        """Succeeded tasks whose result claims a side effect from a ledgered
+        capability that has no ledger row for the action run that made it."""
+        from friday.side_effects import LEDGERED
+        unledgered: set[str] = set()
+        for task in tasks:
+            result = task.get("result")
+            if (task.get("status") != "SUCCEEDED" or not isinstance(result, dict)
+                    or result.get("tool_id") not in LEDGERED
+                    or not result.get("side_effects")):
+                continue
+            rows = self.side_effects_for(run_id=str(result.get("run_id") or ""))
+            if not any(row["capability"] == result["tool_id"] for row in rows):
+                unledgered.add(task["task_id"])
+        return unledgered
+
     # -- devices (PRD v7 DEVICE-003) -------------------------------------------
     # Each lifecycle step is one conditional UPDATE on the state the step
     # expects, so two racing callers cannot both advance the same device.
@@ -3465,6 +3525,14 @@ class Store:
 
         tasks = self.objective_tasks(run_id)
         events = self.objective_events(run_id)
+        # SIDE-001: evidence for a task that claims a side effect the ledger
+        # never recorded does not pass, here, where every completion gate
+        # (this store's and the executor's) reads it.
+        unledgered = self._unledgered_tasks(tasks)
+        evidence = [
+            {**e, "passed": False, "side_effect_ledger": "no row recorded"}
+            if isinstance(e, dict) and e.get("task_id") in unledgered else e
+            for e in loads(run.get("evidence"), [])]
         workers = sorted({
             str((loads(t.get("result"), {}) or {}).get("worker") or "")
             for t in tasks} - {""})
@@ -3495,7 +3563,7 @@ class Store:
                                                   "task.failed", "run.paused",
                                                   "run.resumed", "lease.acquired",
                                                   "continuation.scheduled")],
-            "evidence": loads(run.get("evidence"), []),
+            "evidence": evidence,
             "retry_budget": run.get("retry_budget") or 3,
             "cost_budget_tokens": run.get("cost_budget_tokens") or 0,
             "time_budget_s": run.get("time_budget_s") or 0,
