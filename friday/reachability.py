@@ -303,10 +303,10 @@ DECLARED = {
                                  "BIN-001 slice 1: the knowledge-extraction core, not yet "
                                  "wired to the forge or registry, run by "
                                  "tests/test_knowledge_extract.py"),
-    "friday/telemetry": (FUTURE,
-                         "OTEL-001: the local GenAI-convention span recorder; only "
-                         "the claude_code executor emits so far (model gateway and "
-                         "Hermes bridge are the next emitters), run by "
+    "friday/telemetry": (PRODUCTION,
+                         "OTEL-001: the local GenAI-convention span recorder; the "
+                         "claude_code executor and the model gateway emit (the "
+                         "Hermes bridge is the next emitter), run by "
                          "tests/test_telemetry.py"),
     "friday/onboarding": (PRODUCTION,
                           "the owner's interview console: friday.onboarding "

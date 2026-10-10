@@ -171,3 +171,72 @@ def test_the_claude_code_executor_emits_a_live_span(tmp_path, monkeypatch):
         assert "fix it" not in out.read_text(encoding="utf-8")
     finally:
         telemetry.reset()
+
+
+# -- the model gateway emits a chat span under the caller's span ------------
+
+
+def _fake_gateway(tmp_path):
+    import sys
+    from pathlib import Path
+    from friday import model_gateway as mg
+    fake = str(Path(__file__).parent / "fake_model_gateway_worker.py")
+    worker = mg.ModelGatewayWorker(command=[sys.executable, fake], profile="")
+    return mg, mg.ModelGateway(
+        worker=worker, telemetry=mg.GatewayTelemetry(tmp_path / "gateway.sqlite3"),
+        tier_table={t: ("anthropic", "fake-model") for t in mg.TIERS})
+
+
+def test_the_gateway_nests_a_chat_span_under_the_executor_span(tmp_path, monkeypatch):
+    from friday import provider_cooldowns as PC
+    monkeypatch.setattr(PC, "COOLDOWNS_FILE", tmp_path / "cooldowns.json")
+    rec = telemetry.configure(path=tmp_path / "gw.jsonl")
+    mg, gw = _fake_gateway(tmp_path)
+    try:
+        req = mg.ModelGatewayRequest(
+            objective_id="obj-otel", task_class=mg.SIMPLE,
+            context_package=mg.compile_context(
+                system="You are Friday.", user=f"say hi {DUMMY_SECRET}"))
+        with telemetry.span("invoke_agent claude_code",
+                            component="executor.claude_code") as root:
+            result = gw.infer(req)
+        assert result.status == "ok"
+
+        spans = rec.trace(root.trace_id)
+        chat = [s for s in spans if s.component == "model_gateway"]
+        assert len(chat) == 1 and chat[0].parent_id == root.span_id
+        attrs = chat[0].attributes
+        assert attrs["gen_ai.operation.name"] == "chat"
+        assert attrs["gen_ai.request.model"] == result.model != ""
+        assert attrs["gen_ai.usage.input_tokens"] == result.input_tokens
+        assert attrs["gen_ai.usage.output_tokens"] == result.output_tokens
+        assert chat[0].name == f"chat {result.model}"
+
+        times = rec.component_time_ms(root.trace_id)
+        assert set(times) == {"executor.claude_code", "model_gateway"}
+        assert times["model_gateway"] > 0
+        assert sum(times.values()) == pytest.approx(rec.duration_ms(root.trace_id))
+
+        # Content stays off by default and the planted secret is never exported.
+        dumped = (tmp_path / "gw.jsonl").read_text(encoding="utf-8")
+        assert "say hi" not in dumped and DUMMY_SECRET not in dumped
+    finally:
+        gw.close()
+        telemetry.reset()
+
+
+def test_a_refused_gateway_call_is_an_error_span(tmp_path):
+    rec = telemetry.configure()
+    mg, gw = _fake_gateway(tmp_path)
+    try:
+        req = mg.ModelGatewayRequest(
+            objective_id="obj-big", task_class=mg.SIMPLE, max_input_tokens=1,
+            context_package=mg.compile_context(system="s", user="x " * 200))
+        with pytest.raises(mg.BudgetExceeded):
+            gw.infer(req)
+        (chat,) = [s for s in rec.spans() if s.component == "model_gateway"]
+        assert chat.status == telemetry.ERROR
+        assert chat.attributes["error.type"] == "BudgetExceeded"
+    finally:
+        gw.close()
+        telemetry.reset()

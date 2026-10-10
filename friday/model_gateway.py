@@ -60,6 +60,7 @@ from friday import domain_gate
 from friday import gateway_retry
 from friday import privacy
 from friday import provider_health
+from friday import telemetry as otel
 
 logger = logging.getLogger("friday.model_gateway")
 
@@ -1581,6 +1582,21 @@ class ModelGateway:
     # -- the call (FR-070 / FR-076 / FR-077 / FR-078 / FR-080 / FR-081) ----
 
     def infer(self, request: ModelGatewayRequest) -> ModelGatewayResult:
+        """One bounded call, recorded as a `chat` span under the caller's span
+        (OTEL-001). Metadata only: the messages and the answer are content and
+        are never attached here."""
+        with otel.span("chat", component="model_gateway",
+                       attributes={"gen_ai.operation.name": "chat"}) as sp:
+            result = self._infer_routed(request)
+            sp.name = f"chat {result.model}" if result.model else "chat"
+            sp.set("gen_ai.request.model", result.model)
+            sp.set("gen_ai.provider.name", result.provider)
+            sp.set("gen_ai.usage.input_tokens", result.input_tokens)
+            sp.set("gen_ai.usage.output_tokens", result.output_tokens)
+            sp.set("friday.result.status", result.status)
+            return result
+
+    def _infer_routed(self, request: ModelGatewayRequest) -> ModelGatewayResult:
         budget = budget_for(request.task_class)
         max_in = request.max_input_tokens or budget.max_input_tokens
         max_out = request.max_output_tokens or budget.max_output_tokens
