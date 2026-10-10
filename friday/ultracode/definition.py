@@ -22,7 +22,8 @@ costing artefact, not a runnable plan. It drops each step's `executor`,
 between two barriers into one pipeline, so independent roots would be chained
 and a `deterministic` stage would be dispatched to a model agent. The compiled
 spec is therefore a `DefinitionSpec` (`durable_runner_safe` is False) and
-`Compiled.require_durable_runner_safe()` always refuses. The DAG semantics
+`Compiled.require_durable_runner_safe()` always refuses; so does
+`runner.start_run` (NotDurableRunnerSafe). The DAG semantics
 (no barrier between independent steps, a dependent starts only when its handoff
 validates, a deterministic step goes to its executor and never a model) are
 delivered only by `run_definition`, in process.

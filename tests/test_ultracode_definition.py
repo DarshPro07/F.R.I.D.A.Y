@@ -414,3 +414,33 @@ async def test_a_terminal_step_result_is_checked_against_its_schema_too():
     outcome = await D.run_definition(compiled, agent=agent, executors=executors)
     assert outcome["verdict"].state == "INVALID"
     assert outcome["verdict"].field == "steps[4].outputs"
+
+
+# --- the durable runner refuses a flattened DAG (UCW-002 gap 1) --------------------
+
+def test_start_run_refuses_a_compiled_definition_spec_and_creates_no_run():
+    from friday.contracts import PERSON
+    from friday.store import Store
+    from friday.ultracode import runner as R
+
+    store = Store(":memory:")
+    compiled = D.compile_definition(D.parse_definition(json.dumps(build_capability())))
+    with pytest.raises(R.NotDurableRunnerSafe) as caught:
+        R.start_run(store, compiled.spec, ["a"], provenance=PERSON, attended=True)
+    assert caught.value.spec_id == "friday.build_capability@v1"
+    assert "depends_on" in str(caught.value) and "deterministic" in str(caught.value)
+    assert isinstance(caught.value, ValueError)
+    assert store.objective_runs(limit=10) == []          # refused before any run exists
+
+
+def test_start_run_still_admits_a_plain_ultra001_spec():
+    from friday.contracts import PERSON
+    from friday.store import Store
+    from friday.ultracode import runner as R
+
+    store = Store(":memory:")
+    spec = S.parse_spec({"id": "plain", "budget_tokens": 1000, "stages": [
+        {"id": "s1", "template": "lookup", "barrier": False, "schema": _NOTES,
+         "tier": "economy", "cap": 10}]})
+    run = R.start_run(store, spec, ["a"], provenance=PERSON, attended=True)
+    assert run["run_id"]

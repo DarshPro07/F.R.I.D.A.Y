@@ -58,9 +58,24 @@ Agent = Callable[[Stage, list, str], Awaitable[dict]]
 ModelFor = Callable[[Stage], str]
 
 __all__ = ["BudgetStop", "CAPABILITY", "DROPPED_MARK", "DispatchGate",
-           "EVENT_ITEMS_DROPPED",
+           "EVENT_ITEMS_DROPPED", "NotDurableRunnerSafe",
            "EVENT_STAGES_DROPPED", "MANIFEST", "ResultCache", "StagePort", "cap_items",
            "plan_tasks", "start_run"]
+
+
+class NotDurableRunnerSafe(ValueError):
+    """`start_run` was given a spec whose `durable_runner_safe` is False.
+
+    UCW-002: a definition's flat spec has lost depends_on, inputs and executors,
+    so this runner would chain independent steps in one pipeline and send a
+    deterministic step to a model agent. Raised before any run exists."""
+
+    def __init__(self, spec_id: str) -> None:
+        self.spec_id = spec_id
+        super().__init__(
+            f"{spec_id} is not runnable on the durable runner: its spec is flattened, so "
+            "depends_on is lost, independent steps would be chained in one pipeline and a "
+            "deterministic step would be sent to a model agent")
 
 
 def _segments(spec: Spec) -> list[list[Stage]]:
@@ -119,7 +134,10 @@ def start_run(store, spec: Spec, items: list[str], *, provenance: str,
     """Admit the run as one durable objective; the engine takes it from here.
 
     The spec's token budget becomes the run's budget here, and items beyond
-    the first stage's cap are logged on the run, not run."""
+    the first stage's cap are logged on the run, not run. A spec that says
+    `durable_runner_safe = False` (a compiled definition) is refused first."""
+    if not getattr(spec, "durable_runner_safe", True):
+        raise NotDurableRunnerSafe(spec.id)
     kept, dropped = cap_items(spec, items)
     run = objectives.compile_objective(
         store, request=f"ultracode {spec.id}", tasks=plan_tasks(spec, kept),
