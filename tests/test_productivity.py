@@ -193,18 +193,19 @@ def test_write_report_refuses_a_run_id_that_is_not_a_file_name(seeded, tmp_path,
 def _seed_gateway(path, objective_id):
     from friday import model_gateway as mg
     ledger = mg.GatewayTelemetry(path)
+    split = json.dumps({"instructions": 300, "task": 400, "code": 50,
+                        "tool_results": 100, "history": 50})
     ledger.record(objective_id=objective_id, task_class="STANDARD", status="ok",
                   input_tokens=900, output_tokens=100, latency_ms=2000,
-                  input_sources=json.dumps({"system": 300, "user": 600}))
+                  retries=2, input_split=split)
     ledger.record(objective_id=objective_id, task_class="STANDARD", status="retried",
-                  input_tokens=900, latency_ms=500,
-                  input_sources=json.dumps({"system": 300, "user": 600}))
+                  input_tokens=900, latency_ms=500, input_split=split)
     ledger.record(objective_id=objective_id, task_class="STANDARD", status="failed",
-                  input_tokens=100, latency_ms=250)            # an old row: no sources
+                  input_tokens=100, latency_ms=250, retries=1)  # an old row: no split
     ledger.record(objective_id=objective_id, task_class="STANDARD", status="refused",
                   input_tokens=50_000)                         # never sent anywhere
     ledger.record(objective_id="someone-else", task_class="STANDARD", status="ok",
-                  input_tokens=7, output_tokens=7)
+                  input_tokens=7, output_tokens=7, retries=9)
     return ledger
 
 
@@ -220,9 +221,10 @@ def test_model_calls_report_the_gateway_ledger_by_source(seeded, tmp_path):
     rep = productivity.report("obj-a", db_path=db, telemetry=ledger)
 
     assert rep["model_calls"] == {
-        "calls": 3, "retried": 1, "failed": 1, "refused": 1,
+        "calls": 3, "retried": 1, "failed": 1, "refused": 1, "retries": 3,
         "input_tokens": 1_900, "output_tokens": 100, "latency_s": 2.75,
-        "input_by_source": {"system": 600, "user": 1_200},
+        "input_by_source": {"code": 100, "history": 100, "instructions": 600,
+                            "task": 800, "tool_results": 200},
         "unattributed_input_tokens": 100,
     }
     # The EVAL-005 figures are untouched by it.
@@ -241,3 +243,63 @@ def test_an_objective_with_no_model_calls_reports_zeros_not_unmeasured(seeded, t
 def test_without_a_gateway_ledger_the_model_calls_are_unmeasured(seeded):
     db, _, _ = seeded
     assert productivity.report("obj-a", db_path=db)["model_calls"] == productivity.UNMEASURED
+
+
+def test_a_row_with_only_the_old_role_sources_is_unattributed_not_misfiled(seeded, tmp_path):
+    db, _, _ = seeded
+    from friday import model_gateway as mg
+    ledger = mg.GatewayTelemetry(tmp_path / "gateway.sqlite3")
+    ledger.record(objective_id="obj-a", task_class="STANDARD", status="ok",
+                  input_tokens=900, input_sources=json.dumps({"system": 300, "user": 600}))
+    ledger.record(objective_id="obj-a", task_class="STANDARD", status="ok",
+                  input_tokens=40, input_split="{not json")
+    calls = productivity.report("obj-a", db_path=db, telemetry=ledger)["model_calls"]
+    assert calls["input_by_source"] == {}
+    assert calls["unattributed_input_tokens"] == 940
+
+
+def test_a_provider_safeguard_refusal_was_sent_so_its_spend_and_retries_count(seeded, tmp_path):
+    db, _, _ = seeded
+    from friday import model_gateway as mg
+    ledger = mg.GatewayTelemetry(tmp_path / "gateway.sqlite3")
+    split = json.dumps({"instructions": 100, "task": 400})
+    # The route retried once, then the provider itself refused: that row ends the route.
+    ledger.record(objective_id="obj-a", task_class="STANDARD", status="refused",
+                  input_tokens=500, latency_ms=1200, retries=1, input_split=split,
+                  entitlement_state="SAFEGUARD_REFUSED")
+    # A gate refusal never reached a provider: it carries nothing.
+    ledger.record(objective_id="obj-a", task_class="STANDARD", status="refused",
+                  input_tokens=9_000, latency_ms=77, retries=4, input_split=split,
+                  entitlement_state="BUDGET_EXHAUSTED")
+    calls = productivity.report("obj-a", db_path=db, telemetry=ledger)["model_calls"]
+    assert calls["refused"] == 2
+    assert calls["calls"] == 1
+    assert calls["retries"] == 1
+    assert calls["input_tokens"] == 500
+    assert calls["latency_s"] == 1.2
+    assert calls["input_by_source"] == {"instructions": 100, "task": 400}
+
+
+def test_a_malformed_split_is_unattributed_not_summed(seeded, tmp_path):
+    db, _, _ = seeded
+    from friday import model_gateway as mg
+    ledger = mg.GatewayTelemetry(tmp_path / "gateway.sqlite3")
+    for bad in ({"bogus": 5, "task": 3}, {"task": -5, "code": 10}, {"task": "x"},
+                {"task": True}, [1, 2]):
+        ledger.record(objective_id="obj-a", task_class="STANDARD", status="ok",
+                      input_tokens=20, input_split=json.dumps(bad))
+    calls = productivity.report("obj-a", db_path=db, telemetry=ledger)["model_calls"]
+    assert calls["input_by_source"] == {}
+    assert calls["unattributed_input_tokens"] == 100
+
+
+def test_the_objective_wall_time_is_its_own_start_to_finish(seeded):
+    import sqlite3
+    db, _, _ = seeded
+    assert productivity.report("obj-a", db_path=db)["objective_wall_time_s"] is None
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE objective_runs SET created_at=?, finished_at=? WHERE run_id=?",
+                     ("2026-10-10T10:00:00+00:00", "2026-10-10T10:02:05+00:00", "obj-a"))
+    rep = productivity.report("obj-a", db_path=db)
+    assert rep["objective_wall_time_s"] == 125.0
+    assert rep["wall_time_s"] == pytest.approx(30.5)

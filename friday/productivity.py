@@ -29,11 +29,15 @@ Honesty rules, because a ratio is easy to flatter:
 
   * ORCH-009: `tool_calls` is the task attempts (what the objective budget
     counts), and `model_calls` is the model gateway's own ledger for the run
-    (calls, retries, tokens, input by source). That ledger is a separate
+    (calls, retries, tokens, input by the five sources of `input_split`). That ledger is a separate
     SQLite file, so it is read only from a `telemetry` the caller names, or
     the default ledger when the default database is in use; otherwise it is
-    UNMEASURED. Refused calls were never sent, so they carry no tokens or time.
+    UNMEASURED. A gate refusal (budget, data class, scope) was never sent, so it
+    carries no tokens or time; a provider safeguard refusal was sent, so it does.
     The units-per-100K figure stays on the worker-measured tokens.
+
+`wall_time_s` is the summed worker-measured durations; `objective_wall_time_s`
+is the objective run's own start-to-finish time (None until it finishes).
 
 The report carries no timestamp, so two runs over the same rows are equal.
 """
@@ -98,31 +102,68 @@ def _outcomes_for(db, work_run_ids: list[str]) -> dict[str, dict]:
     return found
 
 
+def _elapsed_s(start, finish):
+    """Seconds from the objective run's start to its finish, or None while it is
+    unfinished or when either stamp is not an ISO time (never a guess)."""
+    from datetime import datetime
+    try:
+        a, b = datetime.fromisoformat(start), datetime.fromisoformat(finish)
+        return round(max((b - a).total_seconds(), 0.0), 3)
+    except (TypeError, ValueError):
+        return None
+
+
+def _split(raw, allowed) -> dict:
+    """A row's `input_split` as {source: tokens}, or {} when it is not a trustworthy
+    split: unparseable, not an object, a key outside `allowed`, or a value that is
+    not a non-negative integer. Such a row is unattributed, never partly summed."""
+    try:
+        split = json.loads(raw or "{}")
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(split, dict):
+        return {}
+    for name, tokens in split.items():
+        if name not in allowed or isinstance(tokens, bool)                 or not isinstance(tokens, int) or tokens < 0:
+            return {}
+    return split
+
+
 def _model_calls(telemetry) -> dict:
-    """The gateway ledger's rows for one objective, summed (ORCH-009)."""
-    out = {"calls": 0, "retried": 0, "failed": 0, "refused": 0,
+    """The gateway ledger's rows for one objective, summed (ORCH-009).
+
+    Input by source reads each row's `input_split` (instructions, task, code,
+    tool results, history); a row without a readable split, such as one written
+    before the column existed, is counted as unattributed rather than filed
+    under another name. `retries` sums the retries the gateway itself recorded
+    per row (`gateway_calls.retries`); `retried` counts the rows it retried.
+    """
+    from .model_gateway import INPUT_SOURCES
+    out = {"calls": 0, "retried": 0, "failed": 0, "refused": 0, "retries": 0,
            "input_tokens": 0, "output_tokens": 0, "latency_ms": 0,
            "input_by_source": {}, "unattributed_input_tokens": 0}
     for row in telemetry:
         status = row["status"]
         if status == "refused":
             out["refused"] += 1
-            continue
+            # A gate refusal (budget, data class, scope) never reached a provider
+            # and carries nothing. A provider safeguard refusal did: the call was
+            # sent, so its tokens, time and the route's retries are real spend.
+            if row.get("entitlement_state") != "SAFEGUARD_REFUSED":
+                continue
         out["calls"] += 1
         if status in ("retried", "failed"):
             out[status] += 1
         out["input_tokens"] += row["input_tokens"]
         out["output_tokens"] += row["output_tokens"]
         out["latency_ms"] += row["latency_ms"]
-        try:
-            sources = json.loads(row.get("input_sources") or "{}")
-        except ValueError:
-            sources = {}
-        if not isinstance(sources, dict) or not sources:
+        out["retries"] += row["retries"]
+        sources = _split(row.get("input_split"), INPUT_SOURCES)
+        if not sources:
             out["unattributed_input_tokens"] += row["input_tokens"]
             continue
         for name, tokens in sources.items():
-            out["input_by_source"][name] = out["input_by_source"].get(name, 0) + int(tokens)
+            out["input_by_source"][name] = out["input_by_source"].get(name, 0) + tokens
     out["latency_s"] = round(out.pop("latency_ms") / 1000, 3)
     out["input_by_source"] = dict(sorted(out["input_by_source"].items()))
     return out
@@ -138,7 +179,7 @@ def report(run_id: str, *, db_path: str | Path | None = None,
     """
     with _connect_readonly(_resolve_db(db_path)) as db:
         run = db.execute(
-            "SELECT status FROM objective_runs WHERE run_id = ?",
+            "SELECT status, created_at, finished_at FROM objective_runs WHERE run_id = ?",
             (run_id,)).fetchone()
         if run is None:
             raise KeyError(run_id)
@@ -184,6 +225,7 @@ def report(run_id: str, *, db_path: str | Path | None = None,
         "model_calls": (_model_calls(telemetry.for_objective(run_id))
                         if telemetry is not None else UNMEASURED),
         "wall_time_s": round(sum(o["duration_s"] for o in measured), 3),
+        "objective_wall_time_s": _elapsed_s(run["created_at"], run["finished_at"]),
         "units_per_100k": (measured_verified / total * TOKENS_PER_UNIT
                            if total > 0 else None),
         "requirements_closed": UNMEASURED,
