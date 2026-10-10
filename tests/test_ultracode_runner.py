@@ -32,6 +32,23 @@ def _spec(*stages: tuple[str, bool]) -> S.Spec:
                    for name, barrier in stages]})
 
 
+class OpenGate:
+    """An explicit permissive gate: these tests are about stages and the cache,
+    not the budget (tests/test_ultracode_budget.py), so nothing is held back."""
+
+    def admit(self, run, stage, arguments) -> str:
+        return ""
+
+    def release(self, lease: str) -> None:
+        pass
+
+    def settle(self, run, stage, arguments) -> None:
+        pass
+
+
+OPEN = OpenGate()
+
+
 class Killed(BaseException):
     """The process dies here: not an Exception, so nothing handles it."""
 
@@ -142,13 +159,13 @@ async def test_killed_after_stage_two_and_resumed_no_finished_stage_runs_again(t
     agent.kill_at = ("s3", "a")
     args = R.plan_tasks(spec, ["a"])[0]["arguments"]
 
-    first = R.StagePort(spec, agent, R.ResultCache(Store(db), "ws"), _model)
+    first = R.StagePort(spec, agent, R.ResultCache(Store(db), "ws"), _model, OPEN)
     with pytest.raises(Killed):
         await first(R.CAPABILITY, args)
     assert agent.calls[("s1", "a")] == 1 and agent.calls[("s2", "a")] == 1
 
     # The process died: a new Store and port over the same database.
-    second = R.StagePort(spec, agent, R.ResultCache(Store(db), "ws"), _model)
+    second = R.StagePort(spec, agent, R.ResultCache(Store(db), "ws"), _model, OPEN)
     result = await second(R.CAPABILITY, args)
     assert agent.calls[("s1", "a")] == 1, "stage 1 was called again after the restart"
     assert agent.calls[("s2", "a")] == 1, "stage 2 was called again after the restart"
@@ -162,9 +179,9 @@ async def test_a_changed_model_is_not_answered_from_the_cache(tmp_path):
     spec = _spec(("s1", False))
     agent = FakeAgent()
     args = R.plan_tasks(spec, ["a"])[0]["arguments"]
-    await R.StagePort(spec, agent, R.ResultCache(Store(db), "ws"), _model)(R.CAPABILITY, args)
+    await R.StagePort(spec, agent, R.ResultCache(Store(db), "ws"), _model, OPEN)(R.CAPABILITY, args)
     await R.StagePort(spec, agent, R.ResultCache(Store(db), "ws"),
-                      lambda stage: "another-model")(R.CAPABILITY, args)
+                      lambda stage: "another-model", OPEN)(R.CAPABILITY, args)
     assert agent.calls[("s1", "a")] == 2
 
 
@@ -175,7 +192,7 @@ async def test_the_engine_retry_of_a_dropped_stage_does_not_call_the_finished_st
     agent = FakeAgent()
     agent.drop_at = ("s3", "a")
     run = R.start_run(store, spec, ["a"], provenance=PERSON, attended=True)
-    port = R.StagePort(spec, agent, R.ResultCache(store, "ws"), _model)
+    port = R.StagePort(spec, agent, R.ResultCache(store, "ws"), _model, OPEN)
     executor = _executor(store, port, "retry")
     await executor.start(run["run_id"])
     executor.stop()
@@ -191,7 +208,7 @@ async def test_a_stopped_run_resumes_through_the_engine_at_the_barrier(tmp_path)
 
     before = Store(db)
     run = R.start_run(before, spec, ["a"], provenance=PERSON, attended=True)
-    port = R.StagePort(spec, agent, R.ResultCache(before, "ws"), _model)
+    port = R.StagePort(spec, agent, R.ResultCache(before, "ws"), _model, OPEN)
     first = _executor(before, port, "process-1")
     first.portion_budget = 1                      # stop after stage 2's task
     await first.start(run["run_id"])
@@ -201,7 +218,7 @@ async def test_a_stopped_run_resumes_through_the_engine_at_the_barrier(tmp_path)
     del before
 
     after = Store(db)
-    port = R.StagePort(spec, agent, R.ResultCache(after, "ws"), _model)
+    port = R.StagePort(spec, agent, R.ResultCache(after, "ws"), _model, OPEN)
     second = _executor(after, port, "process-2")
     await second.start(run["run_id"])
     second.stop()
@@ -220,7 +237,7 @@ async def test_a_stage_without_a_barrier_starts_before_a_slower_sibling_finishes
     agent = FakeAgent()
     agent.gate("scan", "slow")          # the slow sibling parks in its first stage
     run = R.start_run(store, spec, ["slow", "fast"], provenance=PERSON, attended=True)
-    port = R.StagePort(spec, agent, R.ResultCache(store, "ws"), _model)
+    port = R.StagePort(spec, agent, R.ResultCache(store, "ws"), _model, OPEN)
     executor = _executor(store, port, "pipeline")
     driving = asyncio.ensure_future(executor.start(run["run_id"]))
 
