@@ -25,10 +25,12 @@ from friday import model_gateway as mg
 
 
 def _run(outcomes, run_id, *, provider, model, tokens, status="COMPLETE",
-         rework=0, task_class="code_change"):
-    outcomes.record(run_id, task_class=task_class, route_level="hermes_single",
+         rework=0, task_class="code_change", executor="hermes",
+         route_level="hermes_single"):
+    outcomes.record(run_id, task_class=task_class, route_level=route_level,
                     tier="standard", model=model, provider=provider, calls=1,
-                    prompt_tokens=tokens, status=status, rework=rework)
+                    prompt_tokens=tokens, status=status, rework=rework,
+                    executor=executor)
 
 
 def test_cost_per_completion_is_keyed_by_provider_and_model(tmp_path):
@@ -201,3 +203,52 @@ def test_a_hermes_run_is_recorded_under_a_class_a_gateway_request_can_carry(
     gw._outcomes = ee.RouteOutcomes(log._path)
     ranked = gw.candidates(_req(task_class=mg.STANDARD))
     assert [r[1] for r in ranked] == ["dear", "cheap"]
+    assert {r["executor"] for r in rows} == {ee.EXECUTOR_HERMES}
+
+
+def test_one_model_behind_two_executors_is_measured_as_two_routes(tmp_path):
+    outcomes = ee.RouteOutcomes(tmp_path / "o.sqlite3")
+    _run(outcomes, "h1", provider="p", model="m", tokens=20_000, executor="hermes")
+    # The executor that is cheaper per attempt but fails twice for every win.
+    _run(outcomes, "k1", provider="p", model="m", tokens=10_000, executor="claude-code")
+    _run(outcomes, "k2", provider="p", model="m", tokens=10_000,
+         executor="claude-code", status="FAILED")
+    _run(outcomes, "k3", provider="p", model="m", tokens=10_000,
+         executor="claude-code", status="FAILED")
+    costs = outcomes.cost_per_completion("code_change", key=ee.ROUTE_KEY)
+    hermes = ("p", "m", "hermes", "hermes_single")
+    claude = ("p", "m", "claude-code", "hermes_single")
+    assert set(costs) == {hermes, claude}
+    assert costs[hermes] == pytest.approx(20_000, rel=0.01)
+    assert costs[claude] == pytest.approx(30_000, rel=0.01)
+    # The default key is still the route a gateway request names.
+    assert set(outcomes.cost_per_completion("code_change")) == {("p", "m")}
+
+
+def test_one_model_in_two_configurations_is_measured_as_two_routes(tmp_path):
+    outcomes = ee.RouteOutcomes(tmp_path / "o.sqlite3")
+    _run(outcomes, "s1", provider="p", model="m", tokens=10_000,
+         route_level="hermes_single")
+    _run(outcomes, "d1", provider="p", model="m", tokens=40_000,
+         route_level="hermes_deep")
+    costs = outcomes.cost_per_completion("code_change", key=ee.ROUTE_KEY)
+    assert set(costs) == {("p", "m", "hermes", "hermes_single"),
+                          ("p", "m", "hermes", "hermes_deep")}
+
+
+def test_an_old_outcome_table_gains_the_executor_and_its_rows_read_as_hermes(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.sqlite3"
+    db = sqlite3.connect(path)
+    db.execute(ee._OUTCOMES_TABLE.replace(
+        "    executor      TEXT NOT NULL DEFAULT '',\n", ""))
+    db.execute("INSERT INTO route_outcomes (work_run_id, task_class, created_at)"
+               " VALUES ('old1', 'code_change', 1.0)")
+    db.commit()
+    db.close()
+    outcomes = ee.RouteOutcomes(path)
+    outcomes.record("new1", task_class="code_change", route_level="l", tier="t")
+    by_id = {r["work_run_id"]: r["executor"] for r in outcomes.by_class("code_change")}
+    # Only the Hermes bridge ever wrote a row before the column existed; a row
+    # written since by a recorder that did not say is not guessed at.
+    assert by_id == {"old1": ee.EXECUTOR_HERMES, "new1": ""}

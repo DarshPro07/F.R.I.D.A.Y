@@ -530,6 +530,7 @@ CREATE TABLE IF NOT EXISTS route_outcomes (
     tier          TEXT NOT NULL DEFAULT '',
     model         TEXT NOT NULL DEFAULT '',
     provider      TEXT NOT NULL DEFAULT '',
+    executor      TEXT NOT NULL DEFAULT '',
     calls         INTEGER NOT NULL DEFAULT 0,
     prompt_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
@@ -570,6 +571,15 @@ def cache_read_tokens(usage: dict) -> int:
 #: it (FAB-003). One lucky cheap completion is not a measurement.
 MIN_RANKED_RUNS = 3
 
+#: The executor the Hermes bridge records its runs under.
+EXECUTOR_HERMES = "hermes"
+
+#: What a benchmark result is keyed by, below its task class (FAB-003): the
+#: route (provider, model), the executor that ran it, and the configuration it
+#: ran in - `route_level`, single worker or multi or deep. No executor reports
+#: the model's own version separately from its id, so there is no version key.
+ROUTE_KEY = ("provider", "model", "executor", "route_level")
+
 
 class RouteOutcomes:
     """Durable H6 records. Same database file as the WorkRun log."""
@@ -581,12 +591,19 @@ class RouteOutcomes:
         self._path = str(db_path)
         with self._connect() as db:
             db.execute(_OUTCOMES_TABLE)
-            # Additive migration for databases created before the cache
-            # column existed.
-            if "cache_read_tokens" not in {r[1] for r in db.execute(
-                    "PRAGMA table_info(route_outcomes)")}:
+            # Additive migration for databases created before the cache and
+            # executor columns existed.
+            columns = {r[1] for r in db.execute(
+                "PRAGMA table_info(route_outcomes)")}
+            if "cache_read_tokens" not in columns:
                 db.execute("ALTER TABLE route_outcomes ADD COLUMN"
                            " cache_read_tokens INTEGER NOT NULL DEFAULT 0")
+            if "executor" not in columns:
+                db.execute("ALTER TABLE route_outcomes ADD COLUMN"
+                           " executor TEXT NOT NULL DEFAULT ''")
+                # The Hermes bridge was the only recorder before this column.
+                db.execute("UPDATE route_outcomes SET executor = ?",
+                           (EXECUTOR_HERMES,))
 
     def _connect(self):
         from friday.dbconn import ledger_connection
@@ -597,16 +614,17 @@ class RouteOutcomes:
                calls: int = 0, prompt_tokens: int = 0,
                output_tokens: int = 0, duration_s: float = 0,
                status: str = "", verification: str = "",
-               rework: int = 0, cache_read_tokens: int = 0) -> None:
+               rework: int = 0, cache_read_tokens: int = 0,
+               executor: str = "") -> None:
         with self._connect() as db:
             db.execute(
                 "INSERT OR REPLACE INTO route_outcomes (work_run_id,"
-                " task_class, route_level, tier, model, provider, calls,"
-                " prompt_tokens, output_tokens, cache_read_tokens,"
+                " task_class, route_level, tier, model, provider, executor,"
+                " calls, prompt_tokens, output_tokens, cache_read_tokens,"
                 " duration_s, status, verification, rework, created_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (work_run_id, task_class, route_level, tier, model,
-                 provider, calls, prompt_tokens, output_tokens,
+                 provider, executor, calls, prompt_tokens, output_tokens,
                  cache_read_tokens, duration_s, status, verification, rework,
                  time.time()))
 
@@ -677,23 +695,27 @@ class RouteOutcomes:
         return cost
 
     def cost_per_completion(self, task_class: str, limit: int = 500,
-                            min_runs: int = 1) -> dict[tuple[str, str], float]:
-        """FAB-003: per (provider, model), everything the route spent on this
-        task class divided by the runs it verifiably completed. Failed runs
-        are paid for by the completions, so a cheap route that fails often
-        costs more per task than a dear one that completes; a route with no
-        completion is infinity. Two providers serving one model are two keys.
-        A run counts as completed when its status is COMPLETE, the same test
-        `execution_value` applies. A route with fewer than `min_runs` runs on
-        record is left out: too few to rank on."""
-        spent: dict[tuple[str, str], float] = {}
-        done: dict[tuple[str, str], int] = {}
-        runs: dict[tuple[str, str], int] = {}
+                            min_runs: int = 1,
+                            key: tuple[str, ...] = ("provider", "model")
+                            ) -> dict[tuple[str, ...], float]:
+        """FAB-003: per `key` (the route a gateway request names, (provider,
+        model), by default; `ROUTE_KEY` adds the executor and configuration),
+        everything the route spent on this task class divided by the runs it
+        verifiably completed. Failed runs are paid for by the completions, so
+        a cheap route that fails often costs more per task than a dear one
+        that completes; a route with no completion is infinity. Two providers
+        serving one model are two keys, and under `ROUTE_KEY` so are two
+        executors. A run counts as completed when its status is COMPLETE, the
+        same test `execution_value` applies. A route with fewer than
+        `min_runs` runs on record is left out: too few to rank on."""
+        spent: dict[tuple[str, ...], float] = {}
+        done: dict[tuple[str, ...], int] = {}
+        runs: dict[tuple[str, ...], int] = {}
         for rec in self.by_class(task_class, limit):
-            key = (rec["provider"], rec["model"])
-            spent[key] = spent.get(key, 0.0) + self.run_cost(rec)
-            done[key] = done.get(key, 0) + (rec["status"] == "COMPLETE")
-            runs[key] = runs.get(key, 0) + 1
+            route = tuple(rec[column] for column in key)
+            spent[route] = spent.get(route, 0.0) + self.run_cost(rec)
+            done[route] = done.get(route, 0) + (rec["status"] == "COMPLETE")
+            runs[route] = runs.get(route, 0) + 1
         return {k: (spent[k] / done[k] if done[k] else math.inf)
                 for k in spent if runs[k] >= min_runs}
 

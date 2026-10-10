@@ -2590,8 +2590,8 @@ class HermesSupervisor:
         """
         try:
             from friday import task_class as TC
-            from friday.execution_economics import RouteOutcomes, \
-                cache_read_tokens
+            from friday.execution_economics import EXECUTOR_HERMES, \
+                RouteOutcomes, cache_read_tokens
             usage = {}
             cached = 0
             try:
@@ -2613,6 +2613,7 @@ class HermesSupervisor:
                 route_level=level, tier=tier,
                 model=record.get("model", ""),
                 provider=record.get("provider", ""),
+                executor=EXECUTOR_HERMES,
                 calls=usage.get("calls", 0),
                 prompt_tokens=usage.get("prompt", 0),
                 output_tokens=usage.get("completion", 0),
