@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 80bdc8c on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T11:34:12+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 93, "PARKED_BY_OWNER": 1, "PARTIAL": 95, "VERIFIED": 71}
+- HEAD: 13ac4a6 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T12:52:47+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 86, "PARKED_BY_OWNER": 1, "PARTIAL": 101, "VERIFIED": 72}
 - Unresolved P0: 5
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (350): FAB-002=INTEGRATED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), SKILL-006 (blocked), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), ORCH-004 (stale worktree), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), BIN-002 (stale worktree), SIDE-001 (merge queue busy), COG-006 (stale worktree), EVO-001 (stale worktree), ULTRA-002 (stale worktree), ULTRA-006 (stale worktree), AGENT-002 (stale worktree), LAB-003 (stale worktree), FAB-007 (stale worktree), HARN-001 (stale worktree), EVAL-005 (stale worktree), ORCH-009 (stale worktree), ORCH-001 (stale worktree), OTEL-001 (stale worktree), PRO-001 (stale worktree), RSCH-001 (stale worktree), RSCH-002 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), EVO-002 (merge queue busy), CHAOS-001 (stale worktree), CTX-004 (stale worktree), CAP-FORGE-011 (blocked), UCW-002 (stale worktree), ULTRA-003 (stale worktree), EVOLAB-002 (stale worktree), LAB-004 (stale worktree)
-- Open escalations: 350
-  - COG-005 resolved: controller unpark: controller build integrated: INTEGRATED
-  - TRAJ-002 resolved: controller unpark: controller build integrated: INTEGRATED
-  - EVO-002 integration_queue: merge queue: EVO-002 waited 1800s behind EVO-001
-  - CHAOS-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\chaos-001 already exists
-  - CTX-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ctx-004 already exists
-  - CAP-FORGE-011 blocked: Owner decision 1 (rule 04, no documented source): when an import overlaps only SOME operations of an
-  - UCW-002 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ucw-002 already exists
-  - ULTRA-003 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ultra-003 already exists
-  - EVOLAB-002 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\evolab-002 already exists
-  - LAB-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\lab-004 already exists
+- Last wave (352): ORCH-003=INTEGRATED, FAB-002=FAILED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), SKILL-006 (blocked), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), ORCH-004 (stale worktree), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), BIN-002 (stale worktree), SIDE-001 (merge queue busy), AGENT-002 (stale worktree), HARN-001 (stale worktree), ORCH-009 (stale worktree), ORCH-001 (stale worktree), OTEL-001 (stale worktree), PRO-001 (stale worktree), RSCH-001 (stale worktree), RSCH-002 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CHAOS-001 (stale worktree), CTX-004 (stale worktree), CAP-FORGE-011 (blocked), UCW-002 (stale worktree), ULTRA-003 (stale worktree), EVOLAB-002 (stale worktree), LAB-004 (stale worktree), EVAL-005 (merge queue busy), FAB-007 (stale worktree)
+- Open escalations: 360
+  - EVO-002 resolved: controller unpark: controller build integrated: INTEGRATED
+  - ULTRA-002 resolved: controller unpark: controller build integrated: INTEGRATED
+  - LAB-003 resolved: controller unpark: controller build integrated: INTEGRATED
+  - COG-006 resolved: controller unpark: controller build integrated: INTEGRATED
+  - COG-003 resolved: controller unpark: COG-006 integrated 2026-10-10 16:09 (P1 triage wf_3f5877de: COG-003 waits on COG-
+  - ULTRA-006 resolved: controller unpark: controller build integrated: INTEGRATED
+  - FAB-007 resolved: controller unpark: controller build integrated: INTEGRATED
+  - EVO-001 resolved: controller unpark: controller build integrated: INTEGRATED
+  - EVAL-005 integration_queue: merge queue: EVAL-005 waited 1800s behind ORCH-009
+  - FAB-007 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\fab-007 already exists
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
