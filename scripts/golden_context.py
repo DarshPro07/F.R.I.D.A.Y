@@ -215,18 +215,11 @@ def check(name, ok, detail):
     return {"name": name, "ok": bool(ok), "detail": detail}
 
 
-def checks(baseline, controlled, bounded):
+def controlled_checks(controlled, baseline=None):
+    """The checks that need only the controlled run, so a short replay can prove
+    them alone (tests/test_context_health.py). The comparison with the baseline
+    is made only when one is given."""
     out = []
-    base = [r["state"] for r in baseline]
-    ranks = [severity(s) for s in base]
-    first = []
-    for s in base:
-        if s not in first:
-            first.append(s)
-    out.append(check("baseline_states_appear_in_order",
-                     first == list(H.STATES) and ranks == sorted(ranks),
-                     {"first_seen": first, "turn_of_first": {
-                         s: next(r["turn"] for r in baseline if r["state"] == s) for s in first}}))
     acted = [r for r in controlled if r["action"] != H.NONE]
     seen_states = sorted({r["state"] for r in controlled}, key=severity)
     out.append(check("controlled_run_meets_every_state",
@@ -254,15 +247,33 @@ def checks(baseline, controlled, bounded):
     unexplained = [r["turn"] for r in controlled if r["end_state"] != H.HEALTHY
                    and not r["end_awaiting_person"]]
     healthy = sum(r["end_state"] == H.HEALTHY for r in controlled) / len(controlled)
-    base_over = sum(severity(r["end_state"]) > severity(H.NOISY) for r in baseline) / len(baseline)
+    detail = {"controlled_turns_above_noisy": len(over),
+              "controlled_noisy_without_an_open_contradiction": unexplained[:5],
+              "controlled_healthy_share": round(healthy, 4),
+              "controlled_peak_tokens": max(r["tokens"] for r in controlled)}
+    worse = True
+    if baseline:
+        base_over = sum(severity(r["end_state"]) > severity(H.NOISY) for r in baseline) / len(baseline)
+        worse = base_over > 0.5
+        detail.update(baseline_share_of_turns_above_noisy=round(base_over, 4),
+                      baseline_peak_tokens=max(r["tokens"] for r in baseline))
     out.append(check("acting_keeps_the_run_out_of_trouble",
-                     not over and not unexplained and base_over > 0.5,
-                     {"controlled_turns_above_noisy": len(over),
-                      "controlled_noisy_without_an_open_contradiction": unexplained[:5],
-                      "controlled_healthy_share": round(healthy, 4),
-                      "baseline_share_of_turns_above_noisy": round(base_over, 4),
-                      "controlled_peak_tokens": max(r["tokens"] for r in controlled),
-                      "baseline_peak_tokens": max(r["tokens"] for r in baseline)}))
+                     not over and not unexplained and worse, detail))
+    return out
+
+
+def checks(baseline, controlled, bounded):
+    base = [r["state"] for r in baseline]
+    ranks = [severity(s) for s in base]
+    first = []
+    for s in base:
+        if s not in first:
+            first.append(s)
+    out = [check("baseline_states_appear_in_order",
+                 first == list(H.STATES) and ranks == sorted(ranks),
+                 {"first_seen": first, "turn_of_first": {
+                     s: next(r["turn"] for r in baseline if r["state"] == s) for s in first}})]
+    out += controlled_checks(controlled, baseline)
     states = sorted({r["state"] for r in bounded}, key=severity)
     out.append(check("bounded_run_stays_healthy",
                      states == [H.HEALTHY] and all(r["applied"] == H.NONE for r in bounded),

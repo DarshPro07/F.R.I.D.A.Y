@@ -452,3 +452,25 @@ def test_a_working_set_carries_the_health_verdict_it_is_given():
     ws = G.compile_working_set(user="hello", health=verdict)
     assert ws.telemetry()["health"]["state"] == H.HEALTHY
     assert "health" not in G.compile_working_set(user="hello").telemetry()
+
+
+def test_the_long_run_bounds_hold_over_a_fast_deterministic_replay(vault_dir):
+    """CTX-004 'Long-run benchmark', inside the normal gate: the 400-turn script
+    of scripts/golden_context.py replayed with `remediate` each turn (about 5 s,
+    against ~30 s for the whole benchmark with its baseline, bounded and lab
+    runs). Prune, summarize AND the real fold fire, the originals stay in the
+    vault, and the benchmark's own controlled-run checks pass on the result."""
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "scripts" / "golden_context.py"
+    spec = importlib.util.spec_from_file_location("golden_context_fast", path)
+    golden = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(golden)
+    controlled = golden.replay(golden.build_script(golden.TURNS), True)
+    assert len(controlled) == golden.TURNS
+    applied = {r["applied"] for r in controlled}
+    assert {H.PRUNE, H.SUMMARIZE, H.FOLD} <= applied
+    assert any(vault_dir.rglob("*")), "a fold keeps the whole original block in the vault"
+    failed = [c for c in golden.controlled_checks(controlled) if not c["ok"]]
+    assert failed == []
+    assert not any(r["critical_lost"] or r["refused"] for r in controlled)
