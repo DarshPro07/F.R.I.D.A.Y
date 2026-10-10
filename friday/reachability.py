@@ -192,6 +192,11 @@ DECLARED = {
                             "written through by RunManager; the composer, "
                             "registry and team views that read it are later "
                             "slices, run by tests/test_agent_ledger.py"),
+    "friday/output_router": (FUTURE,
+                             "ORCH-007: test, git and search output as counts and"
+                             " failures inside a size cap with the full output in"
+                             " the vault; the worker-result caller is the next"
+                             " wiring step, run by tests/test_output_router.py"),
     "friday/shadow": (PRODUCTION,
                       "observes every turn from watch_from_the_side"),
     "friday/system_one": (FUTURE,
