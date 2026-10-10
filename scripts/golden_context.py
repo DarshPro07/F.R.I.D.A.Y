@@ -40,6 +40,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from friday import compaction  # noqa: E402
+from friday import compression  # noqa: E402
 from friday import context_health as H  # noqa: E402
 from friday import context_lab  # noqa: E402
 
@@ -57,8 +58,11 @@ def tokens(text):
     return max(1, len(text) // 4)
 
 
-def entry(text, tier, ts=None, kind=""):
-    return {"tier": tier, "text": text, "ts": ts, "kind": kind}
+def entry(text, tier, ts=None, kind="", score=None):
+    out = {"tier": tier, "text": text, "ts": ts, "kind": kind}
+    if score is not None:
+        out["score"] = score
+    return out
 
 
 def head(text):
@@ -92,8 +96,14 @@ def build_script(turns=TURNS, seed=7):
             resolve.append("- OPEN CONTRADICTION on setting-%d: 'a' vs 'b'" % (t - 40))
         if t >= 320 and t % 10 == 0:                            # a tool dumps its output
             add.append(entry("OUTPUT %d: %s" % (t, "line of build log " * 90), "outcomes"))
+        if t % 7 == 3:                                          # work is attempted; a run of tries fails
+            failed = 300 <= t < 345 or t % 4 == 0
+            add.append(entry("- attempt %d: %s -> %s" % (t, rng.choice(TOPICS),
+                                                         "failed" if failed else "done"),
+                             "outcomes", kind=H.FAILED_ATTEMPT if failed else H.ATTEMPT))
         if t == 150:                                            # one section balloons
-            add += [entry("- [spec%d] %s" % (i, "requirement detail " * 22), "specs")
+            add += [entry("- [spec%d] %s" % (i, "requirement detail " * 22), "specs",
+                          score=(i + 1) / 10)                  # each a retrieval hit with a score
                     for i in range(10)]
         if t == 250:                                            # a stutter
             add += [entry(text, "episodes", FRESH) for _ in range(45)]
@@ -136,17 +146,24 @@ class Session:
         open_ = tuple(t for t, e in self.ledger.items() if e.get("kind") == H.CONTRADICTION)
         return compaction.CriticalFactSet(constraints=rules, questions=open_)
 
-    def hand_off(self, packet):
-        """A fresh session that starts from the hand-off packet and nothing else."""
-        self.layout = [head("RESUMED FROM A HANDOFF:")] + [self.ledger[t] for t in packet.splitlines()]
-
 
 def point(turn, verdict):
     m = verdict["metrics"]
     return {"turn": turn, "state": verdict["state"], "tokens": m["tokens"],
             "utilization": m["utilization"], "duplicate_ratio": m["duplicate_ratio"],
             "stale_ratio": m["stale_ratio"], "contradiction_score": m["contradiction_score"],
-            "raw_output_ratio": m["raw_output_ratio"], "drivers": verdict["drivers"]}
+            "raw_output_ratio": m["raw_output_ratio"],
+            "failed_attempt_density": m["failed_attempt_density"],
+            "struggle_score": m["struggle_score"],
+            "retrieval_confidence": m["retrieval_confidence"], "drivers": verdict["drivers"]}
+
+
+def restart_recovers(session_before, recovered):
+    """True when the text recovered from the vault is exactly the distinct
+    non-critical lines the session held before the reset, in order."""
+    held = list(dict.fromkeys(e["text"] for e in session_before
+                              if e.get("tier") and not H._critical(e)))
+    return bool(held) and recovered == "\n".join(held)
 
 
 def replay(script, act):
@@ -157,17 +174,21 @@ def replay(script, act):
         verdict = H.assess(agg, NOW)
         row = point(turn, verdict)
         row.update(action=verdict["action"], applied=H.NONE, after=None, after_action=None,
-                   fresh=None, fresh_action=None, critical_lost=[], refused=[])
+                   fresh=None, fresh_action=None, restart_recovers=None, critical_lost=[],
+                   refused=[])
         if act and verdict["action"] != H.NONE:
-            agg2, outcome = H.remediate(agg, NOW)
+            session_before = [e for e in session.layout if e.get("tier")]
+            agg2, outcome = H.remediate(agg, NOW, reset=True)
             row.update(applied=outcome["applied"], after=outcome.get("after"),
                        after_action=outcome.get("after_action"),
                        refused=outcome.get("refused", []))
             session.layout = agg2["layout"]
-            if verdict["action"] == H.HANDOFF and "handoff_packet" in outcome:
-                session.hand_off(outcome["handoff_packet"])
-                fresh = H.assess(session.agg(), NOW)
-                row.update(fresh=fresh["state"], fresh_action=fresh["action"])
+            if outcome["applied"] == H.HANDOFF:
+                # The session restarts on the returned context; what it let go of
+                # must come back from the vault, every line of it.
+                old = compression.recover(outcome["restart"]["recovery"]).decode()
+                row.update(fresh=outcome["after"], fresh_action=outcome["after_action"],
+                           restart_recovers=restart_recovers(session_before, old))
         end = H.assess(session.agg(), NOW)
         row.update(end_state=end["state"], end_action=end["action"],
                    end_awaiting_person=end["awaiting_person"])
@@ -238,6 +259,20 @@ def controlled_checks(controlled, baseline=None):
                                 or severity(r["after"]) > severity(r["state"])))]
     out.append(check("every_action_leaves_a_better_state", not not_better,
                      {"actions": len(acted), "not_better_at_turns": not_better}))
+    reset = [r for r in controlled if r["action"] == H.HANDOFF]
+    out.append(check("reset_restarts_from_a_recoverable_branch",
+                     bool(reset) and all(r["applied"] == H.HANDOFF and r["restart_recovers"]
+                                         for r in reset),
+                     {"resets": [{"turn": r["turn"], "applied": r["applied"],
+                                  "fresh": r["fresh"], "old_context_recovers": r["restart_recovers"]}
+                                 for r in reset]}))
+    measured = {}
+    for name in H.NEEDS_SOURCE:
+        values = [r[name] for r in controlled if r[name] is not None]
+        measured[name] = {"turns_measured": len(values), "peak": max(values) if values else None}
+    out.append(check("every_section_19_5_metric_is_measured",
+                     all(m["turns_measured"] and m["peak"] > 0 for m in measured.values()),
+                     measured))
     lost = [(r["turn"], r["critical_lost"]) for r in controlled if r["critical_lost"]]
     out.append(check("critical_facts_survive_every_turn", not lost,
                      {"turns_checked": len(controlled), "turns_that_lost_a_fact": lost[:5]}))

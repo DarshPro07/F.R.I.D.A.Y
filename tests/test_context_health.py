@@ -62,7 +62,7 @@ def _clean_env(monkeypatch):
 
 def test_an_empty_context_is_healthy_and_asks_for_nothing():
     v = H.assess(agg([]), NOW)
-    assert (v["state"], v["action"], v["advisory"]) == (H.HEALTHY, H.NONE, False)
+    assert (v["state"], v["action"]) == (H.HEALTHY, H.NONE)
     assert v["metrics"]["duplicate_ratio"] == 0.0
 
 
@@ -80,11 +80,11 @@ def test_metrics_on_a_fixed_fixture():
     assert m["relevance_density"] == 0.8            # the 8 note lines name "topic"
 
 
-def test_unmeasured_metrics_are_named_and_never_given_a_number():
+def test_a_metric_with_no_source_in_the_context_is_named_and_never_given_a_number():
     v = H.assess(agg(unique(8)), NOW)
     assert set(v["unmeasured"]) == {"failed_attempt_density", "struggle_score",
                                     "retrieval_confidence"}
-    assert not set(v["unmeasured"]) & set(v["metrics"])
+    assert all(v["metrics"][name] is None for name in v["unmeasured"])
     # No line carries a timestamp and no task was given: those are None, not 0.
     assert v["metrics"]["stale_ratio"] is None
     assert v["metrics"]["relevance_density"] is None
@@ -112,7 +112,7 @@ def test_each_state_selects_its_action():
     assert H.assess(agg(duplicated(20, 3)), NOW)["action"] == H.PRUNE
     assert H.assess(agg(duplicated(20, 6)), NOW)["action"] == H.SUMMARIZE
     rotting = H.assess(agg(duplicated(20, 10)), NOW)
-    assert (rotting["action"], rotting["advisory"]) == (H.HANDOFF, True)
+    assert rotting["action"] == H.HANDOFF
 
 
 def test_a_degraded_context_dominated_by_one_section_folds():
@@ -120,7 +120,7 @@ def test_a_degraded_context_dominated_by_one_section_folds():
     layout = bulky + unique(8, "contacts") + [dict(bulky[0]) for _ in range(8)]
     v = H.assess(agg(layout, budget=5000), NOW)
     assert v["state"] == H.DEGRADED
-    assert (v["action"], v["advisory"], v["bulk_tier"]) == (H.FOLD, True, "specs")
+    assert (v["action"], v["bulk_tier"]) == (H.FOLD, "specs")
 
 
 def test_a_folding_verdict_really_folds_the_bulk_section_into_one_recoverable_line(vault_dir):
@@ -210,14 +210,14 @@ def critical_layout(contradiction=True):
     return out
 
 
-def test_prune_drops_repeats_stale_and_raw_and_keeps_every_critical_line():
+def test_prune_drops_repeats_stale_and_raw_and_keeps_every_critical_line(vault_dir):
     layout = (critical_layout() + [head("WHAT WAS SAID BEFORE (most recent last):")]
               + [line("- he: hello", "episodes", FRESH)] * 4
               + [line("- he: old news %d" % i, "episodes", OLD) for i in range(3)]
               + [line("DUMP " * 300, "outcomes")])
     before = agg(layout)
-    after, verdict = H.remediate(before, NOW)
-    assert verdict["state"] == H.ROTTING and verdict["applied"] == H.SUMMARIZE
+    after, verdict = H.remediate(before, NOW, reset=True)
+    assert verdict["state"] == H.ROTTING and verdict["applied"] == H.HANDOFF
     pruned = H.prune(layout, NOW)
     texts = [e["text"] for e in pruned]
     assert texts.count("- he: hello") == 1
@@ -285,18 +285,27 @@ def test_an_action_that_would_lose_a_critical_fact_is_refused(monkeypatch):
                             H.critical_facts(layout))
 
 
-def test_a_rotting_verdict_carries_the_critical_lines_a_fresh_session_starts_from():
+def test_a_rotting_verdict_resets_to_a_fresh_session_that_starts_from_the_critical_lines(vault_dir):
     layout = critical_layout() + duplicated(20, 12)
-    after, verdict = H.remediate(agg(layout), NOW)
-    assert (verdict["state"], verdict["action"], verdict["advisory"]) == (
-        H.ROTTING, H.HANDOFF, True)
+    before = agg(layout)
+    after, verdict = H.remediate(before, NOW, reset=True)
+    assert (verdict["state"], verdict["action"], verdict["applied"]) == (
+        H.ROTTING, H.HANDOFF, H.HANDOFF)
     packet = verdict["handoff_packet"]
     assert packet.splitlines() == [PREF, RULE, CONTRA]
-    # The fresh session holds only the critical lines: far better than rotting,
-    # and still NOISY because the open contradiction travels with it.
-    fresh = H.assess(agg(critical_layout()), NOW)
-    assert fresh["state"] == H.NOISY
+    # The fresh session is the critical lines plus ONE line that points at the
+    # whole previous context in the vault; none of the old turns is in it.
+    fresh = [e for e in after["layout"] if e.get("tier")]
+    assert [e["text"] for e in fresh[:3]] == [PREF, RULE, CONTRA]
+    assert len(fresh) == 4 and fresh[3]["kind"] == H.FOLDED
+    assert compression.POINTER in fresh[3]["text"]
+    assert "- note 1 about" not in after["prompt"]
+    assert after["tokens_used"] < before["tokens_used"]
+    # Still NOISY because the open contradiction travels with it; nothing left to act on.
+    assert (verdict["after"], verdict["after_action"]) == (H.NOISY, H.NONE)
     assert H.assess(agg(critical_layout(contradiction=False)), NOW)["state"] == H.HEALTHY
+    assert compression.recover(verdict["restart"]["recovery"]).decode().splitlines() == list(
+        dict.fromkeys(e["text"] for e in duplicated(20, 12)))
 
 
 def test_an_open_contradiction_raises_the_state_but_asks_for_no_action():
@@ -331,9 +340,10 @@ def stale_layout():
             + [line("DUMP " * 300, "outcomes")])
 
 
-def test_remediate_records_every_line_it_lets_go_of_and_each_one_recovers(vault_dir):
-    after, verdict = H.remediate(agg(stale_layout()), NOW)
-    records = verdict["transformations"]
+def test_summarize_records_every_line_it_lets_go_of_and_each_one_recovers(vault_dir):
+    ledger = []
+    after = H.summarize(stale_layout(), NOW, ledger=ledger)
+    records = [t.to_dict() for t in ledger]
     assert {r["action"] for r in records} == {compression.DROP}
     assert {r["payload_class"] for r in records} == {compression.DROP_AFTER_EXTRACTION}
     recovered = {compression.recover(r["recovery"]).decode() for r in records}
@@ -341,7 +351,7 @@ def test_remediate_records_every_line_it_lets_go_of_and_each_one_recovers(vault_
     for r in records:
         assert compression.recover(r["transformed_sha256"]) == compression.recover(r["recovery"])
         assert r["source_sha256"] == r["origin_sha256"] and r["parent_sha256"] == ""
-    assert not any(t in after["prompt"] for t in recovered)
+    assert not any(t in H._packet(after) for t in recovered)
 
 
 def test_a_critical_line_is_never_transformed_even_when_something_else_quotes_it(vault_dir):
@@ -429,7 +439,8 @@ def test_the_voice_brain_acts_on_the_verdict(db, monkeypatch):
     assert ctx.count("- he: ok") == 1
 
 
-def test_the_long_run_benchmark_passes_and_writes_its_evidence(tmp_path):
+def test_the_long_run_benchmark_passes_and_writes_its_evidence(tmp_path, monkeypatch):
+    monkeypatch.setenv("FRIDAY_ARTIFACT_VAULT", str(tmp_path / "vault"))
     import importlib.util
     import json
     from pathlib import Path
@@ -441,7 +452,7 @@ def test_the_long_run_benchmark_passes_and_writes_its_evidence(tmp_path):
     assert golden.main(["--out", str(out)]) == 0
     evidence = json.loads(out.read_text(encoding="utf-8"))
     assert [c["name"] for c in evidence["checks"] if not c["ok"]] == []
-    assert len(evidence["checks"]) == 7 and len(evidence["controlled"]) == golden.TURNS
+    assert len(evidence["checks"]) == 9 and len(evidence["controlled"]) == golden.TURNS
     lab = evidence["context_lab"]["summary"]
     assert lab["scenarios"] == 14 and lab["exercised"] > 0 and lab["failed"] == 0
 
@@ -474,3 +485,170 @@ def test_the_long_run_bounds_hold_over_a_fast_deterministic_replay(vault_dir):
     failed = [c for c in golden.controlled_checks(controlled) if not c["ok"]]
     assert failed == []
     assert not any(r["critical_lost"] or r["refused"] for r in controlled)
+
+
+# --- the three metrics that need a recorded source (PRD 19.5) ----------------
+
+def attempts(kinds, tier="outcomes"):
+    return [line("- attempt %d: restart the sync job" % i, tier, kind=k)
+            for i, k in enumerate(kinds)]
+
+
+def test_failed_attempt_density_and_struggle_score_are_measured_from_recorded_attempts():
+    ok, bad = H.ATTEMPT, H.FAILED_ATTEMPT
+    layout = unique(8) + attempts([ok, bad, bad, ok, bad, bad, bad])
+    m = H.measure(agg(layout), NOW)
+    assert m["failed_attempt_density"] == round(5 / 15, 4)        # failed lines over all lines
+    assert m["struggle_score"] == 0.8                              # 4 of the last 5 attempts failed
+    v = H.assess(agg(layout), NOW)
+    assert v["unmeasured"] == ["retrieval_confidence"]
+    only_ok = H.measure(agg(unique(8) + attempts([ok] * 3)), NOW)
+    assert (only_ok["failed_attempt_density"], only_ok["struggle_score"]) == (0.0, 0.0)
+
+
+def test_retrieval_confidence_is_the_mean_score_of_the_lines_that_carry_one():
+    scored = [dict(line("- [a%d] spec" % i, "specs"), score=s) for i, s in enumerate((0.5, 1.0, 0.0))]
+    m = H.measure(agg(unique(5) + scored), NOW)
+    assert m["retrieval_confidence"] == 0.5
+    assert H.measure(agg(unique(5)), NOW)["retrieval_confidence"] is None
+    wild = dict(line("- [z] spec", "specs"), score=7)
+    assert H.measure(agg([wild]), NOW)["retrieval_confidence"] == 1.0, "a score is clamped to 0..1"
+
+
+def test_known_failures_count_toward_density_but_never_toward_struggle():
+    known = [line("- lesson %d: lock stalls" % i, "failures", kind=H.KNOWN_FAILURE) for i in range(4)]
+    m = H.measure(agg(unique(6) + known), NOW)
+    assert m["failed_attempt_density"] == 0.4 and m["struggle_score"] is None
+    mixed = H.measure(agg(unique(6) + known + attempts([H.ATTEMPT, H.ATTEMPT, H.FAILED_ATTEMPT])), NOW)
+    assert mixed["struggle_score"] == round(1 / 3, 4), "only recorded attempts make the window"
+
+
+def test_the_new_metrics_report_but_drive_no_state():
+    layout = unique(8) + attempts([H.FAILED_ATTEMPT] * 5)
+    v = H.assess(agg(layout), NOW)
+    assert v["metrics"]["struggle_score"] == 1.0
+    assert (v["state"], v["action"], v["drivers"]) == (H.HEALTHY, H.NONE, {})
+
+
+def test_the_live_aggregate_marks_failures_and_scores_specs(db, monkeypatch, tmp_path):
+    from friday import memory_stack as M
+    from friday import vault
+    spec = tmp_path / "vault"
+    spec.mkdir()
+    (spec / "cutover.md").write_text("the cutover plan covers the backup job\n", encoding="utf-8")
+    monkeypatch.setattr(vault, "VAULT", spec)
+    monkeypatch.setattr(M, "failures", lambda *a, **k: {"items": [
+        {"symptom": "sync stalls", "root_cause": "lock", "repair": "clear it",
+         "prevention": "", "applicability": []}]})
+    got = M.aggregate("cutover backup", budget_tokens=900)
+    kinds = {e["tier"]: e for e in got["layout"] if e.get("tier") in ("specs", "failures")}
+    # A genome lesson is a known failure, not an attempt made in this session.
+    assert kinds["failures"]["kind"] == H.KNOWN_FAILURE
+    assert kinds["specs"]["score"] == 1.0
+    m = got["health"]["metrics"]
+    assert m["retrieval_confidence"] == 1.0
+    assert m["failed_attempt_density"] > 0
+    # Nothing in the live path records an attempt, so how the work is going now
+    # is unmeasured - not a constant 1.0 made of historical lessons.
+    assert m["struggle_score"] is None
+    assert got["health"]["unmeasured"] == ["struggle_score"]
+
+
+# --- 19.6 temporary branch and the session restart (CTX-004) ----------------
+
+def test_a_branch_ingests_a_large_block_and_folds_out_as_one_recoverable_line(vault_dir):
+    parent = critical_layout() + [head("WHAT WAS SAID BEFORE (most recent last):")] + unique(3, "episodes")
+    big = [line("- page %d: %s" % (i, "research detail " * 30), "specs") for i in range(12)]
+    branch = H.Branch(parent)
+    branch.ingest(big)
+    out = branch.fold_out(result="12 pages read, the cutover moves to Friday")
+    assert out is not None and len(out) == len(parent) + 2         # a heading and one line
+    folded = out[-1]
+    assert folded["kind"] == H.FOLDED and compression.POINTER in folded["text"]
+    assert folded["text"].startswith("12 pages read, the cutover moves to Friday ")
+    assert not any("research detail" in e["text"] for e in out), "the raw block never reaches the parent"
+    assert compression.recover(branch.recovery).decode().splitlines() == [e["text"] for e in big]
+    joined = "\n".join(e["text"] for e in out)
+    for fact in (PREF, RULE, CONTRA):
+        assert fact in joined
+    assert H.measure(agg(out), NOW)["tokens"] < H.measure(agg(parent + big), NOW)["tokens"]
+
+
+def test_a_branch_refuses_a_critical_line_and_a_vault_that_cannot_keep_the_block(monkeypatch, tmp_path):
+    branch = H.Branch(critical_layout())
+    with pytest.raises(ValueError):
+        branch.ingest([line(RULE, "rules")])
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file where the vault directory should be")
+    monkeypatch.setenv("FRIDAY_ARTIFACT_VAULT", str(blocked))
+    branch.ingest(unique(4, "specs"))
+    assert branch.fold_out() is None, "the block stays where it was when it cannot be kept"
+
+
+def test_a_reset_the_vault_cannot_back_falls_back_to_summarizing_in_place(monkeypatch, tmp_path):
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file where the vault directory should be")
+    monkeypatch.setenv("FRIDAY_ARTIFACT_VAULT", str(blocked))
+    after, verdict = H.remediate(agg(critical_layout() + duplicated(20, 12)), NOW, reset=True)
+    assert verdict["action"] == H.HANDOFF and verdict["applied"] == H.SUMMARIZE
+    assert "restart" not in verdict
+    for fact in (PREF, RULE, CONTRA):
+        assert fact in after["prompt"]
+
+
+def test_a_reset_records_the_whole_old_context_as_one_fold_and_it_recovers(vault_dir):
+    after, verdict = H.remediate(agg(stale_layout()), NOW, reset=True)
+    assert verdict["applied"] == H.HANDOFF
+    (record,) = verdict["transformations"]
+    assert record["action"] == compression.FOLD_TO_ARTIFACT
+    assert record["recovery"] == verdict["restart"]["recovery"]
+    old = compression.recover(record["recovery"]).decode().splitlines()
+    assert old == ["- he: hello"] + ["- he: old news %d" % i for i in range(3)] + ["DUMP " * 300]
+    assert old[-1] not in after["prompt"], "the raw dump is not carried, only its pointer"
+
+
+# --- the stateless live path must not reset (review of CTX-004) ---------------
+
+def rotting_with_specs():
+    layout = (critical_layout(contradiction=False)
+              + [head("RELEVANT SPECS FROM THE VAULT:")]
+              + [line("- [cutover.md] the cutover plan moves the backup job to Friday %d" % i, "specs")
+                 for i in range(3)]
+              + [head("WHAT WAS SAID BEFORE (most recent last):")] + duplicated(60, 40))
+    return agg(layout, budget=300, task="cutover backup")
+
+
+def test_remediate_resets_only_for_a_caller_that_holds_a_session(vault_dir):
+    before = rotting_with_specs()
+    assert H.assess(before, NOW)["action"] == H.HANDOFF
+    stateless, v = H.remediate(before, NOW)
+    assert v["applied"] == H.SUMMARIZE and "restart" not in v
+    assert "cutover" in stateless["prompt"], "a request-scoped rebuild keeps its task-relevant specs"
+    fresh, v = H.remediate(before, NOW, reset=True)
+    assert v["applied"] == H.HANDOFF and "restart" in v
+    assert "cutover" not in fresh["prompt"]
+
+
+def test_the_voice_brain_keeps_task_specs_when_the_context_is_rotting(db, monkeypatch, vault_dir):
+    from friday import memory_stack as M
+    from friday import voice_brain as V
+    rotting = rotting_with_specs()
+    rotting["prompt"] = "\n".join(e["text"] for e in rotting["layout"])
+    monkeypatch.setattr(M, "aggregate", lambda *a, **k: rotting)
+    ctx = V._memory_context("cutover backup")
+    assert "cutover plan" in ctx and RULE in ctx
+
+
+def test_the_benchmark_judges_a_recovery_on_every_line_not_just_the_last():
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "scripts" / "golden_context.py"
+    spec = importlib.util.spec_from_file_location("golden_context_x", path)
+    golden = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(golden)
+    before = critical_layout() + [line("- a", "episodes"), line("- b", "episodes"), line("- a", "episodes"),
+                                  line("- c", "episodes")]
+    assert golden.restart_recovers(before, "- a\n- b\n- c")
+    assert not golden.restart_recovers(before, "- c"), "a recovery that lost earlier lines fails"
+    assert not golden.restart_recovers(before, "- a\n- b\n- z")
+    assert not golden.restart_recovers(before, "")

@@ -10,9 +10,15 @@ and no model.
 Measured from the layout: utilization (tokens over budget, so a context at or
 under its budget scores 1.0 or less), relevance density, duplicate ratio, stale
 ratio (only lines that carry a timestamp), contradiction score and raw-output
-ratio. Not measured, because nothing in the context records them yet:
-failed-attempt density, struggle score and retrieval confidence. They are named
-in `UNMEASURED` and never given a number.
+ratio. Three more are measured only from what a line records about itself, and
+are None - named in the verdict's `unmeasured`, never given a number - when no
+line does: failed-attempt density (lines of `kind` FAILED_ATTEMPT over all
+lines, once any line is an ATTEMPT or a FAILED_ATTEMPT), struggle score (the
+share of the last STRUGGLE_WINDOW attempts that failed: how the work is going
+now, where density is the whole context; a genome lesson, KNOWN_FAILURE, counts
+toward density only, so struggle stays None until something records real attempts) and retrieval confidence (the mean
+`score`, 0..1, of the lines that carry one). Like relevance density they are
+reported and drive nothing.
 
 The state is the worst level any driver reaches. Relevance density is reported
 but drives nothing: rules and preferences are always-on and match no task, so a
@@ -25,11 +31,15 @@ Actions. NOISY prunes (duplicates, stale and raw-dump lines). DEGRADED
 summarizes (the same, plus clipping and a per-section cap), or folds when one
 non-critical section holds most of the tokens: the section's lines become one
 line that points at the original in the artifact vault, and the rest is
-summarized. ROTTING hands off. Hand-off names a seam that does not exist yet -
-there is no temporary-branch machinery (19.6) and no session-restart hook - so
-it stays advisory: the context is still shrunk in place with the summarize
-action, and a hand-off verdict carries the packet a fresh session would start
-from.
+summarized. ROTTING resets: the whole non-critical context is ingested by a
+temporary `Branch` (19.6) and folded out as one recoverable line, and the
+context `remediate` returns is the fresh session - the rules, preferences and
+open contradictions plus that line. This is opt-in (`remediate(..., reset=True)`)
+for a caller that owns a session and swaps its state for the returned aggregate
+when `applied` is HANDOFF; `restart` in the verdict names where the old context
+is kept. A stateless per-request caller gets the summarize action instead. When the vault cannot keep the old
+context the reset is not made: the context is shrunk in place with the
+summarize action, as before, and `applied` says so.
 
 Every change to a prompt is checked against `compaction.CriticalFactSet`
 (rules, preferences, open contradictions); a change that would drop one is
@@ -50,9 +60,17 @@ STATES = (HEALTHY, NOISY, DEGRADED, ROTTING)
 
 NONE, PRUNE, SUMMARIZE, FOLD, HANDOFF = "none", "prune", "summarize", "fold", "handoff"
 ACTION_FOR = {HEALTHY: NONE, NOISY: PRUNE, DEGRADED: SUMMARIZE, ROTTING: HANDOFF}
-ADVISORY = (FOLD, HANDOFF)
 
-UNMEASURED = ("failed_attempt_density", "struggle_score", "retrieval_confidence")
+#: `kind` on a layout record for an attempt at something, and for one that failed.
+ATTEMPT, FAILED_ATTEMPT = "attempt", "failed_attempt"
+#: `kind` of a historical, root-caused lesson (the failure genome). It is a failure
+#: the context carries, not an attempt made in this session, so it counts toward
+#: failed-attempt density and never toward the struggle window.
+KNOWN_FAILURE = "known_failure"
+#: Struggle score looks at this many of the newest attempts.
+STRUGGLE_WINDOW = 5
+#: The metrics that exist only when a line records them (see the module doc).
+NEEDS_SOURCE = ("failed_attempt_density", "struggle_score", "retrieval_confidence")
 
 #: Tiers whose lines are the person's standing instructions; never pruned or clipped.
 CRITICAL_TIERS = ("preferences", "rules")
@@ -183,6 +201,10 @@ def measure(agg: dict, now: datetime | None = None) -> dict:
         seen.add(key)
     stamped = [e for e in entries if _parse_ts(e.get("ts")) is not None]
     task = {w for w in _norm(agg.get("task", "")).split() if len(w) >= 3}
+    tried = [e for e in entries if e.get("kind") in (ATTEMPT, FAILED_ATTEMPT)]
+    recent = [e["kind"] == FAILED_ATTEMPT for e in tried[-STRUGGLE_WINDOW:]]
+    scores = [min(1.0, max(0.0, float(e["score"]))) for e in entries
+              if isinstance(e.get("score"), (int, float)) and not isinstance(e["score"], bool)]
     return {
         "entries": n,
         "tokens": total,
@@ -197,6 +219,12 @@ def measure(agg: dict, now: datetime | None = None) -> dict:
                                 if n else 0.0),
         "raw_output_ratio": (round(sum(_tokens(e["text"]) for e in entries if _is_raw(e))
                                    / total, 4) if total else 0.0),
+        "failed_attempt_density": (round(sum(e.get("kind") in (FAILED_ATTEMPT, KNOWN_FAILURE)
+                                             for e in entries) / n, 4)
+                                   if tried or any(e.get("kind") == KNOWN_FAILURE
+                                                   for e in entries) else None),
+        "struggle_score": round(sum(recent) / len(recent), 4) if recent else None,
+        "retrieval_confidence": round(sum(scores) / len(scores), 4) if scores else None,
     }
 
 
@@ -239,9 +267,10 @@ def assess(agg: dict, now: datetime | None = None) -> dict:
     if STATES[fixable] == DEGRADED and bulk_share >= _env_number("FRIDAY_CTX_FOLD_SHARE",
                                                                  FOLD_SHARE, float):
         action = FOLD
-    return {"state": STATES[level], "action": action, "advisory": action in ADVISORY,
+    return {"state": STATES[level], "action": action,
             "awaiting_person": [d for d in drivers if d in NEEDS_PERSON],
-            "drivers": drivers, "metrics": metrics, "unmeasured": list(UNMEASURED),
+            "drivers": drivers, "metrics": metrics,
+            "unmeasured": [m for m in NEEDS_SOURCE if metrics[m] is None],
             "bulk_tier": bulk_tier}
 
 
@@ -397,8 +426,90 @@ def _packet(layout) -> str:
     return "\n".join(e["text"] for e in layout)
 
 
-def remediate(agg: dict, now: datetime | None = None) -> tuple[dict, dict]:
-    """Act on the verdict. Returns the aggregate with its layout, prompt and
+#: Heading of the line a branch leaves in its parent, and of the one a reset starts from.
+BRANCH_HEADING = "FOLDED FROM A TEMPORARY BRANCH (original in the artifact vault):"
+RESET_HEADING = "CARRIED FROM THE PREVIOUS SESSION (original in the artifact vault):"
+
+
+class Branch:
+    """A temporary context branch (PRD v7 19.6). Large material is ingested into
+    the branch instead of the parent; `fold_out` writes all of it to the artifact
+    vault through the compression coordinator and gives the parent one line: a
+    concise result and the pointer to the original. The parent never holds the
+    raw material, and no critical line goes into a branch - those stay in the
+    parent, whole."""
+
+    def __init__(self, parent, heading: str = BRANCH_HEADING):
+        self.parent = list(parent)
+        self.heading = heading
+        self.entries: list = []
+        self.ledger: list = []
+
+    def ingest(self, entries) -> None:
+        for e in entries:
+            if not e.get("tier"):
+                continue
+            if _critical(e):
+                raise ValueError("a critical line stays in the parent context")
+            self.entries.append(e)
+
+    @property
+    def recovery(self) -> str:
+        """The handle that gives back the whole block ("" before a fold-out)."""
+        folds = [r for r in self.ledger if r.action == compression.FOLD_TO_ARTIFACT]
+        return folds[-1].recovery if folds else ""
+
+    def _result(self) -> str:
+        distinct = list(dict.fromkeys(e["text"] for e in self.entries))
+        newest = distinct[-_env_number("FRIDAY_CTX_SUMMARY_SECTION_LINES",
+                                       SUMMARY_SECTION_LINES, int):]
+        return _clip(" | ".join(_clip_line(t) for t in newest),
+                     3 * _env_number("FRIDAY_CTX_SUMMARY_LINE_CHARS", SUMMARY_LINE_CHARS, int))
+
+    def fold_out(self, result: str | None = None) -> list | None:
+        """The parent layout with the branch folded into it: a heading and one
+        line, `result` (default: the newest lines, clipped) then the pointer.
+        None when the coordinator refuses - the vault cannot keep the block -
+        and the material stays where it was. Raises `compaction.LossyCompaction`
+        if the new parent would lose a critical fact."""
+        if not self.entries:
+            return list(self.parent)
+        facts = critical_facts(self.parent)
+        block = "\n".join(dict.fromkeys(e["text"] for e in self.entries))
+        stub = _shorten(block, compression.FOLD_TO_ARTIFACT, facts, self.ledger)
+        if stub is None:
+            return None
+        text = "%s %s" % (self._result() if result is None else result, stub)
+        out = self.parent + [{"tier": None, "text": self.heading},
+                             {"tier": RECENT_TIER, "text": text, "ts": None, "kind": FOLDED}]
+        compaction.validate(_packet(out), facts)
+        return out
+
+
+def restart(layout, ledger: list | None = None) -> tuple[list, str] | None:
+    """The fresh session for `layout`: its critical lines, with their headings,
+    and everything else folded out through a `Branch` into one line. Returns
+    (fresh layout, recovery handle of the old context), or None when the old
+    context cannot be kept and so cannot be let go of."""
+    old = [e for e in _entries(layout) if not _critical(e)]
+    kept = _tidy([e for e in layout if not e.get("tier") or _critical(e)])
+    if not old:
+        return kept, ""
+    branch = Branch(kept, RESET_HEADING)
+    branch.ingest(old)
+    fresh = branch.fold_out()
+    if ledger is not None:
+        ledger.extend(branch.ledger)
+    return None if fresh is None else (fresh, branch.recovery)
+
+
+def remediate(agg: dict, now: datetime | None = None,
+              reset: bool = False) -> tuple[dict, dict]:
+    """Act on the verdict. `reset` is for a caller that holds a session and will
+    swap its state for the returned aggregate: only then does HANDOFF restart
+    from a fresh context. A caller that rebuilds its context on every request
+    (the voice brain) leaves it False, and a ROTTING context is summarized in
+    place, task-relevant lines kept, with nothing written to the vault. Returns the aggregate with its layout, prompt and
     token count replaced, and the verdict with `applied` (what was done to the
     prompt), `after` (the state it left) and `after_action` (what that state
     would still call for; none means nothing an action can clear is left).
@@ -411,10 +522,13 @@ def remediate(agg: dict, now: datetime | None = None) -> tuple[dict, dict]:
         return agg, dict(verdict, applied=NONE)
     budget = agg.get("budget_tokens") or 0
     ledger: list = []
+    restarted = restart(layout, ledger) if action == HANDOFF and reset else None
     if action == PRUNE:
         shrunk = prune(layout, now, budget, ledger)
     elif action == FOLD:
         shrunk = summarize(fold(layout, verdict["bulk_tier"], ledger), now, budget, ledger)
+    elif restarted is not None:
+        shrunk = restarted[0]
     else:
         shrunk = summarize(layout, now, budget, ledger)
     folded = any(r.action == compression.FOLD_TO_ARTIFACT for r in ledger)
@@ -428,13 +542,16 @@ def remediate(agg: dict, now: datetime | None = None) -> tuple[dict, dict]:
     after = dict(agg, layout=shrunk, prompt=_packet(shrunk),
                  tokens_used=sum(_tokens(e["text"]) for e in _entries(shrunk)))
     left = assess(after, now)
-    out = dict(verdict, applied=PRUNE if action == PRUNE else FOLD if folded else SUMMARIZE,
+    out = dict(verdict, applied=PRUNE if action == PRUNE else HANDOFF if restarted is not None
+               else FOLD if folded else SUMMARIZE,
                after=left["state"], after_action=left["action"],
                transformations=[t.to_dict() for t in ledger])
     if action == HANDOFF:
         packet = _packet([e for e in _entries(layout) if _critical(e)])
         compaction.validate(packet, facts)
         out["handoff_packet"] = packet
-    log.info("context health %s -> %s (applied %s, now %s%s)", verdict["state"], action,
-             out["applied"], out["after"], ", advisory" if verdict["advisory"] else "")
+        if restarted is not None:
+            out["restart"] = {"recovery": restarted[1]}
+    log.info("context health %s -> %s (applied %s, now %s)", verdict["state"], action,
+             out["applied"], out["after"])
     return after, out

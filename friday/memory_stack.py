@@ -145,10 +145,15 @@ def specs(task="", limit=4, excerpt=600):
             hits.append((score, p, text))
     hits.sort(key=lambda x: -x[0])
     items = []
+    wanted = list(dict.fromkeys(toks))
     for score, p, text in hits[:limit]:
         body = re.sub(r"^---.*?---\s*", "", text, count=1, flags=re.S)
+        low, name = text.lower(), p.stem.lower()
         items.append({"path": str(p.relative_to(root)).replace("\\", "/"),
                       "score": score, "excerpt": body[:excerpt].strip(),
+                      # the share of the task's words this file answers: 0..1
+                      "confidence": round(sum(1 for t in wanted if t in low or t in name)
+                                          / len(wanted), 4),
                       "hand_edited": "generated-by: friday.vault" not in text})
     return {"items": items, "source": str(root)}
 
@@ -365,12 +370,14 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
     # has to parse the prompt text back into tiers.
     meta = {}
 
-    def take(section, text, key, ts=None, kind=""):
+    def take(section, text, key, ts=None, kind="", score=None):
         nonlocal used
         cost = _approx_tokens(text)
         if used + cost > budget:
             return False
         meta[len(lines)] = {"tier": key, "ts": ts, "kind": kind}
+        if score is not None:
+            meta[len(lines)]["score"] = score
         lines.append(text)
         used += cost
         injected[key] += 1
@@ -431,7 +438,7 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
                 detail += " | prevention: %s" % f["prevention"][:120]
             if f["applicability"]:
                 detail += " | only when: %s" % "; ".join(f["applicability"])[:120]
-            if not take("failure", detail, "failures"):
+            if not take("failure", detail, "failures", kind=context_health.KNOWN_FAILURE):
                 break
     if t1["items"]:
         lines.append("YOUR PREFERENCES AND RULES:")
@@ -446,7 +453,8 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
     if t2["items"]:
         lines.append("RELEVANT SPECS FROM THE VAULT:")
         for it in t2["items"]:
-            if not take("spec", "- [%s] %s" % (it["path"], it["excerpt"][:300].replace("\n", " ")), "specs"):
+            if not take("spec", "- [%s] %s" % (it["path"], it["excerpt"][:300].replace("\n", " ")), "specs",
+                        score=it.get("confidence")):
                 break
     if t4["items"] or t4["conflicts"]:
         lines.append("HOW THINGS CONNECT:")
