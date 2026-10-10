@@ -11,7 +11,7 @@ and the durable WorkRun ledger the bridge keeps.
 This adapter presents the bridge through the executor contract
 `DevelopmentRun.execute()` already relies on:
 
-    execute(bundle, *, timeout=...) -> contracts.ActionResult
+    execute(bundle, *, timeout=..., envelope=None) -> contracts.ActionResult
 
 so Hermes drops into the existing pipeline unchanged. The claude_code
 executor stays as an explicit fallback (`prefer="claude"` or Hermes absent);
@@ -65,6 +65,26 @@ def to_bridge_bundle(bundle) -> hb.TaskBundle:
     )
 
 
+def _bounded(bundle: hb.TaskBundle, workspace: str,
+             envelope: c.Envelope) -> hb.Bounded:
+    """`bundle`, held to `envelope` for a session started in `workspace`.
+
+    The bridge compiles the envelope (`hb.bounded_by`: expired or not allowed to
+    delegate is refused). The caller's workspace is held to the envelope here as
+    `brokers.within_envelope` holds it for claude_code, because the bridge would
+    otherwise start the session in the envelope's own directory instead.
+    """
+    bounded = hb.bounded_by(bundle, envelope)
+    if not envelope.reads(workspace):
+        raise c.OutsideEnvelope(
+            f"the workspace {workspace} is outside this run's envelope")
+    if not envelope.writes(workspace):
+        raise c.OutsideEnvelope(
+            f"a run that writes needs its workspace {workspace} inside a "
+            "write root of its envelope")
+    return bounded
+
+
 class HermesExecutor:
     """Hand a development bundle to Hermes and wait for the turn."""
 
@@ -84,8 +104,15 @@ class HermesExecutor:
         return self._supervisor
 
     async def execute(self, bundle, *, timeout: float = 1800.0,
+                      envelope: c.Envelope | None = None,
                       **_ignored) -> c.ActionResult:
-        run_ctx = c.Run.create(bundle.goal, capability="development")
+        if envelope is None:
+            run_ctx = c.Run.create(bundle.goal, capability="development")
+        else:
+            run_ctx = c.Run(run_id=c.new_run_id(), request=bundle.goal,
+                            capability="development",
+                            provenance=envelope.provenance,
+                            attended=envelope.attended, envelope=envelope)
         started = c.started(run_ctx.run_id, "executor.hermes")
 
         plan = ee.plan_delegation(bundle.goal,
@@ -93,12 +120,25 @@ class HermesExecutor:
                                   acceptance=len(bundle.acceptance),
                                   model=self.model, effort=self.effort)
         try:
+            sent, within = to_bridge_bundle(bundle), {}
+            if envelope is not None:
+                bounded = _bounded(sent, bundle.workspace, envelope)
+                sent = bounded.bundle
+                within = {"expires_in": bounded.expires_in, "scope": bounded.envelope}
+                # The run ends when its envelope does, whatever timeout was asked for.
+                if bounded.expires_in is not None:
+                    timeout = min(timeout, bounded.expires_in)
             sup = self.supervisor()
             out = sup.delegate(
-                to_bridge_bundle(bundle), friday_run_id=run_ctx.run_id,
+                sent, friday_run_id=run_ctx.run_id,
                 model=plan["model"], reasoning_effort=plan["effort"],
                 route_reason=plan["reason"], workspace=bundle.workspace,
-                wait=True, turn_timeout=timeout)
+                wait=True, turn_timeout=timeout, **within)
+        except c.OutsideEnvelope as exc:
+            # Refused, not attempted: the same answer claude_code gives for a
+            # launch its envelope does not allow.
+            return run_ctx.record(started.finish(
+                status=c.NOT_PERMITTED, error=f"ENVELOPE: {exc}"))
         except hb.HermesUnavailable as exc:
             return run_ctx.record(c.failed(started, f"hermes unavailable: {exc}"))
         except Exception as exc:                            # noqa: BLE001

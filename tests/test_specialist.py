@@ -12,12 +12,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from friday import contracts as c
+from friday import hermes_bridge as hb
 from friday import specialist as S
 from friday.agent_ledger import AgentLedger, FAILED, LedgerError, SUCCEEDED, TERMINAL
+from friday.executors.hermes import HermesExecutor
 from friday.store import Store
 
 ROUTE = "anthropic/claude-sonnet/5.5/subscription"
@@ -171,6 +174,113 @@ def test_the_run_limits_reach_every_executor_alike_and_none_is_invented(
     # No limit asked for: the executor's own default applies, not one made up here.
     asyncio.run(S.dispatch(ledger, _compose("hermes"), "t", "/w", run_id="R-D"))
     assert executors["hermes"].limits[-1] == {}
+
+
+class _Supervisor:
+    """The bridge a real `HermesExecutor` hands its task to: keeps what it was sent."""
+
+    def __init__(self, raises: Exception | None = None) -> None:
+        self.calls, self.raises = [], raises
+
+    def delegate(self, bundle, **kwargs):
+        if self.raises is not None:
+            raise self.raises
+        self.calls.append((bundle, kwargs))
+        return {"work_run_id": "WR-1",
+                "result": {"status": hb.COMPLETE, "result": "done", "model": "m"}}
+
+
+def _envelope(tmp_path, *, seconds=120.0, capabilities=("hermes_delegate",)):
+    work = tmp_path / "ws"
+    work.mkdir(exist_ok=True)
+    expires = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    return c.Envelope(run_id="R-ENV", cwd=str(work), read_roots=(str(tmp_path),),
+                      write_roots=(str(work),), allowed_capabilities=capabilities,
+                      expires_at=expires.isoformat())
+
+
+def _real_hermes(monkeypatch, supervisor):
+    """Hermes is the real executor class; only its gateway is the stand-in."""
+    monkeypatch.setattr(
+        S.executor_router, "build",
+        lambda executor_id, store, **kw: HermesExecutor(store, supervisor=supervisor))
+
+
+def test_the_hermes_executor_holds_the_role_run_to_the_envelope_it_was_given(
+        ledger, tmp_path, monkeypatch):
+    envelope, supervisor = _envelope(tmp_path), _Supervisor()
+    _real_hermes(monkeypatch, supervisor)
+    work = envelope.cwd
+
+    got = asyncio.run(S.dispatch(ledger, _compose("hermes"), "t", work, run_id="R-H",
+                                 timeout=900.0, envelope=envelope))
+
+    assert got.status == c.SUCCEEDED
+    ((bundle, sent),) = supervisor.calls
+    # The bridge registers the envelope, so the exec bridge judges every file call by it.
+    assert sent["scope"] is envelope
+    assert sent["workspace"] == work
+    # The run ends when its envelope does, whatever timeout was asked for.
+    assert 0 < sent["expires_in"] <= 120
+    assert sent["turn_timeout"] <= 120
+    assert bundle.allowed_paths == envelope.write_roots
+    assert "Allowed tools: Read, Edit, Bash" in bundle.constraints
+    assert any(line.startswith("write only under: ") for line in bundle.constraints)
+    assert ledger.run("R-H")["status"] == SUCCEEDED
+
+    # No envelope asked for: the delegation is the unscoped one it always was.
+    asyncio.run(S.dispatch(ledger, _compose("hermes"), "t", work, run_id="R-D",
+                           timeout=900.0))
+    (_, plain) = supervisor.calls[-1]
+    assert "scope" not in plain and "expires_in" not in plain
+    assert plain["turn_timeout"] == 900.0
+
+
+@pytest.mark.parametrize("make, reason", [
+    (lambda tmp: _envelope(tmp, seconds=-5.0), "expired"),
+    (lambda tmp: _envelope(tmp, capabilities=()), "hermes_delegate"),
+], ids=["expired", "delegation-not-allowed"])
+def test_an_envelope_that_does_not_allow_the_run_is_refused_not_run_on_hermes(
+        ledger, tmp_path, monkeypatch, make, reason):
+    envelope, supervisor = make(tmp_path), _Supervisor()
+    _real_hermes(monkeypatch, supervisor)
+
+    got = asyncio.run(S.dispatch(ledger, _compose("hermes"), "t", envelope.cwd,
+                                 run_id="R-H", envelope=envelope))
+
+    assert got.status == c.NOT_PERMITTED
+    assert got.error.startswith("ENVELOPE: ") and reason in got.error
+    assert supervisor.calls == []
+    assert ledger.run("R-H")["status"] in TERMINAL
+    assert _results(ledger, "R-H")[0]["status"] == c.NOT_PERMITTED
+
+
+def test_a_workspace_outside_the_envelope_is_refused_on_hermes_as_on_claude(
+        ledger, tmp_path, monkeypatch):
+    envelope, supervisor = _envelope(tmp_path), _Supervisor()
+    _real_hermes(monkeypatch, supervisor)
+    elsewhere = tmp_path.parent / "not-in-the-envelope"
+
+    got = asyncio.run(S.dispatch(ledger, _compose("hermes"), "t", str(elsewhere),
+                                 run_id="R-H", envelope=envelope))
+
+    assert got.status == c.NOT_PERMITTED
+    assert "outside this run's envelope" in got.error
+    assert supervisor.calls == []
+
+
+def test_a_gateway_that_cannot_be_held_to_the_envelope_is_a_refusal_not_a_crash(
+        ledger, tmp_path, monkeypatch):
+    envelope = _envelope(tmp_path)
+    _real_hermes(monkeypatch, _Supervisor(
+        raises=c.OutsideEnvelope("no gateway can be held to an envelope here")))
+
+    got = asyncio.run(S.dispatch(ledger, _compose("hermes"), "t", envelope.cwd,
+                                 run_id="R-H", envelope=envelope))
+
+    assert got.status == c.NOT_PERMITTED
+    assert got.error == "ENVELOPE: no gateway can be held to an envelope here"
+    assert ledger.run("R-H")["status"] == FAILED
 
 
 def test_a_failed_result_closes_the_role_run_as_failed_with_the_reason(
