@@ -219,8 +219,10 @@ DECLARED = {
                                       "slices, run by tests/test_system_one_calibration.py"),
     "friday/opportunities": (FUTURE,
                              "PRO-001: deterministic anomaly detectors over automation runs "
-                             "feeding the Opportunities Inbox; a scheduled caller and an "
-                             "inbox tool are later slices, run by tests/test_opportunities.py"),
+                             "feeding the Opportunities Inbox; scan() runs on the UI background "
+                             "loop (ui_server._proactive_scan, lazy import) but the inbox "
+                             "tool is a later slice, run by tests/test_opportunities.py "
+                             "and tests/test_proactive_tick.py"),
     "friday/project_brain": (FUTURE,
                              "BRAIN-001: the Project Brain's storage and "
                              "Markdown export; the MCP tools and the "

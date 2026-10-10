@@ -68,6 +68,11 @@ _GBRAIN_CACHE = {"at": 0.0, "value": None}
 #: proves the bridge is alive is far too slow to sit on a request.
 _HERMES_TTL = 20.0
 _HERMES_CACHE = {"at": 0.0, "value": None}
+#: The proactive scan (PRO-001) rides this same background loop rather than
+#: a loop of its own. It is deterministic code over stored rows and makes no
+#: model call, so an idle system pays one cheap read every five minutes.
+_PROACTIVE_TTL = 300.0
+_PROACTIVE_CACHE = {"at": 0.0, "value": None}
 
 # The shared-memory snapshot, kept warm in the background so the UI's center
 # panel is instant (GBrain recall spawns a bun subprocess -- never on the
@@ -103,6 +108,13 @@ def _compute_mem_snapshot():
 log = logging.getLogger("friday.ui")
 
 
+def _proactive_scan():
+    """One pass of the opportunity detectors; the count of new inbox rows."""
+    from friday import opportunities
+    from friday.toolsets.objectives import store
+    return len(opportunities.scan(store()))
+
+
 def _mem_refresher():
     """Warm the shared-memory cache. Never dies silently: a broken refresher
     means every reader quietly gets stale data, so the failure is logged once
@@ -122,7 +134,8 @@ def _mem_refresher():
                 log.exception("memory snapshot refresh failed (%d in a row); "
                               "/api/memory_snapshot is serving stale data", failures)
         for cache, ttl, probe in ((_GBRAIN_CACHE, _GBRAIN_TTL, _probe_gbrain),
-                                  (_HERMES_CACHE, _HERMES_TTL, _probe_hermes)):
+                                  (_HERMES_CACHE, _HERMES_TTL, _probe_hermes),
+                                  (_PROACTIVE_CACHE, _PROACTIVE_TTL, _proactive_scan)):
             if time.time() - cache["at"] > ttl:                  # off the request path
                 try:
                     cache.update(at=time.time(), value=probe())
