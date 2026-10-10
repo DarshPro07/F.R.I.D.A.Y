@@ -702,3 +702,24 @@ def rank_routes(routes: list[tuple[str, str, str]],
     for i, route in zip(slots, ordered):
         out[i] = route
     return out
+
+
+def cheapest_capable(cands: list[str], bench: dict, *, min_n: int, rate_floor: float
+                     ) -> tuple[str, list[dict]] | None:
+    """The cheapest per verified win among `cands`, with the rows it was chosen
+    from; None when no candidate has `min_n` outcomes and a win. `bench` maps
+    model -> {n, wins, cost}. A model keeps its place only while its success rate
+    is at least `rate_floor` of the best; ties go to the earlier candidate. The
+    ranker `build_kernel.pick_model` and ultracode tiers share. It sits beside
+    `rank_routes`/`cost_per_completion` (FAB-003), which order routes from a
+    different input; the two are not yet expressed through one another."""
+    rated = {m: bench[m]["wins"] / bench[m]["n"] for m in cands
+             if m in bench and bench[m]["n"] >= min_n and bench[m]["wins"] > 0}
+    if not rated:
+        return None
+    best = max(rated.values())
+    rows = [{"model": m, "n": bench[m]["n"], "wins": bench[m]["wins"],
+             "cost": bench[m]["cost"], "cost_per_win": bench[m]["cost"] / bench[m]["wins"]}
+            for m in cands if m in rated and rated[m] >= rate_floor * best]
+    winner = min(rows, key=lambda r: (r["cost_per_win"], cands.index(r["model"])))
+    return winner["model"], rows

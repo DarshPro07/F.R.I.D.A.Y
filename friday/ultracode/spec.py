@@ -181,4 +181,6 @@ def compile_plan(spec: Spec) -> dict:
     A plain dict of JSON types, so two entry points that loaded the same
     file can be compared with `==`.
     """
+    from friday.ultracode.tiers import resolve_tiers
+    resolve_tiers(spec)
     return spec.to_dict()

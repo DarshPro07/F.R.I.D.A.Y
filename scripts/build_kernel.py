@@ -42,6 +42,7 @@ sys.path.insert(0, str(ROOT))
 import code_capsule  # noqa: E402
 import prd_ledger as PL  # noqa: E402
 from friday import waves as W  # noqa: E402
+from friday.execution_economics import cheapest_capable  # noqa: E402
 
 try:
     import psutil
@@ -1899,13 +1900,8 @@ def pick_model(kind: str, *, runs_dir: Path = RUNS_DIR, state_file: Path | None 
     least = min(cands, key=lambda m: (seen[m], cands.index(m)))
     if seen[least] < BENCH_MIN and tries % EXPLORE_EVERY == EXPLORE_EVERY - 1:
         return least
-    rated = {m: bench[m]["wins"] / bench[m]["n"] for m in cands
-             if seen[m] >= BENCH_MIN and bench[m]["wins"] > 0}
-    if not rated:
-        return cands[0]
-    best = max(rated.values())
-    able = [m for m, rate in rated.items() if rate >= RATE_FLOOR * best]
-    return min(able, key=lambda m: (bench[m]["cost"] / bench[m]["wins"], cands.index(m)))
+    chosen = cheapest_capable(cands, bench, min_n=BENCH_MIN, rate_floor=RATE_FLOOR)
+    return cands[0] if chosen is None else chosen[0]
 
 
 def bench_table(runs_dir: Path = RUNS_DIR) -> list[str]:

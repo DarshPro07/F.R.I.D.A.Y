@@ -261,6 +261,11 @@ DECLARED = {
     "friday/ultracode": (FUTURE,
                          "ULTRA-001/002: the workflow spec and stage result cache, "
                          "run by tests/test_ultracode_spec.py"),
+    "friday/ultracode/tiers": (FUTURE,
+                               "ULTRA-006: tier resolution and the model ranked "
+                               "within a tier; the stage runner (ULTRA-002) is "
+                               "the model-choice caller, run by "
+                               "tests/test_ultracode_tiers.py"),
     "friday/pattern_extraction": (FUTURE,
                                   "CAP-FORGE-012 EXTRACT_PATTERN decision and its "
                                   "native build; the forge intake "
