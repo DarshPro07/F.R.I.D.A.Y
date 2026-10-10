@@ -54,8 +54,10 @@ def overlaps(a: Iterable[str], b: Iterable[str]) -> bool:
     right = [p.casefold() for p in b]
     for x in left:
         for y in right:
-            if x == y or (y.endswith("/") and x.startswith(y)) \
-                    or (x.endswith("/") and y.startswith(x)):
+            # A path may name a directory with or without its trailing "/":
+            # a conflict missed here lets two writers share a tree.
+            x_dir, y_dir = x.rstrip("/") + "/", y.rstrip("/") + "/"
+            if x == y or x.startswith(y_dir) or y.startswith(x_dir):
                 return True
     return False
 

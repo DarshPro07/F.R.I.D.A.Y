@@ -45,6 +45,13 @@ def test_a_directory_overlaps_every_path_under_it():
     assert not waves.overlaps(surf("friday/"), surf("fridayx/a.py"))
 
 
+def test_a_directory_named_without_a_slash_still_overlaps_its_contents():
+    # A path parameter such as `build.old` names a directory with no slash.
+    assert waves.overlaps(surf("build.old"), surf("build.old/x.txt"))
+    assert waves.overlaps(surf("build.old/x.txt"), surf("BUILD.old"))
+    assert not waves.overlaps(surf("build"), surf("build.old/x.txt"))
+
+
 def test_unknown_runs_alone_and_blocks_everything():
     rows = {"a": surf("x.py"), "b": surf("y.py"), "u": surf()}
     pick = lambda items, running=(), room=9: waves.pick_starts(  # noqa: E731

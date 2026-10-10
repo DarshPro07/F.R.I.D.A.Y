@@ -1102,6 +1102,32 @@ def contract_for(plan: Plan, text: str, *, assumptions: tuple[str, ...] = (),
     )
 
 
+#: Every parameter that names a place a capability works on. `_FROM_PATH` is
+#: what `arguments_for` can fill; the rest it cannot, so a task whose
+#: capability takes one of them and was given none has an unknown surface.
+_PATH_PARAMETERS = _FROM_PATH + ('source', 'root', 'directory', 'folder')
+
+
+def surface_for(capability_id: str, arguments: dict) -> list[str]:
+    """
+    The files one capability call works on (ORCH-001), or [] when unknown.
+
+    Read off the path parameters the capability takes. Unknown is the safe
+    answer - the wave scheduler runs an unknown task alone - so it is given
+    whenever any path parameter has no usable value: naming only some of
+    what a call touches would let two writers share a file.
+    """
+    paths: list[str] = []
+    for name in parameters_of(capability_id):
+        if name.lower() not in _PATH_PARAMETERS:
+            continue
+        value = arguments.get(name)
+        if not isinstance(value, str) or not value.strip():
+            return []
+        paths.append(value.strip())
+    return paths
+
+
 def task_specs(plan: Plan) -> list[dict]:
     """
     A validated Plan as the task specs `compile_objective` persists.
@@ -1120,21 +1146,23 @@ def task_specs(plan: Plan) -> list[dict]:
     for goal in plan.goals:
         dependencies = [order[dep] for dep in goal.depends_on
                         if dep in order]
-        if goal.children:
-            specs.append({
+        if goal.children or goal.capability:
+            spec = {
                 "capability": goal.capability,
                 "arguments": arguments_for(goal),
                 "dependencies": dependencies,
                 "reason": goal.intent,
-                "children": list(goal.children),
-            })
-        elif goal.capability:
-            specs.append({
-                "capability": goal.capability,
-                "arguments": arguments_for(goal),
-                "dependencies": dependencies,
-                "reason": goal.intent,
-            })
+            }
+            if goal.children:
+                # A group is a view over its leaves and compile keeps no
+                # surface on them, so a grouped plan stays serial.
+                spec["children"] = list(goal.children)
+            else:
+                # Left off when unknown: the wave scheduler runs it alone.
+                surface = surface_for(goal.capability, spec["arguments"])
+                if surface:
+                    spec["surface"] = surface
+            specs.append(spec)
         else:
             specs.append({
                 "capability": UNMAPPED_CAPABILITY,
