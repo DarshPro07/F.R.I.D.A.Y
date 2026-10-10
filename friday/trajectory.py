@@ -21,20 +21,44 @@ it, and says whether it is still going somewhere:
 run and asks the person (continuous.py); resuming starts a new window. Acting
 on an open question is caught before the step starts (`upcoming`), and a person
 who has said carry on is not asked about the same questions again.
+
+`assess` reads failures. The stall layer (COG-006) reads progress: a `Step`
+record per action, a `progress_score` over the five signs a run is going
+somewhere (state changed, tool executed, artifact produced, test improved,
+requirement moved), and a `StallMeter` that says STALL_DETECTED when tokens pass
+a threshold with no real progress, or the same action or the same failure comes
+round again. The critic is injected and runs at most once per meter, so a
+healthy run never pays for it. This is the detector only: wiring it into the
+product loop and the build harness is later slices and is not done yet.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import Any, Callable
 
 ON_TRACK = "ON_TRACK"
 NO_PROGRESS = "NO_PROGRESS"
 DRIFTING = "DRIFTING"
+STALL_DETECTED = "STALL_DETECTED"
 
 #: The event the executor records when it pauses a flagged run.
 EVENT_FLAGGED = "trajectory.flagged"
+#: The once-marker: the stall critic has run for this run, never again.
+EVENT_STALL_CRITIC = "stall.critic"
+
+#: Tokens spent since the run last made real progress. A threshold, not a
+#: budget: the budget stops a run, this says it is spending without going
+#: anywhere.
+STALL_TOKENS = 100_000
+#: The same (tool, arguments), or the same failure of one tool, this many times
+#: since the last real progress.
+STALL_REPEATS = 3
+#: Reasoning steps in a row that did not act.
+STALL_IDLE_STEPS = 4
 
 #: Failed or retried attempts since the last success, across at least
 #: `NO_PROGRESS_TASKS` tasks. One task alone is the task-level detector's.
@@ -321,3 +345,211 @@ def for_run(store, run_id: str, upcoming: tuple = ()) -> Assessment:
                   open_questions=tuple(contract.get("open_questions") or ()),
                   upcoming=tuple(upcoming), refusals=refusals, since=since,
                   starts=store.objective_event_counts(run_id, _STARTED, after_id=opened))
+
+
+# -- the stall layer (COG-006) -------------------------------------------------------
+
+OK = "ok"
+FAILED = "failed"
+
+
+def args_hash(arguments: Any) -> str:
+    """A short stable fingerprint of a call's arguments, for "the same action"."""
+    text = json.dumps(arguments, sort_keys=True, default=str)
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+
+
+@dataclass(frozen=True)
+class Step:
+    """One thing a run did. `tool` is empty for a step that reasoned and did not
+    act. The four flags are the outcome signs a consumer can observe."""
+
+    tokens: int = 0
+    tool: str = ""
+    args: str = ""
+    outcome: str = OK
+    failure: str = ""
+    state_changed: bool = False
+    artifact: bool = False
+    test_improved: bool = False
+    requirement_moved: bool = False
+
+    @property
+    def tool_executed(self) -> bool:
+        return bool(self.tool) and self.outcome == OK
+
+    @property
+    def real_progress(self) -> bool:
+        """A tool that ran and changed nothing is activity, not progress."""
+        return (self.state_changed or self.artifact or self.test_improved
+                or self.requirement_moved)
+
+
+def progress_score(step: Step) -> int:
+    """How many of the five signs of progress this step shows."""
+    return sum((step.state_changed, step.tool_executed, step.artifact,
+                step.test_improved, step.requirement_moved))
+
+
+class StallMeter:
+    """
+    Progress per token for one run. Feed it each step; it says STALL_DETECTED
+    when tokens since the last real progress reach `token_limit`, when the same
+    action or the same failure has come round `repeat_limit` times since then,
+    or when `idle_limit` steps in a row reasoned without acting. Real progress
+    clears all of that. A verdict, once reached, stays: the run was stalled.
+    """
+
+    def __init__(self, *, token_limit: int = STALL_TOKENS,
+                 repeat_limit: int = STALL_REPEATS, idle_limit: int = STALL_IDLE_STEPS):
+        self.token_limit = token_limit
+        self.repeat_limit = repeat_limit
+        self.idle_limit = idle_limit
+        self.steps = 0
+        self.tokens = 0
+        self.score = 0
+        self.critic_ran = False
+        self._since = 0
+        self._idle = 0
+        self._actions: Counter = Counter()
+        self._failures: Counter = Counter()
+        self._found: Assessment | None = None
+
+    def feed(self, step: Step) -> Assessment:
+        self.steps += 1
+        self.tokens += step.tokens
+        self.score += progress_score(step)
+        if step.real_progress:
+            self._since = 0
+            self._idle = 0
+            self._actions.clear()
+            self._failures.clear()
+        else:
+            self._since += step.tokens
+            self._idle = 0 if step.tool else self._idle + 1
+            if step.tool:
+                self._actions[(step.tool, step.args)] += 1
+            if step.tool and step.outcome == FAILED and step.failure:
+                self._failures[(step.tool, step.failure)] += 1
+        return self.verdict()
+
+    def verdict(self) -> Assessment:
+        if self._found is None:
+            reasons = self._reasons()
+            if reasons:
+                self._found = Assessment(STALL_DETECTED, tuple(reasons), self.signals())
+        return self._found or Assessment(ON_TRACK, (), self.signals())
+
+    def flag(self, reason: str) -> Assessment:
+        """Latch a stall the caller found itself (an action it refused to run a
+        third time), so it goes through the same once-only critic."""
+        if self._found is None:
+            self._found = Assessment(STALL_DETECTED, (reason,), self.signals())
+        return self._found
+
+    def signals(self) -> dict:
+        return {"steps": self.steps, "tokens": self.tokens, "progress_score": self.score,
+                "tokens_since_progress": self._since}
+
+    def _reasons(self) -> list[str]:
+        found = []
+        if self._since >= self.token_limit:
+            found.append(f"{self._since} tokens spent since the last real progress "
+                         f"(limit {self.token_limit})")
+        for (tool, _), n in sorted(self._actions.items()):
+            if n >= self.repeat_limit:
+                found.append(f"{tool} ran {n} times with the same arguments and "
+                             "nothing advanced")
+        for (tool, failure), n in sorted(self._failures.items()):
+            if n >= self.repeat_limit:
+                found.append(f"{tool} failed the same way ({failure}) {n} times")
+        if self._idle >= self.idle_limit:
+            found.append(f"{self._idle} reasoning steps in a row without an action")
+        return found
+
+    def claim_critic(self) -> bool:
+        """True exactly once, and only for a stalled meter: the caller then runs
+        its critic. A healthy run is never handed the claim."""
+        if self.critic_ran or self.verdict().verdict != STALL_DETECTED:
+            return False
+        self.critic_ran = True
+        return True
+
+    def critique(self, critic: Callable[[Assessment], Any]) -> Any:
+        """Run `critic` on a stalled run, at most once; None otherwise."""
+        return critic(self.verdict()) if self.claim_critic() else None
+
+
+def stall_steps(events: list[dict], tasks: list[dict], *,
+                since_resume: bool = True) -> list[Step]:
+    """The steps a stored run has recorded, by default since the person last
+    resumed it: a task that succeeded moved the requirement, one that failed
+    carries its kind."""
+    start = -1
+    if since_resume:
+        start = max((i for i, e in enumerate(events) if e.get("event") == _RESUMED), default=-1)
+    capability_of = {t.get("task_id"): str(t.get("capability") or "") for t in tasks}
+    steps = []
+    for e in events[start + 1:]:
+        kind, task = e.get("event"), e.get("task_id")
+        capability = capability_of.get(task) or ""
+        if kind == _SUCCEEDED:
+            steps.append(Step(tool=capability, args=args_hash(task), requirement_moved=True,
+                              state_changed=_side_effecting(capability)))
+        elif kind in (_FAILED, _RETRY, _BLOCKED):
+            failure = str(_detail(e).get("kind") or _detail(e).get("reason") or "error")[:60]
+            steps.append(Step(tool=capability or "task", args=args_hash(task),
+                              outcome=FAILED, failure=failure))
+    return steps
+
+
+def stall_for_events(events: list[dict], tasks: list[dict], *, tokens: int = 0,
+                     meter: StallMeter | None = None,
+                     step_count: int | None = None) -> StallMeter:
+    """A meter fed the stored run's steps. The store does not attribute tokens
+    to events, so the run's measured `tokens` are spread evenly over ALL of its
+    steps: an estimate of progress per token, not a measurement. Only the steps
+    since the last resume are fed, each at that share, so a resume does not
+    hand the whole run's spend to its first step. `step_count` is the number of
+    steps the whole run has taken when `events` is only its recent window (the
+    store's counts); without it the window is taken to be the whole run."""
+    meter = meter or StallMeter()
+    every = step_count if step_count is not None else len(
+        stall_steps(events, tasks, since_resume=False))
+    share = tokens // every if every else 0
+    for step in stall_steps(events, tasks):
+        meter.feed(replace(step, tokens=share))
+    return meter
+
+
+def critic_already_ran(events: list[dict]) -> bool:
+    return any(e.get("event") == EVENT_STALL_CRITIC for e in events)
+
+
+def stall_for_run(store, run_id: str, *, telemetry=None, work_log=None) -> StallMeter:
+    """The stall meter over what the store holds for this run. Tokens come only
+    from the gateway ledger and the Hermes work log (`telemetry`, `work_log`,
+    as for `objective_budget.measure`); without them the run's spend reads 0.
+
+    Only the newest events are fed (a resume older than that window is outside
+    it, so every fed event is after it), but the per-step token share divides by
+    the run's whole step count and the once-only critic marker is looked up by
+    name, so neither depends on how long the run is.
+
+    Repeated failure is `assess`'s ground and the task-level detector's (a task
+    gets `continuous.DEFAULT_MAX_ATTEMPTS` tries): the store path therefore only
+    calls the same failure a stall once it has outlasted `NO_PROGRESS_ATTEMPTS`,
+    so it never pre-empts them. What it adds is spend with nothing advancing."""
+    from friday import objective_budget as B
+
+    step_count = sum(sum(store.objective_event_counts(run_id, kind).values())
+                     for kind in (_SUCCEEDED, _FAILED, _RETRY, _BLOCKED))
+    meter = stall_for_events(store.recent_objective_events(run_id),
+                             store.objective_tasks(run_id),
+                             tokens=B.measure(store, run_id, telemetry=telemetry,
+                                              work_log=work_log).tokens,
+                             meter=StallMeter(repeat_limit=NO_PROGRESS_ATTEMPTS),
+                             step_count=step_count)
+    meter.critic_ran = critic_already_ran(
+        store.objective_events_named(run_id, (EVENT_STALL_CRITIC,)))
+    return meter

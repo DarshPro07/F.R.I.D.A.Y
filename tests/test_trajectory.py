@@ -1092,3 +1092,262 @@ def test_a_long_run_where_every_failure_is_followed_by_its_own_success_is_never_
         found = T.for_run(store, run_id)
         assert found.verdict == T.ON_TRACK, (i, found)
         assert found.signals["attempts_since_success"] == 0
+
+
+# -- the stall layer (COG-006): progress per token, a once-only critic ---------------
+
+class _Critic:
+    def __init__(self):
+        self.calls: list[T.Assessment] = []
+
+    def __call__(self, assessment):
+        self.calls.append(assessment)
+        return "change strategy"
+
+
+def _healthy_steps(rng):
+    """A run that works: every so often a step changes something, the steps in
+    between read different things, nothing repeats, and no step is a long wait."""
+    steps = []
+    gap = rng.choice([2, 3])          # a step that changes something at least every 3rd
+    for i in range(80):
+        if i % gap == 0:
+            steps.append(T.Step(tokens=rng.randint(500, 4000), tool="files_write",
+                                args=T.args_hash(i), state_changed=True,
+                                artifact=rng.random() < 0.5))
+        elif rng.random() < 0.2:
+            steps.append(T.Step(tokens=rng.randint(100, 1500)))        # reasoning only
+        else:
+            steps.append(T.Step(tokens=rng.randint(500, 4000), tool="files_read",
+                                args=T.args_hash(i),
+                                outcome=rng.choice([T.OK, T.OK, T.FAILED]),
+                                failure="TRANSIENT"))
+    return steps
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_a_healthy_run_never_stalls_and_never_calls_the_critic(seed):
+    critic = _Critic()
+    meter = T.StallMeter()
+    for step in _healthy_steps(random.Random(seed)):
+        assert meter.feed(step).verdict == T.ON_TRACK, (seed, meter.signals())
+        assert meter.critique(critic) is None
+    assert critic.calls == []
+
+
+def test_the_progress_score_counts_the_five_signs():
+    assert T.progress_score(T.Step()) == 0
+    assert T.progress_score(T.Step(tool="x", outcome=T.FAILED)) == 0
+    assert T.progress_score(T.Step(tool="x")) == 1
+    assert T.progress_score(T.Step(tool="x", state_changed=True, artifact=True,
+                                   test_improved=True, requirement_moved=True)) == 5
+    meter = T.StallMeter()
+    meter.feed(T.Step(tool="x", state_changed=True))
+    meter.feed(T.Step(tool="y"))
+    assert meter.score == 3 and meter.signals()["progress_score"] == 3
+
+
+def test_tokens_past_the_threshold_with_no_progress_stall_the_run_once():
+    critic = _Critic()
+    meter = T.StallMeter(token_limit=10_000)
+    for i in range(5):
+        verdict = meter.feed(T.Step(tokens=2_000, tool="files_read", args=T.args_hash(i)))
+        assert (verdict.verdict == T.ON_TRACK) == (i < 4), i
+    assert verdict.verdict == T.STALL_DETECTED
+    assert any("10000 tokens" in r for r in verdict.reasons)
+    assert meter.critique(critic) == "change strategy"
+    assert len(critic.calls) == 1 and critic.calls[0].verdict == T.STALL_DETECTED
+
+
+def test_a_tool_that_ran_and_changed_nothing_is_not_progress():
+    meter = T.StallMeter(token_limit=3_000)
+    for i in range(3):
+        meter.feed(T.Step(tokens=1_000, tool="files_read", args=T.args_hash(i)))
+    assert meter.verdict().verdict == T.STALL_DETECTED
+    assert meter.score == 3          # activity is scored, it is not progress
+
+
+def test_real_progress_clears_the_token_count():
+    meter = T.StallMeter(token_limit=3_000)
+    meter.feed(T.Step(tokens=2_500, tool="files_read", args="a"))
+    meter.feed(T.Step(tokens=100, tool="files_write", args="b", state_changed=True))
+    meter.feed(T.Step(tokens=2_500, tool="files_read", args="c"))
+    assert meter.verdict().verdict == T.ON_TRACK
+
+
+def test_the_same_action_repeating_is_a_stall_without_any_token_cost():
+    meter = T.StallMeter()
+    same = T.Step(tokens=10, tool="files_read", args="deadbeef")
+    assert meter.feed(same).verdict == T.ON_TRACK
+    assert meter.feed(same).verdict == T.ON_TRACK
+    verdict = meter.feed(same)
+    assert verdict.verdict == T.STALL_DETECTED
+    assert any("files_read ran 3 times with the same arguments" in r for r in verdict.reasons)
+
+
+def test_the_same_failure_repeating_is_a_stall_even_with_different_arguments():
+    meter = T.StallMeter()
+    for i in range(3):
+        verdict = meter.feed(T.Step(tokens=10, tool="web_fetch", args=str(i),
+                                    outcome=T.FAILED, failure="TIMEOUT"))
+    assert verdict.verdict == T.STALL_DETECTED
+    assert any("web_fetch failed the same way (TIMEOUT) 3 times" in r for r in verdict.reasons)
+
+
+def test_reasoning_without_action_is_a_stall():
+    meter = T.StallMeter()
+    for _ in range(3):
+        assert meter.feed(T.Step(tokens=50)).verdict == T.ON_TRACK
+    verdict = meter.feed(T.Step(tokens=50))
+    assert verdict.verdict == T.STALL_DETECTED
+    assert any("reasoning steps in a row" in r for r in verdict.reasons)
+    # An action in between breaks the run of reasoning.
+    other = T.StallMeter()
+    for i in range(10):
+        other.feed(T.Step(tokens=50))
+        other.feed(T.Step(tokens=50, tool="files_read", args=str(i), outcome=T.OK))
+    assert other.verdict().verdict == T.ON_TRACK
+
+
+def test_the_critic_is_not_called_twice():
+    critic = _Critic()
+    meter = T.StallMeter(repeat_limit=2)
+    same = T.Step(tool="files_read", args="a")
+    meter.feed(same)
+    meter.feed(same)
+    assert meter.critique(critic) == "change strategy"
+    meter.feed(same)
+    assert meter.critique(critic) is None
+    assert meter.claim_critic() is False
+    assert len(critic.calls) == 1
+
+
+def test_a_stall_is_kept_even_after_the_run_moves_again():
+    meter = T.StallMeter(repeat_limit=2)
+    meter.feed(T.Step(tool="x", args="a"))
+    meter.feed(T.Step(tool="x", args="a"))
+    meter.feed(T.Step(tool="y", args="b", state_changed=True))
+    assert meter.verdict().verdict == T.STALL_DETECTED
+
+
+def test_stored_events_that_repeat_one_failure_stall_and_a_success_run_does_not():
+    trace = _Trace(1)
+    for _ in range(3):
+        trace.failed("t0", kind="PROVIDER_DOWN")
+    meter = T.stall_for_events(trace.events, trace.tasks)
+    assert meter.verdict().verdict == T.STALL_DETECTED
+    assert any("PROVIDER_DOWN" in r for r in meter.verdict().reasons)
+
+    healthy = _Trace(6)
+    for i in range(6):
+        healthy.failed(f"t{i}", kind="TRANSIENT")
+        healthy.succeeded(f"t{i}")
+    assert T.stall_for_events(healthy.events, healthy.tasks,
+                              tokens=50_000).verdict().verdict == T.ON_TRACK
+
+
+def test_a_resume_starts_a_new_stall_window():
+    trace = _Trace(1)
+    for _ in range(3):
+        trace.failed("t0", kind="PROVIDER_DOWN")
+    trace.events.append({"event": T._RESUMED, "task_id": None, "detail": {}})
+    assert T.stall_for_events(trace.events, trace.tasks).verdict().verdict == T.ON_TRACK
+
+
+def test_the_critic_marker_is_read_from_the_run_events():
+    events = [{"event": T.EVENT_STALL_CRITIC, "task_id": None, "detail": {}}]
+    assert T.critic_already_ran(events) and not T.critic_already_ran([])
+
+
+class _Ledger:
+    """A gateway ledger that has recorded `tokens` for every objective."""
+
+    def __init__(self, tokens: int):
+        self.tokens = tokens
+
+    def for_objective(self, run_id):
+        return [{"input_tokens": self.tokens // 2, "output_tokens": self.tokens - self.tokens // 2}]
+
+
+class _NoWork:
+    def for_friday_run(self, run_id):
+        return []
+
+
+def test_the_stall_meter_reads_its_tokens_from_the_ledgers_it_is_given(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store, 1)
+    task_id = store.objective_tasks(run_id)[0]["task_id"]
+    store.append_objective_event(run_id, O.EVENT_TASK_RETRY, task_id=task_id,
+                                 detail={"kind": "TRANSIENT"})
+    # No ledger: the run's spend reads 0, so nothing is spent without progress.
+    assert T.stall_for_run(store, run_id).tokens == 0
+    meter = T.stall_for_run(store, run_id, telemetry=_Ledger(400_000), work_log=_NoWork())
+    assert meter.verdict().verdict == T.STALL_DETECTED
+    assert any("tokens spent since the last real progress" in r for r in meter.verdict().reasons)
+
+
+def test_a_resume_does_not_hand_the_whole_runs_spend_to_its_first_step():
+    trace = _Trace(11)
+    for i in range(10):
+        trace.succeeded(f"t{i}")
+    trace.events.append({"event": T._RESUMED, "task_id": None, "detail": {}})
+    trace.failed("t10", kind="TRANSIENT")
+    # 200k over the run's 11 steps is ~18k for the one step in this window.
+    meter = T.stall_for_events(trace.events, trace.tasks, tokens=200_000)
+    assert meter.steps == 1 and meter.tokens == 200_000 // 11
+    assert meter.verdict().verdict == T.ON_TRACK
+
+
+class _Work:
+    """A Hermes work log that recorded `tokens` for every run."""
+
+    def __init__(self, tokens: int):
+        self.tokens = tokens
+
+    def for_friday_run(self, run_id):
+        return [{"usage": {"total": self.tokens, "calls": 1}}]
+
+
+def test_the_stall_meter_counts_worker_tokens_from_the_work_log_it_is_given(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store, 1)
+    task_id = store.objective_tasks(run_id)[0]["task_id"]
+    store.append_objective_event(run_id, O.EVENT_TASK_RETRY, task_id=task_id,
+                                 detail={"kind": "TRANSIENT"})
+    meter = T.stall_for_run(store, run_id, work_log=_Work(400_000))
+    assert meter.tokens == 400_000
+    assert meter.verdict().verdict == T.STALL_DETECTED
+
+
+def test_a_stored_stall_critic_marker_means_the_critic_has_run(tmp_path):
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store, 1)
+    assert T.stall_for_run(store, run_id).critic_ran is False
+    store.append_objective_event(run_id, T.EVENT_STALL_CRITIC, detail={"reply": "x"})
+    meter = T.stall_for_run(store, run_id)
+    assert meter.critic_ran is True and meter.claim_critic() is False
+
+
+def _succeeded_run(tmp_path, n):
+    store = Store(tmp_path / "ada.sqlite3")
+    run_id = _compile(store, 1)
+    task_id = store.objective_tasks(run_id)[0]["task_id"]
+    for _ in range(n):
+        store.append_objective_event(run_id, O.EVENT_TASK_SUCCEEDED, task_id=task_id)
+    return store, run_id
+
+
+def test_a_critic_marker_after_more_than_a_thousand_events_is_still_seen(tmp_path):
+    store, run_id = _succeeded_run(tmp_path, 1200)
+    store.append_objective_event(run_id, T.EVENT_STALL_CRITIC, detail={"reply": "x"})
+    meter = T.stall_for_run(store, run_id)
+    assert meter.critic_ran is True and meter.claim_critic() is False
+
+
+def test_the_token_share_spreads_over_the_whole_run_not_the_recent_window(tmp_path):
+    store, run_id = _succeeded_run(tmp_path, 1200)
+    meter = T.stall_for_run(store, run_id, telemetry=_Ledger(1_200_000), work_log=_NoWork())
+    # 1.2M over 1200 steps is 1000 each; 500 steps are fed, none of them inflated.
+    assert meter.steps == 500 and meter.tokens == 500 * 1000
+    assert meter.verdict().verdict == T.ON_TRACK

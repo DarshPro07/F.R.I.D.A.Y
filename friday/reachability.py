@@ -368,6 +368,7 @@ KNOWN: dict[str, tuple[str, str]] = {
         'used while deriving capability resolution, through a comprehension the reference walk does not follow',
     ),
     '_spawn': (PRODUCTION, 'objective_cli subcommand, dispatched by name'),
+    'stall_steps': (FUTURE, 'COG-006: the stall detector is not yet wired into the executor loops (slice 2), run by tests/test_trajectory.py'),
     'is_terminal': (DEAD, 'no reader; run state is compared directly'),
     'PlanProblem': (DEAD, 'never raised; the planner returns problems as data'),
     'FailedToAcquire': (DEAD, 'never raised; acquisition returns a bool'),
