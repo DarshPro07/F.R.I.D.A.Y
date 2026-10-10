@@ -1054,6 +1054,120 @@ async def api_objective_status(request):
     return JSONResponse(await run_in_threadpool(read))
 
 
+# SIGNAL-001: the control room's door onto the signal bus. Every field is
+# bounded; nothing outside this table reaches signals.send.
+_SIGNAL_KINDS = {
+    "stop": "USER_STOP", "back": "USER_BACK", "approve": "USER_APPROVAL",
+    "deny": "USER_DENIAL", "answer": "USER_ANSWER", "amend": "USER_CORRECTION",
+}
+_SIGNAL_TEXT_LIMITS = {          # field -> max characters
+    "reason": 300, "operation": 128, "target": 512, "answer": 2000,
+    "assumption": 128, "said": 2000, "description": 2000,
+}
+_SIGNAL_FIELDS = {"run_id", "signal", "changes", "state", *_SIGNAL_TEXT_LIMITS}
+_SIGNAL_RUN_ID_MAX = 64
+_SIGNAL_STATES = ("VALIDATED", "REFUTED", "WAIVED")
+_SIGNAL_CHANGES_MAX = 20
+_SIGNAL_CHANGE_VALUE_MAX = 2000
+_SIGNAL_BODY_MAX = 16 * 1024
+
+
+def _signal_payload(data):
+    """Validate one signal request. Returns (run_id, kind, payload, error)."""
+    if not isinstance(data, dict):
+        return None, None, None, "the body must be a JSON object"
+    unknown = sorted(set(data) - _SIGNAL_FIELDS)
+    if unknown:
+        return None, None, None, f"unknown field: {str(unknown[0])[:40]}"
+    run_id = data.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip() or len(run_id) > _SIGNAL_RUN_ID_MAX:
+        return None, None, None, f"run_id is required (text, at most {_SIGNAL_RUN_ID_MAX} characters)"
+    name = data.get("signal")
+    if not isinstance(name, str) or name not in _SIGNAL_KINDS:
+        return None, None, None, "signal must be one of: " + ", ".join(_SIGNAL_KINDS)
+    payload = {}
+    for field, limit in _SIGNAL_TEXT_LIMITS.items():
+        if field not in data:
+            continue
+        value = data[field]
+        if not isinstance(value, str) or len(value) > limit:
+            return None, None, None, f"{field} must be text of at most {limit} characters"
+        payload[field] = value
+    if name == "approve":
+        # A confirmation binds to one exact action: the signal layer reads an
+        # empty operation/target as "any", so a blind approval is refused here.
+        for field in ("operation", "target"):
+            if not payload.get(field, "").strip():
+                return None, None, None, "approve needs the exact operation and target being approved"
+    if "state" in data:
+        state = data["state"]
+        if not isinstance(state, str) or state.upper() not in _SIGNAL_STATES:
+            return None, None, None, "state must be one of: " + ", ".join(_SIGNAL_STATES)
+        payload["state"] = state.upper()
+    changes = data.get("changes")
+    if "changes" in data:
+        if not isinstance(changes, dict) or len(changes) > _SIGNAL_CHANGES_MAX:
+            return None, None, None, f"changes must be an object of at most {_SIGNAL_CHANGES_MAX} entries"
+        for key, value in changes.items():
+            if len(key) > _SIGNAL_TEXT_LIMITS["operation"]:
+                return None, None, None, "a change name is too long"
+            if isinstance(value, (dict, list)) or (
+                    isinstance(value, str) and len(value) > _SIGNAL_CHANGE_VALUE_MAX):
+                return None, None, None, "a change value must be a short scalar"
+    if name == "amend" and ("description" in payload or changes):
+        payload["amend"] = {"description": payload.pop("description", ""),
+                            "changes": changes or {}}
+    return run_id.strip(), _SIGNAL_KINDS[name], payload, None
+
+
+async def api_objective_signal(request):
+    """SIGNAL-001: the control room says stop, back, approve, deny, answer or
+    amend to an objective. It rides the session gate like every control
+    endpoint (an unauthenticated call is 423 and logged by the middleware),
+    is same-origin only, and goes through `signals.send(surface="web")` -
+    the surface is fixed here, never taken from the caller."""
+    from friday import signals
+    from friday.toolsets import objectives as OT
+    client = request.client.host if request.client else ""
+    if not _same_origin(request.headers):
+        access.log({"kind": "signal_refused", "reason": "cross-origin", "client": client})
+        return JSONResponse({"ok": False, "error": "cross-origin blocked"}, status_code=403)
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > _SIGNAL_BODY_MAX:
+            access.log({"kind": "signal_refused", "reason": "too-large", "client": client})
+            return JSONResponse({"ok": False, "error": "request too large"}, status_code=413)
+    try:
+        data = json.loads(bytes(raw).decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        data = None
+        bad = "the body must be valid JSON"
+    else:
+        bad = None
+    run_id, kind, payload, error = (None, None, None, bad) if bad else _signal_payload(data)
+    if error:
+        access.log({"kind": "signal_refused", "reason": "invalid", "client": client})
+        return JSONResponse({"ok": False, "error": error}, status_code=400)
+
+    def deliver():
+        store = OT.store()
+        if store.objective_run(run_id) is None:
+            return None
+        return signals.send(store, run_id, kind, surface="web", payload=payload)
+
+    delivery = await run_in_threadpool(deliver)
+    if delivery is None:
+        access.log({"kind": "signal_refused", "reason": "unknown-run", "client": client})
+        return JSONResponse({"ok": False, "error": "no such objective run"}, status_code=404)
+    # The ledger names what was sent, never the words: those stay in the trace.
+    access.log({"kind": "signal", "run_id": run_id, "signal": kind,
+                "effect": delivery.effect, "client": client})
+    return JSONResponse({"ok": True, "signal_id": delivery.signal_id, "kind": delivery.kind,
+                         "surface": delivery.surface, "effect": delivery.effect,
+                         "applied": delivery.applied, "reason": delivery.reason})
+
+
 async def api_interrupted(request):
     """FR-039: the page tells us how much of a reply it actually played
     before the boss cut it off; the stored turn becomes exactly that."""
@@ -1663,6 +1777,7 @@ def create_app():
         Route("/api/harness", api_harness),
         Route("/api/objective", api_objective, methods=["POST"]),
         Route("/api/objective/status", api_objective_status),
+        Route("/api/objective/signal", api_objective_signal, methods=["POST"]),
         Route("/api/ask", api_ask, methods=["POST"]),
         Route("/api/interrupted", api_interrupted, methods=["POST"]),
         Route("/api/hermes/progress", api_hermes_progress),
