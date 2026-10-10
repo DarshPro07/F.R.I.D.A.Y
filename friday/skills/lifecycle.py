@@ -253,6 +253,7 @@ class SkillLifecycle:
             report = forge.ScanReport(status=forge.SCAN_ERROR, detail=f"the scanner raised {exc!r}")
         scan = report.to_dict()
         scan["policy_version"] = SCAN_POLICY_VERSION
+        scan["runtime_safe"] = scan_stage.RUNTIME_SAFE      # CLEAN is about the text, never the behaviour
         kept.parent.mkdir(parents=True, exist_ok=True)
         kept.write_text(json.dumps(scan, indent=2, sort_keys=True), encoding="utf-8")
         if scan.get("target_sha256") == before and forge.scan_admits(scan, skill.dir):

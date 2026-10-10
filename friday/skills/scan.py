@@ -17,6 +17,16 @@ when, over which content hash, what was found, and the external report hash.
 
 A static PASS is evidence about text, not about behaviour. Every record says
 `runtime_safe: False`; nothing in this module can make it true.
+
+What a full trust scan would cover, and what this stage does:
+
+    text        injection patterns over every text file          done, in-process
+    dependency  declared dependency names against OSV.dev        done by SkillSpector
+                                                                 (external scan only)
+    runtime     run the skill and observe what it does           NOT scanned, no stage
+
+`runtime_safe` therefore stays False until a runtime stage exists; a clean
+record only means no known-bad text and no known-vulnerable dependency.
 """
 
 from __future__ import annotations
@@ -37,6 +47,10 @@ CLEAN, BLOCKED, NOT_SCANNED, NOT_REQUESTED = "CLEAN", "BLOCKED", "NOT_SCANNED", 
 PROVIDER = "skillspector"
 STAGE = "skill-scan/1"
 NOTE = "static scan only: a pass says nothing about runtime behaviour"
+
+#: Every scan record this package keeps (the evaluation's and the one kept with
+#: a version snapshot) carries this; there is no runtime stage to make it True.
+RUNTIME_SAFE = False
 
 #: Trust levels whose content is not the owner's own or FRIDAY's: these are
 #: scanned externally as well.
@@ -114,4 +128,4 @@ def scan_skill(skill: F.SkillFiles, *, scanner: Scanner | None = None, trust: st
     return {"stage": STAGE, "at": now_iso(), "skill": skill.name, "content_hash": skill.content_hash(),
             "trust": trust, "verdict": verdict,
             "injection": {"status": "FOUND" if found else CLEAN, "findings": found},
-            "external": external, "runtime_safe": False, "note": NOTE}
+            "external": external, "runtime_safe": RUNTIME_SAFE, "note": NOTE}

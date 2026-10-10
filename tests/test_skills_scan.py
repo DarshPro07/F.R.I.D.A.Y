@@ -72,6 +72,18 @@ def test_the_clean_control_passes_and_is_still_not_runtime_safe(world):
     assert stored["runtime_safe"] is False and "runtime" in stored["note"]
 
 
+def test_the_scan_kept_with_an_activated_version_is_not_runtime_safe_either(world):
+    skill = world.write_skill("kept-notes")
+    world.lifecycle.register(skill, tier=K.PROJECT_TIER, trust=K.TRUST_OWNER)
+    world.lifecycle.stage("kept-notes")
+    _, record = world.lifecycle.evaluate_and_activate("kept-notes")
+    assert record.state == K.ACTIVE
+    kept = json.loads((world.root / "versions" / "kept-notes" / f"{record.version}.skillspector.json")
+                      .read_text(encoding="utf-8"))
+    assert kept["status"] == "CLEAN"                     # the scanner's verdict is clean ...
+    assert kept.get("runtime_safe") is False             # ... and the record still does not say it is safe to run
+
+
 def test_an_injection_in_a_supporting_file_is_found(world):
     skill = world.write_skill("ref-notes")
     (skill.dir / "references").mkdir()
