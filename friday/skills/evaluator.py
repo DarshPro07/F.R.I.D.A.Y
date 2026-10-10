@@ -32,6 +32,7 @@ from friday.skills import contracts as K
 from friday.skills import files as F
 from friday.skills import lint as L
 from friday.skills import router as RT
+from friday.skills import scan as SC
 
 PASS, WARN, FAIL = L.PASS, L.WARN, L.FAIL
 
@@ -81,7 +82,7 @@ def test_argv(command: str, skill_dir: Path | None = None) -> list[str]:
 
 class SkillEvaluator:
     def __init__(self, registry, *, repo_root: Path | None = None, runner: Runner | None = None,
-                 timeout_s: float = TEST_TIMEOUT_S) -> None:
+                 timeout_s: float = TEST_TIMEOUT_S, scanner: SC.Scanner | None = None) -> None:
         if repo_root is None:
             from friday.config import PROJECT_ROOT
 
@@ -90,6 +91,7 @@ class SkillEvaluator:
         self.repo_root = Path(repo_root)
         self.runner: Runner = runner or run_command
         self.timeout_s = timeout_s
+        self.scanner = scanner               # the external scan; None is the fabric's SkillSpector
 
     # -- the evaluation ----------------------------------------------------------
 
@@ -104,6 +106,11 @@ class SkillEvaluator:
         else:
             warnings = ", ".join(sorted({f.code for f in report.warnings()}))
             checks.append(("lint", WARN if warnings else PASS, warnings or "clean"))
+
+        scan = SC.scan_skill(skill, scanner=self.scanner, trust=record.trust) if skill.exists() else {}
+        if scan:
+            checks.append(("scan", FAIL if scan["verdict"] == SC.REJECTED
+                           else WARN if scan["verdict"] == SC.NOT_FULLY_SCANNED else PASS, self._scan_detail(scan)))
 
         try:
             _, body = F.parse_skill_md(text)
@@ -155,9 +162,19 @@ class SkillEvaluator:
         result = K.EvaluationReport(skill=record.name, version=record.version,
                                     content_hash=skill.content_hash() if skill.exists() else "",
                                     passed=not any(state == FAIL for _, state, _ in checks),
-                                    checks=checks, token_estimate=estimate)
+                                    checks=checks, token_estimate=estimate, scan=scan)
         self.registry.record_evaluation(result)
         return result
+
+    @staticmethod
+    def _scan_detail(scan: dict) -> str:
+        found = scan["injection"]["findings"]
+        external = scan["external"]
+        parts = [f"{f['code']} in {f['file']}" for f in found[:3]] or ["no injection patterns"]
+        parts.append(f"external scan {external['status']}")
+        if external.get("detail") and external["status"] != SC.CLEAN:
+            parts.append(external["detail"][:120])
+        return "; ".join(parts) + " (static; not runtime-safe)"
 
     # -- quality -----------------------------------------------------------------
 

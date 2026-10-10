@@ -289,6 +289,7 @@ class EvaluationReport:
     passed: bool
     checks: list[tuple[str, str, str]]   # (name, PASS|WARN|FAIL, detail)
     token_estimate: int = 0
+    scan: dict = field(default_factory=dict)   # the scan stage's record (friday.skills.scan)
     at: str = field(default_factory=now_iso)
     nonce: str = field(default_factory=lambda: secrets.token_hex(8))
 
