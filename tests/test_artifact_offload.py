@@ -196,7 +196,7 @@ def test_deep_research_offloads_every_source_on_the_fresh_path(
 
     monkeypatch.setattr(research_cache, "lookup", lambda *a, **k: None)
     saved = []
-    monkeypatch.setattr(research_cache, "save", lambda artifact: saved.append(artifact))
+    monkeypatch.setattr(research_cache, "save", lambda artifact: (saved.append(artifact), artifact)[1])
 
     result = deep()
     assert result.status in (c.SUCCEEDED, c.PARTIAL)

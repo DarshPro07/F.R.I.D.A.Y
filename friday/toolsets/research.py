@@ -763,12 +763,17 @@ async def web_deep_research(
     # this call hands the corpus to the agent's own model rather than
     # synthesising it (see the docstring) - so only the source-backed facts
     # are kept; a future call that does synthesise can save one too.
-    research_cache.save(research_cache.Artifact.create(
+    # route() saves to the research store itself, then sends the run's other
+    # outputs to their owners (RSCH-004): ledger claims, a Project Brain
+    # pointer, and only the small facts through the memory promotion gate.
+    from friday import research_routing
+    from friday.toolsets.memory import store as memory_store
+    research_routing.route(research_cache.Artifact.create(
         question,
         sources=[{"url": p["url"], "title": p.get("title", "")} for p in kept],
         facts=[p.get("markdown", "") for p in kept],
         confidence=len(kept) / max(len(hits), 1),
-    ))
+    ), store=memory_store())
 
     note = None
     if dropped or unreadable:

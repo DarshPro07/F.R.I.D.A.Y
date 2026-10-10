@@ -127,3 +127,56 @@ def test_at_most_max_promoted_facts_cross_into_memory(store):
     facts = [f"Fact number {i} about model Q." for i in range(RR.MAX_PROMOTED + 4)]
     RR.route(artifact(facts), store=store)
     assert len(memories(store)) == RR.MAX_PROMOTED
+
+
+# ---------------------------------------------------------------------------
+# The live entry point: web_deep_research hands its run to route()
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def live_run(store, monkeypatch):
+    """`web_deep_research` with stand-in search and fetch (no network), and the
+    toolset's memory store pointed at the temp store."""
+    import asyncio
+
+    from friday.toolsets import memory as toolset_memory
+    from friday.toolsets import research as R
+
+    toolset_memory.reset_store(store)
+
+    async def fake_search(run, query, *, limit=8, engine=None):
+        started = c.started(run.run_id, "web.search")
+        return run.record(c.succeeded(started, output={
+            "provider": "stub",
+            "results": [{"url": "https://a.example/short"},
+                        {"url": "https://b.example/long"}]},
+            verification=c.Verification(method="stub", evidence="stand-in search")))
+
+    async def fake_crawl_all(urls, **_kw):
+        pages = {"https://a.example/short": "Model Q scores 91 on the tool-call benchmark.",
+                 "https://b.example/long": CORPUS}
+        return [{"url": u, "title": u, "ok": True, "markdown": pages[u],
+                 "chars": len(pages[u])} for u in urls]
+
+    monkeypatch.setattr(R, "web_search", fake_search)
+    monkeypatch.setattr(R, "crawl_all", fake_crawl_all)
+    question = "which local model calls tools best"
+    result = asyncio.run(R.web_deep_research(
+        c.Run.create("test", capability="web"), question))
+    yield question, result
+    toolset_memory.reset_store(None)
+
+
+def test_a_live_research_run_reaches_the_brain_and_gated_memory(live_run, store):
+    question, result = live_run
+    assert result.status == c.SUCCEEDED
+
+    saved = RC.lookup(question)
+    assert saved is not None and len(saved.sources) == 2   # the cache still holds the run
+    record = ProjectBrain(store).get("friday", "research", "research-" + saved.question_key[:16])
+    assert record is not None                              # the Project Brain points at it
+
+    added = [m["value"] for m in memories(store)]
+    assert added == ["Model Q scores 91 on the tool-call benchmark."]
+    assert all(CORPUS[:60] not in value for value in added)  # no raw corpus in memory
