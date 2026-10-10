@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: fabf4d3 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T10:26:15+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 95, "PARKED_BY_OWNER": 1, "PARTIAL": 93, "VERIFIED": 71}
+- HEAD: 80bdc8c on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T11:34:12+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 93, "PARKED_BY_OWNER": 1, "PARTIAL": 95, "VERIFIED": 71}
 - Unresolved P0: 5
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (346): FAB-005=INTEGRATED, CAP-MKT-002=BLOCKED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), SKILL-006 (blocked), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), ORCH-004 (stale worktree), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), BIN-002 (stale worktree), SIDE-001 (merge queue busy), COG-006 (stale worktree), EVO-001 (stale worktree), EVO-002 (stale worktree), TRAJ-002 (stale worktree), ULTRA-002 (stale worktree), ULTRA-006 (stale worktree), AGENT-002 (stale worktree), LAB-003 (stale worktree), FAB-007 (stale worktree), HARN-001 (stale worktree), RSCH-003 (stale worktree), COG-005 (merge queue busy), EVAL-005 (stale worktree), ORCH-009 (stale worktree), ORCH-001 (stale worktree), OTEL-001 (stale worktree), PRO-001 (stale worktree), RSCH-001 (stale worktree), RSCH-002 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked)
-- Open escalations: 339
-  - EVAL-005 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\eval-005 already exists
-  - ORCH-009 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-009 already exists
-  - ORCH-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-001 already exists
-  - OTEL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\otel-001 already exists
-  - PRO-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\pro-001 already exists
-  - RSCH-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-001 already exists
-  - RSCH-002 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-002 already exists
-  - SIGNAL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\signal-001 already exists
-  - FAB-005 partial: integrated without closing its gaps
-  - CAP-MKT-002 blocked: OWNER DECISION: how should a SKILL.md that names repo-internal files (depends_on: [friday/launcher.p
+- Last wave (350): FAB-002=INTEGRATED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), COG-003 (cascade exhausted), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), SKILL-006 (blocked), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), ORCH-004 (stale worktree), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), BIN-002 (stale worktree), SIDE-001 (merge queue busy), COG-006 (stale worktree), EVO-001 (stale worktree), ULTRA-002 (stale worktree), ULTRA-006 (stale worktree), AGENT-002 (stale worktree), LAB-003 (stale worktree), FAB-007 (stale worktree), HARN-001 (stale worktree), EVAL-005 (stale worktree), ORCH-009 (stale worktree), ORCH-001 (stale worktree), OTEL-001 (stale worktree), PRO-001 (stale worktree), RSCH-001 (stale worktree), RSCH-002 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), EVO-002 (merge queue busy), CHAOS-001 (stale worktree), CTX-004 (stale worktree), CAP-FORGE-011 (blocked), UCW-002 (stale worktree), ULTRA-003 (stale worktree), EVOLAB-002 (stale worktree), LAB-004 (stale worktree)
+- Open escalations: 350
+  - COG-005 resolved: controller unpark: controller build integrated: INTEGRATED
+  - TRAJ-002 resolved: controller unpark: controller build integrated: INTEGRATED
+  - EVO-002 integration_queue: merge queue: EVO-002 waited 1800s behind EVO-001
+  - CHAOS-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\chaos-001 already exists
+  - CTX-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ctx-004 already exists
+  - CAP-FORGE-011 blocked: Owner decision 1 (rule 04, no documented source): when an import overlaps only SOME operations of an
+  - UCW-002 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ucw-002 already exists
+  - ULTRA-003 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ultra-003 already exists
+  - EVOLAB-002 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\evolab-002 already exists
+  - LAB-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\lab-004 already exists
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
