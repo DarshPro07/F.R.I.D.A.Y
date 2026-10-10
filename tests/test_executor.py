@@ -505,6 +505,18 @@ def test_a_claude_code_worker_records_why_it_was_started(store, bundle, monkeypa
     assert reasons == [G.SPECIALISATION]
 
 
+def test_a_claude_code_bundle_with_no_valid_spawn_reason_is_refused_when_built(bundle):
+    """ORCH-002: refused at construction, not later at `admit`."""
+    import dataclasses
+    from friday import governor as G
+
+    for reason in ("", "because I can", "Parallel"):
+        with pytest.raises(ValueError, match="spawn_reason"):
+            dataclasses.replace(bundle, spawn_reason=reason)
+    for reason in G.SPAWN_REASONS:
+        assert dataclasses.replace(bundle, spawn_reason=reason).spawn_reason == reason
+
+
 def test_a_claude_code_worker_records_the_reason_its_bundle_carries(store, bundle, monkeypatch):
     """ORCH-002: the lease records the reason the bundle was built with."""
     import dataclasses

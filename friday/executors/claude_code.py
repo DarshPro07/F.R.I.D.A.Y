@@ -124,6 +124,10 @@ class TaskBundle:
     #: What tools and the plan recorded: quoted as data, never as instruction.
     recorded_state: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        from friday import governor as G
+        G.require_spawn_reason(self.spawn_reason)
+
     def worktree_name(self) -> str:
         """One name, used by the launch flag and by the guard that checks it."""
         return f"ada-{self.run_id.lower()}"

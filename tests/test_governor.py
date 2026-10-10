@@ -608,6 +608,18 @@ def test_a_worker_with_no_valid_reason_is_refused_and_takes_no_lease(reason):
     assert gov.queue_depth() == 0 and gov.decisions == []
 
 
+@pytest.mark.parametrize("reason", G.SPAWN_REASONS)
+def test_a_spawn_reason_from_the_four_is_accepted_as_it_is(reason):
+    """ORCH-002: the one check `admit` and both task bundles share."""
+    assert G.require_spawn_reason(reason) == reason
+
+
+@pytest.mark.parametrize("reason", ["", "because I can", "parallel ", "PARALLEL"])
+def test_a_spawn_reason_outside_the_four_is_refused_by_name(reason):
+    with pytest.raises(ValueError, match="spawn_reason"):
+        G.require_spawn_reason(reason)
+
+
 def test_pressure_stops_running_optional_work_but_not_workers():
     gov, dial = make()
     stopped = []

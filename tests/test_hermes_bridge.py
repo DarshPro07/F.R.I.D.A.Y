@@ -509,6 +509,26 @@ def test_a_hermes_worker_records_why_it_was_started(tmp_path, monkeypatch):
         supervisor.stop()
 
 
+@pytest.mark.parametrize("reason", ["", "because I can", "Parallel"])
+def test_a_bundle_with_no_valid_spawn_reason_is_refused_when_built(reason):
+    """ORCH-002: a request that fits none of the four never becomes a bundle,
+    so nothing is queued or leased for it; the caller's work stays in the
+    worker it already has."""
+    import dataclasses
+    with pytest.raises(ValueError, match="spawn_reason"):
+        hb.TaskBundle(goal='check it', spawn_reason=reason)
+    with pytest.raises(ValueError, match="spawn_reason"):
+        dataclasses.replace(hb.TaskBundle(goal='check it'), spawn_reason=reason)
+
+
+def test_every_spawn_reason_builds_a_hermes_bundle():
+    """ORCH-002: parallel, specialisation, isolation and verification are each
+    a bundle the bridge can be handed."""
+    from friday import governor as G
+    built = [hb.TaskBundle(goal='go', spawn_reason=r).spawn_reason for r in G.SPAWN_REASONS]
+    assert built == list(G.SPAWN_REASONS)
+
+
 def test_a_hermes_worker_records_the_reason_its_bundle_carries(tmp_path, monkeypatch):
     """ORCH-002: the reason is chosen by whoever builds the bundle, not fixed by the bridge."""
     from friday import governor as G

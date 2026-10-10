@@ -441,6 +441,10 @@ class TaskBundle:
     #: are not the person's.
     recorded_state: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        from friday import governor as G
+        G.require_spawn_reason(self.spawn_reason)
+
     def with_memory(self, budget_tokens: int = 600) -> "TaskBundle":
         """The same bundle, with the shared memory relevant to its goal.
 

@@ -90,6 +90,19 @@ ISOLATION = "isolation"              # context that must not leak into the curre
 VERIFICATION = "verification"        # a check made independently of the one who built it
 SPAWN_REASONS = (PARALLEL, SPECIALISATION, ISOLATION, VERIFICATION)
 
+
+def require_spawn_reason(spawn_reason: str) -> str:
+    """The reason a worker may be started for, or ValueError.
+
+    A request that fits none of SPAWN_REASONS does not start a worker: the
+    caller's work runs in the worker it already has. A task bundle asks this
+    when it is built, so the request is refused before anything is queued;
+    `admit` asks it again for a caller that never built a bundle."""
+    if spawn_reason not in SPAWN_REASONS:
+        raise ValueError(f"a worker needs a spawn_reason, one of {SPAWN_REASONS}; "
+                         f"got {spawn_reason!r}")
+    return spawn_reason
+
 # -- priority of the objective the work serves (BG-001) ----------------------
 
 BACKGROUND = "background"    # proactive work: waits for the person to be away and the power to be on
@@ -993,9 +1006,8 @@ class Governor:
         runs in the worker it already has."""
         if kind not in KINDS:
             raise ValueError(f"unknown work kind {kind!r}; known: {KINDS}")
-        if kind == WORKER and spawn_reason not in SPAWN_REASONS:
-            raise ValueError(f"a worker needs a spawn_reason, one of {SPAWN_REASONS}; "
-                             f"got {spawn_reason!r}")
+        if kind == WORKER:
+            require_spawn_reason(spawn_reason)
         if priority not in PRIORITIES:
             raise ValueError(f"unknown priority {priority!r}; known: {PRIORITIES}")
         p = self.pressure()
