@@ -507,3 +507,15 @@ def test_a_hermes_worker_records_why_it_was_started(tmp_path, monkeypatch):
         assert owned.spawn_reason == G.SPECIALISATION
     finally:
         supervisor.stop()
+
+
+def test_a_hermes_worker_records_the_reason_its_bundle_carries(tmp_path, monkeypatch):
+    """ORCH-002: the reason is chosen by whoever builds the bundle, not fixed by the bridge."""
+    from friday import governor as G
+    supervisor = make(tmp_path, monkeypatch, flags={'FAKE_HERMES_HANG': '1'})
+    try:
+        out = supervisor.delegate(hb.TaskBundle(goal='check it', spawn_reason=G.VERIFICATION))
+        owned = G.governor()._owned[supervisor._leases[out['work_run_id']]]
+        assert owned.spawn_reason == G.VERIFICATION
+    finally:
+        supervisor.stop()

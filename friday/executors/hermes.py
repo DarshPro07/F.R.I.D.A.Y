@@ -61,6 +61,7 @@ def to_bridge_bundle(bundle) -> hb.TaskBundle:
         role=bundle.role,
         verification=tuple(bundle.verification),
         iteration_budget=int(bundle.iteration_budget),
+        spawn_reason=bundle.spawn_reason,
     )
 
 

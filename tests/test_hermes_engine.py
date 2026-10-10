@@ -157,3 +157,14 @@ def test_hermes_executor_reports_unavailable_not_a_crash(tmp_path):
     res = asyncio.run(HermesExecutor(None, supervisor=Dead()).execute(
         DevBundle(goal="x", workspace=str(tmp_path))))
     assert res.status == "failed" and "unavailable" in res.error
+
+
+def test_the_bridge_bundle_carries_the_development_bundle_reason(tmp_path):
+    from friday import governor as G
+    from friday.executors.claude_code import TaskBundle as DevBundle
+    from friday.executors.hermes import to_bridge_bundle
+
+    assert to_bridge_bundle(DevBundle(goal="x", workspace=str(tmp_path))
+                            ).spawn_reason == G.SPECIALISATION
+    assert to_bridge_bundle(DevBundle(goal="x", workspace=str(tmp_path),
+                                      spawn_reason=G.PARALLEL)).spawn_reason == G.PARALLEL

@@ -105,6 +105,9 @@ class TaskBundle:
     role: str = ""
     #: How many attempts this task gets before it escalates. 0 = unset.
     iteration_budget: int = 0
+    #: Why a worker is started for this task (ORCH-002): one of
+    #: governor.SPAWN_REASONS, chosen by whoever builds the bundle.
+    spawn_reason: str = "specialisation"
     #: The repo-map summary, distinct from `context` (which also carries
     #: team instructions and assumptions for the local prompt).
     known_facts: tuple[str, ...] = ()
@@ -372,7 +375,7 @@ class ClaudeCodeExecutor:
         from friday import governor as G
         decision = G.governor().admit(G.WORKER, label=f"claude:{bundle.goal[:40]}",
                                       objective_id=bundle.run_id, owner="claude_code",
-                                      spawn_reason=G.SPECIALISATION)
+                                      spawn_reason=bundle.spawn_reason)
         if not decision.admitted:
             return run_ctx.record(c.failed(
                 started, f"governor {decision.decision}: {decision.reason}; "

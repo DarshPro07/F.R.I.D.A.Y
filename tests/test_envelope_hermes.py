@@ -444,3 +444,17 @@ def test_a_finished_task_leaves_no_expiry_timer(tmp_path, monkeypatch):
         assert out["work_run_id"] not in supervisor._expiry_timers
     finally:
         supervisor.stop()
+
+
+def test_an_objectives_delegation_is_isolated_and_a_conversation_one_is_not(delegate_tool):
+    """ORCH-002: an objective's worker starts from a compiled packet (context
+    isolation); a conversation delegation stays a specialist hand-off."""
+    from friday import governor as G
+    store, delegate, supervisor = delegate_tool
+    run_id = _objective(store)
+    _running(store, run_id)
+    delegate(goal="fix the parser", objective_run_id=run_id, wait_seconds=0)
+    delegate(goal="fix it", wait_seconds=0)
+    (objective_bundle, _), (chat_bundle, _) = supervisor.calls
+    assert objective_bundle.spawn_reason == G.ISOLATION
+    assert chat_bundle.spawn_reason == G.SPECIALISATION

@@ -212,8 +212,10 @@ def register(mcp):
             except (c.ContractError, ValueError, LookupError) as exc:
                 return {"status": "failed",
                         "error": f"CONTEXT: the objective's record cannot be read: {exc}"}
+            # The worker starts from the compiled packet, not the history.
             bundle = replace(bundle, critical_facts=compiled.binding,
-                             recorded_state=compiled.recorded)
+                             recorded_state=compiled.recorded,
+                             spawn_reason=G.ISOLATION)
             try:
                 compaction.validate(bundle.render(), compiled.facts)
             except compaction.LossyCompaction as exc:

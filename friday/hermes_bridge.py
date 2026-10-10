@@ -408,6 +408,9 @@ class TaskBundle:
     verification: tuple[str, ...] = ()
     #: How many attempts this task gets before it escalates. 0 = unset.
     iteration_budget: int = 0
+    #: Why a worker is started for this bundle (ORCH-002): one of
+    #: governor.SPAWN_REASONS, chosen by whoever builds the bundle.
+    spawn_reason: str = "specialisation"
     #: Paths or `path:reason` references. 3-8 is the intended shape; more is
     #: allowed but shows up in `oversized()`.
     code_refs: tuple[str, ...] = ()
@@ -2266,7 +2269,7 @@ class HermesSupervisor:
         from friday import governor as G
         decision = G.governor().admit(G.WORKER, label=f"hermes:{bundle.goal[:40]}",
                                       objective_id=friday_run_id, owner="hermes_bridge",
-                                      spawn_reason=G.SPECIALISATION)
+                                      spawn_reason=bundle.spawn_reason)
         if not decision.admitted:
             raise G.Refused(decision)
         if scope is not None:

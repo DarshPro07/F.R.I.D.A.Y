@@ -503,3 +503,30 @@ def test_a_claude_code_worker_records_why_it_was_started(store, bundle, monkeypa
     result = asyncio.run(executor(store).execute(bundle))
     assert result.status == c.PARTIAL, result.error
     assert reasons == [G.SPECIALISATION]
+
+
+def test_a_claude_code_worker_records_the_reason_its_bundle_carries(store, bundle, monkeypatch):
+    """ORCH-002: the lease records the reason the bundle was built with."""
+    import dataclasses
+    from friday import contracts as c
+    from friday import governor as G
+
+    class FakeRun:
+        process = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        async def events(self, timeout=None):
+            reasons.extend(o.spawn_reason for o in G.governor()._owned.values())
+            yield cli.Event("result", {"result": "done"})
+
+    reasons: list[str] = []
+    monkeypatch.setattr(cli, "available", lambda: True)
+    monkeypatch.setattr(cli, "Run", FakeRun)
+    monkeypatch.setattr(ClaudeCodeExecutor, "finish",
+                        lambda self, b, started, final: started.finish(status=c.PARTIAL))
+    assert bundle.spawn_reason == G.SPECIALISATION
+    asyncio.run(executor(store).execute(
+        dataclasses.replace(bundle, spawn_reason=G.PARALLEL)))
+    assert reasons == [G.PARALLEL]
