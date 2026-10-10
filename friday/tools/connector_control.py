@@ -122,11 +122,11 @@ def register(mcp):
             # The recoverable sub-objective is finished: wake every run
             # parked at an auth boundary. Deterministic - no model call.
             try:
-                from friday import objective_cli
-                from friday.continuous import resume_after_auth
+                from friday import objective_cli, signals
 
-                resumed = resume_after_auth(
-                    objective_cli._db(), reason=f"{connector} verified")
+                resumed = signals.auth_verified(
+                    objective_cli._db(), surface="desktop",
+                    reason=f"{connector} verified")
                 if resumed:
                     spoken["resumed_runs"] = resumed
                     spoken["say"] += (" I'm resuming the task that was "

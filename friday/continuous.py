@@ -1873,6 +1873,61 @@ def _describe(capability, target: str) -> str:
     return f"{verb} {target}".strip()
 
 
+def _pending_approval(store: Store, run_id: str, operation: str,
+                      target: str) -> tuple[dict, dict, str] | None:
+    """The WAITING task a run is parked on for an approval, with its arguments
+    and target, when it is the action `operation`/`target` name (empty means
+    any); None when the run is not waiting for that."""
+    run = store.objective_run(run_id)
+    if run is None or run["status"] != O.RunStatus.WAITING_PERMISSION:
+        return None
+    parked = [t for t in store.objective_tasks(run_id)
+              if t["status"] == O.TaskStatus.WAITING
+              and t.get("failure_kind") == O.FailureKind.USER_REQUIRED
+              and _is_approval(str(t.get("evidence") or ""))]
+    if not parked:
+        return None
+    task = parked[0]
+    arguments = dict(task.get("arguments") or {})
+    actual_target = str(arguments.get("path") or arguments.get("url")
+                        or arguments.get("target") or arguments.get("name") or "")
+    if operation and operation != task.get("capability"):
+        return None
+    if target and target != actual_target:
+        return None
+    return task, arguments, actual_target
+
+
+def deny_pending(store: Store, run_id: str, *, decided_by: str,
+                 operation: str = "", target: str = "") -> bool:
+    """A person refused the pending action on this run. The WAITING task is
+    stopped (FAILED, not retried) and the refusal is recorded against the exact
+    action; the run goes back to RUNNING so the driver skips what depended on
+    the step and settles the run. Refuses when nothing is pending or the named
+    action does not match what was asked."""
+    pending = _pending_approval(store, run_id, operation, target)
+    if pending is None:
+        return False
+    task, arguments, actual_target = pending
+    reason = f"approval denied by the person via {decided_by}"
+    if not store.update_objective_task_if(
+            task["task_id"], expect=(O.TaskStatus.WAITING,),
+            status=O.TaskStatus.FAILED, evidence=reason,
+            finished_at=now_iso(), next_wake=None):
+        return False
+    store.append_objective_approval(
+        run_id, operation=str(task.get("capability") or ""), target=actual_target,
+        parameters=arguments, decision="DENIED", decided_by=decided_by)
+    store.touch_objective_run(run_id, status=O.RunStatus.RUNNING,
+                              next_wake=_in_seconds(0.0), blocker="")
+    store.append_objective_event(
+        run_id, O.EVENT_TASK_FAILED, task_id=task["task_id"],
+        detail={"kind": O.FailureKind.USER_REQUIRED, "reason": reason})
+    logger.info("objective.approval_denied run_id=%s task=%s by=%s",
+                run_id, task["task_id"], decided_by)
+    return True
+
+
 def resume_after_approval(store: Store, run_id: str, *, decided_by: str,
                           operation: str = "", target: str = "") -> bool:
     """A person approved the pending action on this run (FR-060: the
@@ -1880,23 +1935,10 @@ def resume_after_approval(store: Store, run_id: str, *, decided_by: str,
     task goes READY with the approval marked on the run, the run goes
     RUNNING, and the driver picks it up. Refuses when nothing is pending or
     the named action does not match what was asked."""
-    run = store.objective_run(run_id)
-    if run is None or run["status"] != O.RunStatus.WAITING_PERMISSION:
+    pending = _pending_approval(store, run_id, operation, target)
+    if pending is None:
         return False
-    parked = [t for t in store.objective_tasks(run_id)
-              if t["status"] == O.TaskStatus.WAITING
-              and t.get("failure_kind") == O.FailureKind.USER_REQUIRED
-              and _is_approval(str(t.get("evidence") or ""))]
-    if not parked:
-        return False
-    task = parked[0]
-    arguments = dict(task.get("arguments") or {})
-    actual_target = str(arguments.get("path") or arguments.get("url")
-                        or arguments.get("target") or arguments.get("name") or "")
-    if operation and operation != task.get("capability"):
-        return False
-    if target and target != actual_target:
-        return False
+    task, arguments, actual_target = pending
     # A lease on this plan (APPROVAL-001): bound to what the objective would
     # do at this moment, and to a time after which the person is asked again.
     from friday import modification
@@ -1930,7 +1972,24 @@ def resume_after_approval(store: Store, run_id: str, *, decided_by: str,
     return True
 
 
-def resume_after_auth(store: Store, *, reason: str = "") -> list[str]:
+def _auth_parked(store: Store, run: dict) -> list[dict]:
+    """The WAITING tasks a WAITING_PERMISSION run holds for a sign-in."""
+    if run["status"] != O.RunStatus.WAITING_PERMISSION:
+        return []
+    return [t for t in store.objective_tasks(run["run_id"])
+            if t["status"] == O.TaskStatus.WAITING
+            and t.get("failure_kind") == O.FailureKind.USER_REQUIRED
+            and _is_auth(str(t.get("evidence") or ""))]
+
+
+def runs_parked_at_auth(store: Store) -> list[str]:
+    """Ids of the runs waiting for a connector sign-in."""
+    return [run["run_id"] for run in store.objective_runs(limit=100)
+            if _auth_parked(store, run)]
+
+
+def resume_after_auth(store: Store, *, reason: str = "",
+                      run_id: str = "") -> list[str]:
     """Wake every run parked at an auth boundary - the connector_verify
     success hook.
 
@@ -1941,12 +2000,9 @@ def resume_after_auth(store: Store, *, reason: str = "") -> list[str]:
     """
     resumed: list[str] = []
     for run in store.objective_runs(limit=100):
-        if run["status"] != O.RunStatus.WAITING_PERMISSION:
+        if run_id and run["run_id"] != run_id:
             continue
-        parked = [t for t in store.objective_tasks(run["run_id"])
-                  if t["status"] == O.TaskStatus.WAITING
-                  and t.get("failure_kind") == O.FailureKind.USER_REQUIRED
-                  and _is_auth(str(t.get("evidence") or ""))]
+        parked = _auth_parked(store, run)
         if not parked:
             continue
         for task in parked:

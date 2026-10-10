@@ -32,6 +32,7 @@ import re
 
 from friday import capabilities, contracts as c
 from friday import objectives as O
+from friday import signals
 from friday.capability_router import _phrase_score
 from friday.policy import PolicyEngine, default_engine
 from friday.store import DEFAULT_DB, Store
@@ -572,9 +573,10 @@ def objective_pause(run: c.Run, run_id: str = "", *, reason: str = "",
             else "no objective has been started"))
     if found["status"] == O.RUN_PAUSED:
         return run.record(c.failed(started, "already paused"))
-    if not O.pause_run(db, run_id=found["run_id"],
-                       reason=reason.strip() or "user request",
-                       executor_id="objectives.pause"):
+    if not signals.send(
+            db, found["run_id"], "USER_STOP", surface="desktop",
+            payload={"reason": reason.strip() or "user request",
+                     "by": "objectives.pause"}).applied:
         return run.record(c.failed(
             started, f"cannot pause {found['run_id']} "
             f"({found['status']})"))
@@ -621,9 +623,10 @@ def objective_resume(run: c.Run, run_id: str = "", *, reason: str = "",
     if found["status"] != O.RUN_PAUSED:
         return run.record(c.failed(
             started, f"{found['run_id']} is {found['status']}, not paused"))
-    if not O.resume_run(db, run_id=found["run_id"],
-                        reason=reason.strip() or "user request",
-                        executor_id="objectives.resume"):
+    if not signals.send(
+            db, found["run_id"], "USER_BACK", surface="desktop",
+            payload={"reason": reason.strip() or "user request",
+                     "by": "objectives.resume"}).applied:
         return run.record(c.failed(
             started, f"cannot resume {found['run_id']}"))
     return run.record(c.succeeded(
@@ -694,8 +697,11 @@ def objective_cancel(run: c.Run, run_id: str = "", *, reason: str = "",
 
 
 def objective_history(run: c.Run, run_id: str = "", *, limit: int = 25,
+                      include_signals: bool = False,
                       engine: PolicyEngine = default_engine):
-    """The event ledger of the named run (or the most recent one)."""
+    """The event ledger of the named run (or the most recent one). The signal
+    bus's own received/applied bookkeeping is left out unless asked for: what
+    a signal did is already an event of its own (run.paused, task.failed)."""
     tool_id = "objectives.history"
     blocked = _gate(run, tool_id, engine)
     if blocked:
@@ -707,8 +713,11 @@ def objective_history(run: c.Run, run_id: str = "", *, limit: int = 25,
         return run.record(c.failed(
             started, f"no objective run {run_id!r}" if run_id.strip()
             else "no objective has been started"))
-    events = db.objective_events(found["run_id"],
-                                 limit=max(1, min(int(limit), 500)))
+    events = db.objective_events(found["run_id"], limit=500)
+    if not include_signals:
+        events = [row for row in events
+                  if not row["event"].startswith("signal.")]
+    events = events[:max(1, min(int(limit), 500))]
     payload = [{
         "event": row["event"],
         "task_id": row.get("task_id"),

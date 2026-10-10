@@ -24,6 +24,7 @@ import pytest
 
 from friday import signals as S
 from friday import objectives as O
+from friday import requirements as REQ
 from friday.continuous import ContinuousTaskExecutor
 from friday.contracts import PERSON
 from friday.objectives import RUN_TERMINAL, compile_objective
@@ -258,3 +259,166 @@ def test_an_amendment_applied_through_the_bus_edits_the_future_and_lifts_the_bar
     assert got.effect == S.BARRIER_RELEASED, got.reason
     assert store.objective_task("t1")["arguments"]["source"] == "bbc"
     assert not S.barrier_up(store, "R")
+
+
+# -- denial and answer: the two signals that settle a waiting step ----------
+
+def _parked_for_approval(store, run_id="R"):
+    store.open_objective_run(run_id, request="x", objective_summary="x",
+                             status=O.RUN_WAITING_PERMISSION)
+    store.save_objective_task(
+        task_id="t1", run_id=run_id, capability="files_write",
+        arguments=json.dumps({"path": "notes.md"}), dependencies="[]",
+        status=O.TaskStatus.WAITING)
+    store.update_objective_task(
+        "t1", failure_kind=O.FailureKind.USER_REQUIRED,
+        evidence="approval_required: write notes.md")
+    store.save_objective_task(
+        task_id="t2", run_id=run_id, capability="work",
+        arguments=json.dumps({"name": "after"}), dependencies='["t1"]',
+        status=O.TaskStatus.QUEUED)
+
+
+def test_a_denial_stops_the_waiting_step_and_is_on_the_record():
+    store = Store(":memory:")
+    _parked_for_approval(store)
+    got = S.send(store, "R", "USER_DENIAL", surface="mobile",
+                 payload={"operation": "files_write", "target": "notes.md"})
+    assert got.applied and got.effect == S.DENIED, got.reason
+    task = store.objective_task("t1")
+    assert task["status"] == O.TaskStatus.FAILED
+    assert "denied" in task["evidence"] and "mobile" in task["evidence"]
+    # The run is handed back to the driver, which skips what hung off the step.
+    assert store.objective_run("R")["status"] == O.RUN_RUNNING
+    ledger = store.objective_ledger("R")
+    assert [a["decision"] for a in ledger["approvals"]][-1] == "DENIED"
+    assert ledger["approvals"][-1]["decided_by"] == "mobile"
+
+
+def test_a_denial_for_a_different_action_or_an_idle_run_changes_nothing():
+    store = Store(":memory:")
+    _parked_for_approval(store)
+    wrong = S.send(store, "R", "USER_DENIAL", surface="web",
+                   payload={"operation": "files_delete"})
+    assert wrong.effect == S.IGNORED
+    assert store.objective_task("t1")["status"] == O.TaskStatus.WAITING
+    store.open_objective_run("Q", request="y", objective_summary="y",
+                             status=O.RUN_RUNNING)
+    assert S.send(store, "Q", "USER_DENIAL", surface="web").effect == S.IGNORED
+
+
+def test_an_answer_resumes_the_run_held_for_an_assumption_after_a_restart(tmp_path):
+    path = tmp_path / "objectives.sqlite3"
+    store = Store(path)
+    store.open_objective_run("R", request="x", objective_summary="x",
+                             status=O.RUN_WAITING_QUESTION)
+    store.save_objective_task(
+        task_id="t1", run_id="R", capability="work",
+        arguments=json.dumps({"name": "a"}), dependencies="[]",
+        status=O.TaskStatus.QUEUED)
+    entry = REQ.Assumption(statement="the report is for Q3", origin="request",
+                           confidence=REQ.LOW, consequence=REQ.HIGH,
+                           validation="ask the person")
+    store.save_assumption("R", key=entry.key, **entry.to_dict())
+    del store
+
+    reopened = Store(path)
+    got = S.send(reopened, "R", "USER_ANSWER", surface="voice",
+                 payload={"answer": "yes, Q3"})
+    assert got.applied and got.effect == S.ANSWERED, got.reason
+    assert reopened.objective_run("R")["status"] == O.RUN_RUNNING
+    assert reopened.objective_task("t1")["status"] == O.TaskStatus.READY
+    assert [a["state"] for a in reopened.list_assumptions("R")] == ["VALIDATED"]
+    applied = [e for e in reopened.objective_events("R")
+               if e["event"] == S.EVENT_RECEIVED]
+    assert applied[0]["detail"]["payload"]["answer"] == "yes, Q3"
+
+
+def test_an_answer_to_a_run_that_asked_nothing_is_ignored():
+    store = Store(":memory:")
+    store.open_objective_run("R", request="x", objective_summary="x",
+                             status=O.RUN_RUNNING)
+    got = S.send(store, "R", "USER_ANSWER", surface="web",
+                 payload={"answer": "yes"})
+    assert got.effect == S.IGNORED and not got.applied
+
+
+# -- every surface goes through the one bus ---------------------------------
+
+def _received(store, run_id):
+    return [e["detail"] for e in store.objective_events(run_id)
+            if e["event"] == S.EVENT_RECEIVED]
+
+
+def test_the_pause_and_resume_tools_send_signals_not_direct_calls():
+    from friday import contracts as c
+    from friday.toolsets import objectives as OT
+
+    store = Store(":memory:")
+    store.open_objective_run("R", request="x", objective_summary="x",
+                             status=O.RUN_RUNNING)
+    run = c.Run.create("signal-test", capability="objectives")
+    OT.reset_store(store)
+    try:
+        assert OT.objective_pause(run, "R", reason="gone").status == c.SUCCEEDED
+        assert OT.objective_resume(run, "R").status == c.SUCCEEDED
+        sent = _received(store, "R")
+    finally:
+        OT.reset_store(None)
+    assert [s["kind"] for s in sent] == ["USER_STOP", "USER_BACK"]
+
+
+def test_history_keeps_the_signal_bookkeeping_out_unless_asked_for():
+    from friday import contracts as c
+    from friday.toolsets import objectives as OT
+
+    store = Store(":memory:")
+    store.open_objective_run("R", request="x", objective_summary="x",
+                             status=O.RUN_RUNNING)
+    S.send(store, "R", "USER_STOP", surface="voice")
+    run = c.Run.create("signal-test", capability="objectives")
+    OT.reset_store(store)
+    try:
+        plain = [e["event"] for e in OT.objective_history(run, "R").output]
+        full = [e["event"] for e in OT.objective_history(
+            run, "R", include_signals=True).output]
+    finally:
+        OT.reset_store(None)
+    assert plain == ["run.paused"]
+    assert S.EVENT_RECEIVED in full and S.EVENT_APPLIED in full
+
+
+def test_the_cli_pause_and_resume_send_signals(monkeypatch, capsys):
+    from friday import objective_cli
+
+    store = Store(":memory:")
+    store.open_objective_run("R", request="x", objective_summary="x",
+                             status=O.RUN_RUNNING)
+    monkeypatch.setattr(objective_cli, "_db", lambda: store)
+    objective_cli._pause("R")
+    objective_cli._resume("R")
+    assert [s["kind"] for s in _received(store, "R")] == [
+        "USER_STOP", "USER_BACK"]
+    assert store.objective_run("R")["status"] == O.RUN_RUNNING
+
+
+def test_a_verified_connector_resumes_the_auth_parked_run_through_the_bus():
+    store = Store(":memory:")
+    store.open_objective_run("A", request="x", objective_summary="x",
+                             status=O.RUN_WAITING_PERMISSION)
+    store.save_objective_task(
+        task_id="a1", run_id="A", capability="work",
+        arguments=json.dumps({"name": "a"}), dependencies="[]",
+        status=O.TaskStatus.WAITING)
+    store.update_objective_task(
+        "a1", failure_kind=O.FailureKind.USER_REQUIRED,
+        evidence="not logged in to anthropic")
+    _parked_for_approval(store, "B")      # waits on an approval, not a sign-in
+
+    resumed = S.auth_verified(store, surface="desktop",
+                              reason="anthropic verified")
+    assert resumed == ["A"]
+    assert store.objective_run("A")["status"] == O.RUN_RUNNING
+    assert store.objective_run("B")["status"] == O.RUN_WAITING_PERMISSION
+    assert [s["kind"] for s in _received(store, "A")] == ["USER_APPROVAL"]
+    assert _received(store, "B") == []    # the other run was never signalled

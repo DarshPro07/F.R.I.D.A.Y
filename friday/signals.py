@@ -14,11 +14,23 @@ dead one left it, and the MCP server and the voice agent can each send one.
                       and lifts it again
     USER_APPROVAL     `continuous.resume_after_approval`, bound to the named
                       operation and target
+                      (`payload["auth"]`: the person finished a sign-in, so
+                      the run parked at that auth boundary resumes)
+    USER_DENIAL       `continuous.deny_pending`: the step waiting for that
+                      approval is stopped and what depended on it is skipped
+    USER_ANSWER       a run held for an assumption is released with the
+                      answer on the record (`payload["answer"]`, optionally
+                      `assumption` and `state`)
     USER_STOP         the run is paused
     USER_BACK         the barrier is lifted and a paused run resumes
-    USER_DENIAL, USER_ANSWER, USER_PRIORITY_CHANGE, USER_POLICY_CHANGE
+    USER_PRIORITY_CHANGE, USER_POLICY_CHANGE
                       recorded on the objective; no behaviour hangs off them
                       yet
+
+Every surface sends through `send`: the objective tools, the CLI and the
+connector sign-in hook use it too (`auth_verified`). `payload["reason"]` and
+`payload["by"]` let a caller keep its own words and identity on the pause and
+resume events.
 
 The amendment barrier: while it is up the executor starts nothing new for the
 run (`continuous._execute_task` asks `barrier_up`). A call already running is
@@ -52,10 +64,12 @@ BARRIER_RAISED = "barrier_raised"
 BARRIER_RELEASED = "barrier_released"
 PAUSED = "paused"
 RESUMED = "resumed"
+DENIED = "denied"
+ANSWERED = "answered"
 RECORDED = "recorded"        # written down; nothing acts on this kind yet
 IGNORED = "ignored"          # the run was not in a state the signal applies to
 
-_ACTED = (BARRIER_RAISED, BARRIER_RELEASED, PAUSED, RESUMED)
+_ACTED = (BARRIER_RAISED, BARRIER_RELEASED, PAUSED, RESUMED, DENIED, ANSWERED)
 
 
 @dataclass(frozen=True)
@@ -123,12 +137,65 @@ def _approve(store: Store, run_id: str, surface: str,
              payload: dict) -> tuple[str, str]:
     from friday import continuous
 
+    if payload.get("auth"):
+        if continuous.resume_after_auth(
+                store, reason=str(payload.get("reason") or f"signal from {surface}"),
+                run_id=run_id):
+            return RESUMED, ""
+        return IGNORED, "nothing on this run is waiting for a sign-in"
     if continuous.resume_after_approval(
             store, run_id, decided_by=surface,
             operation=str(payload.get("operation") or ""),
             target=str(payload.get("target") or "")):
         return RESUMED, ""
     return IGNORED, "nothing on this run is waiting for that approval"
+
+
+def _deny(store: Store, run_id: str, surface: str,
+          payload: dict) -> tuple[str, str]:
+    from friday import continuous
+
+    if continuous.deny_pending(
+            store, run_id, decided_by=surface,
+            operation=str(payload.get("operation") or ""),
+            target=str(payload.get("target") or "")):
+        return DENIED, ""
+    return IGNORED, "nothing on this run is waiting for that approval"
+
+
+def _answer(store: Store, run_id: str, payload: dict) -> tuple[str, str]:
+    """Release a run held on an assumption. The answer text is already on the
+    objective in the `signal.received` event; `state` (VALIDATED, REFUTED or
+    WAIVED, default VALIDATED) says what it did to the assumption."""
+    due = O.awaiting_validation(store, run_id)
+    if not due:
+        return IGNORED, "the run is not waiting for an answer"
+    key = str(payload.get("assumption") or "")
+    if not key:
+        if len(due) != 1:
+            return IGNORED, "name the assumption this answers"
+        key = due[0]["key"]
+    try:
+        if not O.resolve_assumption(
+                store, run_id, key, str(payload.get("state") or "VALIDATED").upper()):
+            return IGNORED, f"the run has no assumption {key!r}"
+    except ValueError as exc:
+        return IGNORED, str(exc)
+    return ANSWERED, ""
+
+
+def auth_verified(store: Store, *, surface: str, reason: str = "") -> list[str]:
+    """The person finished a connector sign-in: tell every run parked at an
+    auth boundary, one signal each. Returns the ids that resumed."""
+    from friday import continuous
+
+    resumed = []
+    for run_id in continuous.runs_parked_at_auth(store):
+        got = send(store, run_id, "USER_APPROVAL", surface=surface,
+                   payload={"auth": True, "reason": reason})
+        if got.effect == RESUMED:
+            resumed.append(run_id)
+    return resumed
 
 
 def send(store: Store, run_id: str, kind: str, *, surface: str,
@@ -159,16 +226,22 @@ def send(store: Store, run_id: str, kind: str, *, surface: str,
         effect, reason = _correct(store, run_id, signal_id, surface, payload)
     elif kind == "USER_APPROVAL":
         effect, reason = _approve(store, run_id, surface, payload)
+    elif kind == "USER_DENIAL":
+        effect, reason = _deny(store, run_id, surface, payload)
+    elif kind == "USER_ANSWER":
+        effect, reason = _answer(store, run_id, payload)
     elif kind == "USER_STOP":
         if O.pause_run(store, run_id=run_id,
-                       reason=f"stop signal from {surface}", executor_id=surface):
+                       reason=str(payload.get("reason") or f"stop signal from {surface}"),
+                       executor_id=str(payload.get("by") or surface)):
             effect = PAUSED
         else:
             effect, reason = IGNORED, "the run is already paused"
     elif kind == "USER_BACK":
         released = _release_barrier(store, run_id, signal_id, surface)
         if O.resume_run(store, run_id=run_id,
-                        reason=f"back signal from {surface}", executor_id=surface):
+                        reason=str(payload.get("reason") or f"back signal from {surface}"),
+                        executor_id=str(payload.get("by") or surface)):
             effect = RESUMED
         elif released:
             effect = BARRIER_RELEASED

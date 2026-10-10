@@ -34,6 +34,7 @@ import time
 
 from friday import capabilities, contracts as c
 from friday import objectives as O
+from friday import signals
 from friday.continuous import ContinuousTaskExecutor
 from friday.policy import PolicyEngine
 from friday.store import DEFAULT_DB, Store
@@ -191,8 +192,9 @@ def _pause(run_id: str) -> None:
     if found is None:
         print("no objective run")
         return
-    O.pause_run(store, run_id=found["run_id"],
-                reason="operator request", executor_id=f"cli-{os.getpid()}")
+    signals.send(store, found["run_id"], "USER_STOP", surface="desktop",
+                 payload={"reason": "operator request",
+                          "by": f"cli-{os.getpid()}"})
     print(f"paused {found['run_id']}")
 
 
@@ -209,8 +211,9 @@ def _resume(run_id: str) -> None:
     if found is None:
         print("no paused objective run")
         return
-    O.resume_run(store, run_id=found["run_id"],
-                 reason="operator request", executor_id=f"cli-{os.getpid()}")
+    signals.send(store, found["run_id"], "USER_BACK", surface="desktop",
+                 payload={"reason": "operator request",
+                          "by": f"cli-{os.getpid()}"})
     print(f"resumed {found['run_id']}")
 
 
