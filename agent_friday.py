@@ -2705,6 +2705,14 @@ async def drain_hermes_deliveries(session, log=None) -> int:
     return delivered
 
 
+def hermes_delivery_log():
+    """The log the startup sweep creates Hermes deliveries through: it renders
+    a worker's result as the bounded record, never the transcript (ORCH-004)."""
+    from friday import record_delivery
+
+    return record_delivery.RecordDeliveryLog()
+
+
 async def drain_objective_deliveries(session, store=None) -> int:
     """
     One delivery pass for FINISHED OBJECTIVES - the seam the RC1 regression
@@ -2869,7 +2877,7 @@ async def entrypoint(ctx: JobContext) -> None:
     async def deliver_hermes_completions() -> None:
         from friday import hermes_bridge as hb
 
-        log = hb.WorkRunLog()
+        log = hermes_delivery_log()
         digest_state: dict = {}
         try:
             swept = await asyncio.to_thread(log.sweep_undelivered)

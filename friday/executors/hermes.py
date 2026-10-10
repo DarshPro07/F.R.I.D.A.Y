@@ -29,6 +29,7 @@ import logging
 from friday import contracts as c
 from friday import execution_economics as ee
 from friday import hermes_bridge as hb
+from friday.handoff import work_run_record
 
 logger = logging.getLogger("friday-agent.executors.hermes")
 
@@ -147,10 +148,16 @@ class HermesExecutor:
 
         record = out.get("result") or {}
         status = str(record.get("status", "")).upper()
+        # ORCH-004: the bounded record, not the transcript; the full result
+        # stays in the work-run row, read with hermes_status(work_run_id,
+        # full=true); the record's transcript_ref is the Hermes session id.
+        work_record = work_run_record(
+            {**record, "work_run_id": out.get("work_run_id") or record.get("work_run_id", "")})
         payload = {"work_run_id": out.get("work_run_id"),
                    "model": record.get("model", ""),
                    "effort": plan["effort"], "route": plan["reason"],
-                   "result": record.get("result", ""),
+                   "record": work_record,
+                   "result": work_record["summary"],
                    "pending_question": record.get("pending_question", "")}
         if status == hb.COMPLETE:
             return run_ctx.record(c.succeeded(

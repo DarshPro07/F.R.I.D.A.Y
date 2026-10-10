@@ -25,10 +25,15 @@ from friday import execution_economics as ee
 from friday import governor as G
 from friday import hermes_bridge as hb
 from friday.handoff import work_run_record
+from friday.record_delivery import RecordDeliveryLog
 from friday.policy import PolicyEngine, PolicyError
 from friday.toolsets.system import APPROVAL_PREFIX
 
 logger = logging.getLogger("friday-agent")
+
+#: Work-run columns that hold the transcript or its raw bookkeeping; they
+#: leave hermes_status unless the caller asks for full=true.
+_TRANSCRIPT_COLUMNS = frozenset({"result", "progress_json", "usage_json", "handoff"})
 
 _supervisor: hb.HermesSupervisor | None = None
 _engine: PolicyEngine | None = None
@@ -53,8 +58,17 @@ def supervisor() -> hb.HermesSupervisor:
     global _supervisor
     with _lock:
         if _supervisor is None:
+            # ORCH-004: a late finish is delivered as the record.
+            log = RecordDeliveryLog()
             _supervisor = hb.HermesSupervisor(
-                answer_question=_broker_answer)
+                answer_question=_broker_answer, log=log)
+            # A run whose delivery row was lost to a crash is swept here in
+            # record form. agent_friday's own startup sweep (plain WorkRunLog)
+            # may reach such a run first; that path is outside this build.
+            try:
+                log.sweep_undelivered()
+            except Exception:                                # noqa: BLE001
+                logger.exception("hermes record-delivery sweep failed")
         return _supervisor
 
 
@@ -286,7 +300,7 @@ def register(mcp):
                     # ORCH-004: the record, not the transcript. The full
                     # result stays in the work-run row (hermes_status).
                     "handoff": work_run_record(record),
-                    "result": (record.get("result") or "")[:600],
+                    "result": work_run_record(record)["summary"],
                     "pending_question": record.get("pending_question", ""),
                     "bundle": out["bundle"],
                     "model": record.get("model", ""),
@@ -305,13 +319,14 @@ def register(mcp):
         }
 
     @mcp.tool()
-    def hermes_status(work_run_id: str = "") -> dict:
+    def hermes_status(work_run_id: str = "", full: bool = False) -> dict:
         """
         What Hermes is doing right now.
 
-        With a work_run_id: that run's durable record. Without: every
-        non-terminal run. Status comes from Friday's own log, never from
-        asking the model to summarise itself.
+        With a work_run_id: that run's bounded record (status, commit, tests,
+        evidence, blockers). The whole stored row, transcript included, only
+        with full=true. Without: every non-terminal run. Status comes from
+        Friday's own log, never from asking the model to summarise itself.
         """
         sup = supervisor()
         if work_run_id:
@@ -319,7 +334,18 @@ def register(mcp):
             if record is None:
                 return {"status": "failed",
                         "error": f"no work run {work_run_id!r}"}
-            return {"status": "succeeded", "run": record,
+            if full:
+                return {"status": "succeeded", "run": record,
+                        "stall": sup.stall_state(work_run_id)}
+            # ORCH-004: the record, not the transcript; full=true is the
+            # on-demand read of the whole row.
+            # The record is inside the run too: the objective engine's
+            # reconcile path reads only observed["run"].
+            rec = work_run_record(record)
+            lean = {k: v for k, v in record.items() if k not in _TRANSCRIPT_COLUMNS}
+            lean["record"] = rec
+            return {"status": "succeeded", "run": lean,
+                    "record": rec,
                     "stall": sup.stall_state(work_run_id)}
         return {"status": "succeeded", "active": sup.log.active(),
                 # health() answers a stopped shared gateway as {alive, state}
