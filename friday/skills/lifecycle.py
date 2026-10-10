@@ -322,12 +322,13 @@ class SkillLifecycle:
                 and scan.get("policy_version") == SCAN_POLICY_VERSION
                 and str(scan.get("scanner_version") or "").lstrip("v") == forge.SKILLSPECTOR_RELEASE.lstrip("v"))
 
-    def evaluate_and_activate(self, name: str, *, run_tests: bool = True, actor: str = "friday") -> tuple[K.EvaluationReport, K.SkillRecord]:
+    def evaluate_and_activate(self, name: str, *, run_tests: bool = True, actor: str = "friday",
+                          others: list[K.SkillRecord] | None = None) -> tuple[K.EvaluationReport, K.SkillRecord]:
         record = self._require(name)
         skill = F.SkillFiles(Path(record.path))
         if record.state == K.STAGED:
             record = self.registry.transition(name, K.TESTING, actor=actor, reason="evaluation started")
-        report = self.evaluator.evaluate(skill, record, run_tests=run_tests)
+        report = self.evaluator.evaluate(skill, record, run_tests=run_tests, others=others)
         if report.passed:
             return report, self.activate(name, report, actor=actor)
         failures = "; ".join(report.failures())[:300]

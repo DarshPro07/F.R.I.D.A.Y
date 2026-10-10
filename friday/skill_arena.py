@@ -44,9 +44,10 @@ Assumptions (revisit if wrong):
   * `maintenance` (0..1, higher is better; e.g. freshness and dependency health)
     is a property of the candidate supplied by the caller, not of a task.
   * ARCHIVED is this roster's word for "lost the arena, kept with its scores".
-    The skill registry has no such state (`contracts.DEPRECATED` is the nearest);
-    mapping the roster onto registry transitions is the activation hook, not
-    done here.
+    The skill registry has no such state, so `apply_outcome` (the activation
+    hook, below) writes it as `contracts.DEPRECATED` with the scores in the
+    reason. The winner is never set ACTIVE directly: it goes through
+    `SkillLifecycle.evaluate_and_activate`, so every activation gate applies.
 """
 from __future__ import annotations
 
@@ -62,6 +63,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from friday import arena as A
+from friday.skills import contracts as K
 
 log = logging.getLogger("friday.skill_arena")
 
@@ -76,6 +78,10 @@ WEIGHTS: Mapping[str, float] = {
 
 #: A challenger must beat the incumbent's score by more than this to replace it.
 REPLACE_MARGIN = 0.02
+
+
+class PartialActivation(RuntimeError):
+    """`apply_outcome` activated the winner but could not retire every loser."""
 
 
 class SkillArenaError(RuntimeError):
@@ -148,6 +154,24 @@ class Candidate:
 _LOCK = threading.RLock()
 
 
+def _roster_rows(capability: str, report: A.ArenaReport,
+                 notes: Mapping[str, str] | None = None) -> dict[str, dict]:
+    """The roster row every candidate in `report` gets (bare candidate id -> row)."""
+    prefix, rows = capability + "/", {}
+    for result in report.results:
+        if not result.candidate_id.startswith(prefix):
+            raise SkillArenaError(f"{result.candidate_id!r} is not a {capability} candidate")
+        bare = result.candidate_id[len(prefix):]
+        rows[bare] = {
+            "status": ACTIVE if result.candidate_id == report.winner else ARCHIVED,
+            "score": result.score, "passed": result.passed,
+            "failed_gates": list(result.failed_gates),
+            "metrics": dict(result.metrics), "report_id": report.report_id}
+        if notes and bare in notes:
+            rows[bare]["note"] = notes[bare]
+    return rows
+
+
 class Roster:
     """Per capability: which candidate is ACTIVE and what every other candidate
     scored. In memory with no `path`; otherwise JSON, read on every call and
@@ -193,22 +217,16 @@ class Roster:
             found = self._load().get(capability, {}).get("entries", {}).get(candidate_id)
             return copy.deepcopy(found)     # never a handle on the roster's own state
 
-    def apply(self, capability: str, report: A.ArenaReport) -> None:
+    def apply(self, capability: str, report: A.ArenaReport,
+              notes: Mapping[str, str] | None = None) -> None:
         """Make the report's winner ACTIVE and every other candidate it measured
-        ARCHIVED with its score; candidates from earlier runs keep their rows."""
+        ARCHIVED with its score; candidates from earlier runs keep their rows.
+        `notes` (bare candidate id -> text) is kept on that candidate's row."""
         with _LOCK:
             data = json.loads(json.dumps(self._load()))   # a copy to edit
             row = data.setdefault(capability, {"active": "", "entries": {}})
-            prefix = capability + "/"
-            for result in report.results:
-                if not result.candidate_id.startswith(prefix):
-                    raise SkillArenaError(f"{result.candidate_id!r} is not a {capability} candidate")
-                row["entries"][result.candidate_id[len(prefix):]] = {
-                    "status": ACTIVE if result.candidate_id == report.winner else ARCHIVED,
-                    "score": result.score, "passed": result.passed,
-                    "failed_gates": list(result.failed_gates),
-                    "metrics": dict(result.metrics), "report_id": report.report_id}
-            row["active"] = report.winner[len(prefix):] if report.winner else ""
+            row["entries"].update(_roster_rows(capability, report, notes))
+            row["active"] = report.winner[len(capability) + 1:] if report.winner else ""
             if self.path is None:
                 self._memory = data
                 return
@@ -316,11 +334,22 @@ class SkillArena:
         self.clock = clock
 
     def run(self, capability: str, candidates: Sequence[Candidate], tasks: Sequence,
-            grader: Grader) -> SkillArenaOutcome:
+            grader: Grader, *,
+            activate: Callable[[SkillArenaOutcome], Any] | None = None) -> SkillArenaOutcome:
         """Run every candidate on every task, grade the outputs with `grader`,
         record the report, update the roster. The current ACTIVE candidate must be
         among `candidates`, so it is re-measured on the same tasks as its
-        challengers."""
+        challengers.
+
+        `activate` (normally `apply_outcome` bound to a lifecycle) puts the
+        decision into force before the roster changes, so the roster only ever
+        says what the registry serves. If it raises `TransitionRefused`, the
+        winner was not activated: the report is recorded with the incumbent
+        (or no one) as winner, the roster keeps the incumbent ACTIVE and notes
+        the refusal on the refused winner's row, and the refusal propagates. Any
+        other error (a preflight `SkillArenaError`) changed nothing and records
+        nothing; a `PartialActivation` commits the decision, which did take hold,
+        and propagates."""
         if not isinstance(capability, str) or not capability.strip() or "/" in capability:
             raise ValueError("an arena is for a named capability (no '/')")
         if not callable(grader):
@@ -353,9 +382,128 @@ class SkillArena:
             if self.roster.active(capability) != incumbent:
                 raise SkillArenaError(f"{capability}: the incumbent changed during the run; "
                                       "run the arena again")
+            rows = _roster_rows(capability, report)
+            outcome = SkillArenaOutcome(
+                capability=capability, report=report, winner=bare,
+                replaced=incumbent if incumbent and bare != incumbent else "",
+                entries={cid: rows[cid] for cid in ids})
+            if activate is not None:
+                try:
+                    activate(outcome)
+                except K.TransitionRefused as exc:
+                    # The registry still serves the incumbent: record that, not the
+                    # refused winner, or the next run could never replace it.
+                    served = replace(report, winner=qualified_id(capability, incumbent) if incumbent else "")
+                    self.store.record(served)
+                    self.roster.apply(capability, served,
+                                      notes={bare: f"activation refused: {exc}"[:400]})
+                    raise
+                except PartialActivation:
+                    self.store.record(report)
+                    self.roster.apply(capability, report)
+                    raise
             self.store.record(report)
             self.roster.apply(capability, report)
-            entries = {cid: self.roster.entry(capability, cid) for cid in ids}
-        return SkillArenaOutcome(capability=capability, report=report, winner=bare,
-                                 replaced=incumbent if incumbent and bare != incumbent else "",
-                                 entries=entries)
+        return replace(outcome, entries={cid: self.roster.entry(capability, cid) for cid in ids})
+
+
+# -- the activation hook: roster -> skills registry -------------------------------------
+
+def skill_name(candidate_id: str) -> str:
+    """The registry name behind a candidate id: the id itself, or `name` of a
+    `name@v<n>` id (`skill_ladder.arena_id`)."""
+    name, sep, version = candidate_id.rpartition("@v")
+    return name if sep and name and version.isdigit() else candidate_id
+
+
+def skill_names(candidate_ids: Sequence[str]) -> dict[str, str]:
+    names = {cid: skill_name(cid) for cid in candidate_ids}
+    if len(set(names.values())) != len(names):
+        raise SkillArenaError("two candidates are versions of the same skill; a registry holds "
+                              "one record per skill name")
+    return names
+
+
+@dataclass(frozen=True)
+class Activation:
+    capability: str
+    activated: str = ""                 # the winner that went ACTIVE through the lifecycle
+    kept: str = ""                      # the winner that was already ACTIVE
+    deprecated: Mapping[str, str] = field(default_factory=dict)     # skill name -> reason
+
+
+def _retirable(state: str) -> bool:
+    """Whether DEPRECATED is reachable along legal transitions: directly, or by
+    leaving through DRAFT."""
+    if state == K.DEPRECATED or K.DEPRECATED in K.TRANSITIONS.get(state, ()):
+        return True
+    return K.DRAFT in K.TRANSITIONS.get(state, ()) and K.DEPRECATED in K.TRANSITIONS[K.DRAFT]
+
+
+def _lost_because(outcome: SkillArenaOutcome, candidate_id: str) -> str:
+    entry, m = outcome.entry(candidate_id), outcome.entry(candidate_id)["metrics"]
+    gates = f", failed gates {', '.join(entry['failed_gates'])}" if entry["failed_gates"] else ""
+    verdict = (f"winner {outcome.winner} scored {outcome.entry(outcome.winner)['score']:.3f}"
+               if outcome.winner else "no winner: no candidate passed the gates")
+    return (f"lost the {outcome.capability} skill arena {outcome.report.report_id}: score "
+            f"{entry['score']:.3f} (accuracy {m['accuracy']:.2f}, completion {m['completion']:.2f}, "
+            f"tokens {m['tokens']:.0f}, latency {m['latency_ms']:.0f} ms, tool calls "
+            f"{m['tool_calls']:.1f}, retries {m['retries']:.1f}, security violations "
+            f"{m['security_violations']:.0f}, maintenance {m['maintenance']:.2f}{gates}); {verdict}")
+
+
+def apply_outcome(outcome: SkillArenaOutcome, lifecycle, *, actor: str = "skill-arena") -> Activation:
+    """Map one arena outcome onto the skills registry. Candidate ids are skill
+    names (or `name@v<n>`) already registered with `lifecycle`.
+
+    The winner is evaluated and activated by `lifecycle.evaluate_and_activate`,
+    so it passes every gate activation has (evaluator report on record, lint,
+    scan, measured value, provenance, SkillSpector); a refusal propagates and
+    nothing is retired, so the incumbent keeps serving. Its rivals are left out
+    of the evaluator's overlap check, because they are retired by this same
+    decision; any other active near-duplicate still blocks it. Every other
+    candidate in the outcome, an incumbent that lost its place included, is
+    then DEPRECATED (via DRAFT when its state has no direct edge) with its arena
+    scores in the reason. Checked before any change: every candidate is
+    registered and can be retired."""
+    registry = lifecycle.registry
+    names = skill_names(list(outcome.entries))
+    for name in names.values():
+        record = registry.get(name)
+        if record is None:
+            raise SkillArenaError(f"{name}: the arena measured it but it is not in the skill registry")
+    losers = {cid: name for cid, name in names.items() if cid != outcome.winner}
+    for name in losers.values():
+        if not _retirable(registry.get(name).state):
+            raise SkillArenaError(f"{name}: cannot be deprecated from {registry.get(name).state}")
+
+    activated = kept = ""
+    if outcome.winner:
+        name = names[outcome.winner]
+        if registry.get(name).state == K.ACTIVE:
+            kept = name
+        else:
+            rivals = set(names.values())
+            others = [r for r in registry.list() if r.name not in rivals]
+            report, record = lifecycle.evaluate_and_activate(name, actor=actor, others=others)
+            if record.state != K.ACTIVE:
+                raise K.TransitionRefused(f"{name}: won the {outcome.capability} arena but its evaluation "
+                                          "did not pass: " + "; ".join(report.failures())[:300])
+            activated = name
+    deprecated: dict[str, str] = {}
+    for cid, name in losers.items():
+        reason = _lost_because(outcome, cid)
+        try:
+            if registry.get(name).state != K.DEPRECATED:
+                if K.DEPRECATED not in K.TRANSITIONS[registry.get(name).state]:
+                    registry.transition(name, K.DRAFT, actor=actor,
+                                        reason="leaving for retirement: " + reason)
+                registry.transition(name, K.DEPRECATED, actor=actor, reason=reason)
+        except Exception as exc:
+            if not (activated or kept):
+                raise
+            raise PartialActivation(f"{outcome.capability}: {name} was not retired after "
+                                    f"{activated or kept} took the place: {exc}") from exc
+        deprecated[name] = reason
+    return Activation(capability=outcome.capability, activated=activated, kept=kept,
+                      deprecated=deprecated)

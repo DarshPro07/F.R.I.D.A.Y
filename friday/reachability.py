@@ -219,8 +219,9 @@ DECLARED = {
                            "wiring step"),
     "friday/skill_arena": (FUTURE,
                            "CAP-MKT-004: the Skill Arena (same tasks, scored winner ACTIVE, "
-                           "losers ARCHIVED with scores); the skills lifecycle activation "
-                           "hook is the later wiring step, run by tests/test_skill_arena.py"),
+                           "losers ARCHIVED with scores) and its skills-lifecycle activation "
+                           "hook; no live caller yet, run by tests/test_skill_arena.py and "
+                           "tests/test_skill_arena_activation.py"),
     "friday/agent_ledger": (FUTURE,
                             "AGENT-001 slice 1: the durable agent ledger, "
                             "written through by RunManager; the composer, "
