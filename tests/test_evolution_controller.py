@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from friday import evolution_allowance as W
+from friday import evolution_archive as A
 from friday import evolution_controller as C
 from friday import evolution_governor as E
 from friday import governor as G
@@ -45,6 +47,42 @@ def test_a_missing_capability_creates_exactly_one_complete_proposal(tmp_path):
     assert proposal["budget"]["max_usd"] > 0 and proposal["budget"]["max_wall_s"] > 0
     assert proposal["termination"]["max_wall_s"] == proposal["budget"]["max_wall_s"]
     assert len(C.proposals(store)) == 1
+
+
+def _conclude(archive, proposal, promoted, **over):
+    kw = dict(parent_version="v1", candidate_version="v2", baseline={"failures": 3.0},
+              candidate={"failures": 0.0 if promoted else 3.0},
+              evaluation={"verifier": "independent", "passed": promoted}, promoted=promoted)
+    kw.update(over)
+    return C.conclude(archive, proposal, **kw)
+
+
+def test_a_concluded_experiment_is_archived_as_promoted_or_rejected(tmp_path):
+    store, archive = Store(tmp_path / "e.sqlite3"), A.EvolutionArchive(tmp_path / "arc")
+    won = C.consider(store, _missing("pdf_extract")).proposal
+    lost = C.consider(store, _missing("docx_extract")).proposal
+
+    kept, failed = _conclude(archive, won, True), _conclude(archive, lost, False)
+
+    assert (kept["decision"], failed["decision"]) == (A.PROMOTE, A.REJECT)
+    assert kept["objective"] == won["proposal_id"] and kept["rollback_version"] == "v1"
+    assert kept["scope"] == sorted(won["components"])
+    assert archive.get(failed["id"])["candidate_version"] == "v2"
+
+
+def test_a_candidate_that_lost_is_refused_before_the_same_experiment_runs_again(tmp_path):
+    store, archive = Store(tmp_path / "e.sqlite3"), A.EvolutionArchive(tmp_path / "arc")
+    allowance = W.EvolutionAllowance(tmp_path / "allowance", W.AllowanceLimits(usd=2.0, ram_gb_s=100.0, wall_s=60.0))
+    proposal = C.consider(store, _missing()).proposal
+    step = dict(objective_id="exp-2", trigger="missing_capability", parent_version="v1",
+                candidate_version="v3", hypothesis=C.hypothesis_of(proposal),
+                scope=proposal["components"], now=NOW)
+    assert allowance.authorize_step(archive, **step).allowed       # untried: it may run
+
+    failed = _conclude(archive, proposal, False)
+
+    got = allowance.authorize_step(archive, **step)                # tried and lost: it may not
+    assert not got.allowed and got.archived == failed["id"]
 
 
 def test_repeats_of_the_same_trigger_deduplicate(tmp_path):

@@ -63,6 +63,7 @@ UNITS = {MONEY: "usd", RAM: "gb_s", TIME: "s"}
 
 REASON_NO_TRIGGER = "no_trigger"
 REASON_EXHAUSTED = "allowance_exhausted"
+REASON_ALREADY_REJECTED = "already_rejected"
 
 _LEDGER_LOCK = threading.RLock()
 
@@ -219,11 +220,17 @@ class EvolutionAllowance:
                        parent_version: str, candidate_version: str, hypothesis: str, scope,
                        now: datetime | None = None) -> StepDecision:
         """May the next experiment step run? A step with no trigger is refused
-        and spends nothing. A step with any one dimension exhausted is refused
-        and archived (decision REFUSED, which never counts as a lost experiment)
-        with the dimension, the spend and the limit."""
+        and spends nothing. A step of an experiment the archive already holds as
+        rejected (EVO-002) is refused with that record, before the allowance is
+        consulted, and archives nothing new. A step with any one dimension
+        exhausted is refused and archived (decision REFUSED, which never counts
+        as a lost experiment) with the dimension, the spend and the limit."""
         if not (trigger or "").strip():
             return StepDecision(False, REASON_NO_TRIGGER)
+        lost = archive.find_rejected(parent_version=parent_version, hypothesis=hypothesis,
+                                     scope=scope)
+        if lost is not None:
+            return StepDecision(False, REASON_ALREADY_REJECTED, archived=lost["id"])
         period = period_of(now)
         used = self.exhausted(period)
         if not used:

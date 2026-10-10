@@ -85,6 +85,48 @@ def test_an_exhausted_dimension_refuses_the_next_step_and_archives_it(tmp_path, 
     store.close()
 
 
+def _lost(archive, decision=A.REJECT, **over):
+    kw = dict(objective="exp-0", parent_version="router-v4", candidate_version="router-v3",
+              hypothesis="Cache the manifest", scope=["router"], baseline={"p95_ms": 900.0},
+              candidate={"p95_ms": 950.0}, evaluation={"verdict": "slower"}, decision=decision,
+              rollback_version="router-v4")
+    kw.update(over)
+    return archive.record(**kw)
+
+
+def test_a_step_of_an_experiment_that_already_lost_is_refused_with_its_record(tmp_path):
+    allowance, archive = _allowance(tmp_path)
+    lost = _lost(archive)
+
+    got = _step(allowance, archive, candidate_version="router-v6", hypothesis="  cache the MANIFEST ")
+
+    assert not got.allowed and got.reason == W.REASON_ALREADY_REJECTED
+    assert got.archived == lost["id"]
+    assert [row["id"] for row in archive.query()] == [lost["id"]]      # a refusal archives nothing new
+
+
+def test_a_lost_experiment_is_refused_before_the_allowance_is_consulted(tmp_path):
+    store, gov = Store(tmp_path / "e.sqlite3"), _gov()
+    allowance, archive = _allowance(tmp_path)
+    run_id, _ = _running_experiment(store, gov)
+    lost = _lost(archive)
+    allowance.charge(gov, run_id, money_usd=5.0, now=NOW)
+
+    got = _step(allowance, archive, run_id)
+
+    assert got.reason == W.REASON_ALREADY_REJECTED and got.archived == lost["id"]
+    assert not [row for row in archive.query() if row["decision"] == A.REFUSED]
+    store.close()
+
+
+def test_a_later_promotion_lets_the_experiment_run_again(tmp_path):
+    allowance, archive = _allowance(tmp_path)
+    _lost(archive)
+    _lost(archive, decision=A.PROMOTE, objective="exp-9", candidate_version="router-v5")
+
+    assert _step(allowance, archive).allowed
+
+
 def test_a_refusal_is_not_a_lost_experiment(tmp_path):
     store, gov = Store(tmp_path / "e.sqlite3"), _gov()
     allowance, archive = _allowance(tmp_path)

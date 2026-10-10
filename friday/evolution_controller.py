@@ -213,6 +213,27 @@ def proposals(store, status: str | None = None) -> list[dict]:
     return [_view(row) for row in store.evolution_proposals(status)]
 
 
+def hypothesis_of(proposal: dict) -> str:
+    """The archive identity of a proposal's experiment: one trigger kind about one
+    subject, the same pair that dedupes the proposal. Pass it, with the proposal's
+    `components` as the scope, to `EvolutionAllowance.authorize_step` and `conclude`
+    so the step gate finds what `conclude` archived."""
+    return f"{proposal['trigger_kind']}: {proposal['subject']}"
+
+
+def conclude(archive, proposal: dict, *, parent_version: str, candidate_version: str,
+             baseline: dict, candidate: dict, evaluation: dict, promoted: bool) -> dict:
+    """Archive a finished experiment (EVO-002): PROMOTE when the independent
+    verification passed, REJECT when it did not. A rejected candidate is kept like
+    a promoted one, and the version to roll back to is the parent."""
+    return archive.record(
+        objective=proposal["proposal_id"], parent_version=parent_version,
+        candidate_version=candidate_version, hypothesis=hypothesis_of(proposal),
+        scope=proposal["components"], baseline=baseline, candidate=candidate,
+        evaluation=evaluation, decision=A.PROMOTE if promoted else A.REJECT,
+        rollback_version=parent_version)
+
+
 def _value_gate(trigger: Trigger, subject: str, archive) -> str:
     """Why the Evolution Value Gate refuses a release trigger, or "" when it has a
     measurable reason. The refusal is archived; no model runs."""
