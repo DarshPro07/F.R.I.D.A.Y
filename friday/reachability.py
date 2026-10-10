@@ -159,6 +159,11 @@ DEAD = "DEAD"
 #: Each entry needs a reason. An undocumented exemption is how an audit
 #: quietly stops auditing.
 DECLARED = {
+    "friday/forge_journeys": (FUTURE,
+                              "CAP-FORGE-007: the per-class capability journeys with an "
+                              "independent post-state observer that decide whether an "
+                              "integration is complete; no live caller yet, run by "
+                              "tests/test_forge_journeys.py"),
     "friday/toolsets": (PRODUCTION,
                         "reached by capability id through the MCP surface and "
                         "CapabilityRuntime, never by a static call"),
