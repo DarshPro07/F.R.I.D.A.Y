@@ -114,7 +114,22 @@ def test_something_we_wrote_is_not_an_import(load):
     assert reg["ours"].integration_mode == fabric.BUILTIN
 
 
-EVIDENCE = "scripts/bench_tool_disclosure.py"
+def test_something_we_wrote_covers_an_import_whatever_the_module_order(load):
+    reg = load(_provider("a_import", ("fetch",)),
+               _provider("z_ours", ("fetch",), upstream="", mode=fabric.BUILTIN))
+    assert reg["z_ours"].integration_mode == fabric.BUILTIN
+    assert reg["a_import"].integration_mode == fabric.REFERENCE_ONLY
+    assert "z_ours answers fetch" in reg["a_import"].notes
+
+
+def test_something_we_wrote_is_named_once_as_evidence(load):
+    reg = load(_provider("ours", ("fetch", "crawl"), upstream="",
+                         mode=fabric.BUILTIN),
+               _provider("dup", ("fetch", "crawl")))
+    assert reg["dup"].notes.count("ours answers") == 1
+
+
+EVIDENCE ="scripts/bench_tool_disclosure.py"
 
 
 @pytest.fixture

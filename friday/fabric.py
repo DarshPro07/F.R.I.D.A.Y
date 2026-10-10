@@ -412,16 +412,19 @@ def _apply_overlap_policy(found: dict[str, Provider]) -> dict[str, Provider]:
     one is the one recorded. Renaming an adapter module can therefore change
     which of two equivalent providers is recorded. Only
     providers that import an upstream repository are judged: one we wrote
-    ourselves (`upstream == ""`) is not an import. Operations covered by
+    ourselves (`upstream == ""`) is not an import, is never recorded, and so
+    covers an import whatever its module name sorts to. Operations covered by
     several earlier providers together still count as covered.
     """
+    ours = [p for p in found.values() if not p.upstream]
     admitted: list[Provider] = []
     result: dict[str, Provider] = {}
     for provider_id, provider in found.items():
         if (provider.upstream
                 and provider.integration_mode != REFERENCE_ONLY
                 and provider_id not in ACCEPTED_OVERLAPS):
-            overlaps = find_overlaps(provider, admitted)
+            pool = {p.id: p for p in (*admitted, *ours)}.values()
+            overlaps = find_overlaps(provider, pool)
             if ({op for _, op in overlaps} >= set(provider.operations)
                     and not has_benchmark_improvement(
                         provider, {existing for existing, _ in overlaps})):
