@@ -347,7 +347,10 @@ def run_task(narrow_task: str, train: Sequence[Case], eval_cases: Sequence[Case]
     cases = list(eval_cases)
     schema = {"type": "object", "required": ["label"],
               "properties": {"label": {"type": "string", "enum": list(labels)}}}
-    linear = LinearClassifier().fit(list(train))
+    # Weights are fitted only on the candidate path (NEURAL-002); that module
+    # imports this one, hence the local import.
+    from friday.neural.candidates import linear_specialist
+    linear = LinearClassifier.from_dict(linear_specialist.fit_baseline(train))
     ids = [c.case_id for c in cases]
     details: dict[str, dict] = {}
     scores: dict[str, arena.Score] = {}

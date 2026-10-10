@@ -30,6 +30,13 @@ def require_enough(count: int) -> None:
             f"{MIN_TRAIN_CASES}, and no single interaction trains one")
 
 
+def fit_baseline(cases: Sequence[LB.Case]) -> dict:
+    """The LAB-003 benchmark's linear baseline, fitted here so this module stays
+    the one place weights are fitted (NEURAL-002). A measurement baseline, not
+    a specialist: it is never promoted, so no dataset minimum applies."""
+    return LB.LinearClassifier().fit(list(cases)).to_dict()
+
+
 def train_linear(rows: Sequence[Mapping]) -> dict:
     """Train offline on the approved train rows; the artifact is plain JSON.
     Refuses anything that is not a list of rows with enough labelled cases."""
