@@ -24,6 +24,10 @@ Assumptions, stated rather than asked (revisit if wrong):
   * the budget figures below are conservative starting values, per class;
   * a proposal whose components reach a Z4 trust root is recorded but never admitted
     (policy.zone_of, owner ruling: Z4 stays proposal-only);
+  * a NEW_RELEASE trigger (a repository or model appeared) is not evidence of anything by
+    itself: EVO-004's value gate (evolution_value_gate) must find a measured reason in
+    `evidence["reasons"]` before a proposal exists, else it is refused and archived. The
+    other kinds are themselves observations of FRIDAY's own behaviour, so they pass as is;
   * a proposal in any status still absorbs its repeats, so a finished or rejected
     one is not proposed again; the archive (EVO-002) decides when to reopen one.
 """
@@ -35,7 +39,9 @@ import math
 import re
 from dataclasses import dataclass, field
 
+from friday import evolution_archive as A
 from friday import evolution_governor as E
+from friday import evolution_value_gate as V
 from friday import objective_budget as B
 from friday import policy as P
 
@@ -45,7 +51,8 @@ MISSING_CAPABILITY = "missing_capability"
 REPEATED_FAILURE = "repeated_failure"
 SLOW_PATH = "slow_path"
 COSTLY_PATH = "costly_path"
-TRIGGER_KINDS = (MISSING_CAPABILITY, REPEATED_FAILURE, SLOW_PATH, COSTLY_PATH)
+NEW_RELEASE = "new_release"
+TRIGGER_KINDS = (MISSING_CAPABILITY, REPEATED_FAILURE, SLOW_PATH, COSTLY_PATH, NEW_RELEASE)
 
 #: How often a failure, a slow path or a costly path must be seen to be worth a proposal.
 MIN_REPEATS = 3
@@ -115,6 +122,8 @@ def _validate(trigger: Trigger) -> str:
         raise ValueError("trigger observed value must be a finite number of at least 0")
     if not isinstance(trigger.component, str) or len(trigger.component) > MAX_SUBJECT:
         raise ValueError(f"trigger component must be text of at most {MAX_SUBJECT} characters")
+    if trigger.kind == NEW_RELEASE and not trigger.component.strip():
+        raise ValueError("a new_release trigger must name the component it would change")
     if not isinstance(trigger.evidence, dict):
         raise ValueError("trigger evidence must be a dict")
     try:
@@ -128,7 +137,7 @@ def _validate(trigger: Trigger) -> str:
 
 def _threshold(trigger: Trigger) -> str:
     """Why this trigger is not yet worth a proposal, or "" when it is."""
-    if trigger.kind == MISSING_CAPABILITY:
+    if trigger.kind in (MISSING_CAPABILITY, NEW_RELEASE):
         return ""
     if trigger.count < MIN_REPEATS:
         return f"{trigger.kind} has not repeated enough ({trigger.count} of {MIN_REPEATS})"
@@ -169,7 +178,8 @@ def _body(trigger: Trigger, subject: str, klass: str, zone: str, components: lis
     what = {MISSING_CAPABILITY: f"FRIDAY cannot do {subject!r} and was asked to",
             REPEATED_FAILURE: f"{subject!r} failed {trigger.count} times",
             SLOW_PATH: f"{subject!r} took {trigger.observed:g} ms, {trigger.count} times",
-            COSTLY_PATH: f"{subject!r} cost ${trigger.observed:g} a call, {trigger.count} times"}
+            COSTLY_PATH: f"{subject!r} cost ${trigger.observed:g} a call, {trigger.count} times",
+            NEW_RELEASE: f"{subject!r} was released and measurably improves {components[0]!r}"}
     return {
         "trigger": {"kind": trigger.kind, "subject": subject, "count": trigger.count,
                     "observed": trigger.observed, "evidence": trigger.evidence},
@@ -203,19 +213,43 @@ def proposals(store, status: str | None = None) -> list[dict]:
     return [_view(row) for row in store.evolution_proposals(status)]
 
 
-def consider(store, trigger: Trigger | None) -> Decision:
+def _value_gate(trigger: Trigger, subject: str, archive) -> str:
+    """Why the Evolution Value Gate refuses a release trigger, or "" when it has a
+    measurable reason. The refusal is archived; no model runs."""
+    component = trigger.component.strip()
+    verdict = V.review(
+        hypothesis=f"adopt {subject} for {component}", parent_version="current",
+        scope=[component], origin=trigger.evidence.get("origin", "unknown"),
+        reasons=trigger.evidence.get("reasons"),
+        archive=archive if archive is not None else A.EvolutionArchive())
+    return "" if verdict.allowed else verdict.reason
+
+
+def consider(store, trigger: Trigger | None, *, archive=None) -> Decision:
     """Turn a trigger into a proposal. No trigger, or one below its threshold,
-    records nothing. A repeat of a recorded trigger returns the same proposal."""
+    records nothing. A repeat of a recorded trigger returns the same proposal.
+    A release trigger without a measurable reason is refused and archived in `archive`
+    (default: the Evolution Archive on disk)."""
     if trigger is None:
         return Decision(False, False, "no trigger: nothing to propose")
     subject = _validate(trigger)
     why = _threshold(trigger)
     if why:
         return Decision(False, False, why)
+    key = hashlib.sha256(f"{trigger.kind}\0{subject}".encode("utf-8")).hexdigest()[:32]
+    if trigger.kind == NEW_RELEASE:
+        existing = store.evolution_proposal(f"evo-{key}")
+        if existing is not None and not V.evaluate(trigger.evidence.get("reasons")).allowed:
+            # The proposal this release already earned is not refused after the fact, and a
+            # repeat that carries no reason adds nothing to it (no count, no components).
+            return Decision(False, False, f"already proposed as {existing['proposal_id']}; "
+                                          "this repeat has no measurable reason and was not counted")
+        why = _value_gate(trigger, subject, archive)
+        if why:
+            return Decision(False, False, why)
     components = _components(trigger, subject)
     zone = P.zone_of(components)
     klass = _class_of(trigger)
-    key = hashlib.sha256(f"{trigger.kind}\0{subject}".encode("utf-8")).hexdigest()[:32]
     row, created = store.evolution_proposal_raise(
         f"evo-{key}", key, trigger_kind=trigger.kind, subject=subject, klass=klass,
         zone=zone, body=_body(trigger, subject, klass, zone, components))

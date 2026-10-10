@@ -198,6 +198,10 @@ DECLARED = {
                       "INTAKE-001 slice 1: the repository intake front door "
                       "(URL parse, SHA pin, stage order), run by "
                       "tests/test_intake_dossier.py"),
+    "friday/evolution_value_gate": (FUTURE,
+                                    "EVO-004: the Evolution Value Gate; refuses a proposal with no "
+                                    "measurable reason before any paid call and archives it, called by "
+                                    "the evolution controller, run by tests/test_evolution_value_gate.py"),
     "friday/research_providers": (FUTURE,
                                   "RSCH-002: the FridayResearchProvider interface and its web "
                                   "provider, no live caller yet, run by "
