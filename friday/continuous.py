@@ -845,6 +845,20 @@ class ContinuousTaskExecutor:
         # ORCH-003: past the soft limit the run goes on, but reports once.
         budget_module.record_soft_limits(self.store, run_id, verdict, task_id=task_id)
 
+        # EXP-001: how much evidence this attempt buys. The budget check above
+        # bounds recorded spend against the run's declared limits, and the
+        # attempt budget bounds how many tries there are; neither sizes the
+        # verification. The plan prices the cheapest evidence that could settle
+        # this attempt and escalates a rung per attempt, to the depth the
+        # task's risk justifies and no further. It never refuses the attempt.
+        #
+        # Imported here, not at module scope: experiment_engine reuses this
+        # module's failure_fingerprint, so the dependency only points one way
+        # at import time.
+        from friday import experiment_engine
+
+        plan = experiment_engine.evidence_plan(task)
+
         attempt = int(task.get("attempts") or 0) + 1
         self.store.update_objective_task(
             task_id, status=O.TaskStatus.RUNNING,
@@ -854,7 +868,13 @@ class ContinuousTaskExecutor:
         self.store.append_objective_event(
             run_id, O.EVENT_TASK_STARTED,
             task_id=task_id,
-            detail={"attempt": attempt, "capability": task["capability"]},
+            # On the append-only event, not the dispatch arguments: worker
+            # capabilities have strict signatures, so an extra keyword is a
+            # TypeError, not a hint.
+            detail={"attempt": attempt, "capability": task["capability"],
+                    "evidence_depth": plan.depth,
+                    "evidence_cap": plan.cap,
+                    "evidence_reason": plan.reason},
         )
 
         try:
