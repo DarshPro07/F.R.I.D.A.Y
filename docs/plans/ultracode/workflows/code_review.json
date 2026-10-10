@@ -1,0 +1,372 @@
+{
+  "workflow_id": "friday.code_review",
+  "version": 1,
+  "budget_tokens": 80000,
+  "steps": [
+    {
+      "id": "score",
+      "role": "risk_scorer",
+      "kind": "deterministic",
+      "executor": "review.risk_score",
+      "depends_on": [],
+      "inputs": [],
+      "outputs": {
+        "type": "object",
+        "required": [
+          "route",
+          "docs_only",
+          "files"
+        ],
+        "properties": {
+          "route": {
+            "type": "string",
+            "enum": [
+              "economy",
+              "panel"
+            ]
+          },
+          "docs_only": {
+            "type": "boolean"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "score"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "score": {
+                  "type": "integer"
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "docs": {
+                  "type": "boolean"
+                },
+                "unreviewed": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "economy",
+      "role": "economy_reviewer",
+      "kind": "agent",
+      "template": "check",
+      "tier": "economy",
+      "effort": "low",
+      "cap": 8000,
+      "depends_on": [
+        "score"
+      ],
+      "inputs": [
+        {
+          "from": "score",
+          "fields": [
+            "route"
+          ]
+        }
+      ],
+      "outputs": {
+        "type": "object",
+        "required": [
+          "ran",
+          "checks"
+        ],
+        "properties": {
+          "ran": {
+            "type": "boolean"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "perspective",
+                "verdict",
+                "findings",
+                "available"
+              ],
+              "properties": {
+                "perspective": {
+                  "type": "string"
+                },
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "CONFIRMED",
+                    "DISPUTED",
+                    "INCONCLUSIVE"
+                  ]
+                },
+                "findings": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "error": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "panel",
+      "role": "panel_reviewer",
+      "kind": "agent",
+      "template": "judge",
+      "tier": "standard",
+      "effort": "medium",
+      "cap": 24000,
+      "depends_on": [
+        "score"
+      ],
+      "inputs": [
+        {
+          "from": "score",
+          "fields": [
+            "route"
+          ]
+        }
+      ],
+      "outputs": {
+        "type": "object",
+        "required": [
+          "ran",
+          "checks"
+        ],
+        "properties": {
+          "ran": {
+            "type": "boolean"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "perspective",
+                "verdict",
+                "findings",
+                "available"
+              ],
+              "properties": {
+                "perspective": {
+                  "type": "string"
+                },
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "CONFIRMED",
+                    "DISPUTED",
+                    "INCONCLUSIVE"
+                  ]
+                },
+                "findings": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "error": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "judge",
+      "role": "judge",
+      "kind": "agent",
+      "template": "judge",
+      "tier": "deep",
+      "effort": "high",
+      "cap": 12000,
+      "depends_on": [
+        "score",
+        "panel"
+      ],
+      "inputs": [
+        {
+          "from": "score",
+          "fields": [
+            "route"
+          ]
+        },
+        {
+          "from": "panel",
+          "fields": [
+            "checks"
+          ]
+        }
+      ],
+      "outputs": {
+        "type": "object",
+        "required": [
+          "ran",
+          "checks"
+        ],
+        "properties": {
+          "ran": {
+            "type": "boolean"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "perspective",
+                "verdict",
+                "findings",
+                "available"
+              ],
+              "properties": {
+                "perspective": {
+                  "type": "string"
+                },
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "CONFIRMED",
+                    "DISPUTED",
+                    "INCONCLUSIVE"
+                  ]
+                },
+                "findings": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "error": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "verdict",
+      "role": "verdict",
+      "kind": "deterministic",
+      "executor": "review.verdict",
+      "depends_on": [
+        "score",
+        "economy",
+        "panel",
+        "judge"
+      ],
+      "inputs": [
+        {
+          "from": "score",
+          "fields": [
+            "route",
+            "files"
+          ]
+        },
+        {
+          "from": "economy",
+          "fields": [
+            "ran",
+            "checks"
+          ]
+        },
+        {
+          "from": "panel",
+          "fields": [
+            "ran",
+            "checks"
+          ]
+        },
+        {
+          "from": "judge",
+          "fields": [
+            "ran",
+            "checks"
+          ]
+        }
+      ],
+      "outputs": {
+        "type": "object",
+        "required": [
+          "verdict",
+          "findings",
+          "dropped",
+          "reason"
+        ],
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "CONFIRMED",
+              "DISPUTED",
+              "INCONCLUSIVE"
+            ]
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "file",
+                "line",
+                "text",
+                "by"
+              ],
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "by": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "dropped": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

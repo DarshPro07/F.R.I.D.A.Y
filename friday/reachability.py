@@ -187,6 +187,9 @@ DECLARED = {
                           "result on the agent ledger; the live caller that "
                           "picks role and route per objective task is a later "
                           "slice, run by tests/test_specialist.py"),
+    "friday/ultracode/review_workflow": (FUTURE,
+                                         "UCW-006: friday.code_review v1, risk-scored panel review, "
+                                         "run by tests/test_workflow_code_review.py"),
     "friday/prompts": (PRODUCTION, "loaded as text by the agent"),
     "friday/harness_sync": (FUTURE,
                             "HARN-001: renders the .claude harness into the Claude "
