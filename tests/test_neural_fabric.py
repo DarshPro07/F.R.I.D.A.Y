@@ -152,3 +152,37 @@ def test_a_stale_evaluation_cannot_promote_after_the_holdout_changes(tmp_path):
         fh.write(b"{}\n")
     with pytest.raises(LD.EvalSetChanged):
         fab.promote(name, margin=0.1)
+
+
+# -- LAB-004 hooks: a strict win, and a way back to CANDIDATE ------------------
+
+
+def _evaluated(tmp_path, fab, candidate, baseline):
+    fab.register("router-1", "model_router", _export(tmp_path))
+    fab.train("router-1", _trainer)
+    fab.evaluate("router-1", lambda artifact, rows: candidate, lambda rows: baseline)
+    return "router-1"
+
+
+def test_a_tie_promotes_by_default_but_not_when_a_strict_win_is_required(tmp_path):
+    fab = _fabric(tmp_path)
+    name = _evaluated(tmp_path, fab, 0.8, 0.8)
+    rec = fab.promote(name, margin=0.0, strict=True)
+    assert rec["status"] == NF.CANDIDATE and rec["decision"]["promoted"] is False
+    assert fab.promote(name, margin=0.0)["status"] == NF.PRODUCTION
+
+
+def test_a_strict_win_promotes(tmp_path):
+    fab = _fabric(tmp_path)
+    name = _evaluated(tmp_path, fab, 0.85, 0.8)
+    assert fab.promote(name, margin=0.0, strict=True)["status"] == NF.PRODUCTION
+
+
+def test_demote_returns_a_production_network_to_candidate(tmp_path):
+    fab = _fabric(tmp_path)
+    name = _evaluated(tmp_path, fab, 0.9, 0.5)
+    fab.promote(name)
+    rec = fab.demote(name, "rolled back")
+    assert rec["status"] == NF.CANDIDATE and rec["decision"]["demoted"] == "rolled back"
+    with pytest.raises(NF.NotProduction):
+        fab.use(name)

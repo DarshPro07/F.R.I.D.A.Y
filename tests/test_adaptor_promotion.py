@@ -77,3 +77,45 @@ def test_a_dip_within_tolerance_is_not_a_regression(tmp_path):
 
 def test_promoting_an_absent_adaptor_is_absent(tmp_path):
     assert make(tmp_path).promote("ghost", store=store(tmp_path))["status"] == "absent"
+
+
+# -- LAB-004: strict wins, an external incumbent, extra gates, rollback -------
+
+
+def test_default_ladder_promotes_a_tie_but_a_strict_ladder_does_not(tmp_path):
+    for strict, expected in ((False, "promoted"), (True, "blocked")):
+        ladder = ap.AdaptorLadder(tmp_path / f"s{strict}.sqlite3", floor=0.0, strict=strict)
+        ladder.capture("r", holdout=0.8, cases=50)
+        out = ladder.promote("r", store=store(tmp_path), baseline=0.8, provenance=PROVENANCE)
+        assert out["status"] == expected, out
+    assert "strict_win" in out["reason"]
+
+
+def test_a_strict_ladder_promotes_a_win_over_an_external_baseline(tmp_path):
+    ladder = ap.AdaptorLadder(tmp_path / "a.sqlite3", floor=0.0, strict=True)
+    ladder.capture("r", holdout=0.9, cases=50)
+    out = ladder.promote("r", store=store(tmp_path), baseline=0.8, provenance=PROVENANCE)
+    assert out["status"] == "promoted" and out["previous"] is None
+
+
+def test_an_extra_gate_that_fails_blocks_promotion(tmp_path):
+    ladder = ap.AdaptorLadder(tmp_path / "a.sqlite3", floor=0.0)
+    ladder.capture("r", holdout=0.9, cases=50)
+    out = ladder.promote("r", store=store(tmp_path), extra_gates={"no_forgetting": False},
+                         provenance=PROVENANCE)
+    assert out["status"] == "blocked" and "no_forgetting" in out["reason"]
+    assert ladder.current("r") is None
+
+
+def test_rollback_restores_the_previous_version_then_nothing(tmp_path):
+    s = store(tmp_path)
+    ladder = ap.AdaptorLadder(tmp_path / "a.sqlite3", floor=0.0)
+    for holdout in (0.6, 0.7):
+        ladder.capture("r", holdout=holdout, cases=50)
+        assert ladder.promote("r", store=s, provenance=PROVENANCE)["status"] == "promoted"
+    assert ladder.rollback("r") == {"status": "rolled_back", "from": 2, "to": 1}
+    assert ladder.current("r")["version"] == 1
+    assert ladder.rollback("r") == {"status": "rolled_back", "from": 1, "to": None}
+    assert ladder.current("r") is None
+    assert ladder.rollback("r")["status"] == "nothing_to_roll_back"
+    assert [r["state"] for r in ladder.listing()] == ["ROLLED_BACK", "ROLLED_BACK"]

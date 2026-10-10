@@ -175,20 +175,33 @@ class NeuralFabric:
         self._save(state)
         return rec
 
-    def promote(self, name: str, margin: float = DEFAULT_MARGIN) -> dict:
+    def promote(self, name: str, margin: float = DEFAULT_MARGIN, *,
+                strict: bool = False) -> dict:
         """PRODUCTION only if the recorded holdout win clears MARGIN; else the
-        network stays CANDIDATE with the numbers and the decision recorded."""
+        network stays CANDIDATE with the numbers and the decision recorded.
+        `strict` (LAB-004) requires the candidate to exceed baseline + margin,
+        so a tie at margin 0 is not a win."""
         state = self._load()
         rec = self._get(state, name)
         if not rec["holdout"]:
             raise NotEvaluated(name)
         self._read(rec)  # the holdout it was judged on must still be the frozen one
         h = rec["holdout"]
-        won = h["candidate"] >= h["baseline"] + margin
+        bar = h["baseline"] + margin
+        won = h["candidate"] > bar if strict else h["candidate"] >= bar
         rec["decision"] = {"promoted": won, "margin": margin,
                            "delta": h["candidate"] - h["baseline"], "at": time.time()}
         if won:
             rec["status"] = PRODUCTION
+        self._save(state)
+        return rec
+
+    def demote(self, name: str, reason: str) -> dict:
+        """Back to CANDIDATE (LAB-004 rollback): `use` refuses it again."""
+        state = self._load()
+        rec = self._get(state, name)
+        rec["status"] = CANDIDATE
+        rec["decision"] = {"promoted": False, "demoted": reason, "at": time.time()}
         self._save(state)
         return rec
 

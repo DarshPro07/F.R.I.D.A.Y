@@ -259,6 +259,10 @@ DECLARED = {
                              "Markdown export; the MCP tools and the "
                              "objective-engine writers that reach it are a "
                              "later slice"),
+    "friday/lab_specialist": (FUTURE,
+                              "LAB-004: offline-trained specialist micro-model promoted on a "
+                              "strict win, no caller wired yet, run by "
+                              "tests/test_lab_specialist.py"),
     "friday/research_routing": (PRODUCTION,
                                 "web_deep_research routes every completed run through it"),
     "friday/forge": (FUTURE, "skill authoring, frozen by the product rescue"),

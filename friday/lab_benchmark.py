@@ -187,6 +187,19 @@ class LinearClassifier:
                 break
         return self
 
+    def to_dict(self) -> dict:
+        """The trained weights as plain JSON (what NEURAL-001 stores)."""
+        return {"kind": LINEAR, "epochs": self.epochs, "labels": list(self._labels),
+                "weights": {k: dict(v) for k, v in self._w.items()}}
+
+    @classmethod
+    def from_dict(cls, doc: Mapping) -> "LinearClassifier":
+        clf = cls(epochs=int(doc["epochs"]))
+        clf._labels = [str(x) for x in doc["labels"]]
+        clf._w = {str(k): {str(f): float(w) for f, w in v.items()}
+                  for k, v in dict(doc["weights"]).items()}
+        return clf
+
     def predict(self, case: Case) -> str:
         if not self._labels:
             raise ValueError("the classifier has no training cases")
