@@ -311,6 +311,10 @@ DECLARED = {
                              "the generator (CAP-FORGE-005) and the front door "
                              "(CAP-FORGE-001) are its callers, run by "
                              "tests/test_forge_recipes.py"),
+    "friday/ultracode/compiler": (FUTURE,
+                                  "UCW-009: the Workflow Compiler and its run-time fallback; the"
+                                  " callers that feed it recorded trajectories are a later wiring"
+                                  " step, run by tests/test_workflow_compiler.py"),
     "friday/forge_runtime": (FUTURE, "same"),
     "friday/evolution_controller": (FUTURE,
                                     "EVO-001: the event-driven Evolution Controller; the callers "
