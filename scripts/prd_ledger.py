@@ -5424,6 +5424,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "tests": ['tests/test_trace_debugger.py::test_the_debugger_names_step_5_not_the_step_25_where_it_fails', 'tests/test_trace_debugger.py::test_a_healthy_trace_has_no_violation_and_no_failure', 'tests/test_trace_debugger.py::test_a_clean_trace_that_fails_has_no_invariant_to_blame', 'tests/test_trace_debugger.py::test_each_invariant_catches_its_own_break', 'tests/test_trace_debugger.py::test_a_committed_side_effect_counts_as_the_outcome_of_a_started_task', 'tests/test_trace_debugger.py::test_the_report_feeds_the_failure_genome_and_a_regression_test', 'tests/test_trace_debugger.py::test_untrusted_detail_is_data_and_never_changes_the_verdict', 'tests/test_trace_debugger.py::test_from_run_reads_the_black_box_event_log', 'tests/test_trace_debugger.py::test_an_empty_trace_is_said_not_invented', 'tests/test_trace_debugger.py::test_time_moves_forward_reads_iso_timestamps_like_the_store_writes_them', 'tests/test_trace_debugger.py::test_a_real_store_trace_with_a_backwards_timestamp_is_caught', 'tests/test_trace_debugger.py::test_a_healthy_real_store_trace_derives_the_time_invariant_and_passes'],
         "files": [],
     }),
+    ('AGENT-004', {
+        "status": PARTIAL,
+        "current_implementation": 'Design: new friday/team_composer.py (Composer, RoleNeed) over four new tables (agent_temp_roles, agent_temp_teams, agent_team_ledger, agent_promotions). All four are declared UNSCOPED. agent_team_ledger is append-only through triggers.\n\ncompose(goal, needs, ttl_s) works in this order:\n1. Cover each  (build run, commit 84b5ef28d)',
+        "next_action": 'GAPS: No planner or MCP tool calls Composer.compose yet. The module is FUTURE in reachability.DECLARED.; A promoted role is registered in agent_registry, but AgentRegistry.create_instance still goes through specialist.compose, which resolves roles only from roles.BY_ID. Instances of promoted roles need a later slice.; Expiry is lazy (on any composer call), not a timer. Expired rows cost nothing but are only deleted at the next call.; approve() registers the role with default personality, skills and permissions.',
+    }),
 ]
 
 
