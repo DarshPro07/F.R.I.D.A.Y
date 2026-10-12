@@ -1859,6 +1859,31 @@ def test_rebase_run_aborts_a_conflict_and_leaves_the_worktree_clean(repo, tmp_pa
     assert json.loads((runs / "R-1.json").read_text())["commit"] == rec["commit"]
 
 
+def test_rebase_run_replays_only_the_runs_own_commit_when_its_base_was_rolled_back(repo, tmp_path):
+    # 2026-10-11: batch 23 was built on 3296cc8, a landing main later rolled back. `rebase HEAD`
+    # replayed that dead commit as well as the run's own, conflicted, and left four finished
+    # runs REBASE_REQUIRED. Only base..commit belongs to the run.
+    (repo / "x.py").write_text("x = 1\n")
+    _git(repo, "add", "x.py")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t", "commit", "-qm", "a landing, later rolled back")
+    run, wt = _done_run(repo, tmp_path)
+    (wt / "a.py").write_text("a = 1\n")
+    _evidence_done(wt)
+    runs = tmp_path / "runs"
+    rec = K.finalize(run, None, runs)
+    _git(repo, "reset", "-q", "--hard", "HEAD~1")
+    (repo / "other.py").write_text("o = 1\n")
+    _git(repo, "add", "other.py")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t", "commit", "-qm", "main moves on")
+    head = _git(repo, "rev-parse", "HEAD")
+    assert K.rebase_run("R-1", repo=repo, runs_dir=runs) is True
+    after = json.loads((runs / "R-1.json").read_text())
+    assert after["base_sha"] == head and after["commit"] != rec["commit"]
+    assert _git(wt, "rev-parse", "HEAD~1") == head
+    assert (wt / "a.py").exists() and (wt / "other.py").exists()
+    assert not (wt / "x.py").exists()
+
+
 def test_rebase_run_keeps_a_commit_whose_patch_head_already_holds(repo, tmp_path):
     # 2026-10-09: main already held BRAIN-001's patch (a killed integrator's pick); the rebase
     # dropped the run's commit and recorded commit == base, which integrated as NO_TEST.

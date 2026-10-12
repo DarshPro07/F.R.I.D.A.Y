@@ -1438,7 +1438,10 @@ def rebase_run(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR) -> boo
     if not rec.get("commit") or not wt.is_dir():
         return False
     head = _git(["rev-parse", "HEAD"], repo)
-    r = subprocess.run(["git", "-c", "user.name=DarshPro07", "-c", "user.email=DarshPro07", "rebase", head],
+    # Only base..commit is the run's: a base main later rolled back must not be replayed with it
+    # (2026-10-11: batch 23 sat on 3296cc8, a rolled-back landing, and every rebase conflicted).
+    onto = ["--onto", head, rec["base_sha"]] if rec.get("base_sha") else [head]
+    r = subprocess.run(["git", "-c", "user.name=DarshPro07", "-c", "user.email=DarshPro07", "rebase", *onto],
                        cwd=wt, capture_output=True, text=True, timeout=120)
     if r.returncode != 0:
         subprocess.run(["git", "rebase", "--abort"], cwd=wt, capture_output=True, timeout=60)
