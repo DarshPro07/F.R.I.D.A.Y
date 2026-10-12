@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: b0ae9ea on prd-v7/slice-7-adaptive-hardware, updated 2026-10-12T14:07:35+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 64, "PARKED_BY_OWNER": 1, "PARTIAL": 124, "VERIFIED": 73}
+- HEAD: 2e7d5f9 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-12T15:57:54+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 63, "PARKED_BY_OWNER": 1, "PARTIAL": 125, "VERIFIED": 73}
 - Unresolved P0: 5
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (397): EVO-002=FAILED_INTEGRATION
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CAP-FORGE-011 (blocked), OTEL-001 (stale worktree), SKILL-006 (launch failed), BIN-002 (merge queue busy), ULTRA-004 (stale worktree), SIDE-002 (stale worktree), PRO-001 (stale worktree), CUA-003 (merge queue busy), COG-006 (cascade exhausted), ORCH-002 (blocked), SIDE-001 (REBASE_REQUIRED), ORCH-003 (partial x4), FAB-003 (blocked), EVAL-004 (blocked), SKILL-004 (NOT_RED), EVO-001 (blocked), AGENT-003 (stale worktree), EVOLAB-003 (stale worktree), EVOLAB-004 (stale worktree), AGENT-004 (stale worktree), UCW-009 (stale worktree), KEYS-001 (stale worktree), EVO-003 (cascade exhausted), EVO-006 (merge queue busy), EVOLAB-002 (stale worktree), INTAKE-006 (stale worktree), UCW-006 (stale worktree), MODEL-004 (stale worktree), OBJ-004 (stale worktree), ORCH-006 (stale worktree), PRIV-001 (stale worktree), ROUTER-001 (stale worktree), RSCH-001 (stale worktree), RSCH-004 (stale worktree), EVO-002 (FAILED_INTEGRATION)
-- Open escalations: 437
-  - INTAKE-006 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\intake-006 already exists
-  - UCW-006 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ucw-006 already exists
-  - MODEL-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\model-004 already exists
-  - OBJ-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\obj-004 already exists
-  - ORCH-006 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-006 already exists
-  - PRIV-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\priv-001 already exists
-  - ROUTER-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\router-001 already exists
-  - RSCH-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-001 already exists
-  - RSCH-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-004 already exists
-  - EVO-002 integration: {"requirement": "EVO-002", "result": "FAILED_INTEGRATION", "red_green": {"result": "OK", "tests": ["
+- Last wave (403): ULTRA-006=INTEGRATED, ULTRA-002=REBASE_REQUIRED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CAP-FORGE-011 (blocked), OTEL-001 (stale worktree), SKILL-006 (launch failed), BIN-002 (merge queue busy), ULTRA-004 (stale worktree), SIDE-002 (stale worktree), PRO-001 (stale worktree), CUA-003 (merge queue busy), COG-006 (cascade exhausted), ORCH-002 (blocked), SIDE-001 (REBASE_REQUIRED), ORCH-003 (partial x4), FAB-003 (blocked), EVAL-004 (blocked), SKILL-004 (NOT_RED), EVO-001 (blocked), EVOLAB-003 (stale worktree), EVOLAB-004 (stale worktree), AGENT-004 (stale worktree), KEYS-001 (stale worktree), EVO-003 (cascade exhausted), EVOLAB-002 (stale worktree), INTAKE-006 (stale worktree), UCW-006 (stale worktree), MODEL-004 (stale worktree), OBJ-004 (stale worktree), ORCH-006 (stale worktree), PRIV-001 (stale worktree), ROUTER-001 (stale worktree), RSCH-001 (stale worktree), RSCH-004 (stale worktree), EVO-002 (FAILED_INTEGRATION), AGENT-003 (merge queue busy), EVO-006 (REBASE_REQUIRED), ORCH-004 (stale worktree), SUPPLY-001 (stale worktree), UCW-002 (stale worktree), UCW-005 (stale worktree), LAB-003 (stale worktree), CUA-001 (stale worktree), EPI-001 (stale worktree), FAB-007 (stale worktree), FAB-008 (stale worktree), FAIL-001 (stale worktree), MODEL-007 (stale worktree), ULTRA-003 (stale worktree), MODEL-003 (blocked), EVO-004 (stale worktree), ORCH-009 (merge queue busy), ULTRA-002 (REBASE_REQUIRED)
+- Open escalations: 456
+  - EPI-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\epi-001 already exists
+  - FAB-007 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\fab-007 already exists
+  - FAB-008 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\fab-008 already exists
+  - FAIL-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\fail-001 already exists
+  - MODEL-007 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\model-007 already exists
+  - ULTRA-003 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ultra-003 already exists
+  - MODEL-003 blocked: Owner decision needed (packet says hold, do not dispatch a worker): Option A - treat 'Versioned eval
+  - EVO-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\evo-004 already exists
+  - ORCH-009 integration_queue: merge queue: ORCH-009 waited 1800s behind PRIV-001
+  - ULTRA-002 rebase: {"requirement": "ULTRA-002", "result": "REBASE_REQUIRED", "red_green": {}, "verifier": null, "integr
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
