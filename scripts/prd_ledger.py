@@ -5371,6 +5371,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Fixed both review findings at the root in friday/release_boundary.py. (1) MAJOR: decide() now calls a new ReleaseBoundary._require_archivable() before _judge, so nothing is consumed before the archive write is known to succeed. It checks objective, hypothesis, parent_version, candidate_version, the  (build run, commit 0d47cec80)',
         "next_action": "GAPS: No caller yet: wiring decide() into the evolution controller, and an owner-only surface for grant/revoke, is a later slice. grant/revoke are deliberately not an MCP tool.; WAIT_OWNER has no owner-approval path in this slice. A widening adapter just is not promoted; a per-change owner approval flow is not built.; REQUIRED_GATES duplicates the gate names in scripts/release_gate.py. A test guards the drift by checking each name appears in the script source, but release_gate does not export the list.; _require_archivable uses evolution_archive's private validators (_text, _scope, _measurements) to mirror the archive's checks. If the archive's rules change, they follow automatically, but the coupling is to private helpers.",
     }),
+    ('EVOLAB-004', {
+        "status": PARTIAL,
+        "current_implementation": 'Fixed the concrete major findings: every baseline-beating eligible candidate is now archived, non-winning measurable candidates are rejected with NOT_MEASURED_WINNER, promotion requires Protected Evaluation Lab PASS from an isolated sandbox/base commit/held-out tests, lab WEAKENED/TAMPERED/FABRICATE (build run, commit ba87b1000)',
+        "next_action": "GAPS: Full PRD acceptance is still not complete end-to-end: production callers still need to build candidate workspaces and connect real promotion/health wiring around this controller path.; The benchmark metric remains supplied through an injected benchmark hook after Protected Evaluation Lab PASS; the controller now refuses promotion without the real lab judgement, but a production metric source still needs to be wired to the lab/workspace runner.; Production callers still need to connect EVOLAB-002's durable EvolutionAllowance and foreground preemption path; tests use InMemoryEvolutionAllowance.; implementer did not claim acceptance met",
+    }),
 ]
 
 
