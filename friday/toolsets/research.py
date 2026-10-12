@@ -487,6 +487,23 @@ def filter_branches(inquiry: CanonicalInquiry, branches: list[dict]) -> tuple[li
     return kept, rejected
 
 
+def _barren_tail(inquiry: CanonicalInquiry, pages: list[dict]) -> int:
+    """
+    How many independent sources at the end of `pages` added no inquiry term.
+
+    Mirrors of one article are one source (RSCH-003), so reposts are neither a
+    stall nor a gain: five copies in a row must not hide a distinct source
+    that has not been read yet.
+    """
+    covered: set[str] = set()
+    barren = 0
+    for page in collapse_copies(pages):
+        fresh = (inquiry.terms & _terms(f"{page.get('title', '')} {page.get('markdown', '')}")) - covered
+        covered |= fresh
+        barren = 0 if fresh else barren + 1
+    return barren
+
+
 def explore(inquiry: CanonicalInquiry, depth: str, branches: list[dict], fetch, *,
             budget: DepthBudget | None = None, patience: int | None = GAIN_PATIENCE,
             guard: bool = True) -> dict:
@@ -805,22 +822,36 @@ async def web_deep_research(
         return run.record(c.failed(started, "search returned no results to read"))
 
     from friday import netguard
-    crawled = await crawl_all(
-        [h["url"] for h in hits], max_chars=max_chars_per_source, render=True,
-        net=netguard.run_scope(run))
+    # Fetch in waves of GAIN_PATIENCE pages: the smallest batch that can show
+    # a stall, so the information-gain stop saves the fetches it skips.
+    # Pages already read in a wave are kept (they were paid for).
+    crawled: list[dict] = []
+    gain_stopped = False
+    for start in range(0, len(hits), GAIN_PATIENCE):
+        crawled.extend(await crawl_all(
+            [h["url"] for h in hits[start:start + GAIN_PATIENCE]],
+            max_chars=max_chars_per_source, render=True,
+            net=netguard.run_scope(run)))
+        if (start + GAIN_PATIENCE < len(hits)
+                and _barren_tail(inquiry, [p for p in crawled if p.get("ok")]) >= GAIN_PATIENCE):
+            gain_stopped = True
+            break
     unreadable = [{"url": p.get("url"), "error": p.get("error")}
                   for p in crawled if not p.get("ok")]
-    # Pages are fetched together, so the information-gain stop would only
-    # discard pages already paid for: it is off here (patience=None). The
-    # source and char budgets apply to what was read; the drift guard has
-    # already screened the results (guard=False).
+    # The source and char budgets apply to what was read; the drift guard has
+    # already screened the results (guard=False); the gain stop was applied
+    # between waves above, so explore() does not repeat it (patience=None).
     readable = {p["url"]: p for p in crawled if p.get("ok")}
     walked = explore(inquiry, depth, [{"url": u} for u in readable],
                      lambda b: readable[b["url"]],
                      budget=DepthBudget(sources, budget), patience=None, guard=False)
     stop = walked["stop"]
-    if stop["reason"] == "exhausted" and len(on_inquiry) > len(hits):
-        stop["reason"] = "budget_sources"
+    if stop["reason"] == "exhausted":
+        if gain_stopped:
+            stop["reason"] = "no_information_gain"
+        elif len(on_inquiry) > len(hits):
+            stop["reason"] = "budget_sources"
+    stop["not_fetched"] = len(hits) - len(crawled)
     off_inquiry = [{"url": d.get("url"), "title": d.get("title", ""), "reason": d["reason"]}
                    for d in drifted]
     pages = dedupe(walked["pages"])
@@ -866,7 +897,7 @@ async def web_deep_research(
         question,
         sources=[{"url": p["url"], "title": p.get("title", "")} for p in kept],
         facts=[p.get("markdown", "") for p in kept],
-        confidence=len(kept) / max(len(hits), 1),
+        confidence=len(kept) / max(len(crawled), 1),
     ), store=memory_store())
 
     note = None

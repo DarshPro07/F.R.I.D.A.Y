@@ -85,6 +85,14 @@ def rig(store, monkeypatch):
     toolset_memory.reset_store(None)
 
 
+def _wide(count: int) -> tuple[str, dict[str, dict]]:
+    """A question with `count` distinct terms and `count` pages that each add one,
+    so no page is barren and only a budget can stop the walk."""
+    question = "Compare " + " ".join(f"topic{i}" for i in range(count))
+    urls = [f"https://s{i}.example/page" for i in range(count)]
+    return question, {u: _page(u, f"topic{i} notes and detail. " * 8) for i, u in enumerate(urls)}
+
+
 def _run(question: str, **kw) -> c.ActionResult:
     return asyncio.run(R.web_deep_research(
         c.Run.create("test", capability="web"), question, **kw))
@@ -105,9 +113,9 @@ def test_trivial_question_reads_one_source_even_when_ten_are_asked_for(rig):
 
 
 def test_broad_question_gets_its_requested_depth_and_budget(rig):
-    urls = [f"https://s{i}.example/postgres-replication" for i in range(8)]
-    state = rig(urls)
-    out = _run(BROAD, depth="R3").output
+    question, pages = _wide(8)
+    state = rig(list(pages), pages=pages)
+    out = _run(question, depth="R3").output
     assert out["depth"] == "R3"
     assert sum(len(batch) for batch in state["crawled"]) == R.DEPTH_BUDGETS["R3"].max_sources
     assert out["stop"]["reason"] == "budget_sources"
@@ -171,9 +179,9 @@ def test_r0_searches_and_crawls_nothing(rig):
 
 @pytest.mark.parametrize("depth", ["R4", "R5"])
 def test_deep_levels_read_their_own_budget_not_ten(rig, depth):
-    urls = [f"https://s{i}.example/postgres-replication" for i in range(30)]
-    state = rig(urls)
-    out = _run(BROAD, depth=depth).output
+    question, pages = _wide(30)
+    state = rig(list(pages), pages=pages)
+    out = _run(question, depth=depth).output
     want = R.DEPTH_BUDGETS[depth].max_sources
     assert out["depth"] == depth
     assert sum(len(b) for b in state["crawled"]) == want
@@ -228,3 +236,54 @@ def test_mcp_wrapper_leaves_sources_to_the_depth_budget(monkeypatch):
     assert captured["depth"] is None
     asyncio.run(mcp.tools["web_deep_research"](BROAD, depth="R4"))
     assert captured["depth"] == "R4"
+
+
+# --- RSCH-001: information-gain stop on the live path ------------------------
+
+def test_stalled_gain_stops_the_walk_before_the_remaining_fetches(rig):
+    urls = [f"https://s{i}.example/postgres-replication" for i in range(8)]
+    # Distinct sources that all repeat the same three inquiry terms and add no new one.
+    state = rig(urls, pages={
+        u: _page(u, "Postgres MySQL replication. " + " ".join(f"filler{i}x{j}" for j in range(60)))
+        for i, u in enumerate(urls)})
+    out = _run(BROAD, depth="R3").output
+    assert out["stop"]["reason"] == "no_information_gain"
+    assert [len(b) for b in state["crawled"]] == [2, 2]   # two waves, then stop
+    assert out["stop"]["not_fetched"] == R.DEPTH_BUDGETS["R3"].max_sources - 4
+
+
+def test_pages_that_keep_adding_terms_never_trip_the_gain_stop(rig):
+    question, pages = _wide(8)
+    state = rig(list(pages), pages=pages)
+    out = _run(question, depth="R3").output
+    assert out["stop"]["reason"] == "budget_sources"
+    assert sum(len(b) for b in state["crawled"]) == R.DEPTH_BUDGETS["R3"].max_sources
+    assert out["stop"]["not_fetched"] == 0
+
+
+def test_one_barren_page_is_not_a_stall(rig):
+    question, pages = _wide(8)
+    urls = list(pages)
+    pages[urls[1]] = _page(urls[1], "nothing relevant here at all. " * 8)
+    state = rig(urls, pages=pages)
+    out = _run(question, depth="R3").output
+    assert out["stop"]["reason"] == "budget_sources"
+    assert sum(len(b) for b in state["crawled"]) == R.DEPTH_BUDGETS["R3"].max_sources
+
+
+def test_gain_stop_does_not_lower_the_saved_confidence(rig, monkeypatch):
+    """Pages the gain stop skipped were never attempted; a saturated walk whose
+    fetched pages were all readable is stored at full confidence."""
+    from friday import research_routing
+    saved = []
+    monkeypatch.setattr(research_routing, "route",
+                        lambda artifact, **kw: saved.append(artifact))
+    urls = [f"https://s{i}.example/postgres-replication" for i in range(8)]
+    rig(urls, pages={
+        u: _page(u, "Postgres MySQL replication. " + " ".join(f"filler{i}x{j}" for j in range(60)))
+        for i, u in enumerate(urls)})
+    out = _run(BROAD, depth="R3").output
+    assert out["stop"]["reason"] == "no_information_gain"
+    assert out["stop"]["not_fetched"] > 0
+    assert len(saved) == 1
+    assert saved[0].confidence == 1.0
