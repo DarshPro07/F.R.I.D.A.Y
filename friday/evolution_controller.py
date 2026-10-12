@@ -37,13 +37,18 @@ import hashlib
 import json
 import math
 import re
+import time
+import uuid
 from dataclasses import dataclass, field
+from typing import Callable, Sequence
 
 from friday import evolution_archive as A
 from friday import evolution_governor as E
+from friday import evolution_lab as L
 from friday import evolution_value_gate as V
 from friday import objective_budget as B
 from friday import policy as P
+from friday import self_upgrade as SU
 
 # -- trigger kinds -------------------------------------------------------------
 
@@ -97,6 +102,291 @@ class Decision:
     created: bool
     reason: str
     proposal: dict | None = None
+
+
+# -- EVOLAB-004 controlled run ------------------------------------------------
+
+DOES_NOT_BEAT_BASELINE = "DOES_NOT_BEAT_BASELINE"
+UNSAFE = "UNSAFE"
+PROMOTED = "PROMOTED"
+ROLLED_BACK = "ROLLED_BACK"
+ALREADY_REJECTED = "ALREADY_REJECTED"
+NO_CANDIDATES = "NO_CANDIDATES"
+NOT_MEASURED_WINNER = "NOT_MEASURED_WINNER"
+
+_UNSAFE_LAB_VERDICTS = frozenset({"WEAKENED", "TAMPERED", "FABRICATED"})
+_SECRET_RE = re.compile(
+    r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?[^'\"\s]{8,}")
+_PIN_RE = re.compile(r"(@\s*[0-9a-f]{12,}|sha256[:=][0-9a-f]{32,}|"
+                     r"git\+[^\s]+@[0-9a-f]{12,})", re.I)
+
+
+@dataclass(frozen=True)
+class EvolutionCandidate:
+    """One built candidate submitted to the protected evolution run."""
+
+    candidate_version: str
+    hypothesis: str
+    scope: tuple[str, ...]
+    files: tuple[str, ...]
+    measurements: dict
+    diff: str = ""
+    lab_verdict: str = "PASS"
+    sandbox: str = ""
+    base_commit: str = ""
+    tests: tuple[str, ...] = ()
+    claimed_receipt: dict | None = None
+
+
+@dataclass(frozen=True)
+class PromotionRecord:
+    version: str
+    rollback_handle: str
+
+
+@dataclass(frozen=True)
+class CandidateRunResult:
+    candidate_version: str
+    decision: str
+    reason: str
+    baseline: dict
+    candidate: dict
+    evaluation: dict
+    archive_id: str
+    rollback_version: str
+
+
+@dataclass(frozen=True)
+class EvolutionRunResult:
+    results: tuple[CandidateRunResult, ...]
+    promoted: PromotionRecord | None
+    allowance_spent: tuple[dict, ...]
+
+
+class InMemoryEvolutionAllowance:
+    """Small deterministic allowance for tests and dry-runs.
+
+    The production allowance remains `evolution_allowance.EvolutionAllowance`;
+    this object only records that the controller charged EVOLAB-004 work to an
+    evolution-specific ledger instead of an objective or foreground budget.
+    """
+
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+
+    def charge(self, objective_id: str, *, candidate_version: str,
+               amount: float = 1.0) -> dict:
+        row = {
+            "id": f"SPEND-{uuid.uuid4().hex[:12]}",
+            "at": time.time(),
+            "objective_id": objective_id,
+            "candidate_version": candidate_version,
+            "dimension": "time",
+            "amount": float(amount),
+            "unit": "candidate",
+        }
+        self.rows.append(row)
+        return row
+
+
+def _unsafe(candidate: EvolutionCandidate) -> list[str]:
+    reasons: list[str] = []
+    for path in candidate.files:
+        kernel = SU.is_kernel_path(path)
+        if kernel:
+            reasons.append(f"{path}: kernel surface ({kernel})")
+    if candidate.lab_verdict in _UNSAFE_LAB_VERDICTS:
+        reasons.append(f"lab verdict {candidate.lab_verdict}")
+    diff = candidate.diff or ""
+    if _SECRET_RE.search(diff):
+        reasons.append("diff carries a secret-shaped value")
+    lowered = diff.casefold()
+    if "requires_edge" in lowered or "permissions" in lowered and "+" in diff:
+        reasons.append("diff widens a permission surface")
+    for path in candidate.files:
+        name = path.replace("\\", "/").casefold()
+        if name.endswith(("requirements.txt", "pyproject.toml", "setup.cfg", "setup.py")):
+            added = [line for line in diff.splitlines()
+                     if line.startswith("+") and not line.startswith("+++")]
+            for line in added:
+                if line.strip("+ ").startswith("#"):
+                    continue
+                if re.search(r"[a-z0-9_.-]\s*(==|>=|<=|~=|\^|=)", line, re.I) \
+                        and not _PIN_RE.search(line):
+                    reasons.append(f"{path}: unpinned dependency")
+                    break
+    return reasons
+
+
+def _beats_baseline(baseline: dict, candidate: dict, tolerance: float) -> bool:
+    for key, old in baseline.items():
+        new = candidate.get(key)
+        if isinstance(old, (int, float)) and not isinstance(old, bool) \
+                and isinstance(new, (int, float)) and not isinstance(new, bool):
+            if float(new) > float(old) + float(tolerance):
+                return True
+    return False
+
+
+def _improvement(baseline: dict, candidate: dict) -> float:
+    scores = [
+        float(candidate[k]) - float(baseline[k])
+        for k in baseline.keys() & candidate.keys()
+        if isinstance(baseline[k], (int, float)) and not isinstance(baseline[k], bool)
+        and isinstance(candidate[k], (int, float)) and not isinstance(candidate[k], bool)
+    ]
+    return max(scores) if scores else float("-inf")
+
+
+def _lab_judgement(candidate: EvolutionCandidate, lab, lab_runner) -> tuple[str, dict | None]:
+    missing = []
+    if lab is None:
+        missing.append("protected lab")
+    if lab_runner is None:
+        missing.append("protected lab runner")
+    if not candidate.base_commit:
+        missing.append("base commit")
+    if not candidate.sandbox:
+        missing.append("isolated candidate sandbox")
+    if not candidate.tests:
+        missing.append("frozen held-out tests")
+    if missing:
+        return f"missing {', '.join(missing)}", None
+    try:
+        judgement = lab.judge(
+            candidate.base_commit,
+            candidate.sandbox,
+            list(candidate.tests),
+            lab_runner,
+            claimed=candidate.claimed_receipt,
+        )
+    except Exception as exc:
+        return f"protected lab refused candidate: {exc}", None
+    if judgement.verdict != L.PASS:
+        reason = "; ".join(str(r) for r in judgement.reasons) or "protected lab did not pass"
+        return f"protected lab verdict {judgement.verdict}: {reason}", judgement.receipt
+    return "", judgement.receipt
+
+
+def _record_result(archive, *, objective_id: str, parent_version: str,
+                   candidate: EvolutionCandidate, baseline: dict, measurements: dict,
+                   decision: str, reason: str, promoted: bool,
+                   lab_receipt: dict | None = None) -> CandidateRunResult:
+    evaluation = {"decision": decision, "reason": reason}
+    if lab_receipt is not None:
+        evaluation["lab_receipt_digest"] = lab_receipt.get("digest", "")
+        evaluation["lab_receipt_run_id"] = lab_receipt.get("run_id", "")
+    row = archive.record(
+        objective=objective_id, parent_version=parent_version,
+        candidate_version=candidate.candidate_version, hypothesis=candidate.hypothesis,
+        scope=candidate.scope, baseline=baseline, candidate=measurements,
+        evaluation=evaluation, decision=A.PROMOTE if promoted else A.REJECT,
+        rollback_version=parent_version)
+    return CandidateRunResult(
+        candidate_version=candidate.candidate_version,
+        decision=decision,
+        reason=reason,
+        baseline=dict(baseline),
+        candidate=dict(measurements),
+        evaluation=evaluation,
+        archive_id=row["id"],
+        rollback_version=parent_version)
+
+
+def run_controlled_evolution(*, objective_id: str, parent_version: str,
+                             candidates: Sequence[EvolutionCandidate],
+                             baseline: dict, tolerance: float, archive,
+                             lab=None, lab_runner=None,
+                             benchmark: Callable[[EvolutionCandidate], dict],
+                             promote: Callable[[EvolutionCandidate], PromotionRecord],
+                             rollback: Callable[[PromotionRecord], None],
+                             health_check: Callable[[PromotionRecord], bool],
+                             allowance) -> EvolutionRunResult:
+    """Run one EVOLAB-004 batch.
+
+    Unsafe candidates are rejected before `benchmark` is called. A candidate is
+    safe only after the Protected Evaluation Lab has judged its isolated
+    sandbox against the frozen base commit and held-out tests. Safe candidates
+    must beat the frozen baseline by more than `tolerance`; ties and no-gain
+    runs archive a rejection and promote nothing. Every measured candidate is
+    archived; only the measured best candidate is promoted, and a failed health
+    check immediately invokes the supplied rollback hook and records the
+    candidate as rejected for future dedupe.
+    """
+    already_rejected = {
+        A.fingerprint(parent_version=parent_version, hypothesis=c.hypothesis, scope=c.scope)
+        for c in candidates
+        if archive.find_rejected(parent_version=parent_version,
+                                 hypothesis=c.hypothesis, scope=c.scope) is not None
+    }
+    results: list[CandidateRunResult] = []
+    spend: list[dict] = []
+    eligible: list[tuple[EvolutionCandidate, dict, dict | None]] = []
+    for candidate in candidates:
+        key = A.fingerprint(parent_version=parent_version, hypothesis=candidate.hypothesis,
+                            scope=candidate.scope)
+        if key in already_rejected:
+            results.append(CandidateRunResult(
+                candidate.candidate_version, ALREADY_REJECTED,
+                "same rejected experiment is already archived",
+                dict(baseline), {}, {"decision": ALREADY_REJECTED}, "", parent_version))
+            continue
+        spend.append(allowance.charge(objective_id,
+                                      candidate_version=candidate.candidate_version))
+        reasons = _unsafe(candidate)
+        if reasons:
+            results.append(_record_result(
+                archive, objective_id=objective_id, parent_version=parent_version,
+                candidate=candidate, baseline=baseline, measurements=candidate.measurements,
+                decision=UNSAFE, reason="; ".join(reasons), promoted=False))
+            continue
+        lab_reason, lab_receipt = _lab_judgement(candidate, lab, lab_runner)
+        if lab_reason:
+            results.append(_record_result(
+                archive, objective_id=objective_id, parent_version=parent_version,
+                candidate=candidate, baseline=baseline, measurements=candidate.measurements,
+                decision=UNSAFE, reason=lab_reason, promoted=False,
+                lab_receipt=lab_receipt))
+            continue
+        measured = benchmark(candidate)
+        if not _beats_baseline(baseline, measured, tolerance):
+            results.append(_record_result(
+                archive, objective_id=objective_id, parent_version=parent_version,
+                candidate=candidate, baseline=baseline, measurements=measured,
+                decision=DOES_NOT_BEAT_BASELINE,
+                reason="candidate did not beat the baseline past tolerance",
+                promoted=False, lab_receipt=lab_receipt))
+            continue
+        eligible.append((candidate, measured, lab_receipt))
+    if not eligible:
+        return EvolutionRunResult(tuple(results), None, tuple(spend))
+    winner, measured, winner_receipt = max(
+        eligible, key=lambda item: _improvement(baseline, item[1]))
+    for candidate, candidate_measured, lab_receipt in eligible:
+        if candidate is winner:
+            continue
+        results.append(_record_result(
+            archive, objective_id=objective_id, parent_version=parent_version,
+            candidate=candidate, baseline=baseline, measurements=candidate_measured,
+            decision=NOT_MEASURED_WINNER,
+            reason="candidate beat baseline but was not the measured winner",
+            promoted=False, lab_receipt=lab_receipt))
+    record = promote(winner)
+    if not health_check(record):
+        rollback(record)
+        results.append(_record_result(
+            archive, objective_id=objective_id, parent_version=parent_version,
+            candidate=winner, baseline=baseline, measurements=measured,
+            decision=ROLLED_BACK,
+            reason="post-promotion health check failed; rolled back",
+            promoted=False, lab_receipt=winner_receipt))
+        return EvolutionRunResult(tuple(results), None, tuple(spend))
+    results.append(_record_result(
+        archive, objective_id=objective_id, parent_version=parent_version,
+        candidate=winner, baseline=baseline, measurements=measured,
+        decision=PROMOTED, reason="measured winner promoted", promoted=True,
+        lab_receipt=winner_receipt))
+    return EvolutionRunResult(tuple(results), record, tuple(spend))
 
 
 def _normal(subject: str) -> str:

@@ -9,6 +9,8 @@ test holds that by reading the module's imports.
 from __future__ import annotations
 
 import ast
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,12 +20,19 @@ from friday import evolution_allowance as W
 from friday import evolution_archive as A
 from friday import evolution_controller as C
 from friday import evolution_governor as E
+from friday.evolution_lab import Lab, RunResult
 from friday import governor as G
 from friday.store import Store
 from tests.test_governor import make
 
 NOW = datetime(2026, 10, 10, 14, 0, tzinfo=timezone.utc)
 FIELDS = ("benefit", "risk", "cost", "components", "acceptance_tests", "budget", "termination")
+LAB_TEST = (
+    "from calc import add\n\n"
+    "def test_add():\n"
+    "    assert add(1, 2) == 3\n"
+)
+LAB_EVALUATOR = "def verify():\n    return True\n"
 
 
 def _gov():
@@ -34,6 +43,56 @@ def _gov():
 
 def _missing(subject="pdf_extract", **kw):
     return C.Trigger(C.MISSING_CAPABILITY, subject, evidence={"request": "read this pdf"}, **kw)
+
+
+def _git(repo: Path, *args: str) -> str:
+    out = subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+        cwd=str(repo), capture_output=True, text=True, timeout=60, check=True)
+    return out.stdout.strip()
+
+
+class _LabRunner:
+    def __init__(self):
+        self.calls: list[list[str]] = []
+
+    def __call__(self, command, cwd, env):
+        self.calls.append(list(command))
+        return RunResult(0, {"passed": 1})
+
+
+def _lab_world(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "tests").mkdir(parents=True)
+    (repo / "friday").mkdir()
+    (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    (repo / "tests" / "test_calc.py").write_text(LAB_TEST)
+    (repo / "friday" / "evaluation.py").write_text(LAB_EVALUATOR)
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    lab = Lab(repo, tmp_path / "lab-archive")
+    runner = _LabRunner()
+    return lab, base, runner
+
+
+def _candidate(tmp_path, name: str, base: str, score: float, *,
+               hypothesis: str | None = None, mutate=None) -> C.EvolutionCandidate:
+    sandbox = tmp_path / f"sandbox-{name}"
+    shutil.copytree(tmp_path / "repo", sandbox, ignore=shutil.ignore_patterns(".git"))
+    if mutate:
+        mutate(sandbox)
+    return C.EvolutionCandidate(
+        candidate_version=name,
+        hypothesis=hypothesis or f"{name} hypothesis",
+        scope=(name,),
+        files=("calc.py",),
+        measurements={"score": score},
+        sandbox=str(sandbox),
+        base_commit=base,
+        tests=("tests/test_calc.py",),
+    )
 
 
 def test_a_missing_capability_creates_exactly_one_complete_proposal(tmp_path):
@@ -282,3 +341,161 @@ def test_an_admitted_proposal_keeps_its_run_and_lease_across_a_restart(tmp_path)
     refused = C.admit(Store(path), gov, other, "run-no", mode=E.TRIGGER, now=NOW)
     assert not refused.admitted
     assert C.proposals(Store(path), status=C.PENDING)[0]["run_id"] == ""
+
+
+# -- EVOLAB-004: one controlled evolution run ---------------------------------
+
+def test_evolab_run_rejects_canaries_promotes_winner_and_rolls_back_on_health(tmp_path):
+    archive = A.EvolutionArchive(tmp_path / "arc")
+    lab, base, lab_runner = _lab_world(tmp_path)
+    promoted: list[str] = []
+    rolled_back: list[str] = []
+    benchmarked: list[str] = []
+
+    def benchmark(candidate):
+        benchmarked.append(candidate.candidate_version)
+        return candidate.measurements
+
+    def promote(candidate):
+        promoted.append(candidate.candidate_version)
+        return C.PromotionRecord(version=candidate.candidate_version, rollback_handle="v1")
+
+    def rollback(record):
+        rolled_back.append(record.version)
+
+    candidates = [
+        C.EvolutionCandidate(
+            candidate_version="unsafe-kernel",
+            hypothesis="speed parser",
+            scope=("friday/policy.py",),
+            files=("friday/policy.py",),
+            measurements={"score": 0.99},
+        ),
+        C.EvolutionCandidate(
+            candidate_version="unsafe-dependency",
+            hypothesis="speed parser",
+            scope=("parser",),
+            files=("pyproject.toml",),
+            diff="+requests = \"^2.0\"\n",
+            measurements={"score": 0.99},
+        ),
+        C.EvolutionCandidate(
+            candidate_version="unsafe-secret",
+            hypothesis="speed parser",
+            scope=("parser",),
+            files=("friday/parser.py",),
+            diff="+OPENAI_API_KEY = \"sk-1234567890abcdef\"\n",
+            measurements={"score": 0.99},
+        ),
+        C.EvolutionCandidate(
+            candidate_version="unsafe-receipt",
+            hypothesis="speed parser",
+            scope=("parser",),
+            files=("friday/parser.py",),
+            sandbox=str(tmp_path / "missing-sandbox"),
+            base_commit=base,
+            tests=("tests/test_calc.py",),
+            measurements={"score": 0.99},
+        ),
+        _candidate(tmp_path, "inferior", base, 1.01, hypothesis="inferior parser"),
+        _candidate(tmp_path, "no-gain", base, 1.0, hypothesis="steady parser"),
+        _candidate(tmp_path, "runner-up", base, 1.20, hypothesis="runner-up parser"),
+        _candidate(tmp_path, "better", base, 1.25, hypothesis="best parser"),
+    ]
+
+    first = C.run_controlled_evolution(
+        objective_id="EVOLAB-004",
+        parent_version="v1",
+        candidates=candidates,
+        baseline={"score": 1.0},
+        tolerance=0.05,
+        archive=archive,
+        lab=lab,
+        lab_runner=lab_runner,
+        benchmark=benchmark,
+        promote=promote,
+        rollback=rollback,
+        health_check=lambda record: False,
+        allowance=C.InMemoryEvolutionAllowance(),
+    )
+
+    by_version = {r.candidate_version: r.decision for r in first.results}
+    assert by_version == {
+        "unsafe-kernel": C.UNSAFE,
+        "unsafe-dependency": C.UNSAFE,
+        "unsafe-secret": C.UNSAFE,
+        "unsafe-receipt": C.UNSAFE,
+        "inferior": C.DOES_NOT_BEAT_BASELINE,
+        "no-gain": C.DOES_NOT_BEAT_BASELINE,
+        "runner-up": C.NOT_MEASURED_WINNER,
+        "better": C.ROLLED_BACK,
+    }
+    assert promoted == ["better"]
+    assert rolled_back == ["better"]
+    assert benchmarked == ["inferior", "no-gain", "runner-up", "better"]
+    assert all(row["candidate_version"] in by_version for row in archive.query(""))
+    assert len(archive.query("")) == len(by_version)
+    assert all(r.rollback_version == "v1" for r in first.results)
+    assert not first.promoted
+    assert first.allowance_spent and all(row["objective_id"] == "EVOLAB-004" for row in first.allowance_spent)
+
+    second = C.run_controlled_evolution(
+        objective_id="EVOLAB-004",
+        parent_version="v1",
+        candidates=candidates,
+        baseline={"score": 1.0},
+        tolerance=0.05,
+        archive=archive,
+        lab=lab,
+        lab_runner=lab_runner,
+        benchmark=benchmark,
+        promote=promote,
+        rollback=rollback,
+        health_check=lambda record: True,
+        allowance=C.InMemoryEvolutionAllowance(),
+    )
+    assert [r.decision for r in second.results] == [C.ALREADY_REJECTED] * len(candidates)
+    assert promoted == ["better"]
+
+
+def test_evolab_run_rejects_weakened_tests_and_evaluator_tampering_before_benchmark(tmp_path):
+    archive = A.EvolutionArchive(tmp_path / "arc")
+    lab, base, lab_runner = _lab_world(tmp_path)
+    benchmarked: list[str] = []
+    promoted: list[str] = []
+    candidates = [
+        _candidate(
+            tmp_path, "weakened-tests", base, 1.5,
+            mutate=lambda sandbox: (sandbox / "tests" / "test_calc.py").write_text(
+                LAB_TEST.replace("    assert add(1, 2) == 3\n", ""))),
+        _candidate(
+            tmp_path, "edited-evaluator", base, 1.5,
+            mutate=lambda sandbox: (sandbox / "friday" / "evaluation.py").write_text(
+                LAB_EVALUATOR + "# candidate edit\n")),
+    ]
+
+    result = C.run_controlled_evolution(
+        objective_id="EVOLAB-004",
+        parent_version="v1",
+        candidates=candidates,
+        baseline={"score": 1.0},
+        tolerance=0.05,
+        archive=archive,
+        lab=lab,
+        lab_runner=lab_runner,
+        benchmark=lambda candidate: benchmarked.append(candidate.candidate_version) or candidate.measurements,
+        promote=lambda candidate: promoted.append(candidate.candidate_version) or C.PromotionRecord(candidate.candidate_version, "v1"),
+        rollback=lambda record: None,
+        health_check=lambda record: True,
+        allowance=C.InMemoryEvolutionAllowance(),
+    )
+
+    by_version = {r.candidate_version: r for r in result.results}
+    assert by_version["weakened-tests"].decision == C.UNSAFE
+    assert "WEAKENED" in by_version["weakened-tests"].reason
+    assert by_version["edited-evaluator"].decision == C.UNSAFE
+    assert "TAMPERED" in by_version["edited-evaluator"].reason
+    assert benchmarked == []
+    assert promoted == []
+    assert len(lab_runner.calls) == 0
+    assert len(archive.query("")) == 2

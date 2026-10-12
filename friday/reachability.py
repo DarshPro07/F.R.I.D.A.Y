@@ -228,6 +228,11 @@ DECLARED = {
                            "SIMPLE request, built and tested; its live caller (the "
                            "voice turn routing a SIMPLE class to it) is the next "
                            "wiring step"),
+    "friday/evolution_controller": (FUTURE,
+                                    "EVO-001/EVOLAB-004: the event-driven Evolution Controller "
+                                    "and protected-lab controlled run gate; live trigger and "
+                                    "promotion callers are later wiring, run by "
+                                    "tests/test_evolution_controller.py"),
     "friday/skill_arena": (FUTURE,
                            "CAP-MKT-004: the Skill Arena (same tasks, scored winner ACTIVE, "
                            "losers ARCHIVED with scores) and its skills-lifecycle activation "
@@ -316,10 +321,6 @@ DECLARED = {
                                   " callers that feed it recorded trajectories are a later wiring"
                                   " step, run by tests/test_workflow_compiler.py"),
     "friday/forge_runtime": (FUTURE, "same"),
-    "friday/evolution_controller": (FUTURE,
-                                    "EVO-001: the event-driven Evolution Controller; the callers "
-                                    "that raise triggers are a later wiring step, run by "
-                                    "tests/test_evolution_controller.py"),
     "friday/evolution_lab": (FUTURE,
                              "EVOLAB-001 slice 1: the protected evaluation lab core; "
                              "selfdev wiring is a later slice, run by "
