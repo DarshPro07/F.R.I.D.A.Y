@@ -216,6 +216,10 @@ DECLARED = {
                                   "RSCH-002: the FridayResearchProvider interface and its web "
                                   "provider, no live caller yet, run by "
                                   "tests/test_research_providers.py"),
+    "friday/exe_promotion": (FUTURE,
+                             "EVO-005: verifies, swaps, health-checks and rolls back a signed "
+                             "candidate FRIDAY.exe; no live caller yet, run by "
+                             "tests/test_exe_promotion.py"),
     "friday/research_bench": (FUTURE,
                               "RSCH-002: the provider benchmark and its cited-report preference "
                               "gate, no live caller yet, run by tests/test_research_bench.py"),
