@@ -8350,3 +8350,19 @@ EVOLAB-001..004, then the rest.
 | BIN-004 | P1 | Malware analysis only in an authorized isolated offline lab provider; network attack tools excluded by default. | Host detonation refused; scoped_network or active tier refused for samples. Over CYBER-001/002; CYBER-003 stays separate. |
 | BIN-003 | P1 | On-demand Binary Intelligence Engineer role, activated only after ordinary debugging fails. | No patch claim without source; repairs need a fail-before test and an independent verifier. Builds on AGENT-002/003. |
 | BIN-005 | P1 | Ghidra headless adapter evaluated as its own fabric candidate; linked plugins evaluated one by one. | Absent Ghidra is UNAVAILABLE; unauthorized binaries refused; per-item scan decisions recorded. |
+
+## 113. Amendment A19 (2026-10-12): provider keys and model routers in the control room
+
+> Owner, 2026-10-12 (verbatim in `docs/plans/build-harness/00-owner-directive-2026-10-12.md`): "i want that in the env
+> option for choosiing jarvis or firday api key like claude chatgpt gemini openrouter and create ther own api key router
+> if they want ok there will be ui in friday code ok database tpye ok there we can create new api key router and connect
+> api keys without openining env and choose the best model from the connectors ok".
+
+The key panel is the surface `friday/secret_broker.py` names as the end of its interim scratch-file entry: a key goes
+from the panel straight to the broker, and FRIDAY keeps only its alias and the connector's status. Routers are rows in
+FRIDAY's database. Both rows are P1.
+
+| ID | Pri | Requirement | Acceptance evidence |
+|---|---|---|---|
+| KEYS-001 | P1 | The owner connects model providers from the control room without opening .env - Anthropic (Claude), OpenAI (ChatGPT), Google (Gemini), OpenRouter and any OpenAI-compatible endpoint - by pasting a key into a key panel; the key goes straight to the secret broker (encrypted, alias only), and each connector shows its live status and the models it offers. | A key typed in the panel makes that provider usable by FRIDAY after a restart with no .env entry; the raw key never appears in a response, log, memory, model context or plaintext in the database (dummy-secret scan clean); a wrong or revoked key shows REFUSED and a template value PLACEHOLDER; removing a connector deletes its secret; every key endpoint is behind the control-room gate and refuses a request without it. |
+| ROUTER-001 | P1 | The owner creates named model routers in the control room, stored in FRIDAY's database: a router maps FRIDAY's roles (voice normal and deep, coding, research, cheap background work) to an ordered list of models from the connected providers, can pick the best model for a role from measured quality and cost, and one router is active for FRIDAY (spoken to as Jarvis or Friday). | Creating, editing, activating and deleting a router needs no .env edit and no restart; a request in a role uses the active router's first healthy model and falls back down the list on failure, with the fallback recorded; "best" picks from FRIDAY's own measurements, never from a model's self-description; a model whose connector is not connected cannot be added; routers survive a restart. |
