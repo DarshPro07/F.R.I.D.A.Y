@@ -126,6 +126,22 @@ def park(state: dict, req: str, reason: str, kind: str, detail: str) -> None:
     state["escalations"].append({"req": req, "kind": kind, "detail": detail, "at": now()})
 
 
+def providers_out_reset(state: dict, rows: list[dict], integrated: set[str],
+                        k=build_kernel) -> float | None:
+    """When every runnable requirement is parked waiting on a provider reset, the
+    latest reset to wait for; None while any runnable work is parked another way
+    (or none is runnable). The chain waits for this and never relaunches before it."""
+    cfg = k.load_config()
+    runnable = [r["id"] for r in k.ready(rows, cfg["depends"], cfg["order"])
+                if r["id"] not in integrated and r["id"] not in state["repair_queue"]]
+    if not runnable:
+        return None
+    resets = [state.get("providers_out", {}).get(rid) for rid in runnable]
+    if any(reset is None for reset in resets):
+        return None
+    return max(resets)
+
+
 # --------------------------------------------------------------------- lock
 
 def pid_alive(pid: int) -> bool:
@@ -241,6 +257,13 @@ def load_state(path: Path) -> dict:
         old = {}
     if not isinstance(old, dict):
         old = {}
+    providers_out = {}
+    for req_, reason in (old.get("parked") or {}).items():
+        if str(reason).startswith("providers out until "):
+            try:
+                providers_out[req_] = float(str(reason).rsplit(" ", 1)[1])
+            except ValueError:
+                pass
     return {"last_full_suite": old.get("last_full_suite") or dict(LAST_SUITE),
             "waves": list(old.get("waves") or []), "parked": dict(old.get("parked") or {}),
             "attempts": dict(old.get("attempts") or {}),
@@ -251,7 +274,8 @@ def load_state(path: Path) -> dict:
             "partial_gaps": dict(old.get("partial_gaps") or {}),
             "capsule_decision": old.get("capsule_decision"),
             "escalations": list(old.get("escalations") or []),
-            "spend_usd_total": float(old.get("spend_usd_total") or 0.0)}
+            "spend_usd_total": float(old.get("spend_usd_total") or 0.0),
+            "providers_out": providers_out}
 
 
 def snapshot(state: dict, rows: list[dict], nxt: list[str], stop: str | None,
@@ -559,7 +583,8 @@ def recover_crash(state: dict, req: str, head: str, exc: Exception, repo: Path, 
 
 
 def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=build_integrate,
-           repo: Path = ROOT, runner=sh) -> tuple[str, float, bool]:
+           repo: Path = ROOT, runner=sh, runs_dir: Path | None = None,
+           worktrees: Path | None = None, continued: list | None = None) -> tuple[str, float, bool]:
     """Apply one watched run's outcome. Returns (result, spend, settled).
 
     `spend` is the verifier's cost only: a worker's cost is read from the
@@ -579,6 +604,23 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
             return "ADVISED", spend, True
         park(state, req, f"advisor {st.lower()}", "advisor", f"the advisor job ended {st}")
         return "ADVISOR_FAILED", spend, False
+    if st == "PROVIDER_OUT":
+        # A usage limit ended the worker, not the work: continue on the next route
+        # in the same worktree when one is available, else park until the reset.
+        # The continued run joins this wave (`continued`), so the requirement is
+        # not lost and no attempt is counted for the exhausted route.
+        try:
+            cont = k.continue_on(req, runs_dir=runs_dir or k.RUNS_DIR, repo=repo, worktrees=worktrees)
+        except (k.KernelError, build_kernel.ProvidersOut) as exc:
+            reset = getattr(exc, "reset", None)
+            if reset is not None:
+                state.setdefault("providers_out", {})[req] = reset
+            park(state, req, "providers out" if reset is None else f"providers out until {int(reset)}",
+                 "providers_out", f"no route available until {reset}")
+            return "PROVIDERS_OUT", spend, False
+        if continued is not None:
+            continued.append(cont)
+        return "PROVIDERS_OUT", spend, False
     if st == "DONE":
         head = git_out(repo, "rev-parse", "HEAD", runner=runner)
         try:
@@ -617,6 +659,16 @@ def settle(rec: dict, state: dict, integrated: set[str], k=build_kernel, bi=buil
                          "integrated without closing its gaps"
                          + ("" if n >= MAX_PARTIALS else "; the same gaps twice, so no progress"))
             return "INTEGRATED", spend, True
+        receipt = res.get("verifier") or {}
+        if res["result"] == "VERIFIER_FAIL" and "no verifier route" in str(receipt.get("failing_criteria") or []):
+            # No route can verify either: the requirement waits for the providers
+            # like a PROVIDER_OUT does - parked, and no attempt is counted.
+            reset = receipt.get("providers_reset")
+            if reset is not None:
+                state.setdefault("providers_out", {})[req] = reset
+            park(state, req, "providers out" if reset is None else f"providers out until {int(reset)}",
+                 "providers_out", "no verifier route: every provider that could verify is out")
+            return "PROVIDERS_OUT", spend, False
         if res["result"] in REPAIRABLE and state["repairs"].get(req, 0) < MAX_REPAIRS:
             state["repair_queue"][req] = {"result": res["result"], "at": now()}
             return res["result"], spend, True
@@ -691,6 +743,14 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
             return {"stop_reason": "dirty tree", "waves": []}
     worktrees = worktrees or k._worktrees_root()
     state = load_state(state_file)
+    # A providers-out park lifts itself once its reset passes: the provider is
+    # back and the work resumes without an owner (the chain never relaunched
+    # before the reset, so this is the first moment it may).
+    for req_, reset in list(state.get("providers_out", {}).items()):
+        if time.time() >= reset:
+            state["parked"].pop(req_, None)
+            state["providers_out"].pop(req_, None)
+            out(f"providers out until {int(reset)} has passed: resuming {req_}")
     # A dry run plans with the queued edits applied in memory and leaves the inbox for the
     # real run. The chain's readiness check is a dry run: blind to the inbox, it kept 37
     # queued unparks waiting behind a 4 GB P0 that never fit, and no real run - the only
@@ -767,14 +827,24 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
             stop = "day budget" if state.get("budget") else "pressure"
             break
         crashed = False
+        continued = []
         for rec in k.watch(runs):
-            res, cost, ok = settle(rec, state, integrated, k, bi, repo, runner)
+            res, cost, ok = settle(rec, state, integrated, k, bi, repo, runner,
+                                   runs_dir or k.RUNS_DIR, worktrees, continued)
             results[rec["requirement"]] = res
             wave_verifier += cost
             progress = progress or ok
             if res == "INTEGRATION_CRASH_UNRECOVERED":
                 crashed = True  # the branch is unverified: integrate nothing more
                 break
+        if continued and not crashed:
+            # A PROVIDER_OUT continued on the next route: the same wave, the same
+            # worktree, its uncommitted changes intact.
+            for rec in k.watch(continued):
+                res, cost, ok = settle(rec, state, integrated, k, bi, repo, runner)
+                results[rec["requirement"]] = res
+                wave_verifier += cost
+                progress = progress or ok
         verifier_spent += wave_verifier
         wave_spend = k.wave_cost(wave_id) + wave_verifier
         spent = k.run_cost(run_id) + verifier_spent
@@ -786,6 +856,12 @@ def _run_locked(run_id: str, *, max_waves, max_usd, cap, max_wave_usd, priority,
         stop = "no progress" if idle >= NO_PROGRESS_WAVES else None
         if not progress and wave_spend >= COSTLY_SHARE * max_usd:
             stop = "costly wave without progress"
+        reset = providers_out_reset(state, rows, integrated, k)
+        if reset is not None:
+            # Every runnable requirement waits on a provider reset: stop the run
+            # and let the chain wait for it - never relaunch before the reset.
+            stop = "providers out"
+            state["providers_reset"] = reset
         if crashed:
             stop = "integration crash"
         rows = k.load_rows()

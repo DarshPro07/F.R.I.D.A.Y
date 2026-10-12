@@ -596,6 +596,45 @@ def test_verifier_prompt_and_command(tmp_path):
     assert sec[sec.index("--model") + 1] == "opus"
 
 
+def test_claude_verifier_command_regression(monkeypatch):
+    monkeypatch.setattr(bi.shutil, "which", lambda name: None)
+    cmd = bi.verifier_command(1.0, ["friday/a.py"], exe="claude")
+    assert cmd == [
+        "claude", "-p", "--model", "sonnet", "--allowedTools", bi.VERIFIER_TOOLS,
+        "--strict-mcp-config", "--settings", '{"disableAllHooks": true}',
+        "--max-turns", "15", "--max-budget-usd", "1.00", "--output-format", "json",
+    ]
+
+
+def test_verifier_command_falls_back_to_codex_when_claude_is_out(monkeypatch, tmp_path):
+    health = tmp_path / "health.json"
+    monkeypatch.setattr(bi.P, "HEALTH_FILE", health)
+    monkeypatch.setattr(bi.P, "CODEX_CONFIG", tmp_path / "config.toml")
+    (tmp_path / "config.toml").write_text('model = "gpt-5"\n', encoding="utf-8")
+    monkeypatch.setattr(bi.P, "codex_on_plan", lambda: True)
+    bi.P.mark("claude", bi.P.QUOTA, until=9999999999, path=health)
+    cmd = bi.verifier_command(1.0)
+    assert cmd == [build_kernel_mod().VENV_PY, str(bi.ROOT / "scripts" / "build_worker.py"),
+                   "codex", "gpt-5", "--verify", "--read-only"]
+
+
+def test_verifier_command_raises_when_no_route_can_verify(monkeypatch, tmp_path):
+    health = tmp_path / "health.json"
+    monkeypatch.setattr(bi.P, "HEALTH_FILE", health)
+    monkeypatch.setattr(bi.P, "codex_on_plan", lambda: False)
+    bi.P.mark("claude", bi.P.QUOTA, until=9999999999, path=health)
+    with pytest.raises(bi.VerifierUnavailable):
+        bi.verifier_command(1.0)
+
+
+def test_tampered_verifier_receipt_is_never_pass():
+    out = json.dumps({"type": "result", "subtype": "error_tampered", "is_error": True,
+                      "result": '{"verdict":"PASS"}', "total_cost_usd": 0.0})
+    receipt = bi.parse_receipt(out)
+    assert receipt["verdict"] == "INSUFFICIENT_EVIDENCE"
+    assert any("error_tampered" in c for c in receipt["failing_criteria"])
+
+
 def test_patch_is_capped(tmp_path):
     big = {"calc.py": GOOD["calc.py"] + "# " + "x" * 100 + "\n" * 1, "tests/test_twice.py": GOOD["tests/test_twice.py"],
            "big.txt": "y" * (bi.PATCH_CAP * 2)}

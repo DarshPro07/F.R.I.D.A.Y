@@ -34,6 +34,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 
 import build_kernel  # noqa: E402
+import build_providers as P  # noqa: E402
 from build_kernel import (ROOT, RUNS_DIR, VENV_PY, KernelError, agent_utility,  # noqa: E402
                           concurrency, load_rows)
 import test_impact  # noqa: E402
@@ -312,11 +313,31 @@ def verifier_model(files: list[str]) -> str:
     return "opus" if any(_protected(f) for f in files) else "sonnet"
 
 
+class VerifierUnavailable(KernelError):
+    """No route can verify: every provider that could is out. The program treats
+    it as providers out - it waits for the reset and counts no attempt."""
+
+    def __init__(self, detail: str = "no verifier route", reset: float | None = None):
+        super().__init__(detail)
+        self.reset = reset
+
+
 def verifier_command(cost_usd: float, files: list[str] = (), exe: str | None = None,
                      turns: int | None = None) -> list[str]:
     """Turns and budget sized to the change (build_kernel.verifier_turns and
-    verifier_budget - the amount finalize held for it under the day's spend lease)."""
+    verifier_budget - the amount finalize held for it under the day's spend lease).
+
+    When Claude is out but Codex is available on its ChatGPT login, the verifier is
+    the read-only Codex shim (build_worker.py --verify): the same receipt shape, so
+    parse_receipt works unchanged. With no route at all, VerifierUnavailable."""
     budget = build_kernel.verifier_budget(cost_usd, files)
+    if not P.available("claude"):
+        if P.available("codex") and P.codex_on_plan():
+            models = P._codex_models(config=P.CODEX_CONFIG)
+            if models:
+                return [VENV_PY, str(ROOT / "scripts" / "build_worker.py"), "codex", models[0],
+                        "--verify", "--read-only"]
+        raise VerifierUnavailable("no verifier route", P.next_reset())
     return [exe or shutil.which("claude") or "claude", "-p", "--model", verifier_model(list(files)),
             "--allowedTools", VERIFIER_TOOLS,
             "--strict-mcp-config", "--settings", '{"disableAllHooks": true}',
@@ -397,13 +418,20 @@ def run_verifier(row: dict, run: dict, rg: dict, *, repo: Path = ROOT, runner=No
 
 
 def _verify_once(row: dict, run: dict, rg: dict, repo: Path, runner, runs_dir: Path, cwd: Path,
-                 turns: int, key: str, prompt: str | None = None, files: list[str] | None = None) -> dict:
+                  turns: int, key: str, prompt: str | None = None, files: list[str] | None = None) -> dict:
     files = run.get("files_changed", []) if files is None else files
-    cmd = verifier_command(run.get("cost_usd", 0), files, turns=turns)
-    build_kernel.spend_guard(key, "verify", str(run.get("requirement")), "VERIFIER",
-                             float(cmd[cmd.index("--max-budget-usd") + 1]), runs_dir)
     try:
+        cmd = verifier_command(run.get("cost_usd", 0), files, turns=turns)
+        # The Codex verifier shim reserves 0 for itself; only a Claude verifier has a budget.
+        budget = float(cmd[cmd.index("--max-budget-usd") + 1]) if "--max-budget-usd" in cmd else 0.0
+        build_kernel.spend_guard(key, "verify", str(run.get("requirement")), "VERIFIER", budget, runs_dir)
         out = (runner or default_runner)(cmd, prompt or verifier_prompt(row, run, rg, repo), cwd)
+    except VerifierUnavailable as exc:
+        # No route can verify: the program treats it as providers out - it waits
+        # for the reset and counts no attempt.
+        return {"verdict": "INSUFFICIENT_EVIDENCE", "requirement_ids": [],
+                "failing_criteria": [f"no verifier route: {exc}"], "evidence_refs": [],
+                "providers_reset": exc.reset}
     except (subprocess.SubprocessError, OSError) as exc:
         return {"verdict": "INSUFFICIENT_EVIDENCE", "requirement_ids": [],
                 "failing_criteria": [f"verifier did not run: {type(exc).__name__}"], "evidence_refs": []}

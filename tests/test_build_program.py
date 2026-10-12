@@ -60,6 +60,8 @@ class FakeKernel:
         self.rebases_clean: set[str] = set()  # requirements whose branch rebases onto HEAD cleanly
         self.rebased: list[str] = []
         self.discarded: list[str] = []
+        self.continued: list[str] = []
+        self.continue_errors: dict[str, Exception] = {}
         self.spend: list[tuple[str, str, float]] = []  # (req, kind, usd) of each spend lease taken
         self.released: list[str] = []  # memory leases given back
         self.events: list[tuple] = []  # job-state writes and lease attempts, in order
@@ -86,6 +88,12 @@ class FakeKernel:
     def discard_worktree(self, rec, *, repo=None):
         self.discarded.append(rec["requirement"])
         return True
+
+    def continue_on(self, req, *, runs_dir=None, repo=None, worktrees=None):
+        if req in self.continue_errors:
+            raise self.continue_errors[req]
+        self.continued.append(req)
+        return SimpleNamespace(req=req)
 
     def has_work(self, rec):
         return rec["requirement"] in self.with_work
@@ -385,6 +393,26 @@ def test_a_worker_that_fails_with_work_on_disk_enters_the_repair_cascade(env):
     go(env, k, max_waves=1)
     st = state_of(env)
     assert "A" in st["repair_queue"] and "A" not in st["parked"] and not st["attempts"].get("A")
+
+
+def test_provider_out_continues_in_the_same_wave_when_route_available(env):
+    k = FakeKernel(ids=("A",), priority="P0")
+    k.script = {"A": [rec("A", state="PROVIDER_OUT"), rec("A")]}
+    res, _ = go(env, k, max_waves=1)
+    assert k.continued == ["A"]
+    assert res["waves"][0]["results"]["A"] == "INTEGRATED"
+    assert res["stop_reason"] == "max waves"
+
+
+def test_provider_out_parks_until_reset_when_no_route_available(env):
+    k = FakeKernel(ids=("A",), priority="P0")
+    k.script = {"A": [rec("A", state="PROVIDER_OUT")]}
+    k.continue_errors["A"] = BK.ProvidersOut(1234.0)
+    res, _ = go(env, k, max_waves=1)
+    st = state_of(env)
+    assert res["stop_reason"] == "providers out"
+    assert st["parked"]["A"] == "providers out until 1234"
+    assert st["providers_reset"] == 1234.0
 
 
 def test_a_worker_that_fails_with_nothing_on_disk_is_an_attempt(env):

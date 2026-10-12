@@ -29,6 +29,21 @@ def test_a_pressure_stop_without_a_wave_backs_off(monkeypatch, tmp_path):
     assert sleeps == [PC.PRESSURE_BACKOFF_S]
 
 
+def test_providers_out_waits_until_reset(monkeypatch, tmp_path):
+    state = tmp_path / "build_state.json"
+    state.write_text('{"spend_usd_total": 0, "waves": [], "providers_reset": 1000}', encoding="utf-8")
+    monkeypatch.setattr(PC, "STATE", state)
+    monkeypatch.setattr(PC, "RUNS", tmp_path)
+    monkeypatch.setattr(PC, "wait_for_admission", lambda hours, start=None: True)
+    monkeypatch.setattr(PC.time, "time", lambda: 100)
+    sleeps = []
+    monkeypatch.setattr(PC.time, "sleep", sleeps.append)
+    runs = iter(["stopped: providers out", "stopped: no ready work"])
+    monkeypatch.setattr(PC.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, next(runs) + "\n", ""))
+    assert PC.main(["--total-usd", "45"]) == 0
+    assert sleeps == [900]
+
+
 def _default_day_budget(monkeypatch) -> None:
     """These tests are about the chain's budget logic, not today's real budget: the owner's
     standing entry in data/build_runs/day_budget.json (2026-10-05: no daily cap) must not

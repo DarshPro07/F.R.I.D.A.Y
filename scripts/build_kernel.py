@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT))
 
 import code_capsule  # noqa: E402
+import build_providers as P  # noqa: E402
 import prd_ledger as PL  # noqa: E402
 from friday import waves as W  # noqa: E402
 from friday.execution_economics import cheapest_capable  # noqa: E402
@@ -129,6 +130,12 @@ LOCK_WAIT_S = 120.0
 
 class KernelError(Exception):
     pass
+
+
+class ProvidersOut(KernelError):
+    def __init__(self, reset: float | None = None):
+        super().__init__("providers out" + ("" if reset is None else f" until {reset}"))
+        self.reset = reset
 
 
 # -------------------------------------------------------- mode and budget
@@ -908,7 +915,16 @@ def worker_env(wt: Path, base: dict | None = None) -> dict:
 
 def worker_command(model: str, max_turns: int, max_budget: float, *,
                    tools: str = ALLOWED_TOOLS, resume: str | None = None,
-                   prompt: str = WORKER_PROMPT) -> list[str]:
+                   prompt: str = WORKER_PROMPT, wall: float = DEFAULT_WALL_S) -> list[str]:
+    provider, name = P.split(model)
+    if provider in ("codex", "opencode"):
+        if resume:
+            raise KernelError(f"{provider} routes cannot resume a provider session")
+        cmd = [VENV_PY, str(ROOT / "scripts" / "build_worker.py"), provider, name,
+               "--prompt", prompt, "--wall", str(int(wall))]
+        if tools == SCOUT_TOOLS:
+            cmd.append("--read-only")
+        return cmd
     exe = shutil.which("claude") or "claude"
     cmd = [exe, "-p", prompt]
     if resume:
@@ -938,6 +954,7 @@ class Running:
     wall_s: float = DEFAULT_WALL_S
     repo: Path = ROOT
     continued: bool = False
+    continued_from: str = ""  # the exhausted route this run continues (a PROVIDER_OUT)
     repairs: int = 0
     capsule: bool = False
     peak_rss_mb: float | None = None
@@ -1198,7 +1215,7 @@ def launch(row: dict, *, worktrees: Path | None = None, model: str | None = None
     turns, budget, wall = BUDGETS[klass]
     turns, budget = max_turns or turns, max_budget or budget
     model = model or pick_model("SCOUT" if scout else "SHIP", runs_dir=runs_dir)
-    cmd = worker_command(model, turns, budget, tools=SCOUT_TOOLS if scout else ALLOWED_TOOLS)
+    cmd = worker_command(model, turns, budget, tools=SCOUT_TOOLS if scout else ALLOWED_TOOLS, wall=wall)
     if dry_run:
         return {"worktree": str(wt), "mode": mode, "class": klass,
                 "branch": "" if scout else f"build/{name}",
@@ -1207,8 +1224,10 @@ def launch(row: dict, *, worktrees: Path | None = None, model: str | None = None
         raise KernelError(f"worktree {wt} already exists; refusing to reuse it")
     # The spend lease before any side effect: a refused launch leaves no worktree behind.
     attempt_id = _attempt_for(row["id"])
+    provider, _ = P.split(model)
+    worker_usd = 0.0 if provider in ("codex", "opencode") else budget
     spend_guard(attempt_id, "launch", row["id"], mode,
-                budget if scout else budget + verifier_budget(budget), runs_dir)
+                worker_usd if scout else worker_usd + verifier_budget(budget), runs_dir)
     try:
         base_sha = create_worktree(wt, name, repo=repo, detach=scout)
     except BaseException:
@@ -1486,7 +1505,8 @@ def has_work(rec: dict) -> bool:
 
 def attempts_made(req: str, runs_dir: Path = RUNS_DIR) -> int:
     """Worker invocations already recorded for `req` (scouts excluded)."""
-    return sum(e.get("req") == req and e.get("kind") != "SCOUT" for e in ledger_entries(runs_dir))
+    return sum(e.get("req") == req and e.get("kind") != "SCOUT" and not e.get("provider_out")
+               for e in ledger_entries(runs_dir))
 
 
 def advice_path(req: str, runs_dir: Path = RUNS_DIR) -> Path:
@@ -1559,7 +1579,7 @@ def repair(req: str, *, worktrees: Path | None = None, runs_dir: Path = RUNS_DIR
 def _relaunch(req: str, wt: Path, cmd: list[str], meta: dict, run_rec: dict, *, kind: str,
               klass: str, model: str, base_sha: str, wall: float, repo: Path, usd: float,
               repairs: int = 0, runs_dir: Path = RUNS_DIR, reason: str = "",
-              attempt_id: str | None = None) -> Running:
+              attempt_id: str | None = None, continued_from: str = "") -> Running:
     attempt_id = attempt_id or _attempt_for(req)
     spend_guard(attempt_id, "launch", req, kind, usd, runs_dir)
     started = time.time()
@@ -1570,11 +1590,45 @@ def _relaunch(req: str, wt: Path, cmd: list[str], meta: dict, run_rec: dict, *, 
                          "started": started, "stream_offset": offset})
     run = Running(req, _start(cmd, wt), wt, started=started, mode="SHIP", klass=klass,
                   base_sha=base_sha, branch=branch, model=model, wall_s=wall, repo=repo,
-                  continued=False, repairs=repairs, capsule=bool(meta.get("capsule")),
+                  continued=False, continued_from=continued_from, repairs=repairs,
+                  capsule=bool(meta.get("capsule")),
                   stream_offset=offset, kind=kind, reason=reason, attempt_id=attempt_id,
                   runs_dir=runs_dir)
     job_open(run, runs_dir)
     return run
+
+
+def continue_on(req: str, *, runs_dir: Path = RUNS_DIR, repo: Path = ROOT,
+                worktrees: Path | None = None) -> Running:
+    """After a PROVIDER_OUT, start the next route (pick_model for the run's kind) in
+    the SAME worktree with CONTINUE_PROMPT. Nothing here checks out, resets or removes
+    anything: the worktree's uncommitted changes survive, and the run record and
+    ledger keep continued_from - the route that hit its limit. pick_model raises
+    ProvidersOut when no route is available; the caller parks until its reset."""
+    run_rec = _read_json(runs_dir / f"{req}.json")
+    if not isinstance(run_rec, dict) or not run_rec:
+        raise KernelError(f"{req} has no run record to continue from")
+    wt = Path(run_rec.get("worktree") or "")
+    if not wt.is_dir():
+        raise KernelError(f"{req} has no worktree at {wt} to continue in")
+    meta = _run_meta(wt)
+    base_sha = meta.get("base_sha") or run_rec.get("base_sha")
+    if not base_sha:
+        raise KernelError(f"{req} has no base commit to continue from")
+    klass = run_rec.get("budget_class") or meta.get("klass") or "NORMAL"
+    kind = run_rec.get("kind") or "SHIP"
+    branch = meta.get("branch") or run_rec.get("branch", "")
+    model = pick_model(kind, runs_dir=runs_dir)
+    provider, _ = P.split(model)
+    turns, budget, wall = BUDGETS[klass]
+    worker_usd = 0.0 if provider in ("codex", "opencode") else budget
+    cmd = worker_command(model, turns, budget, prompt=CONTINUE_PROMPT, wall=wall)
+    return _relaunch(req, wt, cmd, meta, run_rec, kind=kind, klass=klass, model=model,
+                     base_sha=base_sha, wall=wall, repo=repo,
+                     usd=worker_usd + verifier_budget(budget), runs_dir=runs_dir,
+                     continued_from=run_rec.get("model") or meta.get("model") or "sonnet",
+                     reason=f"CONTINUE: {run_rec.get('model') or meta.get('model')} hit its usage "
+                            f"limit; continuing the same worktree on {model}")
 
 
 def escalate(req: str, *, model: str | None = None, capsule_extra: str = "",
@@ -1896,15 +1950,21 @@ def pick_model(kind: str, *, runs_dir: Path = RUNS_DIR, state_file: Path | None 
     best; with no such record, the roster's default."""
     cands = roster(roster_file).get(kind) or []
     if not cands:
-        return DEFAULT_MODEL.get(kind, "sonnet")
+        cands = [DEFAULT_MODEL.get(kind, "sonnet")]
     bench = model_bench(runs_dir, state_file).get(kind, {})
     seen = {m: bench.get(m, {}).get("n", 0) for m in cands}
     tries = sum(row["n"] for row in bench.values())
     least = min(cands, key=lambda m: (seen[m], cands.index(m)))
     if seen[least] < BENCH_MIN and tries % EXPLORE_EVERY == EXPLORE_EVERY - 1:
-        return least
-    chosen = cheapest_capable(cands, bench, min_n=BENCH_MIN, rate_floor=RATE_FLOOR)
-    return cands[0] if chosen is None else chosen[0]
+        choice = least
+    else:
+        chosen = cheapest_capable(cands, bench, min_n=BENCH_MIN, rate_floor=RATE_FLOOR)
+        choice = cands[0] if chosen is None else chosen[0]
+    ordered = [choice, *[c for c in cands if c != choice]]
+    route = P.route(ordered)
+    if route is None:
+        raise ProvidersOut(P.next_reset({P.split(c)[0] for c in ordered}))
+    return route
 
 
 def bench_table(runs_dir: Path = RUNS_DIR) -> list[str]:
@@ -2029,8 +2089,17 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
     # and the integrator re-proves a DONE run (2026-10-03: SEC-005's finished repair was
     # filed FAILED and queued for an Opus advisor).
     finished_then_capped = (str(res.get("subtype", "")).startswith("error_max") and not scout
-                            and not advisor and ev.get("status") in ("DONE", "BLOCKED"))
-    if reason:
+                             and not advisor and ev.get("status") in ("DONE", "BLOCKED"))
+    # A usage limit on the error channel takes the provider out, not the work: the
+    # run continues on another route (continue_on) instead of entering the repair
+    # cascade. Only the error channel counts - a worker whose own text mentions
+    # "usage limit" or "429" must never take its provider out.
+    limit = P.classify(events=events)
+    if limit and ev.get("status") not in ("DONE", "BLOCKED"):
+        P.mark(P.split(run.model)[0], limit["state"], until=limit["until"], reason=limit["detail"],
+               source=f"{run.req} {run.attempt_id}")
+        state = "PROVIDER_OUT"
+    elif reason:
         state = reason
     elif (run.proc.returncode != 0 or not res or res.get("is_error")) and not finished_then_capped:
         state = "FAILED"
@@ -2055,6 +2124,7 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
     usage = [r.get("usage") or {} for r in results]
     total = lambda key: sum(u.get(key, 0) for u in usage)  # noqa: E731
     rec = {"requirement": run.req, "state": state,
+           "provider_out": state == "PROVIDER_OUT",
            "turns": sum(r.get("num_turns", 0) for r in results),
            "input_tokens": total("input_tokens"),
            "cache_read_tokens": total("cache_read_input_tokens"),
@@ -2081,7 +2151,8 @@ def finalize(run: Running, reason: str | None, runs_dir: Path = RUNS_DIR) -> dic
              "cache_creation_tokens": rec["cache_creation_tokens"], "turns": rec["turns"],
              "wall_seconds": rec["wall_seconds"], "peak_rss_mb": run.peak_rss_mb, "at": at,
              "predicted_gb": predicted, "error_gb": error, "state": state, "budget_class": run.klass, "capsule": run.capsule,
-             "mode": run.mode, "reads": rec["reads"]}
+             "mode": run.mode, "reads": rec["reads"], "continued_from": run.continued_from,
+             "provider_out": state == "PROVIDER_OUT"}
     if entry["kind"] in ("REPAIR", "RESUME") and prior and _context_tokens(prior[-1]):
         entry["retry_context_growth"] = round(_context_tokens(entry) / _context_tokens(prior[-1]), 3)
     ledger_append(entry, runs_dir)

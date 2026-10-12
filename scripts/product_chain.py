@@ -30,7 +30,7 @@ import build_kernel as K  # noqa: E402
 PY = sys.executable
 STATE = ROOT / "data" / "build_state.json"
 RUNS = K.RUNS_DIR
-AGAIN = ("pressure", "max waves", "spend")  # stop reasons another run can clear
+AGAIN = ("pressure", "max waves", "spend", "providers out")  # stop reasons another run can clear
 #: After a pressure stop that ran no wave, wait this long before probing again: the probe and the
 #: program's own check can disagree right at the memory threshold (2026-10-02: a run a minute).
 PRESSURE_BACKOFF_S = 300
@@ -59,6 +59,14 @@ def waves() -> int:
         return len(json.loads(STATE.read_text(encoding="utf-8")).get("waves") or [])
     except (OSError, ValueError):
         return 0
+
+
+def providers_reset() -> float:
+    """The epoch the parked providers come back (build_program's stop); 0 when unknown."""
+    try:
+        return float(json.loads(STATE.read_text(encoding="utf-8")).get("providers_reset") or 0)
+    except (OSError, ValueError):
+        return 0.0
 
 
 def mark(status: str, detail: str) -> None:
@@ -226,6 +234,15 @@ def main(argv: list[str] | None = None) -> int:
         if reason == "pressure" and waves() == waves_before:
             mark("WAITING_RESOURCES", f"pressure stop with no wave; backing off {PRESSURE_BACKOFF_S}s")
             time.sleep(PRESSURE_BACKOFF_S)
+        if reason == "providers out":
+            # Every runnable requirement waits on a provider reset: wait for it -
+            # never relaunch before the reset - capped so a stale one cannot idle
+            # the chain for hours (the program re-parks and re-waits if needed).
+            reset = providers_reset()
+            wait = min(max(reset - time.time(), 60), 1800)
+            mark("WAITING_RESOURCES", f"providers out; waiting {wait:.0f}s for the reset")
+            time.sleep(wait)
+            continue
 
 
 if __name__ == "__main__":

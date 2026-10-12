@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_kernel as K  # noqa: E402
+import build_providers as P  # noqa: E402
 import prd_ledger as PL  # noqa: E402
 from friday.governor import Thresholds  # noqa: E402
 
@@ -308,6 +309,71 @@ def test_finalize_records_the_prediction_and_its_error(tmp_path):
     assert entry["predicted_gb"] == 1.0 and entry["error_gb"] == 0.5
 
 
+def test_finalize_marks_provider_out_and_attempts_do_not_count(repo, tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    health = tmp_path / "health.json"
+    monkeypatch.setattr(P, "HEALTH_FILE", health)
+    wt = tmp_path / "wt"
+    K.create_worktree(wt, "r-1", repo=repo)
+    _stream(wt,
+            {"type": "system", "subtype": "init", "session_id": "s1"},
+            {"type": "result", "subtype": "error_limit", "is_error": True,
+             "result": "usage_limit_reached: try again in 2 hours", "session_id": "s1",
+             "provider": "codex", "route": "codex:gpt-5", "uuid": "u1",
+             "usage": {"input_tokens": 1, "output_tokens": 2}})
+    run = K.Running("R-1", _Proc(3), wt, model="codex:gpt-5",
+                    base_sha=_git(repo, "rev-parse", "HEAD"),
+                    branch="build/r-1", repo=repo)
+    rec = K.finalize(run, None, runs)
+    assert rec["state"] == "PROVIDER_OUT" and rec["provider_out"] is True
+    assert K.attempts_made("R-1", runs) == 0
+    assert K.ledger_entries(runs)[-1]["provider_out"] is True
+    assert P.status("codex", path=health)["state"] == P.QUOTA
+
+
+def test_claude_rate_limit_marks_provider_out(repo, tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    health = tmp_path / "health.json"
+    monkeypatch.setattr(P, "HEALTH_FILE", health)
+    wt = tmp_path / "wt"
+    K.create_worktree(wt, "r-1", repo=repo)
+    _stream(wt,
+            {"type": "system", "subtype": "init", "session_id": "s1"},
+            {"type": "rate_limit_event", "rate_limit_info": {"status": "rejected",
+                                                            "resetsAt": time.time() + 7200,
+                                                            "rateLimitType": "limit"}},
+            {"type": "result", "subtype": "error_max_turns", "is_error": True,
+             "result": "", "session_id": "s1", "uuid": "u1"})
+    run = K.Running("R-1", _Proc(1), wt, model="sonnet",
+                    base_sha=_git(repo, "rev-parse", "HEAD"),
+                    branch="build/r-1", repo=repo)
+    rec = K.finalize(run, None, runs)
+    assert rec["state"] == "PROVIDER_OUT" and rec["provider_out"] is True
+    assert P.status("claude", path=health)["state"] == P.QUOTA
+    assert K.attempts_made("R-1", runs) == 0
+
+
+def test_successful_text_about_limits_is_not_provider_out(repo, tmp_path, monkeypatch):
+    health = tmp_path / "health.json"
+    monkeypatch.setattr(P, "HEALTH_FILE", health)
+    wt = tmp_path / "wt"
+    K.create_worktree(wt, "r-1", repo=repo)
+    (wt / ".build").mkdir(parents=True, exist_ok=True)
+    (wt / ".build" / "evidence.json").write_text(json.dumps({"requirement": "R-1",
+                                                              "status": "DONE",
+                                                              "summary": "ok"}), encoding="utf-8")
+    (wt / "done.txt").write_text("done\n", encoding="utf-8")
+    _stream(wt,
+            {"type": "system", "subtype": "init", "session_id": "s1"},
+            {"type": "result", "subtype": "success", "is_error": False,
+             "result": "docs mention usage limit and 429", "session_id": "s1", "uuid": "u1"})
+    run = K.Running("R-1", _Proc(0), wt, model="sonnet",
+                    base_sha=_git(repo, "rev-parse", "HEAD"),
+                    branch="build/r-1", repo=repo)
+    assert K.finalize(run, None, tmp_path / "runs")["state"] == "DONE"
+    assert P.status("claude", path=health)["state"] == "OK"
+
+
 def test_host_governor_uses_a_matching_profile_and_ignores_a_moved_one(monkeypatch, tmp_path):
     from friday import hardware_profile as HP
     monkeypatch.setattr(HP, "stored", lambda path=None: SimpleNamespace(baseline=None))
@@ -486,6 +552,25 @@ def test_a_worker_starts_without_mcp_servers_or_hooks():
     assert "--strict-mcp-config" in cmd
     assert cmd[cmd.index("--settings") + 1] == '{"disableAllHooks": true}'
     assert "bypassPermissions" not in " ".join(cmd)
+
+
+def test_claude_worker_command_regression(monkeypatch):
+    monkeypatch.setattr(K.shutil, "which", lambda name: None)
+    cmd = K.worker_command("sonnet", 5, 1.0, prompt="p", resume="S")
+    assert cmd == [
+        "claude", "-p", "p", "--resume", "S", "--model", "sonnet", "--max-turns", "5",
+        "--max-budget-usd", "1.0", "--output-format", "stream-json", "--verbose",
+        "--permission-mode", "acceptEdits", "--allowedTools", K.ALLOWED_TOOLS,
+        "--strict-mcp-config", "--settings", '{"disableAllHooks": true}',
+    ]
+
+
+def test_codex_worker_command_uses_the_shim_and_resume_is_refused():
+    cmd = K.worker_command("codex:gpt-5", 7, 0.0, prompt="p", tools=K.SCOUT_TOOLS, wall=42)
+    assert cmd == [K.VENV_PY, str(K.ROOT / "scripts" / "build_worker.py"), "codex", "gpt-5",
+                   "--prompt", "p", "--wall", "42", "--read-only"]
+    with pytest.raises(K.KernelError):
+        K.worker_command("codex:gpt-5", 7, 0.0, resume="S")
 
 
 # ------------------------------------------------ BH-A: worktrees, modes, budgets
@@ -2006,6 +2091,45 @@ def test_no_record_and_no_roster_keep_the_defaults(tmp_path):
     runs, roster = _bench_world(tmp_path, [], [])
     assert K.pick_model("ADVISOR", runs_dir=runs, roster_file=roster) == "a-default"
     assert K.pick_model("SCOUT", runs_dir=runs, roster_file=tmp_path / "absent.json") == "sonnet"
+
+
+def test_pick_model_routes_around_exhausted_providers(tmp_path, monkeypatch):
+    health = tmp_path / "health.json"
+    monkeypatch.setattr(P, "HEALTH_FILE", health)
+    roster = tmp_path / "roster.json"
+    roster.write_text(json.dumps({"SHIP": ["sonnet", "codex:gpt-5"]}), encoding="utf-8")
+    P.mark("claude", P.QUOTA, until=time.time() + 600, path=health)
+    assert K.pick_model("SHIP", runs_dir=tmp_path / "runs", roster_file=roster) == "codex:gpt-5"
+    P.mark("codex", P.QUOTA, until=time.time() + 700, path=health)
+    with pytest.raises(K.ProvidersOut) as exc:
+        K.pick_model("SHIP", runs_dir=tmp_path / "runs", roster_file=roster)
+    assert exc.value.reset is not None
+
+
+def test_continue_on_relaunches_same_worktree_with_continue_prompt(tmp_path, monkeypatch):
+    wt = tmp_path / "wt"
+    (wt / ".build").mkdir(parents=True)
+    (wt / ".build" / "run.json").write_text(json.dumps({"klass": "NORMAL", "base_sha": "base",
+                                                         "branch": "build/r-1"}), encoding="utf-8")
+    (wt / "dirty.txt").write_text("keep me\n", encoding="utf-8")
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / "R-1.json").write_text(json.dumps({"requirement": "R-1", "state": "PROVIDER_OUT",
+                                               "kind": "SHIP", "model": "sonnet",
+                                               "worktree": str(wt), "base_sha": "base",
+                                               "branch": "build/r-1"}), encoding="utf-8")
+    monkeypatch.setattr(K, "pick_model", lambda kind, **kw: "codex:gpt-5")
+    seen = {}
+
+    def fake_relaunch(req, wt_arg, cmd, meta, run_rec, **kw):
+        seen.update(req=req, wt=wt_arg, cmd=cmd, meta=meta, run_rec=run_rec, kw=kw)
+        return SimpleNamespace(req=req, wt=wt_arg, model=kw["model"])
+
+    monkeypatch.setattr(K, "_relaunch", fake_relaunch)
+    run = K.continue_on("R-1", runs_dir=runs, repo=tmp_path, worktrees=tmp_path)
+    assert run.wt == wt and (wt / "dirty.txt").read_text(encoding="utf-8") == "keep me\n"
+    assert seen["cmd"][seen["cmd"].index("--prompt") + 1] == K.CONTINUE_PROMPT
+    assert seen["kw"]["continued_from"] == "sonnet"
 
 
 def test_the_real_roster_names_every_job_kind_and_no_verifier():
