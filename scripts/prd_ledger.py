@@ -5411,6 +5411,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'The acceptance ("editing an active skill\'s content quarantines it") already held on the base tree. It was proven by the existing scan-gate tests and by the content-hash transition in lifecycle.py. I did not change that.\n\nI closed the one gap in the row\'s next_action that needs no owner decision, whi (build run, commit 931a06d5c)',
         "next_action": 'GAPS: External skills already ACTIVE before SKILL-006 keep no provenance row until re-gated; no backfill exists and they stay refused until an importer supplies source data.; No signature verifier exists; signatures are stored as declared-unverified.; No importer in this tree yet calls register() with source_url, source_commit, signature or sbom (INTAKE-004 / SKMKT-002).; SBOM is stored as supplied and not generated per skill.',
     }),
+    ('PRIV-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Fixed the one major review issue in tests/test_privacy_budget.py. Added a helper that corrupts only the stored privacy_budget key (the rest of the envelope stays valid). New test test_an_unreadable_stored_budget_permits_no_provider calls gw._privacy_budget(run_id) directly. It asserts the result equ (build run, commit 2c7dee88c)',
+        "next_action": "GAPS: external_services is declared, narrowed and queryable (permits_service) but no router or CortexOS caller enforces it yet; No MCP tool, planner or UI path sets a budget on an objective; only an envelope handed to objectives.compile_objective carries one; Gateway budget lookup reads the run row on each infer call (one extra SELECT); not cached; system_one.py:127 is a second data_class.decision seam with no objective context; the budget is not applied there (reviewer's note; not in PRIV-001 scope); The CLI-MCP path (model_gateway.py ~2180) honours the budget but has no direct test of its own; the API-path tests and the direct _privacy_budget test cover the shared lookup",
+    }),
 ]
 
 
