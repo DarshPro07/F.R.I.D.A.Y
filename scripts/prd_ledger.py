@@ -5429,6 +5429,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Design: new friday/team_composer.py (Composer, RoleNeed) over four new tables (agent_temp_roles, agent_temp_teams, agent_team_ledger, agent_promotions). All four are declared UNSCOPED. agent_team_ledger is append-only through triggers.\n\ncompose(goal, needs, ttl_s) works in this order:\n1. Cover each  (build run, commit 84b5ef28d)',
         "next_action": 'GAPS: No planner or MCP tool calls Composer.compose yet. The module is FUTURE in reachability.DECLARED.; A promoted role is registered in agent_registry, but AgentRegistry.create_instance still goes through specialist.compose, which resolves roles only from roles.BY_ID. Instances of promoted roles need a later slice.; Expiry is lazy (on any composer call), not a timer. Expired rows cost nothing but are only deleted at the next call.; approve() registers the role with default personality, skills and permissions.',
     }),
+    ('ULTRA-006', {
+        "status": PARTIAL,
+        "current_implementation": 'Wired tier choice into the runner: tiers.choose_models picks a model per stage, runner.model_for feeds StagePort, start_run(choices=) logs each choice with its evidence rows on the run; default spec now has check, skeptic and code stages. (build run, commit f0484301b)',
+        "next_action": 'GAPS: Choices are made by the caller at start_run and logged once; a resumed run does not re-read them from the event log, so a changed bench could pick a different model and miss the result cache.; cheapest_capable and FAB-003 rank_routes/cost_per_completion remain two rankers over different inputs; only cheapest_capable is shared with build_kernel.pick_model (test pins it). Not unified.; No production caller builds the per-tier candidate lists or bench yet; ultracode StagePort has no entry point outside tests (runner is imported by nothing).; default.json build stage template changed builder -> code (same standard tier) so the default spec exercises a code stage.; Assumption: standard is the lowest tier a judge/synthesis/architecture stage may use; economy stays rejected for them.',
+    }),
 ]
 
 
