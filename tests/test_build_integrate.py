@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -96,6 +99,24 @@ def setup(tmp_path, files=None, *, state="DONE", files_changed=None, priority="P
     (runs / "REQ-1.json").write_text(json.dumps(run), encoding="utf-8")
     rows = [{"id": "REQ-1", "priority": priority, "summary": "twice", "acceptance": "twice doubles"}]
     return repo, runs, run, rows
+
+
+def add_run(repo: Path, runs: Path, req: str, base: str, files: dict[str, str], *, priority="P0") -> dict:
+    sh(repo, "checkout", "-q", "-b", f"build/{req.lower()}", base)
+    for rel, text in files.items():
+        write(repo, rel, text)
+    sh(repo, "add", "-A")
+    sh(repo, "commit", "-q", "-m", f"work {req}")
+    commit = sh(repo, "rev-parse", "HEAD")
+    sh(repo, "checkout", "-q", "main")
+    run = {"requirement": req, "state": "DONE", "mode": "SHIP", "budget_class": "S", "base_sha": base,
+           "branch": f"build/{req.lower()}", "commit": commit, "files_changed": sorted(files),
+           "cost_usd": 1.0, "turns": 3, "worktree": "",
+           "evidence": {"requirement": req, "status": "DONE", "summary": f"adds {req}",
+                        "files_changed": [], "tests": {"command": "", "passed": 1, "failed": 0},
+                        "blockers": [], "acceptance_met": True, "gaps": []}}
+    (runs / f"{req}.json").write_text(json.dumps(run), encoding="utf-8")
+    return run
 
 
 def go(repo, runs, rows, **kw):
@@ -294,6 +315,191 @@ def test_integrate_blocked_behind_an_earlier_candidate_does_not_cut_in(tmp_path)
         go(repo, runs, rows, queue=q)
     assert head(repo) == before
     assert [e["req"] for e in q.pending()] == ["OTHER"]
+
+
+def test_the_turn_is_not_held_during_premerge_verifier(tmp_path):
+    repo, runs, run, rows = setup(tmp_path, priority="P0")
+    seen = []
+
+    def runner(cmd, prompt, cwd):
+        seen.append((runs / bi.QUEUE_LOCK).exists())
+        return json.dumps({"result": '{"verdict": "PASS", "requirement_ids": ["REQ-1"]}',
+                           "total_cost_usd": 0.2})
+
+    assert go(repo, runs, rows, runner=runner)["result"] == "INTEGRATED"
+    assert seen == [False]
+
+
+def test_a_clash_between_prepare_and_land_rebases_inside_the_turn(tmp_path):
+    repo, runs, run, rows = setup(tmp_path)
+    prepared = bi._prepare("REQ-1", repo=repo, runs_dir=runs, ledger_path=repo / "scripts" / "prd_ledger.py",
+                           python=sys.executable, rows=rows, runner=boom_runner, dry_run=False, no_ledger=True)
+    assert "prepared" in prepared
+    write(repo, "calc.py", "def add(a, b):\n    return b + a\n")
+    sh(repo, "commit", "-q", "-am", "moved while preparing")
+    before = head(repo)
+    q = bi.MergeQueue(runs, repo=repo)
+    q.enqueue("REQ-1", time.time())
+    with q.turn("REQ-1"):
+        out = bi._land(prepared["prepared"], repo=repo, runs_dir=runs,
+                       ledger_path=repo / "scripts" / "prd_ledger.py", python=sys.executable,
+                       no_ledger=True)
+    assert out["result"] == "REBASE_REQUIRED" and "calc.py" in out["detail"]
+    assert head(repo) == before
+
+
+def test_a_tree_dirtied_between_prepare_and_land_is_refused_inside_the_turn(tmp_path):
+    repo, runs, run, rows = setup(tmp_path)
+    prepared = bi._prepare("REQ-1", repo=repo, runs_dir=runs, ledger_path=repo / "scripts" / "prd_ledger.py",
+                           python=sys.executable, rows=rows, runner=boom_runner, dry_run=False, no_ledger=True)
+    assert "prepared" in prepared
+    write(repo, "calc.py", "# the owner's uncommitted work\n")
+    before = head(repo)
+    q = bi.MergeQueue(runs, repo=repo)
+    q.enqueue("REQ-1", time.time())
+    with q.turn("REQ-1"):
+        with pytest.raises(KernelError, match="tracked changes"):
+            bi._land(prepared["prepared"], repo=repo, runs_dir=runs,
+                     ledger_path=repo / "scripts" / "prd_ledger.py", python=sys.executable, no_ledger=True)
+    assert head(repo) == before
+    assert (repo / "calc.py").read_text(encoding="utf-8") == "# the owner's uncommitted work\n"
+
+
+def test_prepare_does_not_refuse_a_tree_another_landing_is_dirtying(tmp_path):
+    repo, runs, run, rows = setup(tmp_path)
+    write(repo, "calc.py", "# another run is mid-landing\n")
+    prepared = bi._prepare("REQ-1", repo=repo, runs_dir=runs, ledger_path=repo / "scripts" / "prd_ledger.py",
+                           python=sys.executable, rows=rows, runner=boom_runner, dry_run=False, no_ledger=True)
+    assert "prepared" in prepared
+
+
+def test_integrate_many_reports_one_failure_without_dropping_the_others(tmp_path):
+    repo, base_commit = make_repo(tmp_path, {"seed.py": "x = 1\n"})
+    base, _ = base_commit.split()
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    add_run(repo, runs, "REQ-A", base, {"one.py": "def one():\n    return 1\n",
+                                        "tests/test_one.py": "from one import one\n\n\ndef test_one():\n    assert one() == 1\n"})
+    bad = add_run(repo, runs, "REQ-B", base, {"two.py": "def two():\n    return 2\n"})
+    (runs / "REQ-B.json").write_text(json.dumps(dict(bad, state="FAILED")), encoding="utf-8")
+    rows = [{"id": "REQ-A", "priority": "P1", "summary": "one", "acceptance": "one"},
+            {"id": "REQ-B", "priority": "P1", "summary": "two", "acceptance": "two"}]
+    out = bi.integrate_many(["REQ-B", "REQ-A"], repo=repo, runs_dir=runs,
+                            ledger_path=repo / "scripts" / "prd_ledger.py", python=sys.executable,
+                            rows=rows, no_ledger=True)
+    assert [r["requirement"] for r in out] == ["REQ-B", "REQ-A"]
+    assert out[0]["result"] == "ERROR" and "not DONE" in out[0]["detail"]
+    assert out[1]["result"] == "INTEGRATED"
+
+
+@pytest.mark.parametrize("files, priority, result", [
+    ({"tests/test_bad.py": "from calc import add\n\n\ndef test_bad():\n    assert add(2, 3) == 6\n"}, "P1", "NOT_GREEN"),
+    (GOOD, "P0", "VERIFIER_FAIL"),
+])
+def test_terminal_prepare_results_do_not_enqueue(tmp_path, files, priority, result):
+    repo, runs, run, rows = setup(tmp_path, files, priority=priority)
+    out = go(repo, runs, rows, runner=pass_runner("FAIL"))
+    assert out["result"] == result
+    assert not (runs / bi.QUEUE_FILE).exists()
+
+
+def test_two_integrations_prepare_in_parallel_but_merge_serially(tmp_path, monkeypatch):
+    repo, base_commit = make_repo(tmp_path, {"seed.py": "x = 1\n"})
+    base, _ = base_commit.split()
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    add_run(repo, runs, "REQ-A", base, {"one.py": "def one():\n    return 1\n",
+                                        "tests/test_one.py": "from one import one\n\n\ndef test_one():\n    assert one() == 1\n"})
+    add_run(repo, runs, "REQ-B", base, {"two.py": "def two():\n    return 2\n",
+                                        "tests/test_two.py": "from two import two\n\n\ndef test_two():\n    assert two() == 2\n"})
+    rows = [{"id": "REQ-A", "priority": "P0", "summary": "one", "acceptance": "one"},
+            {"id": "REQ-B", "priority": "P0", "summary": "two", "acceptance": "two"}]
+    verifier_windows, merge_events, active_merges = [], [], 0
+    lock = threading.Lock()
+    both_verifiers = threading.Event()
+    real_merge = bi.merge
+
+    def runner(cmd, prompt, cwd):
+        start = time.monotonic()
+        with lock:
+            verifier_windows.append((start, 0.0))
+            if len(verifier_windows) == 2:
+                both_verifiers.set()
+        both_verifiers.wait(5)
+        time.sleep(0.4)
+        end = time.monotonic()
+        with lock:
+            for n, (seen, _) in enumerate(verifier_windows):
+                if seen == start:
+                    verifier_windows[n] = (start, end)
+                    break
+        return json.dumps({"result": '{"verdict": "PASS", "requirement_ids": ["REQ"]}'})
+
+    def merge_probe(*args, **kw):
+        nonlocal active_merges
+        with lock:
+            active_merges += 1
+            merge_events.append(("start", active_merges))
+        try:
+            return real_merge(*args, **kw)
+        finally:
+            with lock:
+                merge_events.append(("end", active_merges))
+                active_merges -= 1
+
+    monkeypatch.setattr(bi, "merge", merge_probe)
+    out = bi.integrate_many(["REQ-A", "REQ-B"], repo=repo, runs_dir=runs,
+                            ledger_path=repo / "scripts" / "prd_ledger.py", python=sys.executable,
+                            rows=rows, runner=runner, no_ledger=True)
+    assert [r["requirement"] for r in out] == ["REQ-A", "REQ-B"]
+    assert all(r["result"] == "INTEGRATED" for r in out)
+    assert verifier_windows[0][0] < verifier_windows[1][1] and verifier_windows[1][0] < verifier_windows[0][1]
+    assert [n for event, n in merge_events if event == "start"] == [1, 1]
+
+
+def test_premerge_slots_limit_parallel_prepare_and_replace_dead_pid(tmp_path, monkeypatch):
+    counts, active = [], 0
+    lock = threading.Lock()
+
+    def hold_slot():
+        nonlocal active
+        with bi.premerge_slot(tmp_path):
+            with lock:
+                active += 1
+                counts.append(active)
+            time.sleep(0.2)
+            with lock:
+                active -= 1
+
+    threads = [threading.Thread(target=hold_slot) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert max(counts) == bi.PREMERGE_SLOTS
+    (tmp_path / "premerge.0.lock").write_text(json.dumps({"pid": 4242}), encoding="utf-8")
+    monkeypatch.setattr(bi.MergeQueue, "_alive", staticmethod(lambda pid: pid != 4242))
+    with bi.premerge_slot(tmp_path):
+        holder = json.loads((tmp_path / "premerge.0.lock").read_text(encoding="utf-8"))["pid"]
+        assert holder == os.getpid()
+    assert not (tmp_path / "premerge.0.lock").exists()
+
+
+def test_integrate_many_returns_results_in_input_order(tmp_path):
+    repo, base_commit = make_repo(tmp_path, {"seed.py": "x = 1\n"})
+    base, _ = base_commit.split()
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    add_run(repo, runs, "REQ-A", base, {"one.py": "def one():\n    return 1\n",
+                                        "tests/test_one.py": "from one import one\n\n\ndef test_one():\n    assert one() == 1\n"})
+    add_run(repo, runs, "REQ-B", base, {"two.py": "def two():\n    return 2\n",
+                                        "tests/test_two.py": "from two import two\n\n\ndef test_two():\n    assert two() == 2\n"})
+    rows = [{"id": "REQ-A", "priority": "P1", "summary": "one", "acceptance": "one"},
+            {"id": "REQ-B", "priority": "P1", "summary": "two", "acceptance": "two"}]
+    out = bi.integrate_many(["REQ-B", "REQ-A"], repo=repo, runs_dir=runs,
+                            ledger_path=repo / "scripts" / "prd_ledger.py", python=sys.executable,
+                            rows=rows, no_ledger=True)
+    assert [r["requirement"] for r in out] == ["REQ-B", "REQ-A"]
 
 
 def _killed_landing(tmp_path):

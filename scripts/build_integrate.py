@@ -70,6 +70,7 @@ QUEUE_WAIT_S = 1800
 QUEUE_POLL_S = 1.0
 TIMEOUT = -999  # gate_run's rc when a chunk outlived TEST_S
 VERIFIER_S = 900
+PREMERGE_SLOTS = 2
 
 
 # ---------------------------------------------------------------- git
@@ -99,13 +100,19 @@ def load_run(req: str, runs_dir: Path = RUNS_DIR) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def refuse_reason(run: dict, repo: Path = ROOT) -> str:
-    """Why this run may not be integrated right now, or ''."""
+def tree_dirty(repo: Path = ROOT) -> bool:
+    """True when the checkout has tracked changes (untracked files are ignored)."""
+    return bool(git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip())
+
+
+def refuse_reason(run: dict, repo: Path = ROOT, check_tree: bool = True) -> str:
+    """Why this run may not be integrated right now, or ''. The clean-tree check is
+    left out (check_tree=False) where the caller makes it itself, inside the merge turn."""
     if run.get("state") != "DONE":
         return f"run state is {run.get('state')!r}, not DONE"
     if not run.get("commit"):
         return "run has no commit"
-    if git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+    if check_tree and tree_dirty(repo):
         return "the checkout has tracked changes"
     return ""
 
@@ -850,6 +857,51 @@ class MergeQueue:
         return outcome
 
 
+@contextmanager
+def premerge_slot(runs_dir: Path, slots: int = PREMERGE_SLOTS):
+    """Bound RED/GREEN plus verifier preparation across integrator processes."""
+    Path(runs_dir).mkdir(parents=True, exist_ok=True)
+    owned: Path | None = None
+    while owned is None:
+        for n in range(slots):
+            path = Path(runs_dir) / f"premerge.{n}.lock"
+            try:
+                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    holder = int(json.loads(path.read_text(encoding="utf-8")).get("pid") or 0)
+                except (OSError, ValueError, AttributeError):
+                    holder = 0
+                if holder and MergeQueue._alive(holder):
+                    continue
+                try:  # created but its pid not written yet: that is a slot being taken, not a dead one
+                    if not holder and time.time() - path.stat().st_mtime < 5:
+                        continue
+                except OSError:
+                    continue
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+                try:
+                    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                except FileExistsError:
+                    continue
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump({"pid": os.getpid()}, fh)
+            owned = path
+            break
+        if owned is None:
+            time.sleep(QUEUE_POLL_S)
+    try:
+        yield
+    finally:
+        try:
+            owned.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def integrate(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR, ledger_path: Path = LEDGER,
               python: str = VENV_PY, rows: list[dict] | None = None, runner=None,
               dry_run: bool = False, no_ledger: bool = False, queue: MergeQueue | None = None) -> dict:
@@ -859,23 +911,173 @@ def integrate(req: str, *, repo: Path = ROOT, runs_dir: Path = RUNS_DIR, ledger_
     if dry_run:
         return _integrate(req, **kw)
     queue = queue or MergeQueue(Path(runs_dir), repo=repo)
-    try:
-        completed = (Path(runs_dir) / f"{req}.json").stat().st_mtime
-    except OSError:
-        completed = time.time()
-    queue.enqueue(req, completed)
+    enqueued = False
     result = "ERROR"
     try:
+        prep = _prepare(req, **kw)
+        if "terminal" in prep:
+            result = prep["terminal"]["result"]
+            return prep["terminal"]
+        try:
+            completed = (Path(runs_dir) / f"{req}.json").stat().st_mtime
+        except OSError:
+            completed = time.time()
+        queue.enqueue(req, completed)
+        enqueued = True
         with queue.turn(req):
-            out = _integrate(req, **kw)
+            out = _land(prep["prepared"], repo=repo, runs_dir=runs_dir, ledger_path=ledger_path,
+                        python=python, no_ledger=no_ledger)
             result = out["result"]
             return out
     finally:
-        queue.finish(req, result)
+        if enqueued:
+            queue.finish(req, result)
         # Whatever happened, the verifier reservation this run's launch held is done with:
         # used and recorded, not needed, or the run went back for a rebase or repair.
         build_kernel.spend_release(verify_key(build_kernel._read_json(Path(runs_dir) / f"{req}.json")),
                                    runs_dir)
+
+
+def integrate_many(reqs: list[str], *, workers: int = 2, **kw) -> list[dict]:
+    """Integrate several finished runs concurrently; the merge queue serializes landing."""
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(lambda req: _integrate_or_error(req, kw), reqs))
+
+
+def _integrate_or_error(req: str, kw: dict) -> dict:
+    """One run's failure is that run's result; it must not drop the others' results."""
+    try:
+        return integrate(req, **kw)
+    except Exception as exc:  # reported in the result, not swallowed
+        return {"requirement": req, "result": "ERROR", "detail": f"{type(exc).__name__}: {exc}"}
+
+
+def _done(req: str, out: dict, runs_dir: Path, dry_run: bool, result: str, **extra) -> dict:
+    out.update(result=result, **extra)
+    if not dry_run:
+        (Path(runs_dir) / f"{req}.integration.json").write_text(
+            json.dumps(out, indent=2), encoding="utf-8", newline="\n")
+    return out
+
+
+def _prepare(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, python: str,
+             rows: list[dict] | None, runner, dry_run: bool, no_ledger: bool,
+             check_tree: bool = False) -> dict:
+    """Everything that needs no turn. The clean-tree check is _land's, inside the turn: out
+    here another run may be mid-landing (merge, ledger, commit) and its tracked changes are
+    not this run's refusal, and anything checked now is stale by the time it merges."""
+    run = load_run(req, runs_dir)
+    why = refuse_reason(run, repo, check_tree=check_tree)
+    # A DONE run with no commit that says the acceptance is already met is confirmed on
+    # HEAD rather than refused - on a clean checkout, like any integration.
+    confirm = why == "run has no commit" and bool((run.get("evidence") or {}).get("acceptance_met"))
+    if confirm and check_tree and tree_dirty(repo):
+        why, confirm = "the checkout has tracked changes", False
+    if why and not confirm:
+        raise KernelError(f"refusing {req}: {why}")
+    row = next((r for r in (rows if rows is not None else load_rows()) if r["id"] == req), None)
+    if row is None:
+        raise KernelError(f"{req} is not a ledger row")
+    out = {"requirement": req, "result": "", "red_green": {}, "verifier": None,
+           "integrated_commit": "", "ledger_status": ""}
+
+    if confirm:
+        return {"prepared": {"req": req, "run": run, "row": row, "out": out, "confirm": True,
+                             "runner": runner, "dry_run": dry_run}}
+    try:
+        clash = collision(run, repo)
+    except KernelError as exc:  # the base is no longer an ancestor of HEAD
+        return {"terminal": _done(req, out, runs_dir, dry_run, "REBASE_REQUIRED", detail=str(exc))}
+    if clash:  # park it with its worktree kept: the worker rebases onto HEAD
+        return {"terminal": _done(req, out, runs_dir, dry_run, "REBASE_REQUIRED",
+                                  detail=f"HEAD changed {clash} since {run['base_sha'][:10]}")}
+    tests = commit_test_files(run, repo)
+    with premerge_slot(runs_dir):
+        out["red_green"] = rg = red_green(run, tests, repo, python)
+        if rg["result"] != "OK":
+            return {"terminal": _done(req, out, runs_dir, dry_run, rg["result"])}
+        required = needs_verifier(row, run.get("files_changed", []))
+        if dry_run:
+            return {"terminal": _done(req, out, runs_dir, dry_run, "DRY_RUN", verifier_required=required)}
+        if required:
+            out["verifier"] = verifier = run_verifier(row, run, rg, repo=repo, runner=runner, runs_dir=runs_dir)
+            if verifier["verdict"] != "PASS":
+                return {"terminal": _done(req, out, runs_dir, dry_run, "VERIFIER_FAIL")}
+        else:
+            verifier = None
+    return {"prepared": {"req": req, "run": run, "row": row, "out": out, "confirm": False, "rg": rg,
+                         "required": required, "verifier": verifier, "tests": tests,
+                         "runner": runner, "dry_run": dry_run}}
+
+
+def _land(prepared: dict, *, repo: Path, runs_dir: Path, ledger_path: Path, python: str,
+          no_ledger: bool) -> dict:
+    req = prepared["req"]
+    run = prepared["run"]
+    row = prepared["row"]
+    out = prepared["out"]
+    dry_run = prepared.get("dry_run", False)
+
+    def done(result: str, **extra) -> dict:
+        return _done(req, out, runs_dir, dry_run, result, **extra)
+
+    # Checked here, in the turn and right before the merge: merge() cherry-picks and may
+    # `reset --hard` on a gate failure, which would destroy uncommitted tracked work.
+    if tree_dirty(repo):
+        raise KernelError(f"refusing {req}: the checkout has tracked changes")
+    if prepared.get("confirm"):
+        return _confirm_existing(req, run, row, out, done, repo=repo, runs_dir=runs_dir, ledger_path=ledger_path,
+                                 python=python, runner=prepared.get("runner"), dry_run=dry_run,
+                                 no_ledger=no_ledger)
+    try:
+        clash = collision(run, repo)
+    except KernelError as exc:
+        return done("REBASE_REQUIRED", detail=str(exc))
+    if clash:
+        return done("REBASE_REQUIRED", detail=f"HEAD changed {clash} since {run['base_sha'][:10]}")
+    rg = prepared["rg"]
+    required = prepared["required"]
+    verifier = prepared["verifier"]
+    tests = prepared["tests"]
+    merged = merge(run, tests, repo, python, runs_dir=runs_dir)
+    out.update(impact=merged.get("impact", "NORMAL"), gate_chunks=merged.get("gate_chunks", 0),
+               gate_workers=merged.get("gate_workers", 1))
+    if merged["result"] != "INTEGRATED":
+        return done(merged["result"], detail=merged.get("detail") or merged.get("reset", ""),
+                    failures=merged.get("failures", []), affected=merged.get("affected", []),
+                    pre_existing_failures=merged.get("pre_existing", []))
+    out["integrated_commit"] = merged["integrated_commit"]
+    out["pre_existing_failures"] = merged.get("pre_existing", [])
+    if not no_ledger:
+        status, gaps = decide_status(run, rg, merged, required, verifier)
+        named = named_tests(rg.get("proving") or rg.get("tests"))
+        if status == "VERIFIED" and not named:
+            # A v7 row is VERIFIED only by a named test (prd_ledger --check); a file is not one.
+            status, gaps = "PARTIAL", gaps + ["RED/GREEN named no test the ledger can cite"]
+        impl = f"{(run.get('evidence') or {}).get('summary', '')} (build run, commit {merged['integrated_commit'][:9]})"
+        rulings = carried_rulings(row.get("next_action") or "")
+        nxt = "" if status == "VERIFIED" else "GAPS: " + "; ".join(gaps) + (f" | {rulings}" if rulings else "")
+        proof = evidence_text(run, rg, merged, verifier) if status == "VERIFIED" else ""
+        cited = ({"tests": named,
+                  "files": cited_files(row, run.get("files_changed", []))}
+                 if status == "VERIFIED" else None)
+        append_progress(Path(ledger_path), req, status, impl, nxt, proof, cited)
+        commit_ledger(Path(ledger_path), req, status, repo)
+        out["ledger_status"] = status
+        out["gaps"] = gaps
+    clear_landing(runs_dir)  # gated, and in the ledger: nothing left to take back
+    remove_worker(run, repo)
+    return done("INTEGRATED")
+
+
+def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, python: str,
+               rows: list[dict] | None, runner, dry_run: bool, no_ledger: bool) -> dict:
+    prep = _prepare(req, repo=repo, runs_dir=runs_dir, ledger_path=ledger_path, python=python,
+                    rows=rows, runner=runner, dry_run=dry_run, no_ledger=no_ledger, check_tree=True)
+    if "terminal" in prep:
+        return prep["terminal"]
+    return _land(prep["prepared"], repo=repo, runs_dir=runs_dir, ledger_path=ledger_path,
+                 python=python, no_ledger=no_ledger)
 
 
 #: An owner ruling that keeps a row's extra scope (00-owner-directive-2026-10-08e): its
@@ -968,83 +1170,6 @@ def _confirm_existing(req: str, run: dict, row: dict, out: dict, done, *, repo: 
         commit_ledger(Path(ledger_path), req, "VERIFIED", repo)
         out["ledger_status"] = "VERIFIED"
     return done("CONFIRMED", tests=tests)
-
-
-def _integrate(req: str, *, repo: Path, runs_dir: Path, ledger_path: Path, python: str,
-               rows: list[dict] | None, runner, dry_run: bool, no_ledger: bool) -> dict:
-    run = load_run(req, runs_dir)
-    why = refuse_reason(run, repo)
-    # A DONE run with no commit that says the acceptance is already met is confirmed on
-    # HEAD rather than refused - on a clean checkout, like any integration.
-    confirm = why == "run has no commit" and bool((run.get("evidence") or {}).get("acceptance_met"))
-    if confirm and git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip():
-        why, confirm = "the checkout has tracked changes", False
-    if why and not confirm:
-        raise KernelError(f"refusing {req}: {why}")
-    row = next((r for r in (rows if rows is not None else load_rows()) if r["id"] == req), None)
-    if row is None:
-        raise KernelError(f"{req} is not a ledger row")
-    out = {"requirement": req, "result": "", "red_green": {}, "verifier": None,
-           "integrated_commit": "", "ledger_status": ""}
-
-    def done(result: str, **extra) -> dict:
-        out.update(result=result, **extra)
-        if not dry_run:
-            (Path(runs_dir) / f"{req}.integration.json").write_text(
-                json.dumps(out, indent=2), encoding="utf-8", newline="\n")
-        return out
-
-    if confirm:
-        return _confirm_existing(req, run, row, out, done, repo=repo, runs_dir=runs_dir, ledger_path=ledger_path,
-                                 python=python, runner=runner, dry_run=dry_run, no_ledger=no_ledger)
-    try:
-        clash = collision(run, repo)
-    except KernelError as exc:  # the base is no longer an ancestor of HEAD
-        return done("REBASE_REQUIRED", detail=str(exc))
-    if clash:  # park it with its worktree kept: the worker rebases onto HEAD
-        return done("REBASE_REQUIRED", detail=f"HEAD changed {clash} since {run['base_sha'][:10]}")
-    tests = commit_test_files(run, repo)
-    out["red_green"] = rg = red_green(run, tests, repo, python)
-    if rg["result"] != "OK":
-        return done(rg["result"])
-    required = needs_verifier(row, run.get("files_changed", []))
-    if dry_run:
-        return done("DRY_RUN", verifier_required=required)
-    if required:
-        out["verifier"] = verifier = run_verifier(row, run, rg, repo=repo, runner=runner, runs_dir=runs_dir)
-        if verifier["verdict"] != "PASS":
-            return done("VERIFIER_FAIL")
-    else:
-        verifier = None
-    merged = merge(run, tests, repo, python, runs_dir=runs_dir)
-    out.update(impact=merged.get("impact", "NORMAL"), gate_chunks=merged.get("gate_chunks", 0),
-               gate_workers=merged.get("gate_workers", 1))
-    if merged["result"] != "INTEGRATED":
-        return done(merged["result"], detail=merged.get("detail") or merged.get("reset", ""),
-                    failures=merged.get("failures", []), affected=merged.get("affected", []),
-                    pre_existing_failures=merged.get("pre_existing", []))
-    out["integrated_commit"] = merged["integrated_commit"]
-    out["pre_existing_failures"] = merged.get("pre_existing", [])
-    if not no_ledger:
-        status, gaps = decide_status(run, rg, merged, required, verifier)
-        named = named_tests(rg.get("proving") or rg.get("tests"))
-        if status == "VERIFIED" and not named:
-            # A v7 row is VERIFIED only by a named test (prd_ledger --check); a file is not one.
-            status, gaps = "PARTIAL", gaps + ["RED/GREEN named no test the ledger can cite"]
-        impl = f"{(run.get('evidence') or {}).get('summary', '')} (build run, commit {merged['integrated_commit'][:9]})"
-        rulings = carried_rulings(row.get("next_action") or "")
-        nxt = "" if status == "VERIFIED" else "GAPS: " + "; ".join(gaps) + (f" | {rulings}" if rulings else "")
-        proof = evidence_text(run, rg, merged, verifier) if status == "VERIFIED" else ""
-        cited = ({"tests": named,
-                  "files": cited_files(row, run.get("files_changed", []))}
-                 if status == "VERIFIED" else None)
-        append_progress(Path(ledger_path), req, status, impl, nxt, proof, cited)
-        commit_ledger(Path(ledger_path), req, status, repo)
-        out["ledger_status"] = status
-        out["gaps"] = gaps
-    clear_landing(runs_dir)  # gated, and in the ledger: nothing left to take back
-    remove_worker(run, repo)
-    return done("INTEGRATED")
 
 
 def main(argv: list[str] | None = None) -> int:
