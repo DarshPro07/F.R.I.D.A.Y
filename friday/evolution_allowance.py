@@ -237,6 +237,12 @@ class EvolutionAllowance:
             return StepDecision(True)
         dimension = used[0]
         spent = {d: self.spent(period, d) for d in DIMENSIONS}
+        archived = self._refusal_record(
+            archive, objective_id=objective_id, parent_version=parent_version,
+            candidate_version=candidate_version, hypothesis=hypothesis, scope=scope,
+            period=period, dimension=dimension)
+        if archived is not None:
+            return StepDecision(False, REASON_EXHAUSTED, dimension, archived["id"])
         row = archive.record(
             objective=objective_id, parent_version=parent_version,
             candidate_version=candidate_version, hypothesis=hypothesis, scope=scope,
@@ -248,6 +254,22 @@ class EvolutionAllowance:
                         "unit": UNITS[dimension]},
             decision=A.REFUSED, rollback_version=parent_version)
         return StepDecision(False, REASON_EXHAUSTED, dimension, row["id"])
+
+    def _refusal_record(self, archive: A.EvolutionArchive, *, objective_id: str,
+                        parent_version: str, candidate_version: str, hypothesis: str,
+                        scope, period: str, dimension: str) -> dict | None:
+        key = A.fingerprint(parent_version=parent_version, hypothesis=hypothesis, scope=scope)
+        for row in archive.query(decision=A.REFUSED):
+            evaluation = row.get("evaluation") or {}
+            if row.get("objective") == objective_id \
+                    and row.get("fingerprint") == key \
+                    and row.get("candidate_version") == candidate_version \
+                    and row.get("rollback_version") == parent_version \
+                    and evaluation.get("refused") == REASON_EXHAUSTED \
+                    and evaluation.get("period") == period \
+                    and evaluation.get("dimension") == dimension:
+                return row
+        return None
 
 
 def yield_to_foreground(store, gov: G.Governor, *, stop=None) -> list[dict]:

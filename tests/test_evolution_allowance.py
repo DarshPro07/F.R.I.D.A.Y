@@ -149,6 +149,22 @@ def test_a_refusal_is_not_a_lost_experiment(tmp_path):
     store.close()
 
 
+def test_repeated_exhausted_checks_reuse_the_refusal_record(tmp_path):
+    store, gov = Store(tmp_path / "e.sqlite3"), _gov()
+    allowance, archive = _allowance(tmp_path)
+    run_id, _ = _running_experiment(store, gov)
+    allowance.charge(gov, run_id, money_usd=5.0, now=NOW)
+
+    first = _step(allowance, archive, run_id)
+    second = _step(allowance, archive, run_id)
+
+    assert not first.allowed and first.reason == W.REASON_EXHAUSTED
+    assert not second.allowed and second.reason == W.REASON_EXHAUSTED
+    assert second.archived == first.archived
+    assert [row["id"] for row in archive.query(decision=A.REFUSED)] == [first.archived]
+    store.close()
+
+
 def test_a_running_evolution_lease_never_makes_a_foreground_task_wait(tmp_path):
     store, gov = Store(tmp_path / "e.sqlite3"), _gov()
     stopped_runs = []
