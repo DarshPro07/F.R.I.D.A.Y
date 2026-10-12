@@ -5381,6 +5381,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Implemented the smallest ledger-gap slice: repeated exhausted authorize_step polling now reuses an existing matching REFUSED archive record instead of appending another one. The match is scoped to objective, experiment fingerprint, candidate version, rollback parent, period, and exhausted dimension, (build run, commit b84e72b81)',
         "next_action": "GAPS: No live caller invokes yield_to_foreground when a foreground task starts; wiring still needs the fenced objectives/planner owner path.; The experiment runner that calls authorize_step and charge each step is still FUTURE in reachability.; The stop callback still has no internally enforced time bound; bounded stop time depends on the caller.; Cross-process locking of the spend ledger is still not implemented; it remains an in-process lock plus fsync'd appends.; Full EVOLAB-002 acceptance remains partial until live foreground preemption and runner wiring exist.; implementer did not claim acceptance met",
     }),
+    ('INTAKE-006', {
+        "status": PARTIAL,
+        "current_implementation": 'Design: friday/skills/dependencies.py, registry.py and bridge.py belong to other builds, so I built a new module, friday/skills/fact_memory.py (SkillFactMemory). It reuses SkillDependencyGraph for fingerprints, classify() and identity(), and SkillRegistry.transition(), so SKILL-003 behaviour is unch (build run, commit 77d2fccb6)',
+        "next_action": 'GAPS: Nothing calls add_fact, sweep or record_intake yet. The generated-skill writer, the intake pipeline (INTAKE-005) and the git-change trigger are later slices. The module is declared FUTURE in reachability.; A skill returns from NEEDS_REVALIDATION to ACTIVE through the existing SKILL-003 lifecycle. revalidate_fact() re-baselines the fact only and does not transition the skill.; Evidence is self-reported (kind, ref, passed). Nothing in this module runs the cited test or reads the file back. The caller that has just run the test must supply it.; Intake package versions are stored as given. Nothing yet compares them to installed versions; only per-fact package dependencies are drift-checked.',
+    }),
 ]
 
 
