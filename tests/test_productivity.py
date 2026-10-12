@@ -303,3 +303,59 @@ def test_the_objective_wall_time_is_its_own_start_to_finish(seeded):
     rep = productivity.report("obj-a", db_path=db)
     assert rep["objective_wall_time_s"] == 125.0
     assert rep["wall_time_s"] == pytest.approx(30.5)
+
+
+def test_a_request_that_found_no_route_was_never_sent_so_it_carries_no_spend(seeded, tmp_path):
+    db, _, _ = seeded
+    from friday import model_gateway as mg
+    ledger = mg.GatewayTelemetry(tmp_path / "gateway.sqlite3")
+    split = json.dumps({"instructions": 100, "task": 400})
+    ledger.record(objective_id="obj-a", task_class="STANDARD", status="ok",
+                  input_tokens=500, output_tokens=40, latency_ms=900, input_split=split)
+    # The gateway writes the compiled context's size on a request it could not route,
+    # but no provider was ever called: nothing was billed and nothing was dispatched.
+    ledger.record(objective_id="obj-a", task_class="STANDARD", status="failed",
+                  input_tokens=8_000, input_split=split, entitlement_state="NO_ROUTE")
+    calls = productivity.report("obj-a", db_path=db, telemetry=ledger)["model_calls"]
+    assert calls["calls"] == 1
+    assert calls["failed"] == 1          # the failure is still reported
+    assert calls["input_tokens"] == 500
+    assert calls["input_by_source"] == {"instructions": 100, "task": 400}
+    assert calls["unattributed_input_tokens"] == 0
+
+
+@pytest.mark.parametrize("state", ["", "BUDGET_EXHAUSTED", "DATA_CLASS_REFUSED",
+                                   "NEEDS_SCOPE", "SAFEGUARD_BLOCKED"])
+def test_a_gate_refusal_is_counted_as_refused_and_carries_no_spend(seeded, tmp_path, state):
+    db, _, _ = seeded
+    from friday import model_gateway as mg
+    ledger = mg.GatewayTelemetry(tmp_path / "gateway.sqlite3")
+    # Every state the gateway writes on a refused row that never reached a provider.
+    ledger.record(objective_id="obj-a", task_class="STANDARD", status="refused",
+                  input_tokens=9_000, latency_ms=77, retries=4, entitlement_state=state,
+                  input_split=json.dumps({"instructions": 100, "task": 400}))
+    calls = productivity.report("obj-a", db_path=db, telemetry=ledger)["model_calls"]
+    assert calls["refused"] == 1
+    assert (calls["calls"], calls["retries"], calls["input_tokens"]) == (0, 0, 0)
+    assert calls["latency_s"] == 0
+    assert calls["input_by_source"] == {}
+    assert calls["unattributed_input_tokens"] == 0
+
+
+def test_a_gateway_call_without_a_working_set_is_reported_by_the_heuristic_split(seeded, tmp_path):
+    db, _, _ = seeded
+    from friday import model_gateway as mg
+    ledger = mg.GatewayTelemetry(tmp_path / "gateway.sqlite3")
+    gw = mg.ModelGateway(telemetry=ledger)
+    messages = [{"role": "system", "content": "s" * 40},
+                {"role": "user", "content": "u" * 80}]
+    # A caller that compiled no WorkingSet: a message list and no context telemetry.
+    req = mg.ModelGatewayRequest(objective_id="obj-a", task_class=mg.STANDARD,
+                                 context_package=messages)
+    gw._record(req, status="ok", provider="fake", model="fake-1",
+               input_tokens=30, output_tokens=5)
+    calls = productivity.report("obj-a", db_path=db, telemetry=ledger)["model_calls"]
+    assert calls["input_by_source"] == {"code": 0, "history": 0, "instructions": 10,
+                                        "task": 20, "tool_results": 0}
+    assert calls["unattributed_input_tokens"] == 0
+    assert (calls["input_tokens"], calls["output_tokens"]) == (30, 5)

@@ -137,6 +137,10 @@ def _model_calls(telemetry) -> dict:
     before the column existed, is counted as unattributed rather than filed
     under another name. `retries` sums the retries the gateway itself recorded
     per row (`gateway_calls.retries`); `retried` counts the rows it retried.
+
+    Only a row that reached a provider is a call and carries spend. `refused` counts
+    every refused row and `failed` every failed one, so neither is a subset of
+    `calls`: a gate refusal and a request that found no route were never sent.
     """
     from .model_gateway import INPUT_SOURCES
     out = {"calls": 0, "retried": 0, "failed": 0, "refused": 0, "retries": 0,
@@ -144,13 +148,19 @@ def _model_calls(telemetry) -> dict:
            "input_by_source": {}, "unattributed_input_tokens": 0}
     for row in telemetry:
         status = row["status"]
+        state = row.get("entitlement_state")
         if status == "refused":
             out["refused"] += 1
             # A gate refusal (budget, data class, scope) never reached a provider
             # and carries nothing. A provider safeguard refusal did: the call was
             # sent, so its tokens, time and the route's retries are real spend.
-            if row.get("entitlement_state") != "SAFEGUARD_REFUSED":
+            if state != "SAFEGUARD_REFUSED":
                 continue
+        elif state == "NO_ROUTE":
+            # The gateway found no eligible route, so nothing was dispatched; the
+            # row's input_tokens is the compiled context's size, not a billed call.
+            out["failed"] += 1
+            continue
         out["calls"] += 1
         if status in ("retried", "failed"):
             out[status] += 1
