@@ -9,12 +9,14 @@ import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import build_integrate as bi  # noqa: E402
+import build_kernel  # noqa: E402
 from build_kernel import KernelError  # noqa: E402
 
 ID = ("-c", "user.name=t", "-c", "user.email=t@t")
@@ -572,7 +574,7 @@ def test_a_wide_affected_set_is_recorded_with_its_chunk_count(tmp_path, monkeypa
     monkeypatch.setattr(bi, "gate_run", lambda python, cwd, tests: (0, ["ok"]))
     # gate_workers asks the host governor for memory slots: pin it, or the count follows the
     # machine's free memory (2026-10-05: it failed MODEL-012's gate with more memory free).
-    monkeypatch.setattr(bi, "concurrency", lambda *a, **kw: (1, "pinned"))
+    monkeypatch.setattr(bi, "gate_slots", lambda *a, **kw: (1, "pinned"))
     out = go(repo, runs, rows, runner=pass_runner())
     assert out["impact"] == "WIDE" and out["gate_chunks"] == 2 and out["gate_workers"] == 1
 
@@ -583,14 +585,55 @@ def test_a_narrow_set_is_not_wide(tmp_path):
     assert out["impact"] == "NORMAL" and out["gate_chunks"] >= 1
 
 
-def test_gate_workers_never_exceed_the_governor(monkeypatch):
-    monkeypatch.setattr(bi, "concurrency", lambda: (1, "one slot"))
+def test_gate_workers_never_exceed_the_gate_slots(monkeypatch):
+    monkeypatch.setattr(bi, "gate_slots", lambda: (1, "one slot"))
     assert bi.gate_workers(500) == 1
-    monkeypatch.setattr(bi, "concurrency", lambda: (3, "ok"))
+    monkeypatch.setattr(bi, "gate_slots", lambda: (3, "ok"))
     assert bi.gate_workers(500) == 3 and bi.gate_workers(bi.WIDE_IMPACT_FILES) == 1
     assert bi.gate_workers(bi.WIDE_IMPACT_FILES + 1) == 2  # only two chunks exist
-    monkeypatch.setattr(bi, "concurrency", lambda: (0, "pressure"))
+    monkeypatch.setattr(bi, "gate_slots", lambda: (0, "pressure"))
     assert bi.gate_workers(500) == 1  # the gate still has to run
+
+
+class _Limits:
+    max_workers = 3
+
+    @staticmethod
+    def ram_floor(total_gb):
+        return 1.0
+
+
+class _Gov:
+    """A governor reading of the shape admit() uses: level, sample with available RAM and commit."""
+    thresholds = _Limits()
+
+    def __init__(self, level, available_gb, commit_gb=None):
+        sample = SimpleNamespace(ram_available_gb=available_gb, total_gb=lambda: 16.0)
+        if commit_gb is not None:
+            sample.commit_available_gb = commit_gb
+        self._p = SimpleNamespace(level=level, sample=sample)
+
+    def pressure(self):
+        return self._p
+
+
+def test_gate_slots_size_chunks_by_a_pytest_chunk_not_a_build_worker(tmp_path, monkeypatch):
+    # 2026-10-12: sized by a build worker's predicted peak, a WIDE gate ran its chunks one after
+    # another for 50 minutes with 3 GB free. Reserve here is ram_floor 1.0 + 1.0 = 2.0 GB.
+    monkeypatch.setattr(build_kernel, "leased_gb", lambda runs_dir=None: 0.0)
+    assert bi.gate_slots(_Gov("NORMAL", 2.0 + 3 * bi.GATE_CHUNK_GB), tmp_path)[0] == 3
+    assert bi.gate_slots(_Gov("NORMAL", 2.0 + 2.5 * bi.GATE_CHUNK_GB), tmp_path)[0] == 2
+    assert bi.gate_slots(_Gov("NORMAL", 99.0), tmp_path)[0] == bi.GATE_MAX_WORKERS
+    assert bi.gate_slots(_Gov("NORMAL", 2.5), tmp_path)[0] == 1  # never below one: the gate has to run
+
+
+def test_gate_slots_respect_pressure_commit_and_live_leases(tmp_path, monkeypatch):
+    monkeypatch.setattr(build_kernel, "leased_gb", lambda runs_dir=None: 0.0)
+    assert bi.gate_slots(_Gov("HIGH", 10.0), tmp_path)[0] == 1
+    assert bi.gate_slots(_Gov("CRITICAL", 10.0), tmp_path)[0] == 1
+    assert bi.gate_slots(_Gov("NORMAL", 10.0, commit_gb=2.0 + bi.GATE_CHUNK_GB), tmp_path)[0] == 1
+    monkeypatch.setattr(build_kernel, "leased_gb", lambda runs_dir=None: 2 * bi.GATE_CHUNK_GB)
+    assert bi.gate_slots(_Gov("NORMAL", 2.0 + 3 * bi.GATE_CHUNK_GB), tmp_path)[0] == 1
 
 
 def test_needs_verifier_goes_through_agent_utility():

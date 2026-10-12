@@ -36,7 +36,7 @@ sys.path.insert(0, str(HERE.parent))
 import build_kernel  # noqa: E402
 import build_providers as P  # noqa: E402
 from build_kernel import (ROOT, RUNS_DIR, VENV_PY, KernelError, agent_utility,  # noqa: E402
-                          concurrency, load_rows)
+                          load_rows)
 import test_impact  # noqa: E402
 
 LEDGER = ROOT / "scripts" / "prd_ledger.py"
@@ -63,6 +63,10 @@ GIT_S = 120
 TEST_S = 3600
 GATE_CHUNK = 40
 WIDE_IMPACT_FILES = 60  # an affected set larger than this is its own, chunked job
+#: One gate chunk (a pytest process over GATE_CHUNK files) at its peak on this host. Assumed from the
+#: build venv's test processes (0.3-0.7 GB) with headroom; replace with a measured figure when recorded.
+GATE_CHUNK_GB = 0.8
+GATE_MAX_WORKERS = 3
 QUEUE_FILE = "merge_queue.jsonl"
 QUEUE_LOCK = "merge_queue.lock"
 LANDING_FILE = "merge_landing.json"  # a pick on HEAD the gate has not settled yet
@@ -550,12 +554,28 @@ def gate_chunk(python: str, cwd: Path, tests: list[str]) -> tuple[int, list[str]
     return res.returncode, [ln.strip() for ln in out.splitlines()]
 
 
+def gate_slots(gov=None, runs_dir: Path = RUNS_DIR) -> tuple[int, str]:
+    """How many gate chunks fit in memory now: free RAM and commit above the governor's
+    reserve and every live worker lease, one chunk per GATE_CHUNK_GB, at most
+    GATE_MAX_WORKERS; one under HIGH or CRITICAL pressure, never fewer than one (the gate
+    has to run). Sized for a pytest chunk: sized for a build worker (concurrency()), a WIDE
+    gate ran its chunks one after another for 50 minutes with 3 GB free (2026-10-12)."""
+    gov = gov or build_kernel.host_governor()
+    pressure = gov.pressure()
+    sample = pressure.sample
+    if pressure.level in ("HIGH", "CRITICAL") or sample is None:
+        return 1, f"pressure {pressure.level}"
+    reserve = gov.thresholds.ram_floor(sample.total_gb()) + 1.0
+    free = min(build_kernel._headroom(sample, reserve)) - build_kernel.leased_gb(runs_dir)
+    return max(1, min(GATE_MAX_WORKERS, int(free // GATE_CHUNK_GB))), f"{free:.1f} GB free above the reserve"
+
+
 def gate_workers(n_tests: int) -> int:
     """Chunks the gate may run at once: only a WIDE set runs in parallel, and never
-    more than the host governor's concurrency() slots (1 on this host)."""
+    more than gate_slots() allows."""
     if n_tests <= WIDE_IMPACT_FILES:
         return 1
-    slots, _ = concurrency()
+    slots, _ = gate_slots()
     return max(1, min(slots, -(-n_tests // GATE_CHUNK)))
 
 
