@@ -187,6 +187,10 @@ DECLARED = {
                           "result on the agent ledger; the live caller that "
                           "picks role and route per objective task is a later "
                           "slice, run by tests/test_specialist.py"),
+    "friday/skills/fact_memory": (FUTURE,
+                                  "INTAKE-006: per-fact skill memory (verified fact + file/glob/package "
+                                  "fingerprint + commit; sweep marks only affected facts and skills), "
+                                  "the intake caller is a later slice, run by tests/test_skill_fact_memory.py"),
     "friday/ultracode/review_workflow": (FUTURE,
                                          "UCW-006: friday.code_review v1, risk-scored panel review, "
                                          "run by tests/test_workflow_code_review.py"),
