@@ -5401,6 +5401,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Fixed the reviewer's major and minor findings at the root, inside friday/research_routing.py only. A research artifact with no synthesis is a fetched corpus (what web_deep_research produces), so _promote_small_facts now returns () for it and _point_brain records finding = synthesis or 'no finding re (build run, commit 80713026f)",
         "next_action": 'GAPS: Epistemic LedgerClaims are still not persisted (no persistence layer); only their ids go into the Brain record. Separate slice.; MAX_FACT_CHARS=240 and MAX_PROMOTED=5 remain unconfirmed owner assumptions.; web_deep_research gets no memory promotion at all now, because it supplies no synthesis. If the owner wants distilled facts from it, research.py (owned by another build) must supply a synthesis.; A route() failure after the cache save still propagates out of web_deep_research.',
     }),
+    ('MODEL-004', {
+        "status": PARTIAL,
+        "current_implementation": 'Design: new friday/route_onboarding.py is the onboarding trigger the previous slice left as its gap. onboard_route(gw, provider, model) skips a declared route (DECLARED) or one with a stored profile (ALREADY_PROFILED). Otherwise it runs model_profiling.profile_route through gateway_completer, with p (build run, commit 5017544fa)',
+        "next_action": 'GAPS: Nothing in production calls onboard_new_routes yet. model_gateway.py is owned by another build, so the route-discovery call site (where the gateway or scout first sees a new provider/model pair) is not wired. The module is FUTURE in reachability.; The image_url data-URI shape for the vision probe is still an unverified assumption about the worker.; A stored profile is never refreshed; there is no staleness policy.',
+    }),
 ]
 
 
