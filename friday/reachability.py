@@ -401,6 +401,10 @@ DECLARED = {
                                  "profiler, built and tested against a scripted gateway; its "
                                  "caller is the onboarding trigger for a newly seen route, "
                                  "run by tests/test_gateway_completer.py"),
+    "friday/release_boundary": (FUTURE,
+                                 "EVOLAB-003: the Release Boundary that decides what a skill, adapter or core "
+                                 "evolution candidate may do alone; the evolution controller that calls it is "
+                                 "a later slice, run by tests/test_release_boundary.py"),
     "friday/deliberation": (FUTURE,
                             "FAB-009: multi-model deliberation, built and tested against "
                             "deterministic stand-in models; its caller is a model_gateway-backed "
