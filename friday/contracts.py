@@ -28,6 +28,10 @@ import uuid
 from dataclasses import dataclass, field, fields, replace
 from datetime import datetime, timezone
 from pathlib import PurePath
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from friday.privacy_budget import PrivacyBudget
 
 # --- statuses --------------------------------------------------------------
 
@@ -692,6 +696,10 @@ class Envelope:
     #: At most this many changes (write or external-action calls) for the
     #: whole objective (BCON-001); 0 is no ceiling of its own.
     max_side_effects: int = 0
+    #: What the objective may let leave the machine (PRIV-001): the most
+    #: sensitive data class, the providers and the external services. None is
+    #: no budget of its own; the global data-class policy still applies.
+    privacy_budget: "PrivacyBudget | None" = None
 
     def __post_init__(self) -> None:
         if not self.run_id:
@@ -789,6 +797,13 @@ class Envelope:
         problems += [f"capability version {cap}"
                      for cap, fingerprint in parent.capability_hashes.items()
                      if self.capability_hashes.get(cap) != fingerprint]
+        # A privacy budget may be tightened, never dropped or loosened
+        # (PRIV-001): a child with none would be free of its parent's.
+        if parent.privacy_budget is not None:
+            if self.privacy_budget is None:
+                problems.append("privacy budget")
+            else:
+                problems += self.privacy_budget.wider_than(parent.privacy_budget)
         return problems
 
     # -- the stored form -------------------------------------------------
@@ -817,6 +832,8 @@ class Envelope:
             "expires_at": self.expires_at,
             "capability_hashes": dict(self.capability_hashes),
             "max_side_effects": self.max_side_effects,
+            "privacy_budget": (None if self.privacy_budget is None
+                               else self.privacy_budget.to_dict()),
         }
 
     @classmethod
@@ -858,7 +875,17 @@ class Envelope:
             expires_at=raw["expires_at"],
             capability_hashes=dict(raw.get("capability_hashes") or {}),
             max_side_effects=int(raw.get("max_side_effects", 0)),
+            privacy_budget=_stored_budget(raw.get("privacy_budget")),
         )
+
+
+def _stored_budget(raw) -> "PrivacyBudget | None":
+    """The privacy budget of a stored envelope; None for one from before budgets."""
+    if raw is None:
+        return None
+    from friday.privacy_budget import PrivacyBudget
+
+    return PrivacyBudget.from_dict(raw)
 
 
 #: Kinds of action a person forbids or limits (PRD v7 BCON-001), by the words

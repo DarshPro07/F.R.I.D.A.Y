@@ -1672,17 +1672,9 @@ class ModelGateway:
         ceiling above still applies."""
         if not objective_id:
             return None
-        store = self._objective_store
+        store = self._objective_store_handle()
         if store is None:
-            try:
-                # The process's one store handle - the same one the driver
-                # and every tool use, so the budget read here is the budget
-                # they see (ADA_DB honoured; never a second connection).
-                from friday.toolsets.memory import store as _store
-                store = self._objective_store = _store()
-            except Exception:  # noqa: BLE001 - see docstring
-                logger.debug("gateway: objective store unavailable for budget", exc_info=True)
-                return None
+            return None
         try:
             if store.objective_run(objective_id) is None:
                 return None
@@ -1691,6 +1683,46 @@ class ModelGateway:
         except Exception:  # noqa: BLE001
             logger.debug("gateway: objective budget check failed", exc_info=True)
             return None
+
+    def _objective_store_handle(self):
+        """The objective store, opened lazily, or None when it cannot be."""
+        store = self._objective_store
+        if store is None:
+            try:
+                # The process's one store handle - the same one the driver
+                # and every tool use, so the budget read here is the budget
+                # they see (ADA_DB honoured; never a second connection).
+                from friday.toolsets.memory import store as _store
+                store = self._objective_store = _store()
+            except Exception:  # noqa: BLE001
+                logger.debug("gateway: objective store unavailable", exc_info=True)
+                return None
+        return store
+
+    def _privacy_budget(self, objective_id: str):
+        """The privacy budget (PRIV-001) the objective's execution envelope
+        declares, or None when it declares none (or there is no such run).
+
+        Unlike the spend budget, a budget that is there but cannot be read is
+        not "unknown": it is read as permitting no provider, because a
+        privacy limit that fails open is not a limit."""
+        if not objective_id:
+            return None
+        store = self._objective_store_handle()
+        if store is None:
+            return None
+        from friday import contracts
+        from friday.privacy_budget import PrivacyBudget
+        try:
+            run = store.objective_run(objective_id)
+            raw = (run or {}).get("envelope")
+            if not raw:
+                return None
+            return contracts.Envelope.from_dict(json.loads(raw)).privacy_budget
+        except Exception as exc:  # noqa: BLE001 - fail closed, said out loud
+            logger.warning("gateway: privacy budget of %s unreadable (%s); "
+                           "no provider is permitted", objective_id, type(exc).__name__)
+            return PrivacyBudget(providers=())
 
     def default_model(self, provider: str) -> str:
         """The provider's own catalog default as Hermes reports it, or "".
@@ -1779,6 +1811,9 @@ class ModelGateway:
         # leaves for a provider.
         content_class = data_class.classify(_joined_text(request.context_package))
         current_mode = privacy.mode()
+        # PRIV-001: the objective's own budget, intersected with the global
+        # policy below - it can only narrow what `data_class.decision` allows.
+        privacy_budget = self._privacy_budget(request.objective_id)
 
         verdict_domain = request_domain(request)
         routes = self.candidates(request)
@@ -1829,6 +1864,17 @@ class ModelGateway:
                              tier=tier, error=f"DATA_CLASS_REFUSED: {verdict.reason}",
                              input_tokens=input_tokens, failover_count=index,
                              fingerprint=fingerprint, entitlement_state="DATA_CLASS_REFUSED")
+                continue
+            over = privacy_budget.refusal(content_class, provider) if privacy_budget else ""
+            if over:
+                attempts.append({"tier": tier, "provider": provider, "model": model,
+                                 "status": "refused", "code": "PRIVACY_BUDGET_REFUSED",
+                                 "error": over})
+                last_error, last_state = over, "PRIVACY_BUDGET_REFUSED"
+                self._record(request, status="refused", provider=provider, model=model,
+                             tier=tier, error=f"PRIVACY_BUDGET_REFUSED: {over}",
+                             input_tokens=input_tokens, failover_count=index,
+                             fingerprint=fingerprint, entitlement_state="PRIVACY_BUDGET_REFUSED")
                 continue
             # ORCH-005: a call that goes to a stronger tier than any already tried is an
             # escalation, and the failure that sent it there is its recorded cause.
@@ -2130,6 +2176,9 @@ class ModelGateway:
         content_class = data_class.classify(_joined_text(request.context_package))
         verdict = data_class.decision(content_class, backend=CLAUDE_CLI, mode=privacy.mode())
         if verdict.verdict == "REFUSE":
+            return None
+        privacy_budget = self._privacy_budget(request.objective_id)
+        if privacy_budget is not None and privacy_budget.refusal(content_class, CLAUDE_CLI):
             return None
         turns, redactions = [], 0
         for msg in _flatten_tool_turns(request.context_package):
