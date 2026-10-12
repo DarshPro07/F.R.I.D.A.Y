@@ -95,6 +95,33 @@ def test_claims_become_ledger_records_and_the_brain_points_at_the_artifact(store
     assert "Paragraph" not in str(record.body)
 
 
+def test_an_unsynthesised_run_is_a_corpus_the_brain_and_memory_never_see(store):
+    # web_deep_research hands over whole fetched pages as facts and no
+    # synthesis. Those facts are source material: not even a short page (an
+    # error page, a cookie banner) may become the Brain finding or a memory row.
+    raw = RC.Artifact.create("q no synthesis",
+                             sources=[{"url": "https://a.example/x", "title": "A"}],
+                             facts=[CORPUS, "Model Q wins."], confidence=0.8)
+    result = RR.route(raw, store=store)
+    body = ProjectBrain(store).get("friday", "research", result.brain_key).body
+    assert "Paragraph of a fetched page" not in str(body)
+    assert "Model Q wins." not in str(body)
+    assert body["finding"] == "no finding recorded"
+    assert body["research_key"] == raw.question_key
+    assert result.promoted == ()
+    assert memories(store) == []
+    kept = RC.lookup("q no synthesis")                 # the research store keeps it
+    assert kept is not None and "Model Q wins." in kept.facts
+
+
+def test_a_synthesised_run_still_promotes_its_short_facts(store):
+    result = RR.route(artifact(["Model Q wins."]), store=store)
+    assert [m["value"] for m in memories(store)] == ["Model Q wins."]
+    assert len(result.promoted) == 1
+    body = ProjectBrain(store).get("friday", "research", result.brain_key).body
+    assert body["finding"] == "Model Q wins on tool calls."
+
+
 def test_a_rerun_supersedes_the_brain_record_and_does_not_duplicate_facts(store):
     fact = "Model Q scores 91 on the tool-call benchmark."
     first = RR.route(artifact([fact]), store=store)
@@ -177,6 +204,8 @@ def test_a_live_research_run_reaches_the_brain_and_gated_memory(live_run, store)
     record = ProjectBrain(store).get("friday", "research", "research-" + saved.question_key[:16])
     assert record is not None                              # the Project Brain points at it
 
-    added = [m["value"] for m in memories(store)]
-    assert added == ["Model Q scores 91 on the tool-call benchmark."]
-    assert all(CORPUS[:60] not in value for value in added)  # no raw corpus in memory
+    # web_deep_research has no synthesis: its pages are corpus, so memory gets
+    # nothing, short page included, and the Brain finding is not a page.
+    assert memories(store) == []
+    assert record.body["finding"] == "no finding recorded"
+    assert "Model Q scores 91" not in str(record.body)

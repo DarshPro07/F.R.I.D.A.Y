@@ -14,6 +14,7 @@ A research run produces four different things and each has one home:
                                              (`memory_promotion`)
 
 Long-term memory is the narrowest of the four: a fact crosses into it only if
+the run was synthesised (a run with none holds fetched pages, which are corpus),
 it is short, the gate accepts it, and no more than MAX_PROMOTED of them per
 run. The corpus itself, and any fact too long to be a fact, stay in the
 research store, where they carry their sources and expire with their
@@ -74,9 +75,9 @@ def route(artifact: research_cache.Artifact, *, store: Store,
 
 def _point_brain(brain: ProjectBrain, project: str, key: str,
                  artifact: research_cache.Artifact, ledger: tuple) -> None:
-    finding = (artifact.synthesis.strip()
-               or next((f.strip() for f in artifact.facts if f.strip()), "")
-               or "no finding recorded")
+    # The finding is the run's synthesis. A run without one holds only fetched
+    # source text, so the Brain gets a pointer to the run and no excerpt.
+    finding = artifact.synthesis.strip() or "no finding recorded"
     body = {
         "question": artifact.question,
         "finding": finding[:MAX_FINDING_CHARS],
@@ -93,6 +94,11 @@ def _point_brain(brain: ProjectBrain, project: str, key: str,
 
 def _promote_small_facts(artifact: research_cache.Artifact,
                          store: Store) -> tuple[Decision, ...]:
+    if not artifact.synthesis.strip():
+        # No synthesis: the "facts" are the fetched pages themselves (what
+        # web_deep_research produces), i.e. corpus. Only a distilled run offers
+        # facts to memory, however short a page is.
+        return ()
     small = [f.strip() for f in artifact.facts
              if f.strip() and len(f.strip()) <= MAX_FACT_CHARS][:MAX_PROMOTED]
     evidence = [s.url for s in artifact.sources if s.url]
