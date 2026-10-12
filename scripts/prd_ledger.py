@@ -5406,6 +5406,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Design: new friday/route_onboarding.py is the onboarding trigger the previous slice left as its gap. onboard_route(gw, provider, model) skips a declared route (DECLARED) or one with a stored profile (ALREADY_PROFILED). Otherwise it runs model_profiling.profile_route through gateway_completer, with p (build run, commit 5017544fa)',
         "next_action": 'GAPS: Nothing in production calls onboard_new_routes yet. model_gateway.py is owned by another build, so the route-discovery call site (where the gateway or scout first sees a new provider/model pair) is not wired. The module is FUTURE in reachability.; The image_url data-URI shape for the vision probe is still an unverified assumption about the worker.; A stored profile is never refreshed; there is no staleness policy.',
     }),
+    ('SKILL-006', {
+        "status": PARTIAL,
+        "current_implementation": 'The acceptance ("editing an active skill\'s content quarantines it") already held on the base tree. It was proven by the existing scan-gate tests and by the content-hash transition in lifecycle.py. I did not change that.\n\nI closed the one gap in the row\'s next_action that needs no owner decision, whi (build run, commit 931a06d5c)',
+        "next_action": 'GAPS: External skills already ACTIVE before SKILL-006 keep no provenance row until re-gated; no backfill exists and they stay refused until an importer supplies source data.; No signature verifier exists; signatures are stored as declared-unverified.; No importer in this tree yet calls register() with source_url, source_commit, signature or sbom (INTAKE-004 / SKMKT-002).; SBOM is stored as supplied and not generated per skill.',
+    }),
 ]
 
 
