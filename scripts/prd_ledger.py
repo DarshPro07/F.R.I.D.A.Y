@@ -5356,6 +5356,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Adapted CAP-FORGE-014's friday.forge_value_gate scorer behind TechScout's ValueGate interface. Omitted gate now uses default_value_gate, while explicit gate=None still preserves the existing unavailable seam. The default scorer is pure data scoring and the regression proves decide does not install,  (build run, commit f57d4d806)",
         "next_action": 'GAPS: QuarantineMeasurement.evidence is still free text; the scout cannot verify the quarantine run it names.; Decisions are still pure advice and are not persisted.; Still unbuilt: detect/search front end, research step, scheduler/event source, MCP tool wrapper, store.py-backed ledger.',
     }),
+    ('UCW-009', {
+        "status": PARTIAL,
+        "current_implementation": 'Fixed the major issue at root: compile() now raises ValueError on any duplicate trajectory id before counting, so one recorded run submitted three times (or two different runs sharing an id) can no longer satisfy min_successes or appear in source_trajectories. Also fixed the minors: a meter that goe (build run, commit 357892a97)',
+        "next_action": "GAPS: Source trajectories' recorded outcomes are not passed through verify(); succeeded=True is the caller's flag (verifying them would also change the existing 'verifier rejects' semantics).; A frozen meter reads as zero cost and 100% savings; only a backwards meter is rejected.; At run(), a missing executor raises DefinitionError instead of falling back to the agent path.; Promotions, divergences and revalidation marks are in memory only; nothing persisted via friday/store.py, so a restart forgets that a workflow awaits revalidation.; Nothing yet records real agent trajectories or calls compile()/run(); module is declared FUTURE in reachability.; Emits a definition only (not a skill); agent-kind (model) steps are NOT_COMPILABLE; step handoff inputs not inferred.; Policy 'compile' registers without a UCW-008-style confirmation; Policy is an in-code dataclass, not read from stored settings.; WF-010 recurrence/reliability/maintenance-cost inputs are reduced to min_successes and min_savings.",
+    }),
 ]
 
 
