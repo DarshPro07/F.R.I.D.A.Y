@@ -279,6 +279,12 @@ DECLARED = {
                                       "System Two escalation over System One; a live "
                                       "caller and durable outcome records are later "
                                       "slices, run by tests/test_system_one_calibration.py"),
+    "friday/team_composer": (FUTURE,
+                             "AGENT-004: gap-only temporary roles and teams with "
+                             "expiry, and approval-gated role promotion; the "
+                             "planner that supplies the needs and the tool that "
+                             "calls compose are later slices, run by "
+                             "tests/test_team_composer.py"),
     "friday/opportunities": (FUTURE,
                              "PRO-001: deterministic anomaly detectors over automation runs "
                              "feeding the Opportunities Inbox; scan() is reached live from "

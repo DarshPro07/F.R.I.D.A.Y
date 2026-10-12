@@ -155,12 +155,16 @@ def ensure_profile(name: str) -> bool:
 # Staffing -> profile order
 # ---------------------------------------------------------------------------
 
-def plan_team(goal: str, *, files: int = 0) -> tuple[str, ...]:
+def plan_team(goal: str, *, files: int = 0,
+              extra: tuple["roles.Role", ...] = ()) -> tuple[str, ...]:
     """
     Ordered specialist profiles for this goal, or () meaning "too small
     for a board - use plain `delegate()`".
+
+    `extra` is the live temporary roles (AGENT-004); one with no profile of
+    its own is staffed by the engineering profile.
     """
-    team = roles.compile_team(goal, files=files)
+    team = roles.compile_team(goal, files=files, extra=extra)
     if team.size in _SINGLE_SIZES or len(team.roles) < 2:
         return ()
     wanted = {_ROLE_PROFILE.get(role.id, "friday-engineering")

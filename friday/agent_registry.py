@@ -48,7 +48,7 @@ class AgentRegistry:
                  skills: tuple[str, ...] = (), permissions: tuple[str, ...] = (),
                  model_strategy: str = "") -> dict:
         """Register (or update) a role as a long-lived agent. Starts nothing."""
-        if role_id not in roles.BY_ID:
+        if role_id not in roles.BY_ID and not self._promoted(role_id):
             raise RegistryError(
                 f"unknown role {role_id!r}; roles: {sorted(roles.BY_ID)}")
         with self.store._tx() as conn:
@@ -240,6 +240,12 @@ class AgentRegistry:
             "SELECT team_id FROM agent_teams ORDER BY rowid")]
 
     # -- internals ---------------------------------------------------------
+
+    def _promoted(self, role_id: str) -> bool:
+        """A temporary role the owner approved for registration (AGENT-004)."""
+        return self.store._conn.execute(
+            "SELECT 1 FROM agent_promotions WHERE role_id=? AND status='approved'",
+            (role_id,)).fetchone() is not None
 
     def _check_registered(self, role_ids: tuple[str, ...]) -> None:
         for role_id in role_ids:

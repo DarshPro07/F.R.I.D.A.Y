@@ -245,7 +245,7 @@ class Team:
 
 
 def compile_team(goal: str, *, files: int = 0,
-                 budget: int = 1200) -> Team:
+                 budget: int = 1200, extra: tuple[Role, ...] = ()) -> Team:
     """
     Choose the specialists for one run.
 
@@ -257,13 +257,20 @@ def compile_team(goal: str, *, files: int = 0,
     An implementing role always comes first and a reviewing role never
     replaces it. A run with only a Code Reviewer on it reviews nothing,
     which is the failure mode of choosing roles purely by keyword.
+
+    `extra` is the live temporary roles (`team_composer`, AGENT-004): they
+    compete with the catalogue on the same evidence and the same caps. An id
+    that is already in the catalogue is refused rather than shadowed.
     """
+    clash = [role.id for role in extra if role.id in BY_ID]
+    if clash:
+        raise ValueError(f"extra roles shadow the catalogue: {clash}")
     text = (goal or "").lower()
     size = size_of(goal, files=files)
     limit = TEAM_SIZE[size]
 
     scored: list[tuple[int, Role]] = []
-    for role in CATALOGUE:
+    for role in CATALOGUE + tuple(extra):
         hits = sum(1 for trigger in role.triggers if trigger in text)
         if hits:
             scored.append((hits, role))

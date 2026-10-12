@@ -371,6 +371,46 @@ CREATE TABLE IF NOT EXISTS agent_team_edges (
     PRIMARY KEY (team_id, from_role, to_role, kind)
 );
 
+-- AGENT-004: temporary roles and teams (each with an expiry), the append-only
+-- composition ledger, and the proposals to make a temporary role permanent.
+CREATE TABLE IF NOT EXISTS agent_temp_roles (
+    role_id        TEXT PRIMARY KEY,
+    title          TEXT NOT NULL,
+    focus          TEXT NOT NULL,
+    triggers       TEXT NOT NULL,
+    delivers       TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL,
+    expires_at     REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_temp_teams (
+    team_id        TEXT PRIMARY KEY,
+    goal           TEXT NOT NULL,
+    roles          TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    expires_at     REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_team_ledger (
+    event_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind           TEXT NOT NULL,
+    subject        TEXT NOT NULL,
+    objective_id   TEXT NOT NULL DEFAULT '',
+    detail         TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS agent_team_ledger_no_update BEFORE UPDATE ON agent_team_ledger
+BEGIN SELECT RAISE(ABORT, 'agent_team_ledger is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS agent_team_ledger_no_delete BEFORE DELETE ON agent_team_ledger
+BEGIN SELECT RAISE(ABORT, 'agent_team_ledger is append-only'); END;
+CREATE TABLE IF NOT EXISTS agent_promotions (
+    role_id        TEXT PRIMARY KEY,
+    definition     TEXT NOT NULL,
+    objectives     INTEGER NOT NULL,
+    status         TEXT NOT NULL,
+    proposed_at    TEXT NOT NULL,
+    decided_at     TEXT,
+    approver       TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS run_narrations (
     run_id         TEXT NOT NULL REFERENCES runs(run_id),
     milestone_key  TEXT NOT NULL,
