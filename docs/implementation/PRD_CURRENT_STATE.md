@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: b9cbf75 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-12T12:22:09+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 62, "PARKED_BY_OWNER": 1, "PARTIAL": 124, "VERIFIED": 73}
+- HEAD: b0ae9ea on prd-v7/slice-7-adaptive-hardware, updated 2026-10-12T14:07:35+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 64, "PARKED_BY_OWNER": 1, "PARTIAL": 124, "VERIFIED": 73}
 - Unresolved P0: 5
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (391): EVO-003=ADVISED
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CAP-FORGE-011 (blocked), OTEL-001 (stale worktree), SKILL-006 (launch failed), BIN-002 (merge queue busy), ULTRA-004 (stale worktree), SIDE-002 (stale worktree), PRO-001 (stale worktree), CUA-003 (merge queue busy), COG-006 (cascade exhausted), ORCH-002 (blocked), SIDE-001 (REBASE_REQUIRED), ORCH-003 (partial x4), FAB-003 (blocked), EVAL-004 (blocked), SKILL-004 (NOT_RED), EVO-001 (blocked)
-- Open escalations: 417
-  - ORCH-006 integration_queue: merge queue: ORCH-006 waited 1800s behind SIDE-001
-  - - docs_commit: skipped: merge queue: program:10348 waited 1800s behind SIDE-001
-  - ORCH-006 resolved: controller unpark: controller build integrated: INTEGRATED
-  - CAP-FORGE-007 resolved: controller unpark: controller build integrated: INTEGRATED
-  - SIDE-001 rebase: {"requirement": "SIDE-001", "result": "REBASE_REQUIRED", "red_green": {}, "verifier": null, "integra
-  - ORCH-003 partial: integrated without closing its gaps
-  - FAB-003 blocked: Q1 (owner): what makes a run 'verified' for ranking? Candidates: an objective-engine evaluation/hone
-  - EVAL-004 blocked: Q1 (research): research promotion = research_providers.set_preferred (research_providers.py:85-98), 
-  - SKILL-004 integration: {"requirement": "SKILL-004", "result": "NOT_RED", "red_green": {"result": "NOT_RED", "tests": ["test
-  - EVO-001 blocked: Q1 (thresholds, per the scout finding that they must be confirmed before wiring): keep MIN_REPEATS=3
+- Last wave (397): EVO-002=FAILED_INTEGRATION
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CAP-FORGE-011 (blocked), OTEL-001 (stale worktree), SKILL-006 (launch failed), BIN-002 (merge queue busy), ULTRA-004 (stale worktree), SIDE-002 (stale worktree), PRO-001 (stale worktree), CUA-003 (merge queue busy), COG-006 (cascade exhausted), ORCH-002 (blocked), SIDE-001 (REBASE_REQUIRED), ORCH-003 (partial x4), FAB-003 (blocked), EVAL-004 (blocked), SKILL-004 (NOT_RED), EVO-001 (blocked), AGENT-003 (stale worktree), EVOLAB-003 (stale worktree), EVOLAB-004 (stale worktree), AGENT-004 (stale worktree), UCW-009 (stale worktree), KEYS-001 (stale worktree), EVO-003 (cascade exhausted), EVO-006 (merge queue busy), EVOLAB-002 (stale worktree), INTAKE-006 (stale worktree), UCW-006 (stale worktree), MODEL-004 (stale worktree), OBJ-004 (stale worktree), ORCH-006 (stale worktree), PRIV-001 (stale worktree), ROUTER-001 (stale worktree), RSCH-001 (stale worktree), RSCH-004 (stale worktree), EVO-002 (FAILED_INTEGRATION)
+- Open escalations: 437
+  - INTAKE-006 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\intake-006 already exists
+  - UCW-006 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ucw-006 already exists
+  - MODEL-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\model-004 already exists
+  - OBJ-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\obj-004 already exists
+  - ORCH-006 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\orch-006 already exists
+  - PRIV-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\priv-001 already exists
+  - ROUTER-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\router-001 already exists
+  - RSCH-001 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-001 already exists
+  - RSCH-004 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\rsch-004 already exists
+  - EVO-002 integration: {"requirement": "EVO-002", "result": "FAILED_INTEGRATION", "red_green": {"result": "OK", "tests": ["
 - Next ready: MODEL-012, CTX-002
 <!-- build-program:end -->
