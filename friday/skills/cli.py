@@ -138,7 +138,11 @@ def cmd_activate(services: Services, args) -> int:
 
 def cmd_revalidate(services: Services, args) -> int:
     if args.name:
-        outcome, report = services.lifecycle.revalidate(args.name, run_tests=not args.no_run, actor="cli")
+        try:
+            outcome, report = services.lifecycle.revalidate(args.name, run_tests=not args.no_run, actor="cli")
+        except K.TransitionRefused as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 2
         print(f"{args.name}: {outcome}")
         return 0 if outcome in ("FRESH", K.ACTIVE) else 1
     changed = services.graph.changed_paths_since(args.since)
@@ -146,7 +150,13 @@ def cmd_revalidate(services: Services, args) -> int:
     print(f"{len(changed)} changed path(s) since {args.since}; {len(marked)} skill(s) affected")
     worst = 0
     for entry in marked:
-        outcome, _ = services.lifecycle.revalidate(entry["skill"], run_tests=not args.no_run, actor="cli")
+        try:
+            outcome, _ = services.lifecycle.revalidate(entry["skill"], run_tests=not args.no_run, actor="cli")
+        except K.TransitionRefused as exc:
+            # One skill that cannot be re-gated (a scan or provenance gap) must not hide the rest.
+            print(f"  {entry['skill']}: refused  ({exc})")
+            worst = 1
+            continue
         print(f"  {entry['skill']}: {outcome}  ({', '.join(entry['changed'][:3])})")
         worst = max(worst, 0 if outcome == "FRESH" else 1)
     return worst

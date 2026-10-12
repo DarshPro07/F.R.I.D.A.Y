@@ -230,3 +230,56 @@ def test_a_failed_provenance_write_leaves_the_skill_inactive(world, monkeypatch)
     with pytest.raises(RuntimeError):
         world.lifecycle.evaluate_and_activate(skill.name)
     assert world.registry.get(skill.name).state != K.ACTIVE
+
+
+class _Marks:
+    """The graph seam cmd_revalidate reads, pinned so no git history is consulted."""
+
+    def __init__(self, names):
+        self._names = list(names)
+
+    def changed_paths_since(self, since):
+        return ["friday/launcher.py"]
+
+    def revalidate_after_change(self, changed, actor):
+        return [{"skill": name, "changed": list(changed)} for name in self._names]
+
+
+def _services(world, names):
+    from types import SimpleNamespace
+    return SimpleNamespace(lifecycle=world.lifecycle, graph=_Marks(names))
+
+
+def _args(**over):
+    from types import SimpleNamespace
+    data = {"name": None, "since": "HEAD~1", "no_run": True}
+    data.update(over)
+    return SimpleNamespace(**data)
+
+
+def test_the_revalidate_command_reports_a_provenance_refusal_instead_of_raising(world, capsys):
+    from friday.skills import cli
+    skill = staged(world, "ext-cli-one", K.TRUST_COMMUNITY, **full_import())
+    world.lifecycle.evaluate_and_activate(skill.name)
+    _lose_provenance(world, skill.name)
+    world.registry.transition(skill.name, K.NEEDS_REVALIDATION, actor="test", reason="a dependency changed")
+    assert cli.cmd_revalidate(_services(world, []), _args(name=skill.name)) == 2
+    assert "refused" in capsys.readouterr().err
+    assert world.registry.get(skill.name).state == K.NEEDS_REVALIDATION
+
+
+def test_one_provenance_refusal_does_not_stop_the_batch_revalidation(world, capsys):
+    from friday.skills import cli
+    legacy = staged(world, "ext-cli-a-legacy", K.TRUST_COMMUNITY, **full_import())
+    healthy = staged(world, "ext-cli-b-healthy", K.TRUST_COMMUNITY, **full_import())
+    for skill in (legacy, healthy):
+        world.lifecycle.evaluate_and_activate(skill.name)
+        world.registry.transition(skill.name, K.NEEDS_REVALIDATION, actor="test", reason="a dependency changed")
+    _lose_provenance(world, legacy.name)
+    code = cli.cmd_revalidate(_services(world, [legacy.name, healthy.name]), _args())
+    captured = capsys.readouterr()
+    assert code == 1
+    assert f"{legacy.name}: refused" in captured.out
+    assert f"{healthy.name}: FRESH" in captured.out
+    assert world.registry.get(legacy.name).state == K.NEEDS_REVALIDATION
+    assert world.registry.get(healthy.name).state == K.ACTIVE
