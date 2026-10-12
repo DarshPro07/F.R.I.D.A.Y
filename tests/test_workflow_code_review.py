@@ -9,6 +9,7 @@ INCONCLUSIVE never reads as a pass."""
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from pathlib import Path
 
@@ -63,11 +64,13 @@ class Fake:
 
     def __init__(self, name, model, session, answer=CLEAN):
         self.calls = 0
+        self.workers = []
         self.answer = answer
         self.actor = Actor(name, model, session, self._infer)
 
     def _infer(self, system, user, *, worker, objective_id):
         self.calls += 1
+        self.workers.append(worker)
         if isinstance(self.answer, Exception):
             raise self.answer
         return self.answer(user) if callable(self.answer) else self.answer
@@ -99,6 +102,18 @@ def run(diff, fakes, implementer=IMPLEMENTER):
 
 def calls(fakes):
     return {k: f.calls for k, f in fakes.items()}
+
+
+def routes_for(fakes):
+    return {
+        "economy": [fakes["economy"].actor.model],
+        "standard": [fakes[k].actor.model for k in ("correctness", "security", "regression")],
+        "deep": [fakes["judge"].actor.model],
+    }
+
+
+def available_for(fakes):
+    return frozenset(actor.actor.model for actor in fakes.values())
 
 
 def security_sees_flaw(user: str) -> str:
@@ -198,6 +213,82 @@ def test_plain_code_gets_one_economy_pass():
     fakes = crew()
     assert run(PLAIN_DIFF, fakes).route == R.ROUTE_ECONOMY
     assert calls(fakes)["economy"] == 1 and calls(fakes)["judge"] == 0
+
+
+def test_review_steps_resolve_their_tier_models_and_caps_before_calling_actors():
+    fakes = crew()
+    result = asyncio.run(R.run_code_review(
+        POLICY_DIFF, implementer=IMPLEMENTER, economy=fakes["economy"].actor,
+        panel={k: fakes[k].actor for k in ("correctness", "security", "regression")},
+        judge=fakes["judge"].actor, routes=routes_for(fakes), available=available_for(fakes)))
+    assert result.verdict == "CONFIRMED"
+    assert fakes["economy"].workers == []
+    assert fakes["security"].workers == [
+        "perspective:sec|tier=standard|model=model-sec|cap=24000"]
+    assert fakes["judge"].workers == [
+        "perspective:jdg|tier=deep|model=model-jdg|cap=12000"]
+
+
+def test_an_unavailable_review_route_is_inconclusive_and_calls_nobody():
+    fakes = crew()
+    result = asyncio.run(R.run_code_review(
+        DOCS_DIFF, implementer=IMPLEMENTER, economy=fakes["economy"].actor,
+        panel={k: fakes[k].actor for k in ("correctness", "security", "regression")},
+        judge=fakes["judge"].actor, routes=routes_for(fakes), available=frozenset()))
+    assert result.verdict == "INCONCLUSIVE" and not result.passes
+    assert "no available economy route" in result.reason
+    assert sum(calls(fakes).values()) == 0
+
+
+def test_a_resolved_model_that_is_not_the_actor_is_refused_before_inference():
+    fakes = crew()
+    routes = routes_for(fakes)
+    routes["economy"] = ["aaa-other", fakes["economy"].actor.model]
+    available = available_for(fakes) | {"aaa-other"}
+    with pytest.raises(RuntimeError, match="aaa-other"):
+        asyncio.run(R.run_code_review(
+            DOCS_DIFF, implementer=IMPLEMENTER, economy=fakes["economy"].actor,
+            panel={k: fakes[k].actor for k in ("correctness", "security", "regression")},
+            judge=fakes["judge"].actor, routes=routes, available=available))
+    assert sum(calls(fakes).values()) == 0 and fakes["economy"].workers == []
+
+
+def test_a_route_the_risk_route_never_uses_does_not_block_the_review():
+    fakes = crew()
+    routes = routes_for(fakes)
+    routes["deep"] = []
+    result = asyncio.run(R.run_code_review(
+        DOCS_DIFF, implementer=IMPLEMENTER, economy=fakes["economy"].actor,
+        panel={k: fakes[k].actor for k in ("correctness", "security", "regression")},
+        judge=fakes["judge"].actor, routes=routes, available=available_for(fakes)))
+    assert result.route == R.ROUTE_ECONOMY and result.verdict == "CONFIRMED"
+    assert calls(fakes)["economy"] == 1 and calls(fakes)["judge"] == 0
+
+
+def test_an_unused_economy_route_does_not_block_a_panel_review():
+    fakes = crew()
+    routes = routes_for(fakes)
+    routes["economy"] = []
+    result = asyncio.run(R.run_code_review(
+        POLICY_DIFF, implementer=IMPLEMENTER, economy=fakes["economy"].actor,
+        panel={k: fakes[k].actor for k in ("correctness", "security", "regression")},
+        judge=fakes["judge"].actor, routes=routes, available=available_for(fakes)))
+    assert result.route == R.ROUTE_PANEL and result.verdict == "CONFIRMED"
+    assert calls(fakes)["economy"] == 0 and calls(fakes)["judge"] == 1
+
+
+def test_the_step_cap_is_enforced_before_inference(monkeypatch):
+    patched = copy.deepcopy(R.DEFINITION)
+    patched["steps"][1]["cap"] = 10
+    monkeypatch.setattr(R, "DEFINITION", patched)
+    fakes = crew()
+    result = asyncio.run(R.run_code_review(
+        DOCS_DIFF, implementer=IMPLEMENTER, economy=fakes["economy"].actor,
+        panel={k: fakes[k].actor for k in ("correctness", "security", "regression")},
+        judge=fakes["judge"].actor, routes=routes_for(fakes), available=available_for(fakes)))
+    assert result.verdict == "INCONCLUSIVE" and not result.passes
+    assert "cap 10" in result.reason
+    assert calls(fakes)["economy"] == 0
 
 
 @pytest.mark.parametrize("slot,field,value,word", [
