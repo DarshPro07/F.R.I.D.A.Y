@@ -10,9 +10,9 @@ does not resolve on the tree.
 - PRD: `F:\F.R.I.D.A.Y\docs\PRD_V7.md`
 - PRD sha256: `3730d8f9e31f9f54480e753feb2f57f17cd74a7702e813001724e6ab0d673bbb`
 - PRD size: 8353 lines, 326432 bytes
-- Repository HEAD: `82638cba1247132236f586e7f9d82e7064df4e9f`
-- Uncommitted paths at generation: 45
-- Generated: 2026-10-12T17:51:30+05:30
+- Repository HEAD: `383946ccaeb8e9e9b0d640e9b71990ac9d457c9c`
+- Uncommitted paths at generation: 46
+- Generated: 2026-10-12T17:53:20+05:30
 
 ## Status vocabulary
 
@@ -279,7 +279,7 @@ Unresolved P1: 156 (INTENT-002, CTX-004, COG-002, COG-003, MODEL-003, MODEL-004,
 
 | id | P | status | requirement | acceptance evidence | v1 rows | where | evidence / blocker / next |
 |---|---|---|---|---|---|---|---|
-| SCOUT-001 | P2 | **PARTIAL** | Technology Scout maps adoption to measured need. | Trending repo not auto-installed. | PRD-GATE-022 | `docs/implementation/PRD_REQUIREMENTS_LEDGER.md`, `scripts/prd_ledger.py:487-495` | GAPS: Wiring: the real value gate is friday/forge_value_gate.py (CAP-FORGE-014, in flight). It must be adapted to ValueGate = gate(option, candidate, need) -> GateScore(admitted, score, reason); not wired, nothing in production calls TechScout.decide().; QuarantineMeasurement.evidence is free text; the scout cannot verify the quarantine run it names, same as MeasuredNeed.evidence.; Decisions are not persisted (pure advice returned to the caller); a ledger entry for decisions is a later slice.; Still unbuilt: detect/search front end, research step, scheduler/event source, MCP tool wrapper, store.py-backed ledger.; Minor, left as is: the gate's exception text is placed verbatim in AdoptionDecision.reason (matches the existing intake failure path).; Assumption: Adopt/adapt/build is derived from the candidate's quarantine measurement on the same metric as the need: meets required = adopt, improves only = adapt, otherwise build. Owner may want a different rule.; Assumption: A gate refusal is DEFER for that single chosen option, with no fallback to a costlier or cheaper one.; Assumption: The gate's call signature and verdict shape are assumed; adjust the adapter when forge_value_gate lands. The seam is strict: a non-GateScore verdict, a non-bool admitted or a non-finite score is UNAVAILABLE. |
+| SCOUT-001 | P2 | **PARTIAL** | Technology Scout maps adoption to measured need. | Trending repo not auto-installed. | PRD-GATE-022 | `docs/implementation/PRD_REQUIREMENTS_LEDGER.md`, `scripts/prd_ledger.py:487-495` | GAPS: QuarantineMeasurement.evidence is still free text; the scout cannot verify the quarantine run it names.; Decisions are still pure advice and are not persisted.; Still unbuilt: detect/search front end, research step, scheduler/event source, MCP tool wrapper, store.py-backed ledger. |
 
 ## PRD section 60
 

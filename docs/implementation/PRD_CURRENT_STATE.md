@@ -153,11 +153,11 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 25e88a6 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-10T19:57:17+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 62, "PARKED_BY_OWNER": 1, "PARTIAL": 125, "VERIFIED": 72}
+- HEAD: b9cbf75 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-12T12:22:09+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 62, "PARKED_BY_OWNER": 1, "PARTIAL": 124, "VERIFIED": 73}
 - Unresolved P0: 5
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (388): EVO-002=SCOUT_DONE, EVO-003=SCOUT_DONE
+- Last wave (391): EVO-003=ADVISED
 - Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CAP-FORGE-011 (blocked), OTEL-001 (stale worktree), SKILL-006 (launch failed), BIN-002 (merge queue busy), ULTRA-004 (stale worktree), SIDE-002 (stale worktree), PRO-001 (stale worktree), CUA-003 (merge queue busy), COG-006 (cascade exhausted), ORCH-002 (blocked), SIDE-001 (REBASE_REQUIRED), ORCH-003 (partial x4), FAB-003 (blocked), EVAL-004 (blocked), SKILL-004 (NOT_RED), EVO-001 (blocked)
 - Open escalations: 417
   - ORCH-006 integration_queue: merge queue: ORCH-006 waited 1800s behind SIDE-001
