@@ -5351,6 +5351,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'The experiment step gate (authorize_step) now refuses an experiment the archive holds as rejected, returning that record before any spend; controller.conclude() archives a finished experiment as PROMOTE or REJECT. Closes the no-live-caller gap. (build run, commit 9c5cda47c)',
         "next_action": "GAPS: No executor calls authorize_step or conclude yet: no evolution executor exists in the tree (the whole evolution stack is FUTURE in reachability.py), so the seams are tested but not driven by a running experiment.; C.admit() does not check the archive: it has no parent_version. The check lives in authorize_step, which has parent_version, hypothesis and scope.; parent_version is supplied by the caller; the value gate still uses the literal 'current'. The two share no fingerprint, so a value-gate refusal never blocks a built experiment (intended).; Not done: MCP tool / memory query route for the archive, retention policy, operator repair tooling for a torn line, POSIX fcntl.flock test (no Linux host here).; Assumption: hypothesis_of() = '<trigger_kind>: <subject>' with the proposal's components as scope; revisit if one subject needs distinct experiments per implementation.",
     }),
+    ('SCOUT-001', {
+        "status": PARTIAL,
+        "current_implementation": "Adapted CAP-FORGE-014's friday.forge_value_gate scorer behind TechScout's ValueGate interface. Omitted gate now uses default_value_gate, while explicit gate=None still preserves the existing unavailable seam. The default scorer is pure data scoring and the regression proves decide does not install,  (build run, commit f57d4d806)",
+        "next_action": 'GAPS: QuarantineMeasurement.evidence is still free text; the scout cannot verify the quarantine run it names.; Decisions are still pure advice and are not persisted.; Still unbuilt: detect/search front end, research step, scheduler/event source, MCP tool wrapper, store.py-backed ledger.',
+    }),
 ]
 
 
