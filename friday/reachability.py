@@ -348,6 +348,11 @@ DECLARED = {
     "friday/ultracode": (FUTURE,
                          "ULTRA-001/002: the workflow spec and stage result cache, "
                          "run by tests/test_ultracode_spec.py"),
+    "friday/route_onboarding": (FUTURE,
+                                "MODEL-004: the onboarding trigger that profiles a newly seen "
+                                "gateway route through gateway_completer; its caller is the "
+                                "route-discovery path, the next wiring step, run by "
+                                "tests/test_route_onboarding.py"),
     "friday/ultracode/tiers": (FUTURE,
                                "ULTRA-006: tier resolution and the model ranked "
                                "within a tier; the stage runner (ULTRA-002) is "
