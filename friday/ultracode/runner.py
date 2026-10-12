@@ -31,17 +31,19 @@ cap that cuts a list logs what it cut.
 from __future__ import annotations
 
 import logging
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Mapping
 
 from friday import governor as governor_module
 from friday import objective_budget as budget_module
 from friday import objectives
 from friday.ultracode.cache import ResultCache, result_key
 from friday.ultracode.spec import Spec, Stage
+from friday.ultracode.tiers import Choice
 
 logger = logging.getLogger(__name__)
 
 EVENT_ITEMS_DROPPED = "ultracode.items_dropped"
+EVENT_MODELS_CHOSEN = "ultracode.models_chosen"
 EVENT_STAGES_DROPPED = "ultracode.stages_dropped"
 #: In the blocker of a run this module paused: the run has its drop list.
 DROPPED_MARK = "stage(s) dropped"
@@ -58,9 +60,9 @@ Agent = Callable[[Stage, list, str], Awaitable[dict]]
 ModelFor = Callable[[Stage], str]
 
 __all__ = ["BudgetStop", "CAPABILITY", "DROPPED_MARK", "DispatchGate",
-           "EVENT_ITEMS_DROPPED", "NotDurableRunnerSafe",
+           "EVENT_ITEMS_DROPPED", "EVENT_MODELS_CHOSEN", "NotDurableRunnerSafe",
            "EVENT_STAGES_DROPPED", "MANIFEST", "ResultCache", "StagePort", "cap_items",
-           "plan_tasks", "start_run"]
+           "model_for", "plan_tasks", "start_run"]
 
 
 class NotDurableRunnerSafe(ValueError):
@@ -129,15 +131,28 @@ def cap_items(spec: Spec, items: list[str]) -> tuple[list[str], list[str]]:
     return refs[:cap], refs[cap:]
 
 
+def model_for(choices: Mapping[str, Choice]) -> ModelFor:
+    """The port's `ModelFor`: the model each stage's recorded choice names
+    (`tiers.choose_models`). A stage with no choice raises KeyError."""
+    return lambda stage: choices[stage.id].model
+
+
 def start_run(store, spec: Spec, items: list[str], *, provenance: str,
-              attended: bool, manifest: list[dict] | None = None) -> dict:
+              attended: bool, manifest: list[dict] | None = None,
+              choices: Mapping[str, Choice] | None = None) -> dict:
     """Admit the run as one durable objective; the engine takes it from here.
 
     The spec's token budget becomes the run's budget here, and items beyond
     the first stage's cap are logged on the run, not run. A spec that says
-    `durable_runner_safe = False` (a compiled definition) is refused first."""
+    `durable_runner_safe = False` (a compiled definition) is refused first.
+    `choices` (stage id -> Choice) is logged on the run with its evidence rows;
+    it must cover every stage, else ValueError before any run exists."""
     if not getattr(spec, "durable_runner_safe", True):
         raise NotDurableRunnerSafe(spec.id)
+    if choices is not None:
+        missing = [stage.id for stage in spec.stages if stage.id not in choices]
+        if missing:
+            raise ValueError(f"no model choice for stage(s): {', '.join(missing)}")
     kept, dropped = cap_items(spec, items)
     run = objectives.compile_objective(
         store, request=f"ultracode {spec.id}", tasks=plan_tasks(spec, kept),
@@ -146,6 +161,14 @@ def start_run(store, spec: Spec, items: list[str], *, provenance: str,
         provenance=provenance, attended=attended)
     run_id = run["run_id"]
     store.touch_objective_run(run_id, cost_budget_tokens=spec.budget_tokens)
+    if choices is not None:
+        store.append_objective_event(
+            run_id, EVENT_MODELS_CHOSEN,
+            detail={"stages": [{"stage": stage.id, "tier": choices[stage.id].tier,
+                                "model": choices[stage.id].model,
+                                "reason": choices[stage.id].reason,
+                                "evidence": list(choices[stage.id].evidence)}
+                               for stage in spec.stages]})
     if dropped:
         store.append_objective_event(
             run_id, EVENT_ITEMS_DROPPED,

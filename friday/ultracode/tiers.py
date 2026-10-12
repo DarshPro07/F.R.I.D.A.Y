@@ -93,3 +93,12 @@ def choose_model(tier: str, candidates: Sequence[str], bench: Mapping[str, dict]
     model, rows = ranked
     return Choice(tier, model, "cheapest per verified win among models keeping "
                                f">= {RATE_FLOOR:.0%} of the best success rate", tuple(rows))
+
+
+def choose_models(spec, candidates: Mapping[str, Sequence[str]],
+                  bench: Mapping[str, dict]) -> dict[str, Choice]:
+    """stage id -> Choice for every stage of `spec`: the stage's tier from
+    `resolve_tiers`, its model from `choose_model` over that tier's `candidates`
+    (tier -> models). A tier with no candidate raises ValueError."""
+    return {stage_id: choose_model(tier, candidates.get(tier, ()), bench)
+            for stage_id, tier in resolve_tiers(spec).items()}

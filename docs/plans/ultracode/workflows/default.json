@@ -18,7 +18,7 @@
     },
     {
       "id": "build",
-      "template": "builder",
+      "template": "code",
       "barrier": false,
       "schema": {
         "type": "object",
@@ -29,6 +29,34 @@
       "effort": "medium",
       "cap": 80000,
       "dry_rounds": 2
+    },
+    {
+      "id": "check",
+      "template": "check",
+      "barrier": false,
+      "schema": {
+        "type": "object",
+        "properties": {"passed": {"type": "boolean"}, "issues": {"type": "array", "items": {"type": "string"}}},
+        "required": ["passed"]
+      },
+      "tier": "economy",
+      "effort": "low",
+      "cap": 20000,
+      "dry_rounds": 1
+    },
+    {
+      "id": "doubt",
+      "template": "skeptic",
+      "barrier": false,
+      "schema": {
+        "type": "object",
+        "properties": {"objections": {"type": "array", "items": {"type": "string"}}},
+        "required": ["objections"]
+      },
+      "tier": "economy",
+      "effort": "low",
+      "cap": 20000,
+      "dry_rounds": 1
     },
     {
       "id": "verdict",

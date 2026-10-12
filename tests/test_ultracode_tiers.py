@@ -35,8 +35,11 @@ def _plan(*stages: dict) -> dict:
 def test_default_spec_resolves_economy_standard_and_one_deep():
     spec = S.load_spec(DEFAULT)
     tiers = T.resolve_tiers(spec)
-    assert tiers == {"scan": "economy", "build": "standard", "verdict": "deep"}
+    assert tiers == {"scan": "economy", "build": "standard", "check": "economy",
+                     "doubt": "economy", "verdict": "deep"}
     assert list(tiers.values()).count("deep") == 1
+    assert {stage.template for stage in spec.stages} == {
+        "lookup", "code", "check", "skeptic", "judge"}
     assert S.compile_plan(spec)["stages"][0]["tier"] == "economy"
 
 
