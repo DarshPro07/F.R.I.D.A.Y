@@ -5376,6 +5376,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Fixed the concrete major findings: every baseline-beating eligible candidate is now archived, non-winning measurable candidates are rejected with NOT_MEASURED_WINNER, promotion requires Protected Evaluation Lab PASS from an isolated sandbox/base commit/held-out tests, lab WEAKENED/TAMPERED/FABRICATE (build run, commit ba87b1000)',
         "next_action": "GAPS: Full PRD acceptance is still not complete end-to-end: production callers still need to build candidate workspaces and connect real promotion/health wiring around this controller path.; The benchmark metric remains supplied through an injected benchmark hook after Protected Evaluation Lab PASS; the controller now refuses promotion without the real lab judgement, but a production metric source still needs to be wired to the lab/workspace runner.; Production callers still need to connect EVOLAB-002's durable EvolutionAllowance and foreground preemption path; tests use InMemoryEvolutionAllowance.; implementer did not claim acceptance met",
     }),
+    ('EVOLAB-002', {
+        "status": PARTIAL,
+        "current_implementation": 'Implemented the smallest ledger-gap slice: repeated exhausted authorize_step polling now reuses an existing matching REFUSED archive record instead of appending another one. The match is scoped to objective, experiment fingerprint, candidate version, rollback parent, period, and exhausted dimension, (build run, commit b84e72b81)',
+        "next_action": "GAPS: No live caller invokes yield_to_foreground when a foreground task starts; wiring still needs the fenced objectives/planner owner path.; The experiment runner that calls authorize_step and charge each step is still FUTURE in reachability.; The stop callback still has no internally enforced time bound; bounded stop time depends on the caller.; Cross-process locking of the spend ledger is still not implemented; it remains an in-process lock plus fsync'd appends.; Full EVOLAB-002 acceptance remains partial until live foreground preemption and runner wiring exist.; implementer did not claim acceptance met",
+    }),
 ]
 
 
