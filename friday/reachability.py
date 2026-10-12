@@ -351,6 +351,11 @@ DECLARED = {
     "friday/quarantine": (FUTURE,
                           "CAP-FORGE-003 repository quarantine; its callers are "
                           "the forge intake (CAP-FORGE-004/014)"),
+    "friday/agent_composer": (FUTURE,
+                              "AGENT-003: the Agent Composer (capped context packet, "
+                              "spend/tool/wall limits, worker lifecycle in the agent "
+                              "ledger); no live caller yet, run by "
+                              "tests/test_agent_composer.py"),
     "friday/appcontainer": (FUTURE,
                             "the OS boundary under friday.quarantine; reachable "
                             "once the quarantine has a caller (CAP-FORGE-004/014)"),
