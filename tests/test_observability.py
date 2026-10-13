@@ -357,7 +357,7 @@ def _ui_client(store, monkeypatch, *, gate=False):
 
     monkeypatch.setattr(access, "GATE_ENABLED", gate)
     monkeypatch.setenv("ADA_DB", str(store.path))
-    return TestClient(u.create_app())
+    return TestClient(u.create_app(), base_url="http://127.0.0.1:8770")
 
 
 def test_normal_mode_hides_what_developer_mode_shows(store, monkeypatch):

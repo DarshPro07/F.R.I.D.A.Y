@@ -46,7 +46,7 @@ SECRET_PATTERNS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S),
 ]
 KEY_VALUE_SECRET = re.compile(
-    r"(?i)\b(api[_-]?key|token|secret|password|passwd|authorization|client_secret)\s*([:=])\s*([\"']?)([^\s\"']{8,})"
+    r"(?i)(api[_-]?key|token|secret|password|passwd|authorization|client_secret)\s*([:=])\s*([\"']?)([^\s\"']{8,})"
 )
 
 

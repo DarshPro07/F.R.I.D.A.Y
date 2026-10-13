@@ -77,7 +77,7 @@ def test_api_interrupted_truncates_through_the_ui_server(monkeypatch, tmp_path):
     store = Store(str(tmp_path / "s.sqlite3"))
     monkeypatch.setattr(M, "store", lambda: store)
     mid = store.add_message("web-x", "assistant", "One. Two. Three.")
-    with TestClient(u.create_app()) as client:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as client:
         r = client.post("/api/interrupted", json={"message_id": mid, "heard": "One. Two."})
         assert r.status_code == 200 and r.json() == {"ok": True}
         assert client.post("/api/interrupted", json={}).status_code == 400

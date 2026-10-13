@@ -31,6 +31,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from friday.config import DATA_DIR
 
@@ -186,6 +187,18 @@ def pin_allowed():
         return True, "PIN (a Friday window is also reading your face)"
     return True, "PIN"
 
+def _spend_try(now):
+    """Count an attempt as a failure BEFORE checking it, under the lock, so
+    parallel guesses cannot all read "no failures yet" during the 0.3 s hash.
+    Returns the seconds left when locked out, else None. A success undoes it."""
+    with _lock:
+        _pin_fails[:] = [t for t in _pin_fails if now - t < PIN_COOLDOWN]
+        if len(_pin_fails) >= PIN_MAX_TRIES:
+            return int(PIN_COOLDOWN - (now - _pin_fails[0]))
+        _pin_fails.append(now)
+        return None
+
+
 def verify_pin(pin):
     allowed, reason = pin_allowed()
     if not allowed:
@@ -194,19 +207,17 @@ def verify_pin(pin):
     if not has_pin():
         return {"ok": False, "error": "no PIN set", "needs_pin": True}
     now = time.time()
-    with _lock:
-        _pin_fails[:] = [t for t in _pin_fails if now - t < PIN_COOLDOWN]
-        if len(_pin_fails) >= PIN_MAX_TRIES:
-            wait = int(PIN_COOLDOWN - (now - _pin_fails[0]))
-            log({"kind": "pin_locked_out", "seconds_left": wait})
-            return {"ok": False, "error": "too many attempts, wait %ds" % wait, "locked_out": wait}
+    wait = _spend_try(now)
+    if wait is not None:
+        log({"kind": "pin_locked_out", "seconds_left": wait})
+        return {"ok": False, "error": "too many attempts, wait %ds" % wait, "locked_out": wait}
     d = json.loads(PIN_PATH.read_text(encoding="utf-8"))
     ok = hmac.compare_digest(_hash_pin(str(pin or ""), bytes.fromhex(d["salt"])), d["hash"])
     if not ok:
-        with _lock:
-            _pin_fails.append(now)
         log({"kind": "pin_rejected", "reason": reason})
-        return {"ok": False, "error": "wrong PIN", "tries_left": PIN_MAX_TRIES - len(_pin_fails)}
+        with _lock:
+            left = PIN_MAX_TRIES - len(_pin_fails)
+        return {"ok": False, "error": "wrong PIN", "tries_left": left}
     token = secrets.token_urlsafe(24)
     with _lock:
         _pin_fails.clear()
@@ -230,17 +241,24 @@ def verify(descriptor):
     owner = load_owner()
     if not owner:
         return {"ok": False, "error": "no owner enrolled", "enrolled": False}
+    now = time.time()
+    wait = _spend_try(now)                   # a face miss counts toward the PIN's limit
+    if wait is not None:
+        log({"kind": "face_locked_out", "seconds_left": wait})
+        return {"ok": False, "error": "too many attempts, wait %ds" % wait, "locked_out": wait}
     best = min(distance(vals, o) for o in owner)
-    ok = best <= THRESHOLD
-    out = {"ok": ok, "distance": round(best, 4), "threshold": THRESHOLD, "enrolled": True}
-    if ok:
-        token = secrets.token_urlsafe(24)
-        with _lock:
-            _sessions[token] = time.time() + SESSION_HOURS * 3600
-        out["token"] = token
-        log({"kind": "unlock", "distance": out["distance"]})
-    else:
-        log({"kind": "face_rejected", "distance": out["distance"]})
+    if best > THRESHOLD:
+        # Only "no": the distance (here or in the open /api/auth/recent log)
+        # would tell a forger which way to move a descriptor.
+        log({"kind": "face_rejected"})
+        return {"ok": False}
+    token = secrets.token_urlsafe(24)
+    with _lock:
+        if now in _pin_fails:                # a lock-out or a PIN success may have cleared it
+            _pin_fails.remove(now)
+        _sessions[token] = now + SESSION_HOURS * 3600
+    out = {"ok": True, "distance": round(best, 4), "threshold": THRESHOLD, "enrolled": True, "token": token}
+    log({"kind": "unlock", "distance": out["distance"]})
     return out
 
 
@@ -363,8 +381,34 @@ def cookie_value(headers):
     return ""
 
 
+LOCAL_HOSTS = ("127.0.0.1", "localhost")
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def _host_name(host):
+    try:
+        return urlsplit("//" + host).hostname or ""
+    except ValueError:                       # e.g. an unclosed "[": not a local name either way
+        return ""
+
+
+async def _deny(scope, receive, send, status, error):
+    if scope["type"] == "websocket":
+        # Deny at the handshake, before accept, so nothing upstream ever
+        # sees the connection. 1008 is "policy violation".
+        await receive()                          # the websocket.connect event
+        await send({"type": "websocket.close", "code": 1008})
+        return
+    body = json.dumps(error).encode()
+    await send({"type": "http.response.start", "status": status,
+                "headers": [(b"content-type", b"application/json"),
+                            (b"content-length", str(len(body)).encode())]})
+    await send({"type": "http.response.body", "body": body})
+
+
 class GateMiddleware:
-    """ASGI: 423 + log for anything not open while no valid session exists."""
+    """ASGI: 403 for a foreign Host or a cross-origin write (gate on or off);
+    423 + log for anything not open while no valid session exists."""
 
     def __init__(self, app):
         self.app = app
@@ -376,27 +420,29 @@ class GateMiddleware:
         # route existed this branch only ever saw "http" and "lifespan", so the
         # gap was latent; it is closed here rather than in each handler, so a
         # future socket cannot forget to be locked.
-        if kind not in ("http", "websocket") or not GATE_ENABLED:
+        if kind not in ("http", "websocket"):
             return await self.app(scope, receive, send)
         path = scope.get("path", "")
+        method = scope.get("method", "") if kind == "http" else "WEBSOCKET"
+        head = {k: v.decode("latin-1") for k, v in scope.get("headers", [])
+                if k in (b"host", b"origin", b"user-agent")}
+        host, origin = head.get(b"host", ""), head.get(b"origin", "")
+        client = (scope.get("client") or ("", 0))[0]
+        # Same-site is not same-origin: a page on another local port gets the
+        # Strict cookie sent and can POST text/plain with no preflight, and a
+        # DNS-rebound name reaches 127.0.0.1 with a foreign Host. Neither needs
+        # the cookie, so this runs before it and in --bypass-login runs too.
+        # No Origin at all passes: scripts and the local agent send none.
+        if _host_name(host) not in LOCAL_HOSTS or (
+                origin and method not in SAFE_METHODS and urlsplit(origin).netloc != host):
+            log({"kind": "cross_origin_refused", "path": path, "method": method,
+                 "host": host[:120], "origin": origin[:120], "client": client})
+            return await _deny(scope, receive, send, 403,
+                               {"ok": False, "error": "cross-origin blocked"})
+        if not GATE_ENABLED:
+            return await self.app(scope, receive, send)
         if is_open(path) or session_ok(cookie_value(scope.get("headers", []))):
             return await self.app(scope, receive, send)
-        client = scope.get("client") or ("", 0)
-        ua = ""
-        for k, v in scope.get("headers", []):
-            if k == b"user-agent":
-                ua = v.decode("latin-1")[:120]
-        log({"kind": "blocked", "path": path,
-             "method": scope.get("method", "") if kind == "http" else "WEBSOCKET",
-             "client": client[0], "ua": ua})
-        if kind == "websocket":
-            # Deny at the handshake, before accept, so nothing upstream ever
-            # sees the connection. 1008 is "policy violation".
-            await receive()                          # the websocket.connect event
-            await send({"type": "websocket.close", "code": 1008})
-            return
-        body = json.dumps({"locked": True, "error": "face verification required"}).encode()
-        await send({"type": "http.response.start", "status": 423,
-                    "headers": [(b"content-type", b"application/json"),
-                                (b"content-length", str(len(body)).encode())]})
-        await send({"type": "http.response.body", "body": body})
+        log({"kind": "blocked", "path": path, "method": method,
+             "client": client, "ua": head.get(b"user-agent", "")[:120]})
+        await _deny(scope, receive, send, 423, {"locked": True, "error": "face verification required"})

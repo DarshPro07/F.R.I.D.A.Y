@@ -32,7 +32,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(access, "GATE_ENABLED", True)
     monkeypatch.setattr(access, "LOG_PATH", tmp_path / "access.jsonl")
     access._sessions[TOKEN] = 9999999999.0
-    with TestClient(u.create_app()) as client:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as client:
         yield client, store, tmp_path / "access.jsonl"
     access._sessions.pop(TOKEN, None)
 
@@ -265,7 +265,9 @@ def test_a_cross_site_request_is_refused_and_logged(server):
               headers={**COOKIE, "Origin": "https://evil.example"})
     assert r.status_code == 403
     assert store.objective_run("R")["status"] == O.RUN_RUNNING
-    assert any(e["kind"] == "signal_refused" and e["reason"] == "cross-origin"
+    # The gate (access.GateMiddleware) now refuses a cross-origin write before
+    # the route's own copy of the check runs, and logs it under its own kind.
+    assert any(e["kind"] == "cross_origin_refused" and e["path"] == "/api/objective/signal"
                for e in _log_lines(log))
 
 

@@ -30,7 +30,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(access, "LOG_PATH", tmp_path / "access.jsonl")
     token = "remote-session-token"
     access._sessions[token] = 9999999999.0
-    with TestClient(u.create_app()) as client:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as client:
         yield client, store, token
     access._sessions.pop(token, None)
 

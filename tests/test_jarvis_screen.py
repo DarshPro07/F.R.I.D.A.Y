@@ -230,9 +230,9 @@ def test_a_locked_gate_refuses_the_speech_websocket(monkeypatch):
     from friday import access, ui_server
     monkeypatch.setattr(access, "GATE_ENABLED", True)
     monkeypatch.setattr(access, "session_ok", lambda token: False)
-    client = TestClient(ui_server.create_app())
+    client = TestClient(ui_server.create_app(), base_url="http://127.0.0.1:8770")
     with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect("/api/stt"):
+        with client.websocket_connect("ws://127.0.0.1:8770/api/stt"):
             pass  # pragma: no cover - the handshake must be refused
 
 
@@ -244,10 +244,10 @@ def test_an_open_gate_accepts_the_socket_and_is_honest_about_a_missing_key(monke
     from friday import access, ui_server
     monkeypatch.setattr(access, "GATE_ENABLED", False)
     monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
-    client = TestClient(ui_server.create_app())
+    client = TestClient(ui_server.create_app(), base_url="http://127.0.0.1:8770")
     # A browser always sends Origin on a WebSocket handshake; the socket now
     # fails closed without one (security review, 2026-09-03).
-    with client.websocket_connect("/api/stt", headers={"Origin": "http://testserver"}) as ws:
+    with client.websocket_connect("ws://127.0.0.1:8770/api/stt", headers={"Origin": "http://127.0.0.1:8770"}) as ws:
         assert ws.receive_json() == {"type": "error", "error": "no DEEPGRAM_API_KEY"}
 
 

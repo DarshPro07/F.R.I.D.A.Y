@@ -407,3 +407,20 @@ def test_on_limit_writes_its_error_to_the_log_and_exits_zero(tmp_path, monkeypat
     assert calls == []
     assert "session_handoff error" in capsys.readouterr().err
     assert "packet blew up" in (tmp_path / "handoffs" / "errors.log").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("line,value", [
+    ("LIVEKIT_API_SECRET=abc123def456", "abc123def456"),
+    ("SARVAM_API_KEY=sk_live_0123456789", "sk_live_0123456789"),
+    ("OPENAI_API_KEY: abcdefgh12345678", "abcdefgh12345678"),
+])
+def test_env_style_secret_names_are_redacted(handoff, line, value):
+    # Fails while the pattern starts with a word boundary: there is none after
+    # "_", so LIVEKIT_API_SECRET=... reached Codex/OpenCode and ~/.claude/handoffs intact.
+    out = handoff.redact(line)
+    assert value not in out and out.endswith("[REDACTED]")
+
+
+def test_a_sentence_about_a_token_is_left_alone(handoff):
+    text = "rotate the token before the demo tomorrow"
+    assert handoff.redact(text) == text

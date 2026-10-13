@@ -136,7 +136,7 @@ def test_ui_assets_are_served_from_the_ui_dir_only():
     that directory may be."""
     httpx = pytest.importorskip("httpx")
     from starlette.testclient import TestClient
-    with TestClient(u.create_app()) as client:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as client:
         r = client.get("/ui/orb.js")
         assert r.status_code == 200 and "createOrbScene" in r.text
         assert client.get("/ui/../friday/ui_server.py").status_code in (404, 400)
@@ -153,7 +153,7 @@ def test_api_work_returns_runs_objectives_and_digest_shape(monkeypatch):
                   "latest": "editing policy.py", "route_reason": "default route"}],
         "objectives": [], "digest": "did 2 tools, last: editing policy.py"})
     u._WORK_CACHE.update(at=0.0, value=None)
-    with TestClient(u.create_app()) as client:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as client:
         r = client.get("/api/work")
         assert r.status_code == 200
         body = r.json()
@@ -295,7 +295,7 @@ def test_shot_path_refuses_traversal():
 def test_http_surface_is_live():
     httpx = pytest.importorskip("httpx")  # starlette TestClient needs httpx
     from starlette.testclient import TestClient
-    with TestClient(u.create_app()) as client:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as client:
         assert client.get("/health").text == "ok"
         r = client.get("/api/state")
         assert r.status_code == 200
@@ -379,19 +379,19 @@ def test_cross_site_callers_cannot_reach_desk_or_stt(monkeypatch):
     calls = []
     monkeypatch.setattr(u.desk_mod, "grab",
                         lambda what: calls.append(what) or {"ok": True, "chars": 0})
-    with TestClient(u.create_app()) as client:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as client:
         r = client.get("/api/desk?what=selection", headers={"Origin": "http://evil.example"})
         assert r.status_code == 403 and calls == []
         r = client.get("/api/desk?what=clipboard",
                        headers={"Referer": "http://evil.example/page"})
         assert r.status_code == 403 and calls == []
-        r = client.get("/api/desk?what=clipboard", headers={"Origin": "http://testserver"})
+        r = client.get("/api/desk?what=clipboard", headers={"Origin": "http://127.0.0.1:8770"})
         assert r.status_code == 200 and calls == ["clipboard"]
         # Header-less is cross-site for desk: a no-referrer image sends nothing.
         assert client.get("/api/desk?what=clipboard").status_code == 403
         assert client.get("/api/desk?what=nope", headers={"Origin": "http://evil.example"}).status_code == 400
         with pytest.raises(WebSocketDisconnect):
-            with client.websocket_connect("/api/stt", headers={"Origin": "http://evil.example"}):
+            with client.websocket_connect("ws://127.0.0.1:8770/api/stt", headers={"Origin": "http://evil.example"}):
                 pass
 
 
@@ -402,7 +402,7 @@ def test_api_helpers_returns_providers_families_and_processes():
     pytest.importorskip("httpx")
     from starlette.testclient import TestClient
     from friday import fabric
-    with TestClient(u.create_app()) as client:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as client:
         r = client.get("/api/helpers")
         assert r.status_code == 200
         body = r.json()

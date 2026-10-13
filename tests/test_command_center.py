@@ -253,7 +253,7 @@ def test_endpoint_reports_real_rows_and_never_raises(monkeypatch, tmp_path):
     log = hb.WorkRunLog(path)
     wid = log.create(task="real")
     log.update(wid, status=hb.WORKING)
-    with TestClient(u.create_app()) as client:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as client:
         body = client.get("/api/command_center/state").json()
         assert [a["run_id"] for a in body["agents"]] == [wid]
         assert body["agents"][0]["state"] == "running"

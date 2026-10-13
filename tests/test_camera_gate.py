@@ -85,6 +85,37 @@ def test_brute_force_gets_locked_out(gate, monkeypatch):
     assert out["ok"] is False and out["locked_out"] > 0
 
 
+def test_parallel_wrong_pins_never_get_more_hash_checks_than_the_limit(gate, monkeypatch):
+    # Fails if the failure is saved after the 0.3 s hash: 40 parallel guesses
+    # all read "0 failures" first and got ~33 checks instead of 5.
+    import threading
+    import time
+    busy_camera(monkeypatch)
+    access.set_pin(PIN)
+    real, checks = access._hash_pin, []
+
+    def slow_hash(pin, salt):
+        checks.append(pin)
+        time.sleep(0.05)
+        return real(pin, salt)
+    monkeypatch.setattr(access, "_hash_pin", slow_hash)
+    threads = [threading.Thread(target=access.verify_pin, args=("guess%02d" % i,)) for i in range(40)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(checks) <= access.PIN_MAX_TRIES, len(checks)
+    assert access.verify_pin(PIN)["ok"] is False                   # still locked out
+
+
+def test_a_right_pin_undoes_its_own_reserved_failure(gate, monkeypatch):
+    busy_camera(monkeypatch)
+    access.set_pin(PIN)
+    assert access.verify_pin("nope")["tries_left"] == access.PIN_MAX_TRIES - 1
+    assert access.verify_pin(PIN)["ok"] is True
+    assert access._pin_fails == []
+
+
 def test_weak_pins_are_rejected(gate):
     for bad in ("", "12", "1111", None, "x" * 40):
         assert access.set_pin(bad)["ok"] is False
@@ -102,7 +133,7 @@ def test_camera_endpoint_answers_while_locked(gate, monkeypatch):
     pytest.importorskip("httpx")
     from starlette.testclient import TestClient
     free_camera(monkeypatch)
-    with TestClient(u.create_app()) as c:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as c:
         assert c.get("/api/state").status_code == 423          # locked, as ever
         assert c.get("/api/camera").status_code == 200         # but the lock screen can explain itself
         assert c.post("/api/camera/hold").status_code == 200
@@ -117,11 +148,11 @@ def test_an_enrolled_owners_room_does_not_take_a_first_pin_from_the_lock_screen(
     from starlette.testclient import TestClient
     free_camera(monkeypatch)
     monkeypatch.setattr(access, "enrolled", lambda: True)
-    with TestClient(u.create_app()) as c:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as c:
         r = c.post("/api/auth/pin/set", json={"pin": PIN})
         assert r.status_code == 423 and not access.has_pin()
     monkeypatch.setattr(access, "enrolled", lambda: False)        # a fresh install claims its PIN
-    with TestClient(u.create_app()) as c:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as c:
         assert c.post("/api/auth/pin/set", json={"pin": PIN}).json()["ok"] is True
 
 
@@ -130,5 +161,5 @@ def test_password_mode_takes_a_first_pin_even_with_a_face_enrolled(gate, monkeyp
     from starlette.testclient import TestClient
     monkeypatch.setattr(access, "enrolled", lambda: True)
     monkeypatch.setattr(access, "AUTH_MODE", "pin")
-    with TestClient(u.create_app()) as c:
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as c:
         assert c.post("/api/auth/pin/set", json={"pin": PIN}).json()["ok"] is True
