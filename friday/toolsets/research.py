@@ -408,8 +408,13 @@ DEPTH_BUDGETS: dict[str, DepthBudget] = {
     "R5": DepthBudget(24, 72000),
 }
 
-# Consecutive pages that add no inquiry term before the search stops.
+# Consecutive pages that add no information before the search stops.
 GAIN_PATIENCE = 2
+# New named facts (numbers, proper names) a page needs to count as information
+# once the inquiry's own terms are all covered.
+FACT_GAIN_MIN = 3
+_FACT_TOKEN = re.compile(r"\b(?:[A-Z][A-Za-z0-9]+|\d+(?:[.,:]\d+)*)\b")
+_SENTENCE_BREAKS = frozenset(".!?#\n*>|-")
 
 _FACT_OPENERS = ("who", "what", "when", "where", "which", "how many", "how much",
                  "how old", "how long", "is", "are", "was", "were", "does", "did")
@@ -487,20 +492,59 @@ def filter_branches(inquiry: CanonicalInquiry, branches: list[dict]) -> tuple[li
     return kept, rejected
 
 
+def _facts(text: str, inquiry: CanonicalInquiry) -> frozenset[str]:
+    """
+    The named facts in `text`: numbers and capitalised names (entities).
+
+    A capitalised word that opens a sentence or heading is ordinary prose, not
+    a name, so it is skipped; the inquiry's own terms are counted separately.
+    """
+    found: set[str] = set()
+    for match in _FACT_TOKEN.finditer(text or ""):
+        token = match.group(0)
+        if token[0].isalpha():
+            before = text[max(0, match.start() - 3):match.start()].rstrip(" \t")
+            if not before or before[-1] in _SENTENCE_BREAKS:
+                continue
+        token = token.lower()
+        if token not in _INSTRUCTION_WORDS and token not in inquiry.terms:
+            found.add(token)
+    return frozenset(found)
+
+
+def _adds_information(inquiry: CanonicalInquiry, page: dict,
+                      covered: set[str], seen: set[str]) -> bool:
+    """
+    Whether `page` adds information to what the walk has read; updates
+    `covered` (inquiry terms) and `seen` (named facts) in place.
+
+    A page adds information when it covers a new inquiry term, or names at
+    least FACT_GAIN_MIN facts not read before that are also a third of the
+    facts it names. Without the second test a short question is covered by
+    its first page and a deep walk stops after two waves whatever its depth.
+    """
+    text = f"{page.get('title', '')} {page.get('markdown', '')}"
+    fresh = (inquiry.terms & _terms(text)) - covered
+    covered |= fresh
+    facts = _facts(text, inquiry)
+    new_facts = facts - seen
+    seen |= facts
+    return bool(fresh) or len(new_facts) >= max(FACT_GAIN_MIN, -(-len(facts) // 3))
+
+
 def _barren_tail(inquiry: CanonicalInquiry, pages: list[dict]) -> int:
     """
-    How many independent sources at the end of `pages` added no inquiry term.
+    How many independent sources at the end of `pages` added no information.
 
     Mirrors of one article are one source (RSCH-003), so reposts are neither a
     stall nor a gain: five copies in a row must not hide a distinct source
     that has not been read yet.
     """
     covered: set[str] = set()
+    seen: set[str] = set()
     barren = 0
     for page in collapse_copies(pages):
-        fresh = (inquiry.terms & _terms(f"{page.get('title', '')} {page.get('markdown', '')}")) - covered
-        covered |= fresh
-        barren = 0 if fresh else barren + 1
+        barren = 0 if _adds_information(inquiry, page, covered, seen) else barren + 1
     return barren
 
 
@@ -512,8 +556,8 @@ def explore(inquiry: CanonicalInquiry, depth: str, branches: list[dict], fetch, 
 
     `fetch(branch)` returns a page dict (see `dedupe`). Stop reasons:
     budget_sources, budget_chars, no_information_gain (`patience` pages in a
-    row covered no new inquiry term; None turns this stop off), or exhausted
-    (nothing left to read). `budget` overrides the depth's own budget;
+    row added no information, see `_adds_information`; None turns this stop
+    off), or exhausted (nothing left to read). `budget` overrides the depth's own budget;
     `guard=False` skips the drift guard for branches the caller already screened.
     """
     budget = budget or DEPTH_BUDGETS[depth]
@@ -521,6 +565,7 @@ def explore(inquiry: CanonicalInquiry, depth: str, branches: list[dict], fetch, 
     pages: list[dict] = []
     failed: list[str] = []
     covered: set[str] = set()
+    seen: set[str] = set()
     spent = 0
     barren = 0
     reason = "exhausted"
@@ -534,9 +579,7 @@ def explore(inquiry: CanonicalInquiry, depth: str, branches: list[dict], fetch, 
             continue
         pages.append(page)
         spent += len(page.get("markdown") or "")
-        fresh = (inquiry.terms & _terms(f"{page.get('title', '')} {page.get('markdown', '')}")) - covered
-        covered |= fresh
-        barren = 0 if fresh else barren + 1
+        barren = 0 if _adds_information(inquiry, page, covered, seen) else barren + 1
         more = index + 1 < len(kept)
         if spent >= budget.max_chars:
             reason = "budget_chars" if more else "exhausted"

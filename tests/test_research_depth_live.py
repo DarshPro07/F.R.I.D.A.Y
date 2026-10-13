@@ -287,3 +287,35 @@ def test_gain_stop_does_not_lower_the_saved_confidence(rig, monkeypatch):
     assert out["stop"]["not_fetched"] > 0
     assert len(saved) == 1
     assert saved[0].confidence == 1.0
+
+
+# --- RSCH-001: gain is new facts, not only the question's own terms ----------
+
+def _named_facts(i: int) -> str:
+    """A page on the inquiry that names facts no other page names."""
+    return "Postgres MySQL replication notes: " + " ".join(
+        f"cluster Node{i}n{j} applied {1000 * i + j} commits;" for j in range(6))
+
+
+def test_narrow_deep_question_keeps_reading_pages_that_name_new_facts(rig):
+    """A three-term question is covered by its first page; pages that keep
+    naming new entities and numbers are still information, so R4 reads its
+    whole budget instead of stopping after two waves."""
+    urls = [f"https://s{i}.example/postgres-replication" for i in range(16)]
+    state = rig(urls, pages={u: _page(u, _named_facts(i)) for i, u in enumerate(urls)})
+    out = _run(BROAD, depth="R4").output
+    assert out["stop"]["reason"] == "budget_sources"
+    assert sum(len(b) for b in state["crawled"]) == R.DEPTH_BUDGETS["R4"].max_sources
+    assert out["stop"]["not_fetched"] == 0
+
+
+def test_pages_repeating_the_same_named_facts_still_stall(rig):
+    urls = [f"https://s{i}.example/postgres-replication" for i in range(8)]
+    same = ("Postgres MySQL replication: Oracle shipped MySQL 8.0 in 2018 and "
+            "PGDG shipped Postgres 10 in 2017. ")
+    state = rig(urls, pages={
+        u: _page(u, same + " ".join(f"filler{i}x{j}" for j in range(60)))
+        for i, u in enumerate(urls)})
+    out = _run(BROAD, depth="R4").output
+    assert out["stop"]["reason"] == "no_information_gain"
+    assert [len(b) for b in state["crawled"]] == [2, 2]

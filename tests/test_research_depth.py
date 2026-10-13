@@ -123,3 +123,17 @@ def test_r0_fetches_nothing():
     out = R.explore(inq, "R0", [{"url": "https://a", "title": "Postgres replication"}],
                     lambda b: 1 / 0)
     assert out["pages"] == [] and out["stop"]["reason"] == "budget_sources"
+
+
+def test_pages_naming_new_facts_are_gain_once_the_terms_are_covered():
+    inq = R.CanonicalInquiry.from_question("Compare Postgres and MySQL replication")
+    branches = [{"url": f"https://x/{i}", "title": "Postgres MySQL replication"} for i in range(6)]
+
+    def fetch(b):
+        i = int(b["url"].rsplit("/", 1)[1])
+        return _page(b["url"], "postgres mysql replication: " + " ".join(
+            f"replica Host{i}r{j} lagged {10 * i + j} seconds;" for j in range(5)))
+
+    out = R.explore(inq, "R4", branches, fetch)
+    assert out["stop"]["reason"] == "exhausted"
+    assert len(out["pages"]) == 6
