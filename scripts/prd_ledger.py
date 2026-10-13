@@ -5489,6 +5489,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'This slice closes part of the second gap, the one about symlinks inside the tree. Before the fix, an attempt that added a directory junction or symlink inside the tree was ACCEPTED. git follows a directory link and reports the files behind it as untracked files of this tree, so a fix could pass veri (build run, commit 11ee4a524)',
         "next_action": 'GAPS: Still not covered: git hooks, GIT_* or PYTHON* variables set through a caller-supplied env, and .pth or sitecustomize files outside the repo. A SANDBOX-001 style jail is the real fix.; The semantic guard still drops changes to helper files under tests/, so a legitimate fix that needs a changed tests/ helper would be rejected as TEST_WEAKENED.; The loop still refuses a workdir that holds ignored files (deliberate, because the reset deletes them).; Links that were already in the baseline tree are allowed; only links the attempt adds are rejected.; test_ultracode_definition, test_trace_debugger, test_ultracode_spec, test_ultracode_tiers and test_voice_interruption were not rerun (test_impact lists none of them as affected).',
     }),
+    ('UCW-002', {
+        "status": PARTIAL,
+        "current_implementation": "I fixed both major review issues. The builder's durable runner (durable.py) and its tests are unchanged.\n\n1. Profiled-route pattern (definition.py:89-123). It no longer turns every alphabetic segment of a profiled id into a family word. It now takes three things from each profiled route: the full id (build run, commit bd3954953)",
+        "next_action": 'GAPS: Nothing in production calls start_definition_run / DefinitionPort yet. friday/ultracode/durable.py is declared FUTURE in reachability.DECLARED.; A model id FRIDAY has never declared or profiled is still not caught. The runtime cannot route to such an id, so it cannot be dispatched.; This uses the private model_capabilities._read_profiles() because model_capabilities.py belongs to another build in this batch. A public listing there should replace it.; durable.py:153 still calls gate.settle only after a successful dispatch (see assumptions). If the agent or executor fails, the spend it incurred is first re-checked at the next admit, not straight away.',
+    }),
 ]
 
 
