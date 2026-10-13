@@ -5609,6 +5609,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Hermes cancel and timeout are now reliable (friday/executors/hermes.py). (1) delegate runs inside a turn() closure on a thread. The run id leaves _running only when that thread ends (hermes.py:145-153), not in the coroutine's finally. A composer fallback work.cancel() therefore no longer orphans the (build run, commit c430d4aac)",
         "next_action": "GAPS: The row's acceptance requires a spend limit to stop the worker. Hermes spend is still not enforced: ActionResult carries no cost and the hermes launcher reports no spend_usd. That is why acceptance_met is false.; A cancel stops the Hermes turn, but the delegate thread itself is not killed. It returns when the gateway reports message.complete after the interrupt. If the gateway never answers, the thread lives until turn_timeout.; If every interrupt for a live run raises, cancel() returns False for that run and arms no retry. The composer then cancels the task, and the thread runs until the gateway ends the turn.; No live Hermes gateway was exercised. The tests use a fake supervisor with the delegate/interrupt/log.for_friday_run surface.; implementer did not claim acceptance met",
     }),
+    ('PRIV-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Repaired the reviewer’s two major issues at the gateway boundary. ModelGateway no longer trusts x_external_service/external_service/service labels embedded in caller-provided tool schemas. It resolves direct FRIDAY tools through the capability registry and normalizes owned tool ids such as web_searc (build run, commit 4651ad745)',
+        "next_action": 'GAPS: No MCP tool, planner or UI path sets a budget on an objective; only an envelope handed to objectives.compile_objective carries one.; Gateway budget lookup reads the run row on each infer call and is not cached.; system_one.py:127 is a second data_class.decision seam with no objective context; the budget is not applied there, per reviewer note outside this slice.; The CLI-MCP path honours provider/data-class budget and external service budget, but still has no direct dedicated test beyond gateway coverage.',
+    }),
 ]
 
 
