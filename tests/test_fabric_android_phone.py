@@ -21,6 +21,11 @@ APP = "com.example.notes"
 class StubBridge:
     def __init__(self):
         self.calls = []
+        self.front = APP
+
+    def foreground(self):
+        self.calls.append(("foreground",))
+        return self.front
 
     def status(self):
         self.calls.append(("status",))
@@ -122,11 +127,25 @@ def test_an_in_scope_action_reaches_the_device_and_is_audited(phone):
     bridge, log = phone
     out = act("read_screen", app=APP, mobile_authorization=grant())
     assert out.status == "succeeded", out.error
-    assert bridge.calls == [("read_screen", APP)]
+    assert bridge.calls == [("foreground",), ("read_screen", APP)]
     assert out.output == {"app": APP, "text": "hello"}
     rows = log.query()
     assert [r["decision"] for r in rows] == ["ALLOW"]
     assert rows[0]["target"] == APP and rows[0]["detail"]["approval_id"] == "apr-mobile-1"
+
+
+@pytest.mark.parametrize("operation,args", [
+    ("read_screen", {}),
+    ("tap_text", {"text": "Save"}),
+])
+def test_a_granted_app_cannot_read_or_tap_another_app_in_front(phone, operation, args):
+    bridge, log = phone
+    bridge.front = "com.bank.pay"
+    out = act(operation, app=APP, **args, mobile_authorization=grant(
+        actions=("read_screen", "tap_text")))
+    assert out.status == "failed" and "foreground" in out.error
+    assert bridge.calls == [("foreground",)]
+    assert [r["decision"] for r in log.query()] == ["DENY"]
 
 
 def test_the_caller_cannot_supply_the_bridge_or_any_other_argument(phone):

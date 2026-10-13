@@ -13,7 +13,9 @@ this adapter is activated. Only `status` is open (knowing, not doing).
 apps and actions it covers, an expiry and the approval on record - the
 mobile counterpart of `trust.target_guard`. An absent, malformed, expired,
 out-of-app or out-of-action request is refused and audited, and the device
-bridge is never touched. The bridge is process state set by
+bridge is never touched. `read_screen` and `tap_text` also ask the bridge
+which app is in front and refuse unless it is the granted one, so a grant
+for one app cannot read or tap whatever else is on screen. The bridge is process state set by
 `register_bridge`; a caller cannot supply or swap it.
 
 **Content.** A tap whose text asks for a password, PIN, OTP or payment detail
@@ -46,8 +48,8 @@ _bridge = None
 
 
 def register_bridge(bridge) -> None:
-    """Install the device bridge: status(), open_app(app), read_screen(app),
-    tap_text(app, text)."""
+    """Install the device bridge: status(), foreground() -> package name,
+    open_app(app), read_screen(app), tap_text(app, text)."""
     global _bridge
     _bridge = bridge
 
@@ -148,6 +150,12 @@ def call(operation: str, handle, **arguments):
     text = _text(arguments, "text") if operation == "tap_text" else ""
 
     grant, reason = _guard(arguments.get("mobile_authorization"), app, operation, text)
+    if not reason and operation != "open_app":
+        # shortcut: check-then-act, the front app can change before the read or
+        # tap lands; a bridge that can bind the action to a package should do so.
+        front = bridge.foreground()
+        if front != app:
+            reason = f"the foreground app is {front!r}, not the granted {app!r}"
     T.audit().record(
         actor="friday", action=tool_id, target=app, tier=T.R1,
         decision="DENY" if reason else "ALLOW", result=reason or "within grant",
