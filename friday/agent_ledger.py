@@ -17,7 +17,8 @@ Two rules decide what a run *is*:
     `start()` records a claim (STARTING); a claim is not a worker.
   * A run the ledger believes is RUNNING must still have a live process.
     `RunManager.is_live` is the judge. A dead one is INTERRUPTED, which
-    invites a resume, never a RUNNING that nobody is working on.
+    invites a resume, never a RUNNING that nobody is working on. A claim that
+    ends PARTIAL before any worker started is INTERRUPTED the same way.
 """
 
 from __future__ import annotations
@@ -38,6 +39,9 @@ TERMINAL = frozenset({SUCCEEDED, FAILED, CANCELLED})
 
 #: The one event that moves a run from claimed to running.
 WORKER_STARTED = "worker_started"
+
+#: A run that ended short of a verdict. Not final, but no process is behind it.
+PARTIAL = "partial"
 
 _ROUTE_PARTS = 4   # provider/model/version/billing_class
 
@@ -107,6 +111,11 @@ class AgentLedger:
             if kind == WORKER_STARTED and row["status"] == STARTING:
                 conn.execute("UPDATE agent_runs SET status=? WHERE run_id=?",
                              (RUNNING, run_id))
+            elif kind == PARTIAL and row["status"] == STARTING:
+                # reconcile() only judges RUNNING rows; a claim that ended
+                # before any worker started would otherwise read STARTING.
+                conn.execute("UPDATE agent_runs SET status=? WHERE run_id=?",
+                             (INTERRUPTED, run_id))
 
     def finish(self, run_id: str, status: str, evidence_refs: list[str],
                message: str = "") -> None:

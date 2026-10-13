@@ -162,6 +162,25 @@ def test_the_direct_executor_records_its_route_and_a_partial_end(tmp_path, monke
         store.close()
 
 
+def test_a_run_that_ends_partial_before_its_worker_started_reads_interrupted(store, ledger):
+    """PARTIAL before `worker_started` must not leave the run claimed forever."""
+    from types import SimpleNamespace
+
+    from friday import contracts as c
+
+    bundle = TaskBundle(goal="add a retry", workspace="/w", role="eng")
+    manager = R.RunManager(store)
+    manager.open(bundle)
+    assert ledger.run(bundle.run_id)["status"] == "STARTING"
+
+    manager.close(bundle.run_id, SimpleNamespace(
+        status=c.PARTIAL, verification=None, output={}, error="out of turns"))
+
+    assert ledger.run(bundle.run_id)["status"] == "INTERRUPTED"
+    assert [e["kind"] for e in ledger.events(bundle.run_id)][-1] == "partial"
+    assert ledger.active() == []
+
+
 def test_a_run_nobody_started_is_never_active(ledger):
     """A model can claim a run; only a worker start event makes it active."""
     ledger.start("CLAIMED", task="t", workspace="/w", executor_id="claude_code")
