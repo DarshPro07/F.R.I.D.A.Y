@@ -5599,6 +5599,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "The packet's next_action was GAPS, so it did not set a slice. The first gap is a production caller passing routes to run_code_review. It needs wiring in runner.py, which another build in this batch owns. Wiring it into development.review instead would need an owner decision on which models fill the  (build run, commit 5cfbf8c01)",
         "next_action": 'GAPS: No production caller yet passes routes/available to run_code_review. Runner wiring (friday/ultracode/runner.py) is owned by another build in this batch. Wiring into development.review needs an owner decision on which models fill the panel and judge.; Infer has no output-token limit, so an over-cap reply is still generated and paid for. It is refused afterwards, not cut off mid-generation.; The cap is still a ceil(len/4) estimate, not a measured token count.; The panel step still checks only that each panel actor is on an allowed, available route. It does not check that the actor is the model the step resolved to.; Heuristic secret/danger detection, rename-only INCONCLUSIVE, hermes token over-routing and large-diff truncation remain.',
     }),
+    ('LAB-004', {
+        "status": PARTIAL,
+        "current_implementation": 'Slice: close the gap where a job fails after AdaptorLadder.capture. The real hazard was the window in SpecialistLab._judge (friday/lab_specialist.py, around line 205) after ladder.promote returns "promoted" and before fabric.promote records PRODUCTION. If the fabric refused or raised there (for exam (build run, commit d25e4ae64)',
+        "next_action": "GAPS: A job that fails after capture but before the ladder promotes (or when promotion is blocked) still leaves a CANDIDATE ladder row and a non-PRODUCTION fabric registration. Neither serves anything and neither blocks later jobs, but an external ladder.promote(name) with no version could pick that latest CANDIDATE. The ladder has no REJECTED state; adding one would change AdaptorLadder semantics.; The earlier build's regression test red state still cannot be demonstrated retroactively.",
+    }),
 ]
 
 
