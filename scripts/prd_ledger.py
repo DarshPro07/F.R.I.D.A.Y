@@ -5579,6 +5579,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Not built.',
         "next_action": 'Amendment A19 (owner 2026-10-12, docs/plans/build-harness/00-owner-directive-2026-10-12.md). P1 (owner). Builds after KEYS-001: a router only lists models of connected connectors. | RULING 2026-10-13 (owner, docs/plans/build-harness/00-owner-directive-2026-10-13.md): Paid API behind /model: Disabled by default. Explicit opt-in, visible billing, approved privacy and bounded spend required.',
     }),
+    ('ULTRA-006', {
+        "status": PARTIAL,
+        "current_implementation": "Acceptance already held; closed the resume gap: runner.recorded_choices reads the run's logged EVENT_MODELS_CHOSEN so a resumed port keeps its models and hits the result cache after the bench moves. Pinned default.json build=code/standard. (build run, commit ab02f565b)",
+        "next_action": "GAPS: Gap 2 left: cheapest_capable and rank_routes/cost_per_completion (FAB-003) are still two rankers over different inputs (bench {n,wins,cost} per model vs RouteOutcomes costs per (provider,model)); only cheapest_capable is shared with build_kernel.pick_model. Unifying means refactoring FAB-003 code pinned by test_route_cost_ranking and is outside this requirement.; Gap 3 left: no production caller builds per-tier candidate lists (execution_economics.candidates yields (provider, model) pairs) or a bench in {n,wins,cost} form from route_benchmarks/RouteOutcomes; a builder with no caller would be speculative.; Gap 4 left: StagePort/start_run/recorded_choices still have no entry point outside tests (runner is imported by nothing); wiring into the orchestrator dispatch path belongs to the ULTRA-002 runner integration and needs an owner decision on the entry.; recorded_choices has no production caller yet either, for the same reason as gap 4; it is the seam the entry point must use on resume.; Assumed: a run's first EVENT_MODELS_CHOSEN is authoritative (start_run logs it once, before any stage runs, so the cache keys of finished stages were computed under it).; Assumption carried: standard is the lowest tier a judge/synthesis/architecture stage may use; economy stays rejected for them.",
+    }),
 ]
 
 
