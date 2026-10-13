@@ -164,6 +164,66 @@ def test_revalidation_re_gates_an_external_skill_that_has_its_import_but_no_prov
     assert world.registry.provenance(skill.name)["source_commit"] == COMMIT
 
 
+def test_backfill_records_provenance_for_an_already_active_external_skill(world):
+    skill = staged(world, "ext-active-backfill", K.TRUST_COMMUNITY, **full_import())
+    world.lifecycle.evaluate_and_activate(skill.name)
+    with world.registry._connect() as db:
+        db.execute("DELETE FROM skill_provenance WHERE name = ?", (skill.name,))
+    assert world.registry.get(skill.name).state == K.ACTIVE
+    assert world.registry.provenance(skill.name) is None
+
+    result = world.lifecycle.backfill_active_provenance(skill.name, actor="test")
+
+    assert result == [{"skill": skill.name, "version": "1.0.0", "status": "backfilled"}]
+    row = world.registry.provenance(skill.name)
+    assert row["source"] == "marketplace:example"
+    assert row["source_url"] == URL
+    assert row["source_commit"] == COMMIT
+    assert row["content_hash"] == skill.content_hash()
+    assert row["scan"]["status"] == forge.SCAN_CLEAN
+    assert row["evaluation"]["passed"] is True
+    assert world.registry.get(skill.name).state == K.ACTIVE
+
+
+def test_backfill_uses_the_active_verified_version_after_rollback(world):
+    skill = staged(world, "ext-rollback-backfill", K.TRUST_COMMUNITY, **full_import())
+    world.lifecycle.evaluate_and_activate(skill.name)
+    frontmatter, body = skill.read()
+    skill.write(frontmatter, body + "\n## Pitfalls\n\n- newer guidance\n")
+    assert world.lifecycle.update(skill.name, bump="major")["version"] == "2.0.0"
+    restored = world.lifecycle.rollback(skill.name, actor="test", reason="prefer v1")
+    assert restored.version == "1.0.0"
+    assert "newer guidance" not in skill.text()
+    with world.registry._connect() as db:
+        db.execute("DELETE FROM skill_provenance WHERE name = ? AND version = ?", (skill.name, "1.0.0"))
+    assert world.registry.provenance(skill.name) is None
+    assert world.registry.provenance(skill.name, "2.0.0") is not None
+
+    result = world.lifecycle.backfill_active_provenance(skill.name, actor="test")
+
+    assert result == [{"skill": skill.name, "version": "1.0.0", "status": "backfilled"}]
+    row = world.registry.provenance(skill.name)
+    assert row["version"] == "1.0.0"
+    assert row["content_hash"] == skill.content_hash() == restored.content_hash
+    assert row["evaluation"]["version"] == "1.0.0"
+
+
+def test_backfill_refuses_an_active_community_skill_with_no_import_record(world):
+    skill = staged(world, "ext-originless-backfill", K.TRUST_COMMUNITY, **full_import())
+    world.lifecycle.evaluate_and_activate(skill.name)
+    _lose_provenance(world, skill.name)
+    with world.registry._connect() as db:
+        db.execute("UPDATE skills SET source = '', source_url = '' WHERE name = ?", (skill.name,))
+    assert world.registry.get(skill.name).state == K.ACTIVE
+
+    with pytest.raises(K.TransitionRefused, match="provenance.*source_url.*source_commit"):
+        world.lifecycle.backfill_active_provenance(skill.name, actor="test")
+
+    assert world.registry.provenance(skill.name) is None
+    assert world.registry.get(skill.name).state == K.ACTIVE
+    assert "provenance incomplete" in world.registry.history(skill.name)[-1]["reason"]
+
+
 def test_a_kept_scan_from_before_the_flag_is_never_read_as_runtime_safe(world):
     skill = staged(world, "ext-old-scan", K.TRUST_COMMUNITY, **full_import())
     world.lifecycle.evaluate_and_activate(skill.name)

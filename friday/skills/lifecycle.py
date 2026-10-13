@@ -214,15 +214,7 @@ class SkillLifecycle:
         if provenance is not None:
             # Written before the ACTIVE transition, so a failed write leaves the skill
             # inactive instead of active without its provenance.
-            if provenance["source_commit"]:
-                provenance["source_commit_kind"] = COMMIT_UPSTREAM
-            elif record.codebase_commit:
-                # Agent skills have no upstream commit; FRIDAY's own commit is kept but marked as such.
-                provenance["source_commit"] = record.codebase_commit
-                provenance["source_commit_kind"] = COMMIT_CODEBASE
-            else:
-                provenance["source_commit_kind"] = COMMIT_NONE
-            self.registry.record_provenance(name, record.version, **provenance)
+            self._record_provenance(record, provenance)
         record = self.registry.transition(name, K.ACTIVE, actor=actor, reason=f"evaluation {report.nonce} passed; skillspector scan clean")
         snapshot = F.snapshot(skill, self.snapshots_dir / name / record.version)
         self.registry.record_version(name, record.version, current_hash, snapshot_path=str(snapshot),
@@ -231,6 +223,35 @@ class SkillLifecycle:
             self.graph.index(skill)
         self.evaluator.rescore(name)
         return self.registry.get(name)
+
+    def backfill_active_provenance(self, name: str | None = None, *, actor: str = "provenance-backfill") -> list[dict]:
+        """Write the missing SKILL-006 provenance row for already ACTIVE
+        external skills, but only when the same evidence required at activation
+        is already present: verified version, exact content hash, clean scan,
+        evaluation report and import metadata. Nothing is invented."""
+        records = [self._require(name)] if name else self.registry.list(state=K.ACTIVE)
+        results: list[dict] = []
+        for record in records:
+            if record.state != K.ACTIVE or record.trust not in scan_stage.EXTERNALLY_SCANNED:
+                continue
+            if self.registry.provenance(record.name, record.version) is not None:
+                results.append({"skill": record.name, "version": record.version, "status": "present"})
+                continue
+            skill = F.SkillFiles(Path(record.path))
+            current_hash = skill.content_hash()
+            if record.content_hash != current_hash:
+                raise K.TransitionRefused(f"{record.name}: the active skill changed on disk; run sync before provenance backfill")
+            report = self._verified_report(record)
+            self._require_clean_scan(record, skill, actor)
+            provenance = self._require_provenance(record, report, actor)
+            if provenance is None:
+                continue
+            if self.graph is not None and not record.codebase_commit:
+                record.codebase_id, record.codebase_commit = self.graph.identity()
+                self.registry.upsert(record)
+            self._record_provenance(record, provenance)
+            results.append({"skill": record.name, "version": record.version, "status": "backfilled"})
+        return results
 
     def _require_clean_scan(self, record: K.SkillRecord, skill: F.SkillFiles, actor: str) -> None:
         """Every skill, whatever its trust, needs a SkillSpector scan that is
@@ -309,6 +330,36 @@ class SkillLifecycle:
         return {"source": source, "source_url": source_url, "source_commit": source_commit,
                 "content_hash": record.content_hash, "signature": imported.get("signature", ""),
                 "sbom": imported.get("sbom", ""), "scan": scan, "evaluation": evaluation}
+
+    def _record_provenance(self, record: K.SkillRecord, provenance: dict) -> None:
+        if provenance["source_commit"]:
+            provenance["source_commit_kind"] = COMMIT_UPSTREAM
+        elif record.codebase_commit:
+            # Agent skills have no upstream commit; FRIDAY's own commit is kept but marked as such.
+            provenance["source_commit"] = record.codebase_commit
+            provenance["source_commit_kind"] = COMMIT_CODEBASE
+        else:
+            provenance["source_commit_kind"] = COMMIT_NONE
+        self.registry.record_provenance(record.name, record.version, **provenance)
+
+    def _verified_report(self, record: K.SkillRecord) -> K.EvaluationReport:
+        version = next((candidate for candidate in self.registry.versions(record.name)
+                        if candidate["verified"] and candidate["version"] == record.version), None)
+        if version is None:
+            raise K.TransitionRefused(f"{record.name}: no verified evaluation is recorded for active version {record.version}")
+        if version.get("content_hash") != record.content_hash:
+            raise K.TransitionRefused(f"{record.name}: the verified version hash does not match the active record")
+        try:
+            stored = json.loads(version.get("evaluation") or "{}")
+            report = K.EvaluationReport(**{k: v for k, v in stored.items() if k in K.EvaluationReport.__dataclass_fields__})
+            report.checks = [tuple(c) for c in report.checks]
+        except (TypeError, ValueError) as exc:
+            raise K.TransitionRefused(f"{record.name}: the stored evaluation is unreadable: {exc}") from exc
+        if not self.registry.evaluation_on_record(report):
+            raise K.TransitionRefused(f"{record.name}: the verified evaluation is not on record")
+        if not report.passed or report.content_hash != record.content_hash:
+            raise K.TransitionRefused(f"{record.name}: the verified evaluation does not describe the active content")
+        return report
 
     @staticmethod
     def _kept_scan_still_holds(kept: Path, tree_digest: str) -> bool:
