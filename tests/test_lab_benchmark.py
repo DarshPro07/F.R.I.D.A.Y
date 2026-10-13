@@ -13,6 +13,7 @@ from friday import confirmation as CF
 from friday import experimental_local as EL
 from friday import lab_benchmark as LB
 from friday import lab_dataset as LD
+from friday import model_gateway as MG
 from friday.store import Store
 
 PROV = {"commit": "abc1234", "date": "2026-10-10T00:00:00+00:00"}
@@ -288,3 +289,84 @@ def test_cases_come_from_the_frozen_export_and_its_hash(tmp_path):
     (out / LD.EVAL).write_bytes(b"")
     with pytest.raises(LD.EvalSetChanged):
         LB.load_export(out)
+
+
+def frozen_export(tmp_path):
+    store = Store(tmp_path / "lab.db")
+    book = CF.StoredBook(store=lambda: store, instance="t")
+    for i in range(60):
+        cap, cls = (("files_delete", "CRITICAL") if i % 2 else ("files_list", "STANDARD"))
+        seed(store, f"run-{i:03d}", cap, cls)
+    out = tmp_path / "export"
+    c = book.ask(LD.APPROVAL_RUN, LD.APPROVAL_ACTION, LD.approval_target(out), "export?")
+    assert book.approve(c.nonce, answered_by="owner").ok
+    LD.build(store, out, approval=c.nonce, book=book)
+    return out
+
+
+def test_the_driver_files_one_report_from_the_export_and_selection_reads_it(tmp_path):
+    out = frozen_export(tmp_path)
+    export = LB.load_export(out)
+    labels = [c.label for c in LB.cases_for(EL.TASK_CATEGORY, export.eval_rows)]
+    reports = LB.ReportStore(tmp_path / "reports.json")
+    picks = []
+    for _ in range(2):
+        stub = Stub(labels)
+        rep = LB.benchmark_export(EL.TASK_CATEGORY, out, reports,
+                                  minimind=[LB.MiniMind("minimind-3-64m", 0.2, stub)],
+                                  provenance=PROV, minimum_cases=1, ram_probe=lambda: 1.0,
+                                  clock=lambda: 0.0)
+        assert rep.eval_sha256 == export.eval_sha256
+        assert reports.latest(EL.TASK_CATEGORY).report_id == rep.report_id
+        # the model is offered every task class the gateway routes, not only the seen ones
+        assert set(json.loads(stub.prompts[0])["labels"]) == set(MG.TASK_CLASSES)
+        picks.append(LB.select(EL.TASK_CATEGORY, reports, eval_sha256=export.eval_sha256))
+    # a MiniMind that only ties the linear baseline is not selected, and the
+    # unchanged set reproduces the same winner from the same stored report
+    assert picks[0] == picks[1]
+    assert picks[0].candidate == "linear" and not picks[0].neural
+
+
+def test_the_driver_files_nothing_for_an_unsupported_task_or_a_changed_set(tmp_path):
+    out = frozen_export(tmp_path)
+    reports = LB.ReportStore(tmp_path / "reports.json")
+    with pytest.raises(LB.UnsupportedTask):
+        LB.benchmark_export(EL.TEAM_ACTIVATION, out, reports, minimind=[],
+                            provenance=PROV, ram_probe=lambda: 1.0)
+    (out / LD.EVAL).write_bytes(b"")
+    with pytest.raises(LD.EvalSetChanged):
+        LB.benchmark_export(EL.TASK_CATEGORY, out, reports, minimind=[],
+                            provenance=PROV, ram_probe=lambda: 1.0)
+    assert not reports.path.exists()
+
+
+def test_model_ram_is_the_variants_own_growth_not_the_whole_process():
+    """`ram_gb` is the process peak; `model_ram_gb` is what the variant added
+    over the resident set sampled just before its first call, so a 64M model
+    is not charged with the rest of FRIDAY's memory."""
+    rss = {"gb": 3.0}
+
+    class Lazy(Stub):
+        def __init__(self, answers, weights_gb):
+            super().__init__(answers)
+            self.weights_gb, self.loaded = weights_gb, False
+
+        def __call__(self, prompt):
+            if not self.loaded:  # weights load on the first call
+                rss["gb"] += self.weights_gb
+                self.loaded = True
+            return super().__call__(prompt)
+
+    dense = LB.MiniMind("minimind-3-64m", 0.13, Lazy(truth(), 0.25))
+    moe = LB.MiniMind("minimind-3-moe-198m", 0.4, Lazy(truth(), 0.75))
+    train, ev = make_sets()
+    rep = LB.run_task(EL.TASK_CATEGORY, train, ev, "e" * 64, minimind=[dense, moe],
+                      labels=LABELS, routing=lambda c: "STANDARD", provenance=PROV,
+                      minimum_cases=10, ram_probe=lambda: rss["gb"])
+    d = rep.arena.result("minimind-3-64m").metrics
+    m = rep.arena.result("minimind-3-moe-198m").metrics
+    assert d["ram_gb"] == pytest.approx(3.25) and d["model_ram_gb"] == pytest.approx(0.25)
+    assert m["ram_gb"] == pytest.approx(4.0) and m["model_ram_gb"] == pytest.approx(0.75)
+    assert "model_ram_gb" not in rep.arena.result(LB.ROUTING).metrics
+    back = LB.BenchmarkReport.from_dict(rep.to_dict())
+    assert back.arena.result("minimind-3-moe-198m").metrics["model_ram_gb"] == pytest.approx(0.75)

@@ -29,8 +29,11 @@ capability names. The other narrow tasks have no labelled rows in the frozen
 set yet; `cases_for` names them `UnsupportedTask` rather than faking cases.
 
 Assumed, revisit if wrong: the 64M and 198M variants are separate candidates
-named by the caller, so each gets its own size, RAM, latency and accuracy; RAM
-is the process's resident set sampled after each call (`ram_probe`).
+named by the caller, so each gets its own size, RAM, latency and accuracy.
+`ram_gb` is the process's peak resident set sampled after each call
+(`ram_probe`); `model_ram_gb` is that peak less the resident set sampled just
+before the variant's first call, the variant's own footprint when its weights
+load on first use (a variant loaded earlier shows only its working memory).
 """
 from __future__ import annotations
 
@@ -358,6 +361,7 @@ def run_task(narrow_task: str, train: Sequence[Case], eval_cases: Sequence[Case]
     def measure(name: str, kind: str, predict: Callable[[Case], str | None],
                 extra: Mapping[str, float] | None = None, probe: bool = False) -> float:
         hits, ms, ram = 0, 0.0, 0.0
+        before = float(ram_probe()) if probe else 0.0
         for c in cases:
             t0 = clock()
             pred = predict(c)
@@ -370,6 +374,7 @@ def run_task(narrow_task: str, train: Sequence[Case], eval_cases: Sequence[Case]
                    **(extra or {})}
         if probe:
             metrics["ram_gb"] = ram
+            metrics["model_ram_gb"] = max(0.0, ram - before)
         details[name] = {"kind": kind, "case_ids": ids}
         scores[name] = arena.Score(gates={"minimum_cases": len(cases) >= minimum_cases},
                                    cases=len(cases), score=acc, metrics=metrics)
@@ -453,6 +458,31 @@ class ReportStore:
     def latest(self, task: str) -> BenchmarkReport | None:
         mine = [r for r in self._read() if r.task == task]
         return mine[-1] if mine else None
+
+
+def _labels(narrow_task: str) -> tuple[str, ...]:
+    """The label schema a candidate may answer with: for the task category,
+    every class the gateway routes, not only the classes the set happens to hold."""
+    if narrow_task != EL.TASK_CATEGORY:
+        raise UnsupportedTask(f"{narrow_task!r} has no label schema yet")
+    from friday.model_gateway import TASK_CLASSES
+    return tuple(TASK_CLASSES)
+
+
+def benchmark_export(narrow_task: str, out_dir: str | Path, store: ReportStore, *,
+                     minimind: Sequence[MiniMind], **run: object) -> BenchmarkReport:
+    """Benchmark one narrow task on a LAB-002 export and file its report.
+
+    The export is checked against its manifest first and the cases are built
+    before anything runs, so an unsupported task or a changed set files
+    nothing. `run` is passed to `run_task` (provenance, training, probes)."""
+    export = load_export(out_dir)
+    train = cases_for(narrow_task, export.train_rows)
+    eval_cases = cases_for(narrow_task, export.eval_rows)
+    report = run_task(narrow_task, train, eval_cases, export.eval_sha256,
+                      minimind=minimind, labels=_labels(narrow_task), **run)
+    store.add(report)
+    return report
 
 
 @dataclass(frozen=True)
