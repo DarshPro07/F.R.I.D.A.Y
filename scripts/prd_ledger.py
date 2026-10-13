@@ -5619,6 +5619,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Fixed the reviewer’s rollback bug at the root. SkillLifecycle._verified_report() now selects the verified skill_versions row for the active record’s own version, then keeps the existing content-hash and evaluation-on-record checks. Added a regression that activates v1, activates v2, rolls back to v1 (build run, commit f05413110)',
         "next_action": 'GAPS: No signature verifier exists; signatures are stored as declared-unverified.; No importer in this tree yet calls register() with source_url, source_commit, signature or sbom (INTAKE-004 / SKMKT-002).; SBOM is stored as supplied and not generated per skill.',
     }),
+    ('AGENT-001', {
+        "status": PARTIAL,
+        "current_implementation": 'A run that ends PARTIAL before worker_started no longer stays STARTING in the ledger: the partial event moves a STARTING claim to INTERRUPTED. Acceptance tests (tree round-trip, dead pid, claim not active, unknown parent, append-only) all pass. (build run, commit 2218af4d3)',
+        "next_action": "GAPS: No retention policy for agent_events: append-only by trigger and the acceptance forbids a delete path, so pruning (archive or compact) needs an owner decision; saw() still appends one progress event per tool use.; parent_run_id is threaded on the composer path (agent_composer.py:396) and specialist.py, but the direct ClaudeCodeExecutor path has no caller with a parent in scope and TaskBundle has no parent field; not added speculatively.; Direct-path route version is 'unversioned': the CLI picks its model and the init event's model id is not parsed.; A PARTIAL end on a RUNNING run is still flipped to INTERRUPTED by reconcile() on the next read, not at the partial event; only the STARTING case was a stuck state, so only it is handled at write time.",
+    }),
 ]
 
 
