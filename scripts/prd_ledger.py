@@ -5604,6 +5604,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Slice: close the gap where a job fails after AdaptorLadder.capture. The real hazard was the window in SpecialistLab._judge (friday/lab_specialist.py, around line 205) after ladder.promote returns "promoted" and before fabric.promote records PRODUCTION. If the fabric refused or raised there (for exam (build run, commit d25e4ae64)',
         "next_action": "GAPS: A job that fails after capture but before the ladder promotes (or when promotion is blocked) still leaves a CANDIDATE ladder row and a non-PRODUCTION fabric registration. Neither serves anything and neither blocks later jobs, but an external ladder.promote(name) with no version could pick that latest CANDIDATE. The ladder has no REJECTED state; adding one would change AdaptorLadder semantics.; The earlier build's regression test red state still cannot be demonstrated retroactively.",
     }),
+    ('AGENT-003', {
+        "status": PARTIAL,
+        "current_implementation": "Hermes cancel and timeout are now reliable (friday/executors/hermes.py). (1) delegate runs inside a turn() closure on a thread. The run id leaves _running only when that thread ends (hermes.py:145-153), not in the coroutine's finally. A composer fallback work.cancel() therefore no longer orphans the (build run, commit c430d4aac)",
+        "next_action": "GAPS: The row's acceptance requires a spend limit to stop the worker. Hermes spend is still not enforced: ActionResult carries no cost and the hermes launcher reports no spend_usd. That is why acceptance_met is false.; A cancel stops the Hermes turn, but the delegate thread itself is not killed. It returns when the gateway reports message.complete after the interrupt. If the gateway never answers, the thread lives until turn_timeout.; If every interrupt for a live run raises, cancel() returns False for that run and arms no retry. The composer then cancels the task, and the thread runs until the gateway ends the turn.; No live Hermes gateway was exercised. The tests use a fake supervisor with the delegate/interrupt/log.for_friday_run surface.; implementer did not claim acceptance met",
+    }),
 ]
 
 
