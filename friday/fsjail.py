@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 import re
 import stat
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from friday.config import ARTIFACTS_DIR, DATA_DIR, PROJECT_ROOT
 
@@ -211,6 +211,9 @@ class FileJail:
         # Either slash: Windows reads "//host/share" as a UNC path too, and
         # resolving it would reach out to that host before any root is checked.
         if raw.startswith("\\\\") or (os.name == "nt" and raw.startswith("//")):
+            raise JailError("UNC and device paths are not permitted")
+        # Mixed pairs ("\\/host/share", "/\\host\\share") are UNC shares as well.
+        if os.name == "nt" and PureWindowsPath(raw).drive.startswith("\\\\"):
             raise JailError("UNC and device paths are not permitted")
 
     @staticmethod

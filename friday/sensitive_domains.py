@@ -92,9 +92,13 @@ def _extra() -> frozenset[str]:
 
 def _host_of(url: str) -> str:
     try:
-        return (urlsplit((url or "").strip()).hostname or "").lower()
+        host = (urlsplit((url or "").strip()).hostname or "").lower()
     except ValueError:
         return ""
+    # Browsers read the ideographic/fullwidth stops as dots, and "bank.com."
+    # is the same host as "bank.com".
+    host = host.translate({0x3002: ".", 0xFF0E: ".", 0xFF61: "."})
+    return host[:-1] if host.endswith(".") else host
 
 
 def is_sensitive(url: str) -> bool:

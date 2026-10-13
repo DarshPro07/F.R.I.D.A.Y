@@ -208,6 +208,20 @@ def test_a_command_that_hangs_is_killed(workspace):
     assert not result.ok
 
 
+def test_a_grandchild_holding_the_pipe_does_not_outlive_the_timeout(workspace):
+    """The child exits at once; its grandchild keeps stdout open for 30 s.
+    The timeout must end the whole tree, not wait on the pipe."""
+    spawn = ("import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
+             "'import time; time.sleep(30)'], stdout=sys.stdout, stderr=sys.stderr)")
+    started = time.monotonic()
+    with EX.NativeExecutionEnvironment(workspace, name='T') as box:
+        result = box.run([sys.executable, '-c', spawn], timeout=2)
+        elapsed = time.monotonic() - started
+    assert result.timed_out
+    assert result.exit_code == 124
+    assert elapsed < 10
+
+
 def test_a_secret_is_not_visible_to_the_process(workspace, monkeypatch):
     """The end-to-end version: not just absent from a dict, absent in there."""
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'sk-ant-do-not-leak')

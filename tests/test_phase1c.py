@@ -131,6 +131,18 @@ def test_unc_paths_are_refused(jail):
         jail.resolve(r"\\server\share\file.txt")
 
 
+@pytest.mark.skipif(not WINDOWS, reason="UNC paths")
+@pytest.mark.parametrize("raw", [r"\/attacker/s/a.txt", r"/\attacker\s\a.txt"])
+def test_mixed_slash_unc_paths_are_refused_before_resolving(jail, raw, monkeypatch):
+    """Windows reads a mixed-slash leading pair as a UNC share too, and
+    resolving it would reach out to that host."""
+    def touched(self, *a, **k):
+        raise AssertionError(f"resolved {self!s} before refusing it")
+    monkeypatch.setattr(Path, "resolve", touched)
+    with pytest.raises(JailError, match="UNC"):
+        jail.resolve(raw)
+
+
 def test_empty_and_null_paths_refused(jail):
     with pytest.raises(JailError, match="empty path"):
         jail.resolve("   ")

@@ -31,6 +31,13 @@ def test_known_bank_is_sensitive():
     assert sd.is_sensitive('http://onlinesbi.sbi')
 
 
+def test_trailing_dot_and_unicode_full_stops_still_match():
+    assert sd.is_sensitive('https://netbanking.hdfcbank.com./')
+    assert sd.is_sensitive('https://netbanking.hdfcbank\u3002com/')
+    assert sd.is_sensitive('https://netbanking.hdfcbank\uff0ecom/')
+    assert sd.is_sensitive('https://netbanking.hdfcbank\uff61com/')
+
+
 def test_suffix_matches_on_label_boundaries_only():
     assert not sd.is_sensitive('https://hdfcbank.com.evil.example/')
     assert not sd.is_sensitive('https://nothdfcbank.com/')

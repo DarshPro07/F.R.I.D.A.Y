@@ -339,6 +339,17 @@ class JobObject:
         finally:
             kernel32.CloseHandle(ctypes.c_void_p(process))
 
+    def terminate(self) -> bool:
+        """Kill everything in the job now; the job stays usable afterwards."""
+        if not self.available or self.handle is None:
+            return False
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        ok = kernel32.TerminateJobObject(ctypes.c_void_p(self.handle), 1)
+        if not ok:
+            logger.warning("could not terminate job %s: %s",
+                           self.name, ctypes.WinError(ctypes.get_last_error()))
+        return bool(ok)
+
     def close(self) -> None:
         """Kill everything in the job. Closing the handle is what does it."""
         if self.handle is None:
@@ -544,8 +555,18 @@ class NativeExecutionEnvironment:
             out, err = process.communicate(input=stdin, timeout=limit)
         except subprocess.TimeoutExpired:
             timed_out = True
+            # The job reaches grandchildren that hold the pipes; kill() is
+            # the fallback when there is no job.
+            self.job.terminate()
             process.kill()
-            out, err = process.communicate()
+            try:
+                out, err = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                # A descendant outside the job still holds the pipe; its
+                # output is abandoned rather than waited on.
+                logger.warning("a descendant of %s outlived the kill and holds its pipe",
+                               command[0])
+                out, err = "", "output abandoned: a descendant held the pipe open"
             err = f"{err}\nkilled after {limit:.0f}s"
 
         return self._record(Execution(
