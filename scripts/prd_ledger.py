@@ -5474,6 +5474,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'I fixed the major issue: read-back evidence is no longer trusted just because the caller says it passed. Evidence now also carries path and expect (expect is kept out of repr). These fields are set by read_back (friday/skills/fact_memory.py, around lines 110-150).\n\nA new method, SkillFactMemory._ver (build run, commit 12bfd03a7)',
         "next_action": "GAPS: Nothing calls add_fact, sweep, record_intake or read_back yet. The generated-skill writer, the INTAKE-005 intake pipeline and the git-change trigger come in later slices, and the module is still FUTURE in reachability.; Evidence of kind 'test' is still self-reported. The module does not run the cited test, so test evidence is still asserted by the caller.; A read-back is bound only to the fact's file or glob dependencies. A fact whose only dependencies are packages or skills cannot be backed by a read-back.; revalidate_fact() re-baselines the fact only. The skill returns to ACTIVE through the SKILL-003 lifecycle.; implementer did not claim acceptance met",
     }),
+    ('AGENT-001', {
+        "status": PARTIAL,
+        "current_implementation": "Direct ClaudeCodeExecutor runs now bind a provider/model/version/billing_class route in the ledger (fill-if-empty, never overwrites a declared route); a PARTIAL close writes a 'partial' evidence event. Slice-1 acceptance tests still pass. (build run, commit 718229127)",
+        "next_action": "GAPS: No retention policy for agent_events: the table is append-only by trigger and the acceptance forbids a delete path, so pruning needs an owner decision (archive or compact); saw() still appends one progress event per tool use.; parent_run_id is passed on the composer path (agent_composer.py:394-396) but the direct ClaudeCodeExecutor path has no caller with a parent in scope and TaskBundle has no parent field; not added speculatively.; Direct-path route version is 'unversioned': the CLI picks its model and the init event's model id is not parsed.; A run that ends PARTIAL before any worker_started stays STARTING in the ledger (reconcile only flips RUNNING); it is never in active().; New tests were not run against the pre-change tree (git checkout is denied); bind_route did not exist before, and the packet records the route as empty on this path.",
+    }),
 ]
 
 
