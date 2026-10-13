@@ -5454,6 +5454,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Whole build for ORCH-006. A repeated promote of the same conflict reuses the existing durable integration objective instead of creating a second. The store gains the pure addition Store.objective_events_across_runs (friday/store.py), so the lookup finds the owning run however many newer runs exist.  (build run, commit 931e43dde)',
         "next_action": "GAPS: The worker's formal requirement contract (PRD row) is still not attached; requirements remain commit subjects.; Pre-existing quirk unchanged: promote() on an already-committed worktree returns REJECTED 'nothing to promote', so dedupe cannot be exercised through a second public development_promote call; tests drive _persist_integration_task directly.; No threaded race test of simultaneous git worktree add.; The dedupe check-then-create is not atomic: two simultaneous conflicting promotes could each create an objective.; Dedupe scans every integration-task event across the store and JSON-decodes each (diffs up to INTEGRATION_DIFF_LIMIT per side); no index on event name alone and the list is materialised, not lazy. Acceptable while such events are rare per store.; implementer did not claim acceptance met",
     }),
+    ('MODEL-004', {
+        "status": PARTIAL,
+        "current_implementation": 'Design: this slice closes the gap from the last run that said "a stored profile is never refreshed". I did not take the bigger gap, the production caller. Every call site for it is in a file another build owns this batch: model_gateway.py, toolsets/model_gateway.py, tools/__init__.py, capabilities.p (build run, commit e2be585d8)',
+        "next_action": 'GAPS: No production caller yet: onboard_new_routes still has no route-discovery call site. Every candidate seam (model_gateway.py, toolsets/model_gateway.py, tools/__init__.py, capabilities/policy) is owned by another build this batch. route_onboarding stays FUTURE in reachability.; There is no default refresh age. The caller chooses max_age_s; None keeps the old never-refresh behaviour.; The image_url data-URI shape for the vision probe is still an unverified assumption about the worker.',
+    }),
 ]
 
 
