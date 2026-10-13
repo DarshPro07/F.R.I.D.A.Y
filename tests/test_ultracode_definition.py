@@ -24,6 +24,12 @@ _VERDICT = {"type": "object", "required": ["accept"],
             "properties": {"accept": {"type": "boolean"}}}
 
 
+@pytest.fixture(autouse=True)
+def _empty_profile_store(tmp_path, monkeypatch):
+    """Parsing reads the route profile store; pin it so no machine's routes leak in."""
+    monkeypatch.setenv("FRIDAY_MODEL_PROFILES", str(tmp_path / "model_profiles.json"))
+
+
 def build_capability(version: int = 1) -> dict:
     """friday.build_capability: two independent lookups, a build, a
     deterministic test run, and one deep judge."""
@@ -366,6 +372,52 @@ def test_every_model_in_the_declared_catalogue_is_refused():
     from friday import model_capabilities
     for _backend, model_id in model_capabilities.CAPABILITIES:
         assert D.MODEL_NAME.search(model_id), model_id
+
+
+@pytest.mark.parametrize("name", ["zorblax-7-turbo", "Zorblax"])
+def test_a_route_of_a_new_family_is_refused_once_it_is_profiled(name):
+    """A family in neither the catalogue nor the static list becomes routable
+    when MODEL-004 profiles it; from then on a step may not name it."""
+    from friday import model_capabilities as MC
+    raw = build_capability()
+    _step(raw, "build")["template"] = name
+    D.parse_definition(copy.deepcopy(raw))          # not yet a route FRIDAY can reach
+    MC.record_profile(MC.ModelCapabilities(
+        model_id="vendorx/zorblax-7-turbo", provider="vendorx", backend="openrouter",
+        vision=False, tools=False, structured_output=False, realtime_audio=False,
+        max_context=None, relative_latency="medium", relative_cost="unknown"),
+        [], profiled_at="2026-10-13T00:00:00Z")
+    with pytest.raises(D.ModelNameError) as caught:
+        D.parse_definition(raw)
+    assert caught.value.field == "steps[2].template"
+
+
+def _profile(model_id: str, provider: str) -> None:
+    from friday import model_capabilities as MC
+    MC.record_profile(MC.ModelCapabilities(
+        model_id=model_id, provider=provider, backend="openrouter",
+        vision=False, tools=False, structured_output=False, realtime_audio=False,
+        max_context=None, relative_latency="medium", relative_cost="unknown"),
+        [], profiled_at="2026-10-13T00:00:00Z")
+
+
+@pytest.mark.parametrize("named", ["llama-4-scout", "meta-llama/llama-4-scout",
+                                   "sonar-deep-research", "Sonar"])
+def test_profiling_a_real_route_does_not_turn_role_or_tier_words_into_models(named):
+    """Onboarding an ordinary route (its id tail holds `scout`, `deep`,
+    `research`) must not make the canonical definition unparseable; the
+    route itself, and its leading family word, are still refused."""
+    _profile("meta-llama/llama-4-scout", "meta-llama")
+    _profile("perplexity/sonar-deep-research", "perplexity")
+    D.parse_definition(build_capability())              # role scout, tier deep
+    raw = build_capability()
+    _step(raw, "review")["role"] = "research"
+    _step(raw, "scan")["template"] = "lookup"
+    D.parse_definition(copy.deepcopy(raw))
+    _step(raw, "build")["template"] = named
+    with pytest.raises(D.ModelNameError) as caught:
+        D.parse_definition(raw)
+    assert caught.value.field == "steps[2].template"
 
 
 @pytest.mark.parametrize("word", ["economy", "standard", "deep", "scout", "builder",

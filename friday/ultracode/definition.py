@@ -26,7 +26,8 @@ spec is therefore a `DefinitionSpec` (`durable_runner_safe` is False) and
 `runner.start_run` (NotDurableRunnerSafe). The DAG semantics
 (no barrier between independent steps, a dependent starts only when its handoff
 validates, a deterministic step goes to its executor and never a model) are
-delivered only by `run_definition`, in process.
+delivered by `run_definition` in process and, durably, by
+`friday.ultracode.durable` (one objective-engine task per step).
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ from typing import Awaitable, Callable, Mapping, Sequence
 from friday import model_capabilities
 from friday.execution_economics import TIER_ECONOMY
 from friday.ultracode.spec import Spec, SpecError, _check_schema, compile_plan, parse_spec
-from friday.ultracode.tiers import choose_model
+from friday.ultracode.tiers import TEMPLATE_TIER, choose_model
 
 KINDS = ("agent", "deterministic")
 #: A step may not carry any of these when no model is called.
@@ -58,14 +59,21 @@ _EXTRA_FAMILIES = ("claude", "gpt", "gemini", "sonnet", "opus", "haiku", "llama"
 _NOT_A_FAMILY = frozenset({"flash", "lite", "pro", "preview", "mini", "nano", "latest"})
 
 
-def _families() -> tuple[str, ...]:
-    """Every family the declared model catalogue names, plus the extra families."""
-    found = set(_EXTRA_FAMILIES)
-    for _backend, model_id in model_capabilities.CAPABILITIES:
+def _family_words(model_ids) -> set[str]:
+    """The family words these model ids are made of (`gemini-2.5-flash` -> gemini)."""
+    found = set()
+    for model_id in model_ids:
         for part in re.split(r"[-_:.]", model_id.lower().rsplit("/", 1)[-1]):
             word = re.match(r"[a-z]+", part)
             if word and len(word.group()) >= 3 and word.group() not in _NOT_A_FAMILY:
                 found.add(word.group())
+    return found
+
+
+def _families() -> tuple[str, ...]:
+    """Every family the declared model catalogue names, plus the extra families."""
+    found = set(_EXTRA_FAMILIES)
+    found |= _family_words(model_id for _backend, model_id in model_capabilities.CAPABILITIES)
     return tuple(sorted(found))
 
 
@@ -76,6 +84,44 @@ def _families() -> tuple[str, ...]:
 MODEL_NAME = re.compile(
     r"(?<![a-z0-9])((" + "|".join(map(re.escape, _families())) + r")(?![a-z])|o[1-9](?![a-z0-9]))",
     re.IGNORECASE)
+
+
+#: Words a profiled route id may hold that a definition uses for itself:
+#: tiers, templates, step kinds, and size or channel words. A profiled id is
+#: never allowed to turn one of these into a model name.
+_NOT_A_PROFILED_NAME = (_NOT_A_FAMILY | frozenset(TEMPLATE_TIER) | frozenset(TEMPLATE_TIER.values())
+                        | frozenset(KINDS) | frozenset({"free", "chat", "instruct", "base", "research",
+                                                     "max", "turbo", "auto", "scout", "standard",
+                                                     "economy", "deep", "reasoning", "thinking"}))
+
+
+def _profiled_model_name() -> re.Pattern | None:
+    """A pattern for the routes MODEL-004 profiled since import, or None.
+
+    MODEL_NAME is fixed at import, so a family in neither the catalogue nor the
+    extra list would pass it. A route FRIDAY can reach is declared or profiled,
+    and the profile store is read on every parse, so a newly onboarded family
+    is refused from the moment it becomes routable. A route never seen by
+    FRIDAY cannot be dispatched to and is not caught here. An unreadable store
+    raises (ProfileStoreError) rather than letting a model name through.
+    Assumed: `_read_profiles` is the store's only full listing and
+    model_capabilities is not this slice's to extend; a public listing there
+    should replace this call."""
+    names = set()
+    for _backend, model_id in model_capabilities._read_profiles():
+        tail = model_id.lower().rsplit("/", 1)[-1]
+        names |= {model_id.lower(), tail}
+        # Only the id's leading word names its family (`sonar-deep-research`
+        # -> sonar); later segments are sizes, channels or task words that a
+        # step's role, tier or template may legitimately use.
+        leading = re.match(r"[a-z]+", tail)
+        if leading and len(leading.group()) >= 3:
+            names.add(leading.group())
+    names -= _NOT_A_PROFILED_NAME
+    if not names:
+        return None
+    return re.compile(r"(?<![a-z0-9])(" + "|".join(map(re.escape, sorted(names)))
+                      + r")(?![a-z])", re.IGNORECASE)
 
 STATUS_PINNED, STATUS_CHOSEN = "PINNED", "CHOSEN"
 STATUS_UNAVAILABLE, STATUS_DETERMINISTIC = "UNAVAILABLE", "DETERMINISTIC"
@@ -195,27 +241,27 @@ def _names(value, field_: str) -> tuple[str, ...]:
     return tuple(_text(v, f"{field_}[{i}]") for i, v in enumerate(value))
 
 
-def _scan_for_models(value, path: str) -> None:
+def _scan_for_models(value, path: str, profiled: re.Pattern | None = None) -> None:
     if isinstance(value, str):
-        if MODEL_NAME.search(value):
+        if MODEL_NAME.search(value) or (profiled is not None and profiled.search(value)):
             raise ModelNameError(path, f"names a model ({value!r}); a definition names a "
                                        "role and a tier, the runtime picks the model")
     elif isinstance(value, dict):
         for key, sub in value.items():
-            _scan_for_models(sub, f"{path}.{key}")
+            _scan_for_models(sub, f"{path}.{key}", profiled)
     elif isinstance(value, list):
         for i, sub in enumerate(value):
-            _scan_for_models(sub, f"{path}[{i}]")
+            _scan_for_models(sub, f"{path}[{i}]", profiled)
 
 
-def _step(raw, index: int) -> Step:
+def _step(raw, index: int, profiled: re.Pattern | None = None) -> Step:
     at = f"steps[{index}]"
     if not isinstance(raw, dict):
         raise DefinitionError(at, "must be an object")
     for key, value in raw.items():
         if key in _MODEL_KEYS:
             raise ModelNameError(f"{at}.{key}", "a step never names a model")
-        _scan_for_models(value, f"{at}.{key}")
+        _scan_for_models(value, f"{at}.{key}", profiled)
     for key in raw:
         if key not in _STEP_KEYS:
             raise DefinitionError(f"{at}.{key}", "unknown field")
@@ -321,7 +367,8 @@ def parse_definition(source) -> Definition:
     raw_steps = source["steps"]
     if not isinstance(raw_steps, list) or not raw_steps:
         raise DefinitionError("steps", "must be a non-empty list")
-    steps = tuple(_step(raw, i) for i, raw in enumerate(raw_steps))
+    profiled = _profiled_model_name()
+    steps = tuple(_step(raw, i, profiled) for i, raw in enumerate(raw_steps))
     known: dict[str, Step] = {}
     for i, step in enumerate(steps):
         if step.id in known:
@@ -375,7 +422,8 @@ class Compiled:
         raise DefinitionError(
             "spec", f"{self.spec.id} is not runnable on the durable runner: it chains "
                     "independent steps in one pipeline and would send a deterministic step "
-                    "to a model. Run it with run_definition")
+                    "to a model. Run it with run_definition, or durably with "
+                    "ultracode.durable.start_definition_run")
 
 
 def compile_definition(definition: Definition) -> Compiled:

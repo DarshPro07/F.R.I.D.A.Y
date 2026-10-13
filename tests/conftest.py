@@ -216,6 +216,15 @@ def _safeguard_ledger_in_tmp(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _model_profiles_in_tmp(tmp_path, monkeypatch):
+    """MODEL-004/UCW-002: a test never reads the live route profile store.
+    `ultracode.definition.parse_definition` refuses every profiled route by
+    name, so a route profiled on this machine would otherwise change which
+    workflow definitions the suite can parse."""
+    monkeypatch.setenv("FRIDAY_MODEL_PROFILES", str(tmp_path / "model_profiles.json"))
+
+
+@pytest.fixture(autouse=True)
 def _delegation_scopes_in_tmp(tmp_path, monkeypatch):
     """SEC-005: a test neither reads nor writes the live registry of the
     delegations holding the exec bridge."""
