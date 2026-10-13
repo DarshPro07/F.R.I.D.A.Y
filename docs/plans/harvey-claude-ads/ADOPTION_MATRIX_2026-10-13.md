@@ -205,3 +205,19 @@ WRONG
 Matrix corrections: items 1–7 above. Every classification stands.
 
 Not checked: the truncated last component, CAP-MKT-002's actual scan result, robots handling beyond profile.py:385-394, jobspy's licence, and gate.py's English-only list.
+
+## Addendum 2026-10-13 22:30 — real SkillSpector scan (pinned scanner, --no-llm)
+
+Scanner: NVIDIA SkillSpector from `third_party/upstream/skillspector` (UPSTREAM_LOCK pin `c7958a3`), installed into the
+isolated tool venv `data/tools/skillspector-venv` (Python 3.12). Pattern mode only (`--no-llm`, no model calls), run over the
+quarantined clones. Raw reports: `data/quarantine/research/skillspector/<repo>.json`.
+
+| repo @ commit | findings | HIGH / MEDIUM / LOW | top categories | risk assessment |
+|---|---|---|---|---|
+| claude-ads @ `ac2164493391` | 84 | 12 / 69 / 3 | Dangerous Code Execution 35, Agent Snooping 26, Data Exfiltration 9, Excessive Agency 8 | score 100, CRITICAL, **DO_NOT_INSTALL** |
+| harvey @ `7940da41b5ac` | 92 | 52 / 29 / 11 | Privilege Escalation 45, Dangerous Code Execution 11, Data Exfiltration 11, Tool Misuse 9, Supply Chain 3 | score 100, CRITICAL, **DO_NOT_INSTALL** |
+
+Reading: pattern mode over-reports (several HIGH hits point at `.gitignore`, `CHANGELOG.md` and `.env.example` lines), but under
+the owner's fail-closed rulings (CAP-MKT-002: a clean score never overrides incomplete coverage) neither repository may be
+installed or activated, and the optional direct `/plugin install claude-ads` stays off. Adoption remains EXTRACT_PATTERN /
+REFERENCE_ONLY as the matrix says; any WRAP component must be re-scanned on its own resolved closure before it can leave TESTING.
