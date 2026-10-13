@@ -102,6 +102,9 @@ def _status_tool(log, monkeypatch):
         def stall_state(self, work_run_id):
             return {}
 
+        def health(self):
+            return {"alive": False}
+
     monkeypatch.setattr(hc, "_engine", P.PolicyEngine(autonomy=P.FULL))
     mcp = FakeMCP()
     hc.register(mcp)
@@ -224,3 +227,25 @@ def test_the_voice_agents_startup_sweep_renders_the_record(monkeypatch):
     assert isinstance(agent_friday.hermes_delivery_log(), Spy)
     entry = inspect.getsource(agent_friday.entrypoint)
     assert "hermes_delivery_log()" in entry and "hb.WorkRunLog()" not in entry
+
+
+def test_hermes_status_lists_active_runs_as_records_not_transcripts(
+        tmp_path, monkeypatch):
+    log = hb.WorkRunLog(tmp_path / "t.sqlite3")
+    run_id = log.create(task="fix the parser")
+    log.update(run_id, result=LONG,                   # still running
+               progress_json=json.dumps({"last_text": NOISE * 40}))
+    status, hc = _status_tool(log, monkeypatch)
+    monkeypatch.setattr(hb, "native_tools_healthy", lambda *a, **k: False)
+    try:
+        listing = status()
+        full = status(work_run_id=run_id, full=True)
+    finally:
+        hc.configure(None)
+    [row] = listing["active"]
+    assert row["work_run_id"] == run_id
+    assert row["record"]["work_run_id"] == run_id
+    assert row["record"]["commit"] == "3f2a9c1d7e"
+    assert json.dumps(listing).count(NOISE) < 30
+    assert _tokens(listing["active"]) <= 2 * RECORD_TOKEN_CAP
+    assert full["run"]["result"] == LONG                   # on request only

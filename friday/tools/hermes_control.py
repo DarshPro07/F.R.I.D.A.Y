@@ -35,6 +35,14 @@ logger = logging.getLogger("friday-agent")
 #: leave hermes_status unless the caller asks for full=true.
 _TRANSCRIPT_COLUMNS = frozenset({"result", "progress_json", "usage_json", "handoff"})
 
+
+def _lean_run(record: dict) -> dict:
+    """A work-run row without its transcript columns, plus its bounded record."""
+    lean = {k: v for k, v in record.items() if k not in _TRANSCRIPT_COLUMNS}
+    lean["record"] = work_run_record(record)
+    return lean
+
+
 _supervisor: hb.HermesSupervisor | None = None
 _engine: PolicyEngine | None = None
 _lock = threading.Lock()
@@ -341,13 +349,14 @@ def register(mcp):
             # on-demand read of the whole row.
             # The record is inside the run too: the objective engine's
             # reconcile path reads only observed["run"].
-            rec = work_run_record(record)
-            lean = {k: v for k, v in record.items() if k not in _TRANSCRIPT_COLUMNS}
-            lean["record"] = rec
+            lean = _lean_run(record)
             return {"status": "succeeded", "run": lean,
-                    "record": rec,
+                    "record": lean["record"],
                     "stall": sup.stall_state(work_run_id)}
-        return {"status": "succeeded", "active": sup.log.active(),
+        # ORCH-004: each active run as its record too; the transcript is
+        # read per run with hermes_status(work_run_id, full=true).
+        return {"status": "succeeded",
+                "active": [_lean_run(r) for r in sup.log.active()],
                 # health() answers a stopped shared gateway as {alive, state}
                 # and adds the scoped gateway's, which may be the only one up.
                 "gateway": sup.health(),
