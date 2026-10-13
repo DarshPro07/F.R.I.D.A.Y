@@ -296,6 +296,77 @@ def test_a_conflict_is_persisted_as_a_durable_integration_objective(finished):
     assert detail == result.output["integration_task"]
 
 
+def test_repeated_conflict_persistence_reuses_the_integration_objective(finished):
+    store, repo, branch = finished
+    (repo / "calc.py").write_text("def add(a, b):\n    return a * b\n", encoding="utf-8")
+    _git(repo, "commit", "-qam", "make add multiply")
+    run = c.Run.create("promote", capability="development_promote")
+    result = DT.development_promote(run, str(repo), "r1", branch,
+                                    "add subtract to calc.py")
+    assert result.status == c.FAILED
+    task = result.output["integration_task"]
+
+    again = DT._persist_integration_task(run, repo.resolve(), task)
+
+    assert again == result.output["integration_objective"]
+    assert len(store.objective_runs(limit=10)) == 1
+
+
+def test_repeated_conflict_persistence_reuses_objective_after_store_churn(finished):
+    store, repo, branch = finished
+    (repo / "calc.py").write_text("def add(a, b):\n    return a * b\n", encoding="utf-8")
+    _git(repo, "commit", "-qam", "make add multiply")
+    run = c.Run.create("promote", capability="development_promote")
+    result = DT.development_promote(run, str(repo), "r1", branch,
+                                    "add subtract to calc.py")
+    assert result.status == c.FAILED
+    objective_id = result.output["integration_objective"]
+    (event,) = store.objective_events_named(objective_id, (DT.EVENT_INTEGRATION_TASK,))
+    stored_task = event["detail"]
+
+    for i in range(1001):
+        O.compile_objective(
+            store, request=f"newer objective {i}",
+            objective_summary=f"newer objective {i}",
+            tasks=[{"capability": "files_list", "arguments": {"path": str(repo)}}],
+            manifest=CAPS.as_dicts(), provenance=c.PERSON, attended=True)
+
+    again = DT._persist_integration_task(run, repo.resolve(), stored_task)
+
+    assert again == objective_id
+    integration_runs = [
+        row["run_id"]
+        for row in store.objective_runs(limit=1105)
+        if store.objective_events_named(row["run_id"], (DT.EVENT_INTEGRATION_TASK,))
+    ]
+    assert integration_runs == [objective_id]
+
+
+def test_a_finished_integration_objective_is_not_reused_for_a_repeat_conflict(finished):
+    store, repo, branch = finished
+    (repo / "calc.py").write_text("def add(a, b):\n    return a * b\n", encoding="utf-8")
+    _git(repo, "commit", "-qam", "make add multiply")
+    run = c.Run.create("promote", capability="development_promote")
+    result = DT.development_promote(run, str(repo), "r1", branch,
+                                    "add subtract to calc.py")
+    assert result.status == c.FAILED
+    first = result.output["integration_objective"]
+    task = result.output["integration_task"]
+
+    # a live objective still owns the conflict: it is reused
+    assert DT._persist_integration_task(run, repo.resolve(), task) == first
+
+    # once it is cancelled nothing owns the conflict: a fresh objective is made
+    assert O.cancel_run(store, run_id=first, reason="test", executor_id="t")
+    assert store.objective_run(first)["status"] in O.RUN_TERMINAL
+    second = DT._persist_integration_task(run, repo.resolve(), task)
+    assert second != first
+    assert store.objective_run(second)["status"] not in O.RUN_TERMINAL
+
+    # and the new live one is reused in turn
+    assert DT._persist_integration_task(run, repo.resolve(), task) == second
+
+
 def test_a_clean_promotion_persists_no_integration_objective(finished):
     store, repo, branch = finished
     run = c.Run.create("promote", capability="development_promote")

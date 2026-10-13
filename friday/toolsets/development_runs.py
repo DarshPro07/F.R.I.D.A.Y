@@ -20,6 +20,7 @@ never a fallback to host commands.
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -76,11 +77,34 @@ def _integration_work(task: dict) -> str:
     return " ".join(lines)
 
 
+def _same_integration_task(left: dict, right: dict) -> bool:
+    return json.dumps(left, sort_keys=True, separators=(",", ":"), default=str) == \
+        json.dumps(right, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _existing_integration_objective(store, task: dict) -> str:
+    """The LIVE run that already holds this exact integration task, searched
+    across the whole objective store (not just the newest runs), else empty.
+    A run that has finished (cancelled, failed, partial, completed) no longer
+    owns the conflict, so it is skipped and the caller staffs it afresh."""
+    for event in store.objective_events_across_runs(EVENT_INTEGRATION_TASK):
+        detail = event.get("detail")
+        if not (isinstance(detail, dict) and _same_integration_task(detail, task)):
+            continue
+        owner = store.objective_run(event["run_id"])
+        if owner is not None and owner["status"] not in O.RUN_TERMINAL:
+            return event["run_id"]
+    return ""
+
+
 def _persist_integration_task(run: c.Run, folder: Path, task: dict) -> str:
     """A conflict's integration task as its own durable objective, so the
     engine owns it and it survives this call. Returns the objective's run id;
     raises `O.CompileError` when it cannot be admitted."""
     store = _objective_store()
+    existing = _existing_integration_objective(store, task)
+    if existing:
+        return existing
     work = _integration_work(task)
     created = O.compile_objective(
         store, request=work, objective_summary=work, manifest=capabilities.as_dicts(),

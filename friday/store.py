@@ -3855,6 +3855,24 @@ class Store:
             rows.append(got)
         return rows
 
+    def objective_events_across_runs(self, event: str) -> list[dict]:
+        """Every event with this name across all objective runs, oldest first,
+        however many runs the store holds. For an event rare per store (a
+        conflict's integration task) that a caller must find without knowing
+        which run owns it; `objective_runs` is capped to the newest runs."""
+        rows = []
+        for row in self._conn.execute(
+            "SELECT * FROM objective_events WHERE event=? ORDER BY id", (event,),
+        ):
+            got = dict(row)
+            if got.get("detail"):
+                try:
+                    got["detail"] = json.loads(got["detail"])
+                except json.JSONDecodeError:
+                    pass
+            rows.append(got)
+        return rows
+
     def objective_event_counts(self, run_id: str, event: str, after_id: int = 0) -> dict[str, int]:
         """How many `event` rows each task of a run has after `after_id`, however
         many events the run holds. The aggregate for an event too common per run
