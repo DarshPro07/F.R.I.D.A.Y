@@ -237,11 +237,11 @@ def cmd_rescore(services: Services, args) -> int:
 
 
 def cmd_gc(services: Services, args) -> int:
-    """Archive stale duplicate skills (DEPRECATED, kept for history)."""
+    """Archive stale duplicate or unhealthy skills (DEPRECATED, kept for history)."""
     report = G.collect(services.registry, apply=not args.dry_run, actor="cli")
     verb = "would archive" if args.dry_run else "archived"
     for item in report["archived"]:
-        print(f"  {verb} {item['name']:<40} duplicate of {item['duplicate_of']} (idle {item['idle_days']} days)")
+        print(f"  {verb} {item['name']:<40} {item['reason']}")
     if not report["archived"]:
         print("  nothing to archive")
     return 0

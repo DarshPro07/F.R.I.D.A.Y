@@ -74,3 +74,18 @@ def test_cli_gc_archives_and_prints_the_result(tmp_path, capsys):
 
     assert "render-export-old" in capsys.readouterr().out
     assert SkillRegistry(db).get("render-export-old").state == K.DEPRECATED
+
+
+def test_gc_archives_an_idle_unhealthy_skill_with_no_duplicate_and_keeps_a_fresh_one(tmp_path):
+    reg = SkillRegistry(tmp_path / "r.sqlite3")
+    plant(reg, "backup-vault", description="rotate the encrypted vault snapshots offsite", at=OLD)  # idle but healthy
+    plant(reg, "mail-sorter", state=K.BROKEN, description="file inbox mail into labelled folders", at=OLD)
+    plant(reg, "photo-tagger", state=K.DEGRADED, description="tag holiday photos by the faces in them", at=RECENT)
+
+    report = G.collect(reg, now=NOW)
+
+    assert report["archived"] == [{"name": "mail-sorter", "duplicate_of": None, "idle_days": 281,
+                                   "reason": "stale 281 days and BROKEN"}]
+    assert {r.name: r.state for r in reg.list()} == {
+        "backup-vault": K.ACTIVE, "mail-sorter": K.DEPRECATED, "photo-tagger": K.DEGRADED}
+    assert reg.history("mail-sorter")[0]["actor"] == "gc"

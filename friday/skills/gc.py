@@ -6,8 +6,10 @@ a better one (same overlap measure the curator merges on) is archived: moved
 to DEPRECATED, "superseded, kept for history", with the winner named in the
 history row. Nothing is deleted. A fresh near-duplicate is kept - it may be
 a deliberate variant - and so is an idle skill that is the only one of its
-kind. DISABLED and QUARANTINED belong to the owner and the safety gate, not
-to this pass.
+kind. An idle skill that is DEGRADED, STALE or BROKEN is archived even
+without a twin: the router cannot select it and nobody has repaired it. An
+idle healthy ACTIVE one-of-a-kind skill stays. DISABLED and QUARANTINED belong
+to the owner and the safety gate, not to this pass.
 
 "Last activity" is the registry's `updated_at`, which every recorded use,
 transition and edit refreshes.
@@ -28,6 +30,9 @@ STALE_DAYS = 90
 #: except NEEDS_REVALIDATION, which is still compared but left for revalidation).
 _POOL = (K.ACTIVE, K.NEEDS_REVALIDATION, K.DEGRADED, K.STALE, K.BROKEN)
 
+#: Not selectable and awaiting repair: idle long enough, archived with no twin.
+_UNHEALTHY = (K.DEGRADED, K.STALE, K.BROKEN)
+
 
 def _epoch(iso: str) -> int:
     return calendar.timegm(time.strptime(iso, "%Y-%m-%dT%H:%M:%SZ"))
@@ -39,7 +44,7 @@ def _rank(record: K.SkillRecord) -> tuple:
 
 
 def collect(registry, *, now: str | None = None, apply: bool = True, actor: str = "gc") -> dict:
-    """Archive stale duplicates. With apply=False report what would be archived."""
+    """Archive stale duplicates and stale unhealthy skills. With apply=False report what would be archived."""
     at = _epoch(now or K.now_iso())
     pool = sorted((r for r in registry.list() if r.state in _POOL), key=lambda r: r.name)
     pool.sort(key=_rank, reverse=True)                      # best first; ties keep name order
@@ -48,14 +53,16 @@ def collect(registry, *, now: str | None = None, apply: bool = True, actor: str 
     for record in pool:
         idle_days = (at - _epoch(record.updated_at)) // 86400
         twin = None
-        if idle_days >= STALE_DAYS and K.DEPRECATED in K.TRANSITIONS[record.state]:
+        stale = idle_days >= STALE_DAYS and K.DEPRECATED in K.TRANSITIONS[record.state]
+        if stale:
             twin = next((k for k in kept
                          if similarity(_fingerprint(k), _fingerprint(record)) >= MERGE_THRESHOLD), None)
-        if twin is None:
+        if twin is None and not (stale and record.state in _UNHEALTHY):
             kept.append(record)
             continue
+        reason = f"stale {idle_days} days and " + (f"duplicate of {twin.name}" if twin else record.state)
         if apply:
-            registry.transition(record.name, K.DEPRECATED, actor=actor,
-                                reason=f"stale {idle_days} days and duplicate of {twin.name}")
-        archived.append({"name": record.name, "duplicate_of": twin.name, "idle_days": idle_days})
+            registry.transition(record.name, K.DEPRECATED, actor=actor, reason=reason)
+        archived.append({"name": record.name, "duplicate_of": twin.name if twin else None,
+                         "idle_days": idle_days, "reason": reason})
     return {"archived": archived, "applied": apply}
