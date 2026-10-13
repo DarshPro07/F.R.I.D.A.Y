@@ -295,6 +295,50 @@ def test_a_job_after_a_failed_one_still_completes_with_the_next_ladder_version(t
     assert gov.active() == 0
 
 
+def _train_file_changes_after_the_ladder_promotes(monkeypatch, ladder, src):
+    """The ladder promotes, then the export's train file is edited before the
+    fabric records the win, so the fabric refuses (DatasetChanged)."""
+    promote = ladder.promote
+
+    def promote_then_edit(*args, **kwargs):
+        out = promote(*args, **kwargs)
+        (src / LD.TRAIN).write_bytes(b"{}\n")
+        return out
+
+    monkeypatch.setattr(ladder, "promote", promote_then_edit)
+
+
+def test_a_job_failing_after_the_ladder_promoted_leaves_routing_serving(tmp_path, monkeypatch):
+    lab, gov, ladder, _, _ = make_lab(tmp_path)
+    src = export(tmp_path, "v1", BASE_TRAIN)
+    _train_file_changes_after_the_ladder_promotes(monkeypatch, ladder, src)
+    with pytest.raises(NF.DatasetChanged):
+        lab.run_job("task-category", src, trigger=LS.CONTROLLER)
+    assert lab.jobs()[-1]["status"] == "FAILED" and gov.active() == 0
+    assert ladder.active("task-category") is None
+    assert [r["state"] for r in ladder.listing()] == ["ROLLED_BACK"]
+    assert serving(lab, "task-category") == routing()
+
+    monkeypatch.undo()
+    out = lab.run_job("task-category", export(tmp_path, "v2", BASE_TRAIN),
+                      trigger=LS.CONTROLLER)
+    assert out["status"] == "promoted" and out["version"] == 2
+
+
+def test_a_job_failing_after_the_ladder_promoted_restores_the_previous_specialist(
+        tmp_path, monkeypatch):
+    lab, _, ladder, _, _ = make_lab(tmp_path)
+    assert lab.run_job("task-category", export(tmp_path, "v1", SHELL_WRONG_TRAIN),
+                       trigger=LS.CONTROLLER)["status"] == "promoted"
+    v1 = serving(lab, "task-category")
+    src = export(tmp_path, "v2", BASE_TRAIN)
+    _train_file_changes_after_the_ladder_promotes(monkeypatch, ladder, src)
+    with pytest.raises(NF.DatasetChanged):
+        lab.run_job("task-category", src, trigger=LS.CONTROLLER)
+    assert ladder.active("task-category")["version"] == 1
+    assert serving(lab, "task-category") == v1
+
+
 # -- approvals are not the specialist's ---------------------------------------
 
 

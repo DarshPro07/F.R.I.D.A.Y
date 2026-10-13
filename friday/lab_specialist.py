@@ -201,9 +201,18 @@ class SpecialistLab:
             raise RuntimeError(f"unexpected ladder result {result}")
         promoted = result["status"] == "promoted"
         if promoted:
-            # the ladder judged the same numbers strictly; the fabric records the win
-            if self._fabric.promote(network, margin=0.0, strict=True)["status"] != NF.PRODUCTION:
-                raise RuntimeError(f"{network}: the ladder promoted what the fabric did not")
+            # the ladder judged the same numbers strictly; the fabric records the
+            # win. If it does not (or raises, e.g. the export changed on disk),
+            # the ladder must not keep serving a version `use` refuses: one
+            # rollback restores what served before, then the failure propagates.
+            try:
+                if self._fabric.promote(network, margin=0.0, strict=True)["status"] != NF.PRODUCTION:
+                    raise RuntimeError(f"{network}: the ladder promoted what the fabric did not")
+            except Exception:
+                undone = self._ladder.rollback(name)
+                log.warning("lab_specialist: %s v%s not recorded by the fabric, ladder %s",
+                            network, version, undone)
+                raise
         failed: list[str] = []
         if not promoted:
             report = self._store.report(result["report_id"])
