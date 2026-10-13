@@ -81,6 +81,59 @@ def test_start_run_refuses_choices_that_leave_a_stage_out():
     assert store.objective_runs() == []
 
 
+def test_the_default_spec_runs_its_code_stage_on_the_standard_tier():
+    spec = S.load_spec(DEFAULT)
+    build = next(stage for stage in spec.stages if stage.id == "build")
+    assert build.template == "code"
+    assert T.resolve_tiers(spec)["build"] == "standard"
+
+
+def test_recorded_choices_round_trip_what_start_run_logged():
+    store = Store(":memory:")
+    spec = S.load_spec(DEFAULT)
+    choices = T.choose_models(spec, CANDIDATES, BENCH)
+    run = R.start_run(store, spec, ["a"], provenance=PERSON, attended=True, choices=choices)
+    assert R.recorded_choices(store, run["run_id"]) == choices
+
+
+def test_recorded_choices_of_a_run_started_without_choices_is_an_error_not_a_guess():
+    store = Store(":memory:")
+    spec = S.load_spec(DEFAULT)
+    run = R.start_run(store, spec, ["a"], provenance=PERSON, attended=True)
+    with pytest.raises(LookupError, match=run["run_id"]):
+        R.recorded_choices(store, run["run_id"])
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_run_dispatches_with_the_models_it_recorded_not_a_fresh_pick():
+    store = Store(":memory:")
+    spec = S.load_spec(DEFAULT)
+    choices = T.choose_models(spec, CANDIDATES, BENCH)
+    run = R.start_run(store, spec, ["a"], provenance=PERSON, attended=True, choices=choices)
+    first, _ = store.objective_tasks(run["run_id"])
+    started = RecordingAgent()
+    port = R.StagePort(spec, started, R.ResultCache(store, "ws"), R.model_for(choices), OpenGate())
+    await port(R.CAPABILITY, first["arguments"], run)
+    stages = len(first["arguments"]["stage_ids"])
+
+    # The bench moved while the run was stopped: a fresh pick names another model.
+    moved = {"haiku-4": {"n": 4, "wins": 4, "cost": 0.4},
+             "haiku-3": {"n": 4, "wins": 4, "cost": 0.8}}
+    fresh = T.choose_models(spec, CANDIDATES, moved)
+    assert fresh["scan"].model == "haiku-4"
+    redone = RecordingAgent()
+    missed = await R.StagePort(spec, redone, R.ResultCache(store, "ws"), R.model_for(fresh),
+                               OpenGate())(R.CAPABILITY, first["arguments"], run)
+    assert missed["hits"] < stages and redone.models
+
+    # The run's own record keeps the models, so every stage is a cache hit.
+    resumed = RecordingAgent()
+    recorded = R.model_for(R.recorded_choices(store, run["run_id"]))
+    hit = await R.StagePort(spec, resumed, R.ResultCache(store, "ws"), recorded,
+                            OpenGate())(R.CAPABILITY, first["arguments"], run)
+    assert hit["hits"] == stages and resumed.models == {}
+
+
 @pytest.mark.asyncio
 async def test_the_port_dispatches_every_stage_with_its_chosen_model():
     store = Store(":memory:")

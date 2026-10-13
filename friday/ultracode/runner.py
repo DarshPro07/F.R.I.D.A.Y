@@ -62,7 +62,7 @@ ModelFor = Callable[[Stage], str]
 __all__ = ["BudgetStop", "CAPABILITY", "DROPPED_MARK", "DispatchGate",
            "EVENT_ITEMS_DROPPED", "EVENT_MODELS_CHOSEN", "NotDurableRunnerSafe",
            "EVENT_STAGES_DROPPED", "MANIFEST", "ResultCache", "StagePort", "cap_items",
-           "model_for", "plan_tasks", "start_run"]
+           "model_for", "plan_tasks", "recorded_choices", "start_run"]
 
 
 class NotDurableRunnerSafe(ValueError):
@@ -135,6 +135,19 @@ def model_for(choices: Mapping[str, Choice]) -> ModelFor:
     """The port's `ModelFor`: the model each stage's recorded choice names
     (`tiers.choose_models`). A stage with no choice raises KeyError."""
     return lambda stage: choices[stage.id].model
+
+
+def recorded_choices(store, run_id: str) -> dict[str, Choice]:
+    """The choices `start_run` logged on this run, for the port of a resumed
+    run: the result cache is keyed by model, so a fresh pick from a bench that
+    has moved since would miss every cached stage. A run started without
+    `choices` has none; that raises LookupError rather than guessing."""
+    events = store.objective_events_named(run_id, (EVENT_MODELS_CHOSEN,))
+    if not events:
+        raise LookupError(f"run {run_id} has no recorded model choices")
+    return {row["stage"]: Choice(row["tier"], row["model"], row["reason"],
+                                 tuple(row["evidence"]))
+            for row in events[0]["detail"]["stages"]}
 
 
 def start_run(store, spec: Spec, items: list[str], *, provenance: str,
