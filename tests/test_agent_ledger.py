@@ -8,6 +8,7 @@ start event written by the executor puts a run in `active()`.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 
 import pytest
@@ -93,6 +94,72 @@ def test_a_malformed_model_route_raises(ledger):
     with pytest.raises(LedgerError):
         ledger.start("X", task="t", workspace="/w", executor_id="claude_code",
                      model_route="sonnet")
+
+
+def test_bind_route_fills_an_empty_route_once_and_never_overwrites(ledger):
+    ledger.start("A", task="t", workspace="/w", executor_id="claude_code")
+    ledger.start("B", task="t", workspace="/w", executor_id="claude_code",
+                 model_route=ROUTE)
+    assert ledger.bind_route("A", ROUTE, ["executor_runs:A"]) is True
+    assert ledger.run("A")["model_route"] == ROUTE
+    assert ledger.events("A")[-1]["kind"] == "route_bound"
+    assert ledger.events("A")[-1]["evidence_refs"] == ["executor_runs:A"]
+
+    other = "anthropic/claude-opus/5.5/billable_api"
+    assert ledger.bind_route("A", other, ["executor_runs:A"]) is False
+    assert ledger.bind_route("B", other, ["executor_runs:B"]) is False
+    assert ledger.run("A")["model_route"] == ROUTE
+    assert ledger.run("B")["model_route"] == ROUTE
+    assert [e["kind"] for e in ledger.events("B")] == ["claimed"]
+
+
+def test_bind_route_refuses_what_would_make_the_ledger_lie(ledger):
+    ledger.start("A", task="t", workspace="/w", executor_id="claude_code")
+    with pytest.raises(LedgerError):
+        ledger.bind_route("A", "sonnet", ["executor_runs:A"])
+    with pytest.raises(LedgerError):
+        ledger.bind_route("A", ROUTE, [])
+    with pytest.raises(LedgerError):
+        ledger.bind_route("NOPE", ROUTE, ["executor_runs:NOPE"])
+    assert ledger.run("A")["model_route"] == ""
+
+
+def test_the_direct_executor_records_its_route_and_a_partial_end(tmp_path, monkeypatch):
+    """The path with no composer still leaves a model route and an end event."""
+    from friday import contracts as c
+    from friday import execution
+    from friday.executors import cli
+    from friday.executors.claude_code import ClaudeCodeExecutor
+
+    class FakeRun:
+        process = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        async def events(self, timeout=None):
+            # A real CLI announces its session first; that is the worker start.
+            yield cli.Event("init", {"session_id": "sess-1"})
+            yield cli.Event("result", {"result": "done"})
+
+    monkeypatch.setattr(execution, "worker_environment", lambda *a, **k: {})
+    monkeypatch.setattr(cli, "available", lambda: True)
+    monkeypatch.setattr(cli, "Run", FakeRun)
+    monkeypatch.setattr(ClaudeCodeExecutor, "finish",
+                        lambda self, b, started, final: started.finish(status=c.PARTIAL))
+    store = Store(tmp_path / "direct.sqlite3")
+    try:
+        bundle = TaskBundle(goal="add a retry", workspace=str(tmp_path), role="eng")
+        asyncio.run(ClaudeCodeExecutor(store).execute(bundle))
+        ledger = AgentLedger(store)
+        run = ledger.run(bundle.run_id)
+        assert run["model_route"] == "anthropic/default/unversioned/subscription_cli"
+        assert run["role_id"] == "eng"
+        kinds = [e["kind"] for e in ledger.events(bundle.run_id)]
+        assert "route_bound" in kinds and "partial" in kinds
+        assert run["status"] == "INTERRUPTED"
+    finally:
+        store.close()
 
 
 def test_a_run_nobody_started_is_never_active(ledger):

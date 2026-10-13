@@ -461,6 +461,9 @@ class ClaudeCodeExecutor:
         # FAB-001: say so before the CLI starts if its environment moves it
         # from the subscription to pay-as-you-go.
         billing = cli.launch_billing(launch, self.sandbox)
+        # The CLI picks its own model version, so none is claimed.
+        self.runs.route(bundle.run_id, f"anthropic/{self.model or 'default'}"
+                                       f"/unversioned/{billing.billing_class}")
         if billing.billable:
             self.runs.saw(bundle.run_id, billing.report())
         self.progress = Progress()

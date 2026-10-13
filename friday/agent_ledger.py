@@ -125,6 +125,35 @@ class AgentLedger:
             self._append(conn, run_id, "finished", message or status,
                          evidence_refs, stamp)
 
+    def bind_route(self, run_id: str, model_route: str,
+                   evidence_refs: list[str]) -> bool:
+        """
+        Record the route a run is on when `start()` was not told one.
+
+        A route the routing policy declared is never overwritten: this fills a
+        gap, it does not second-guess a decision. Returns whether it wrote.
+        """
+        if len(model_route.split("/")) != _ROUTE_PARTS:
+            raise LedgerError(
+                f"model_route {model_route!r} must be "
+                "provider/model/version/billing_class")
+        if not evidence_refs:
+            raise LedgerError(f"route of {run_id} carries no evidence_refs")
+        stamp = now_iso()
+        with self.store._tx() as conn:
+            row = conn.execute(
+                "SELECT model_route FROM agent_runs WHERE run_id=?", (run_id,)
+            ).fetchone()
+            if row is None:
+                raise LedgerError(f"unknown run {run_id!r}")
+            if row["model_route"]:
+                return False
+            conn.execute("UPDATE agent_runs SET model_route=? WHERE run_id=?",
+                         (model_route, run_id))
+            self._append(conn, run_id, "route_bound", model_route,
+                         evidence_refs, stamp)
+        return True
+
     def reconcile(self) -> list[str]:
         """
         Believe the world, not the row: a RUNNING run with no live process is

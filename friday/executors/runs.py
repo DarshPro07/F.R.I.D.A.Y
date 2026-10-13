@@ -183,6 +183,11 @@ class RunManager:
                      message=f"worker started (pid {pid})",
                      evidence_refs=[f"pid:{pid}" if pid else f"executor_runs:{run_id}"])
 
+    def route(self, run_id: str, model_route: str) -> None:
+        """Say which provider/model/version/billing_class this run is on."""
+        self._ledger("bind_route", run_id, model_route=model_route,
+                     evidence_refs=[f"executor_runs:{run_id}"])
+
     @staticmethod
     def is_live(run: dict) -> bool:
         """Is the process this row names still the one it meant?"""
@@ -226,6 +231,12 @@ class RunManager:
             completion_evidence=evidence[:1000] or (result.error or "")[:1000])
         if status in (SUCCEEDED, FAILED, CANCELLED):
             self._ledger("finish", run_id, status=status,
+                         evidence_refs=[f"executor_runs:{run_id}"])
+        else:
+            # PARTIAL is not final: the ledger keeps the run open (it reads
+            # INTERRUPTED once no process is behind it) but says why.
+            self._ledger("event", run_id, kind="partial",
+                         message=(evidence or result.error or "partial")[:400],
                          evidence_refs=[f"executor_runs:{run_id}"])
 
     def cancelled(self, run_id: str) -> None:
