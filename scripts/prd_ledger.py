@@ -5614,6 +5614,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Repaired the reviewer’s two major issues at the gateway boundary. ModelGateway no longer trusts x_external_service/external_service/service labels embedded in caller-provided tool schemas. It resolves direct FRIDAY tools through the capability registry and normalizes owned tool ids such as web_searc (build run, commit 4651ad745)',
         "next_action": 'GAPS: No MCP tool, planner or UI path sets a budget on an objective; only an envelope handed to objectives.compile_objective carries one.; Gateway budget lookup reads the run row on each infer call and is not cached.; system_one.py:127 is a second data_class.decision seam with no objective context; the budget is not applied there, per reviewer note outside this slice.; The CLI-MCP path honours provider/data-class budget and external service budget, but still has no direct dedicated test beyond gateway coverage.',
     }),
+    ('SKILL-006', {
+        "status": PARTIAL,
+        "current_implementation": 'Fixed the reviewer’s rollback bug at the root. SkillLifecycle._verified_report() now selects the verified skill_versions row for the active record’s own version, then keeps the existing content-hash and evaluation-on-record checks. Added a regression that activates v1, activates v2, rolls back to v1 (build run, commit f05413110)',
+        "next_action": 'GAPS: No signature verifier exists; signatures are stored as declared-unverified.; No importer in this tree yet calls register() with source_url, source_commit, signature or sbom (INTAKE-004 / SKMKT-002).; SBOM is stored as supplied and not generated per skill.',
+    }),
 ]
 
 
