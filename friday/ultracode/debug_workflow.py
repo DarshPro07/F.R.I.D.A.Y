@@ -16,6 +16,8 @@ first rule it broke in a stable `code`:
 - the agent did not commit (HEAD_MOVED), did not change what git hides
   (GIT_CONFIG_CHANGED for .git/info/exclude or a git config, HIDDEN_CHANGE for
   assume-unchanged/skip-worktree, HIDDEN_FILE for an ignored file it created),
+  did not add a symlink or junction inside the tree (LINK_IN_TREE: git follows
+  a directory link and reports the files behind it as if they lived here),
   and did not touch test configuration (TEST_CONFIG_CHANGED, .gitignore
   included), delete a test (TEST_DELETED), or weaken one (TEST_WEAKENED);
 - it names at least one regression test (NO_REGRESSION_TEST) that is new, i.e.
@@ -64,6 +66,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -180,6 +183,7 @@ class _Tree:
         self.remaining = remaining or (lambda: float("inf"))
         self.baseline = ""
         self._git_state: dict[Path, bytes | None] = {}
+        self._links: set[str] = set()
 
     def git(self, *args: str, cwd: Path | None = None) -> _Ran:
         return _run(["git", *args], cwd or self.root, self.env, self.timeout)
@@ -219,6 +223,25 @@ class _Tree:
         return [line[2:] for line in self.git_ok("ls-files", "-v").splitlines()
                 if line and line[0] != "H"]
 
+    def links(self) -> list[str]:
+        """Symlinks and junctions inside the tree, outside `.git`. git follows a
+        directory link and reports the files behind it as untracked files of this
+        tree, so a fix could be verified while it lives outside the tree."""
+        found: list[str] = []
+        stack = [self.root]
+        while stack:
+            current = stack.pop()
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    if current == self.root and entry.name == ".git":
+                        continue
+                    attrs = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+                    if entry.is_symlink() or attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                        found.append(Path(entry.path).relative_to(self.root).as_posix())
+                    elif entry.is_dir(follow_symlinks=False):
+                        stack.append(Path(entry.path))
+        return sorted(found)
+
     def _state(self) -> dict[Path, bytes | None]:
         """The git files that decide what git hides: info/exclude and the configs."""
         state: dict[Path, bytes | None] = {}
@@ -244,6 +267,7 @@ class _Tree:
                              f"skip-worktree ({', '.join(found[:3])})")
         self.baseline = self.git_ok("rev-parse", "HEAD").strip()
         self._git_state = self._state()
+        self._links = set(self.links())
 
     def restore(self) -> None:
         """Back to exactly the baseline: tracked files, untracked AND ignored files,
@@ -362,6 +386,10 @@ class _Tree:
         if (hidden := self.hidden_tracked()):
             return self._verdict("HIDDEN_CHANGE", f"{hidden[0]} is marked assume-unchanged or "
                                                   "skip-worktree, so git status cannot see it")
+        if (added := sorted(set(self.links()) - self._links)):
+            return self._verdict("LINK_IN_TREE", f"{added[0]} is a symlink or junction the "
+                                                 "attempt added; what is behind it lives "
+                                                 "outside the tree")
         changes = self.changes()
         if (bad := self._guard(changes)) is not None:
             return bad

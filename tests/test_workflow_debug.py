@@ -453,3 +453,35 @@ def test_no_test_run_starts_once_the_time_budget_is_spent(repo, monkeypatch):
     assert report["attempts"][0]["verdict"]["code"] == "TIMEOUT"
     assert report["status"] == "BUDGET_TIME"
     assert clean(repo)
+
+
+def _dir_link(target, link):
+    """A directory link no privilege is needed for: a junction on Windows, a
+    symlink elsewhere."""
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        os.symlink(target, link, target_is_directory=True)
+
+
+@pytest.mark.parametrize("with_file", [True, False], ids=["link_with_a_file", "empty_link"])
+def test_a_fix_that_leaves_a_link_out_of_the_tree_is_rejected(repo, with_file):
+    outside = repo.parent / "outside"
+    outside.mkdir()
+    if with_file:                       # git follows the link and reports this as ours
+        write(outside, "helper.py", "VALUE = 1\n")
+
+    def links_out(root):
+        out = good_fix(root)
+        _dir_link(outside, root / "vendor")
+        return out
+
+    report = run(repo, Fake(repo, [links_out]), max_attempts=1)
+    verdict = report["attempts"][-1]["verdict"]
+    assert verdict["code"] == "LINK_IN_TREE" and verdict["accepted"] is False
+    assert "vendor" in verdict["reason"]
+    assert not os.path.lexists(repo / "vendor")                  # the link is undone
+    assert (outside / "helper.py").exists() is with_file         # nothing behind it is
+    assert (repo / "calc.py").read_text() == _CALC_BUG
+    assert clean(repo)
