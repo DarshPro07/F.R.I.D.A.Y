@@ -1468,7 +1468,13 @@ class HermesSupervisor:
                  profile: str | None = None,
                  extra_env: dict[str, str] | None = None,
                  owner: "HermesSupervisor | None" = None) -> None:
-        self.log = log or WorkRunLog()
+        if not log:
+            # ORCH-004: a log nobody chose still delivers the record, not the
+            # transcript. Imported here because record_delivery subclasses
+            # this module's WorkRunLog.
+            from friday.record_delivery import RecordDeliveryLog
+            log = RecordDeliveryLog()
+        self.log = log
         self.on_event = on_event
         #: Callable(question: str, options: list[str]) -> str | None.
         #: None means "Friday cannot answer" - the question is parked as

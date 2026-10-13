@@ -249,3 +249,33 @@ def test_hermes_status_lists_active_runs_as_records_not_transcripts(
     assert json.dumps(listing).count(NOISE) < 30
     assert _tokens(listing["active"]) <= 2 * RECORD_TOKEN_CAP
     assert full["run"]["result"] == LONG                   # on request only
+
+
+def test_hermes_status_lean_run_does_not_leak_the_transcript():
+    from friday.tools import hermes_control as hc
+
+    row = {"work_run_id": "hermes-1", "task": "fix the parser",
+           "status": hb.COMPLETE, "result": LONG,
+           "progress_json": json.dumps({"last_text": NOISE * 40}),
+           "usage_json": json.dumps({"total": 10}), "handoff": NOISE * 40}
+    lean = hc._lean_run(row)
+    assert not set(lean) & hc._TRANSCRIPT_COLUMNS
+    assert lean["record"]["commit"] == "3f2a9c1d7e"
+    assert json.dumps(lean).count(NOISE) < 30
+    assert _tokens(lean) <= 2 * RECORD_TOKEN_CAP
+
+
+def test_a_supervisor_built_without_a_log_delivers_the_record(tmp_path, monkeypatch):
+    """A caller that passes no log (a script, a new entry point) must not
+    fall back to a log whose deliveries carry the whole transcript."""
+    monkeypatch.setenv("ADA_DB", str(tmp_path / "t.sqlite3"))
+    sup = hb.HermesSupervisor(profile="")
+    run_id = sup.log.create(task="fix the parser", friday_run_id="",
+                            bundle_chars=10, token_budget=1000)
+    sup._session_runs["s1"] = run_id
+    sup._handle_event({"type": "message.complete", "session_id": "s1",
+                       "payload": {"status": "complete", "text": LONG}})
+    message = sup.log.pending_deliveries()[0]["message"]
+    assert "3f2a9c1d7e" in message and "full=true" in message
+    assert message.count(NOISE) < 15
+    assert sup.log.get(run_id)["result"] == LONG
