@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -134,3 +135,40 @@ def test_duplicates_are_probed_once_and_results_keep_input_order():
 
     assert [(r.provider, r.model) for r in results] == [NEW, other]
     assert {m for _, m in gw.calls} == {NEW[1], other[1]}
+
+
+def _profiled_at(route):
+    return datetime.fromisoformat(MC.profiled(*route).profiled_at)
+
+
+def test_a_profile_older_than_max_age_is_measured_again():
+    RO.onboard_new_routes(CapableGateway(), [NEW])
+    later = _profiled_at(NEW) + timedelta(seconds=120)
+    gw = CapableGateway()
+
+    (result,) = RO.onboard_new_routes(gw, [NEW], max_age_s=60, now=lambda: later)
+
+    assert result.status == RO.PROFILED
+    assert gw.calls
+
+
+def test_a_profile_within_max_age_is_not_probed_again():
+    RO.onboard_new_routes(CapableGateway(), [NEW])
+    later = _profiled_at(NEW) + timedelta(seconds=30)
+    gw = CapableGateway()
+
+    (result,) = RO.onboard_new_routes(gw, [NEW], max_age_s=60, now=lambda: later)
+
+    assert result.status == RO.ALREADY_PROFILED
+    assert gw.calls == []
+
+
+def test_a_failed_refresh_keeps_the_earlier_profile():
+    RO.onboard_new_routes(CapableGateway(), [NEW])
+    before = MC.profiled(*NEW)
+    later = _profiled_at(NEW) + timedelta(days=30)
+
+    (result,) = RO.onboard_new_routes(DownGateway(), [NEW], max_age_s=60, now=lambda: later)
+
+    assert result.status == RO.UNREACHABLE
+    assert MC.profiled(*NEW) == before
