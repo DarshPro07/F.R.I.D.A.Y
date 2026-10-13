@@ -266,6 +266,11 @@ DECLARED = {
                           "BIN-004: refusal policy for dynamic analysis of a sample, through an "
                           "offline Cyber Lab provider only; no MCP tool calls it yet, run by "
                           "tests/test_binary_lab.py"),
+    "friday/forge_adapters": (FUTURE,
+                              "CAP-FORGE-005: generated fabric adapters, generated tests "
+                              "and quarantine test evidence before admission; the forge "
+                              "front door that admits them is a later slice, run by "
+                              "tests/test_forge_adapters.py"),
     "friday/system_one": (FUTURE,
                           "S1-001: the System One decision gateway and its "
                           "mock backend; a Laya/Jev backend and a live caller "
