@@ -5439,6 +5439,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Both review findings fixed at the root in friday/ultracode/review_workflow.py. (1) Label/model mismatch: _require_actor_route now takes the step's resolved model (`chosen`) and raises RuntimeError before any inference when the economy or judge actor is not that model. Resolution is now the binding,  (build run, commit 0de8f5a03)",
         "next_action": "GAPS: No production caller yet passes routes/available to run_code_review, so tier-to-model binding is enforced only when a caller supplies them (runner wiring is out of scope).; The cap is a ceil(len/4) token estimate on the prompt, not a measured count; it does not bound the reply.; On the panel step there is no single resolved model (each panel actor has its own), so only per-actor route membership is checked, not equality with the resolution.; A multi-route economy or judge tier now requires the actor to be the model choose_model picks; a caller with several routes must pass that model's actor, otherwise RuntimeError. That is intended but not yet exercised by any production caller.; Heuristic secret/danger detection, rename-only INCONCLUSIVE, hermes token over-routing and large-diff truncation gaps from the prior record remain.",
     }),
+    ('CAP-FORGE-005', {
+        "status": PARTIAL,
+        "current_implementation": "Fixed the reviewer's major injection defect at the root in friday/forge_adapters.py. The generated module docstring is now fixed text with no upstream name. The DESCRIPTOR notes string is built in Python and emitted with repr (notes={notes!r}), so a quote or newline in the dossier name or entry_poin (build run, commit dc33bf75d)",
+        "next_action": "GAPS: The generated adapter exposes one representative_call operation only; mapping real upstream operations and the forge front door that admits generated adapters are later slices (declared FUTURE in reachability).; Generated tests prove the adapter contract against a stand-in library, not the real upstream package, since the quarantine has no network or installs.; tests/test_voice_interruption.py was not rerun after this repair; it was green in the builder's run and is unrelated to forge_adapters.",
+    }),
 ]
 
 
