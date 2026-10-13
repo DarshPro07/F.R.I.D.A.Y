@@ -5469,6 +5469,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'This slice closes one gap: "hermes_status() with no work_run_id still lists active rows in full." The new helper friday/tools/hermes_control.py:_lean_run (line 39) drops the transcript columns (_TRANSCRIPT_COLUMNS: result, progress_json, usage_json, handoff) from a work-run row and adds its bounded  (build run, commit 62e90dc22)',
         "next_action": "GAPS: friday/continuous.py:1441 and friday/ultracode/runner.py:236 still create a plain hb.WorkRunLog(), so deliveries made through them use render_completion and carry the full text. agent_friday's sweep already uses RecordDeliveryLog through hermes_delivery_log.; supervisor.delegate(wait=True) still returns the full row to direct in-process callers.; hermes_team.poll() still returns raw result text; results are bounded only at development._execute_via_team.; A worker that does not label its report yields empty commit/tests/evidence; only the 300-char summary carries the content.; Per-profile gateways do not run sweep_undelivered() when created.; implementer did not claim acceptance met",
     }),
+    ('INTAKE-006', {
+        "status": PARTIAL,
+        "current_implementation": 'I fixed the major issue: read-back evidence is no longer trusted just because the caller says it passed. Evidence now also carries path and expect (expect is kept out of repr). These fields are set by read_back (friday/skills/fact_memory.py, around lines 110-150).\n\nA new method, SkillFactMemory._ver (build run, commit 12bfd03a7)',
+        "next_action": "GAPS: Nothing calls add_fact, sweep, record_intake or read_back yet. The generated-skill writer, the INTAKE-005 intake pipeline and the git-change trigger come in later slices, and the module is still FUTURE in reachability.; Evidence of kind 'test' is still self-reported. The module does not run the cited test, so test evidence is still asserted by the caller.; A read-back is bound only to the fact's file or glob dependencies. A fact whose only dependencies are packages or skills cannot be backed by a read-back.; revalidate_fact() re-baselines the fact only. The skill returns to ACTIVE through the SKILL-003 lifecycle.; implementer did not claim acceptance met",
+    }),
 ]
 
 
