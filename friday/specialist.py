@@ -58,10 +58,13 @@ class Specialist:
     skills: tuple[str, ...]
     allowed_tools: tuple[str, ...]
     workspace: WorkspacePolicy
+    #: A role outside the catalogue (an approved AGENT-004 promotion); None
+    #: means `roles.BY_ID[role_id]`.
+    role: roles.Role | None = None
 
     def bundle(self, goal: str, workspace: str, **fields) -> TaskBundle:
         """The work packet for this specialist; the role's text is the registry's."""
-        role = roles.BY_ID[self.role_id]
+        role = self.role or roles.BY_ID[self.role_id]
         context = [role.instructions()]
         if self.skills:
             context.append("Skills for this task: " + ", ".join(self.skills))
@@ -78,8 +81,11 @@ class Specialist:
 
 def compose(role_id: str, *, executor_id: str, model_route: str,
             skills: tuple[str, ...] = (), allowed_tools: tuple[str, ...] = (),
-            workspace_policy: WorkspacePolicy | None = None) -> Specialist:
-    if role_id not in roles.BY_ID:
+            workspace_policy: WorkspacePolicy | None = None,
+            role: roles.Role | None = None) -> Specialist:
+    if role is not None and role.id != role_id:
+        raise SpecialistError(f"role {role.id!r} is not {role_id!r}")
+    if role is None and role_id not in roles.BY_ID:
         raise SpecialistError(f"unknown role {role_id!r}; roles: {sorted(roles.BY_ID)}")
     executor = executor_router.BY_ID.get(executor_id)
     if executor is None:
@@ -90,7 +96,8 @@ def compose(role_id: str, *, executor_id: str, model_route: str,
     return Specialist(role_id=role_id, executor_id=executor_id,
                       model_route=model_route, skills=tuple(skills),
                       allowed_tools=tuple(allowed_tools),
-                      workspace=workspace_policy or WorkspacePolicy())
+                      workspace=workspace_policy or WorkspacePolicy(),
+                      role=role)
 
 
 def record(ledger: AgentLedger, specialist: Specialist, *, run_id: str, task: str,

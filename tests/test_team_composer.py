@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday import hermes_team, roles
+from friday import hermes_team, roles, specialist
 from friday.agent_registry import AgentRegistry, RegistryError
 from friday.store import Store
 from friday.team_composer import Composer, ComposerError, RoleNeed
@@ -240,6 +240,27 @@ def test_a_proposal_survives_the_role_expiring_and_registers_only_on_approval(
     later = comp.compose("port the firmware", needs=(FIRMWARE,), ttl_s=HOUR)
     assert later["created"] == []
     assert later["reused"] == ["firmware-developer"]
+
+
+def test_an_approved_role_runs_as_an_instance_with_its_own_text(comp, store):
+    comp.compose("x", needs=(FIRMWARE,), ttl_s=HOUR)
+    comp.record_use("firmware-developer", "obj-1", True)
+    comp.record_use("firmware-developer", "obj-2", True)
+    reg = AgentRegistry(store)
+    assert reg.role("firmware-developer") is None        # proposed, not approved
+    comp.approve("firmware-developer", approver="owner")
+    role = reg.role("firmware-developer")
+    assert (role.title, role.focus) == (FIRMWARE.title, FIRMWARE.focus)
+    inst = reg.create_instance(
+        "firmware-developer", model_route="anthropic/claude-sonnet/5.5/subscription",
+        executor_id="claude", workspace="/w/fw", budget_usd=1.0)
+    assert inst["role_id"] == "firmware-developer"
+    spec = specialist.compose("firmware-developer", executor_id="claude",
+                              model_route="r", role=role)
+    assert FIRMWARE.focus in spec.bundle("flash it", "/w/fw").context[0]
+    with pytest.raises(specialist.SpecialistError):
+        specialist.compose("architect", executor_id="claude",
+                           model_route="r", role=role)
 
 
 def test_approval_needs_a_proposal_and_an_approver(comp):

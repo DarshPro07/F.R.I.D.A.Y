@@ -48,7 +48,7 @@ class AgentRegistry:
                  skills: tuple[str, ...] = (), permissions: tuple[str, ...] = (),
                  model_strategy: str = "") -> dict:
         """Register (or update) a role as a long-lived agent. Starts nothing."""
-        if role_id not in roles.BY_ID and not self._promoted(role_id):
+        if self.role(role_id) is None:
             raise RegistryError(
                 f"unknown role {role_id!r}; roles: {sorted(roles.BY_ID)}")
         with self.store._tx() as conn:
@@ -66,6 +66,19 @@ class AgentRegistry:
         row = self.store._conn.execute(
             "SELECT * FROM agent_registry WHERE role_id=?", (role_id,)).fetchone()
         return self._agent(row) if row else None
+
+    def role(self, role_id: str) -> roles.Role | None:
+        """The role text: the catalogue's, else an approved promotion's."""
+        if role_id in roles.BY_ID:
+            return roles.BY_ID[role_id]
+        row = self.store._conn.execute(
+            "SELECT definition FROM agent_promotions WHERE role_id=? "
+            "AND status='approved'", (role_id,)).fetchone()
+        if row is None:
+            return None
+        d = json.loads(row["definition"])
+        return roles.Role(id=role_id, title=d["title"], focus=d["focus"],
+                          triggers=tuple(d["triggers"]), delivers=d["delivers"])
 
     def agents(self) -> list[dict]:
         return [self._agent(r) for r in self.store._conn.execute(
@@ -112,7 +125,8 @@ class AgentRegistry:
                 role_id, executor_id=executor_id, model_route=model_route,
                 skills=tuple(bound_skills), allowed_tools=tuple(allowed_tools),
                 workspace_policy=specialist.WorkspacePolicy(
-                    allowed_paths=(workspace,)))
+                    allowed_paths=(workspace,)),
+                role=None if role_id in roles.BY_ID else self.role(role_id))
         except specialist.SpecialistError as exc:
             raise RegistryError(str(exc)) from exc
         instance_id = f"inst-{uuid.uuid4().hex[:12]}"
@@ -240,12 +254,6 @@ class AgentRegistry:
             "SELECT team_id FROM agent_teams ORDER BY rowid")]
 
     # -- internals ---------------------------------------------------------
-
-    def _promoted(self, role_id: str) -> bool:
-        """A temporary role the owner approved for registration (AGENT-004)."""
-        return self.store._conn.execute(
-            "SELECT 1 FROM agent_promotions WHERE role_id=? AND status='approved'",
-            (role_id,)).fetchone() is not None
 
     def _check_registered(self, role_ids: tuple[str, ...]) -> None:
         for role_id in role_ids:
