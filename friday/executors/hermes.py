@@ -24,7 +24,10 @@ the rest.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
+import time
 
 from friday import contracts as c
 from friday import execution_economics as ee
@@ -97,6 +100,10 @@ class HermesExecutor:
         self._supervisor = supervisor
         self.model = model
         self.effort = effort
+        #: Friday run ids whose delegate thread is alive, so `cancel` can find
+        #: the Hermes work runs they started. An id leaves when its thread
+        #: ends, not when the awaiting task is cancelled.
+        self._running: set[str] = set()
 
     def supervisor(self) -> hb.HermesSupervisor:
         if self._supervisor is None:
@@ -130,11 +137,23 @@ class HermesExecutor:
                 if bounded.expires_in is not None:
                     timeout = min(timeout, bounded.expires_in)
             sup = self.supervisor()
-            out = sup.delegate(
-                sent, friday_run_id=run_ctx.run_id,
-                model=plan["model"], reasoning_effort=plan["effort"],
-                route_reason=plan["reason"], workspace=bundle.workspace,
-                wait=True, turn_timeout=timeout, **within)
+            # The turn blocks for up to `timeout`; it runs on a thread so the
+            # event loop (and with it `cancel` and the caller's own timers)
+            # keeps running while Hermes works.
+            run_id = run_ctx.run_id
+
+            def turn() -> dict:
+                try:
+                    return sup.delegate(
+                        sent, friday_run_id=run_id,
+                        model=plan["model"], reasoning_effort=plan["effort"],
+                        route_reason=plan["reason"], workspace=bundle.workspace,
+                        wait=True, turn_timeout=timeout, **within)
+                finally:
+                    self._running.discard(run_id)
+
+            self._running.add(run_id)
+            out = await asyncio.to_thread(turn)
         except c.OutsideEnvelope as exc:
             # Refused, not attempted: the same answer claude_code gives for a
             # launch its envelope does not allow.
@@ -171,6 +190,68 @@ class HermesExecutor:
             return run_ctx.record(started.finish(
                 status=c.PARTIAL, output=payload,
                 error=record.get("pending_question") or "hermes reported partial"))
+        if status and status not in hb.TERMINAL:
+            # The wait ran out with the turn still going: stop it, as the
+            # claude executor kills its process on timeout, and say it timed
+            # out in the words a caller recognises as a wall-time stop.
+            work_run_id = out.get("work_run_id")
+            error = f"hermes run {work_run_id} exceeded {timeout:.0f}s still {status}"
+            try:
+                await asyncio.to_thread(sup.interrupt, work_run_id)
+            except Exception as exc:                        # noqa: BLE001
+                logger.exception("could not stop timed-out hermes run %s",
+                                 work_run_id)
+                error += f"; stopping it failed: {exc}"
+            return run_ctx.record(c.failed(started, error))
         return run_ctx.record(c.failed(
             started, f"hermes run {out.get('work_run_id')} ended {status or 'unknown'}",
         ))
+
+    async def cancel(self) -> bool:
+        """Stop what this executor has running on Hermes: interrupt every
+        live work run its in-flight turns started (the gateway runs them, so
+        cancelling the caller's task alone would leave them working). A turn
+        with no work run yet (gateway or session still starting) is watched
+        and interrupted the moment its row appears. False when no turn is in
+        flight, or when every interrupt it tried failed."""
+        runs = tuple(self._running)
+        if not runs:
+            return False
+        stopped, seen = await asyncio.to_thread(self._interrupt_live, runs)
+        unstarted = [r for r in runs if r not in seen]
+        for run_id in unstarted:
+            threading.Thread(target=self._stop_when_started, args=(run_id,),
+                             name=f"hermes-cancel-{run_id}", daemon=True).start()
+        return bool(stopped or unstarted)
+
+    def _interrupt_live(self, runs) -> tuple[list[str], set[str]]:
+        """Interrupt the live work runs of `runs`: (work runs interrupted,
+        Friday run ids that have any work run). An interrupt that raises is
+        logged and the rest still run."""
+        sup = self.supervisor()
+        stopped: list[str] = []
+        seen: set[str] = set()
+        for run_id in runs:
+            for row in sup.log.for_friday_run(run_id):
+                seen.add(run_id)
+                if row.get("status") in hb.TERMINAL:
+                    continue
+                try:
+                    sup.interrupt(row["work_run_id"])
+                    stopped.append(row["work_run_id"])
+                except Exception:                           # noqa: BLE001
+                    logger.exception("could not interrupt hermes run %s",
+                                     row["work_run_id"])
+        return stopped, seen
+
+    def _stop_when_started(self, run_id: str) -> None:
+        """Poll (on its own thread) until the turn's work run appears, then
+        interrupt it; give up when the delegate thread has ended."""
+        while run_id in self._running:
+            if self._interrupt_live((run_id,))[1]:
+                return
+            time.sleep(_CANCEL_POLL_S)
+
+
+#: how often a cancel armed before its work run existed looks for it
+_CANCEL_POLL_S = 0.2

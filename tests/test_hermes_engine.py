@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 
+from friday import contracts as c
 from friday import execution_economics as ee
 from friday import executor_router as R
 from friday import hermes_bridge as hb
@@ -157,6 +158,153 @@ def test_hermes_executor_reports_unavailable_not_a_crash(tmp_path):
     res = asyncio.run(HermesExecutor(None, supervisor=Dead()).execute(
         DevBundle(goal="x", workspace=str(tmp_path))))
     assert res.status == "failed" and "unavailable" in res.error
+
+
+class _Turn:
+    """A fake gateway whose one turn runs until it is interrupted, or until
+    `ends_after` seconds pass with it still WORKING (the wait timed out)."""
+
+    def __init__(self, ends_after: float = 5.0, started: bool = True) -> None:
+        import threading
+        self.entered, self.stopped = threading.Event(), threading.Event()
+        #: cleared = the gateway is still starting; no work-run row exists yet
+        self.started = threading.Event()
+        if started:
+            self.started.set()
+        self.ends_after, self.interrupted, self.rows = ends_after, [], []
+        self.log = self
+
+    def for_friday_run(self, friday_run_id):
+        return [r for r in self.rows if r["friday_run_id"] == friday_run_id]
+
+    def delegate(self, bundle, *, friday_run_id, **kw):
+        self.entered.set()
+        assert self.started.wait(5)
+        self.rows.append({"work_run_id": "hermes-1", "friday_run_id": friday_run_id,
+                          "status": "WORKING"})
+        self.entered.set()
+        stopped = self.stopped.wait(self.ends_after)
+        status = hb.PARTIAL if stopped else "WORKING"
+        self.rows[-1]["status"] = status
+        return {"work_run_id": "hermes-1", "result": {"status": status}}
+
+    def interrupt(self, work_run_id):
+        self.interrupted.append(work_run_id)
+        self.stopped.set()
+        return {}
+
+
+def test_cancelling_the_hermes_executor_interrupts_its_live_work_run(tmp_path):
+    """AGENT-003: the composer's cancel reaches what Hermes is running, not
+    just the asyncio task, and the turn does not block the event loop."""
+    from friday.executors.claude_code import TaskBundle as DevBundle
+    from friday.executors.hermes import HermesExecutor
+
+    turn = _Turn()
+    ex = HermesExecutor(None, supervisor=turn)
+
+    async def scenario():
+        work = asyncio.ensure_future(ex.execute(
+            DevBundle(goal="x", workspace=str(tmp_path)), timeout=30))
+        assert await asyncio.wait_for(asyncio.to_thread(turn.entered.wait, 5), 2)
+        assert not work.done()
+        assert await ex.cancel() is True
+        return await asyncio.wait_for(work, 5)
+
+    res = asyncio.run(scenario())
+    assert turn.interrupted == ["hermes-1"]
+    assert res.status == c.PARTIAL
+    assert asyncio.run(ex.cancel()) is False          # nothing live is left
+
+
+def test_a_cancel_before_hermes_has_a_work_run_still_stops_the_turn(tmp_path):
+    """The cancel lands while the gateway is still starting (no row yet); the
+    turn is interrupted as soon as its row appears, not left to run."""
+    from friday.executors.claude_code import TaskBundle as DevBundle
+    from friday.executors.hermes import HermesExecutor
+
+    turn = _Turn(started=False)
+    ex = HermesExecutor(None, supervisor=turn)
+
+    async def scenario():
+        work = asyncio.ensure_future(ex.execute(
+            DevBundle(goal="x", workspace=str(tmp_path)), timeout=30))
+        assert await asyncio.wait_for(asyncio.to_thread(turn.entered.wait, 5), 2)
+        assert await ex.cancel() is True              # armed, nothing to hit yet
+        assert turn.interrupted == []
+        turn.started.set()
+        return await asyncio.wait_for(work, 5)
+
+    res = asyncio.run(scenario())
+    assert turn.interrupted == ["hermes-1"]
+    assert res.status == c.PARTIAL
+
+
+def test_a_cancelled_task_leaves_its_live_turn_reachable_by_cancel(tmp_path):
+    """The composer's fallback cancels the awaiting task; the thread still
+    runs delegate, so the run must stay findable until the thread ends."""
+    from friday.executors.claude_code import TaskBundle as DevBundle
+    from friday.executors.hermes import HermesExecutor
+
+    turn = _Turn()
+    ex = HermesExecutor(None, supervisor=turn)
+
+    async def scenario():
+        work = asyncio.ensure_future(ex.execute(
+            DevBundle(goal="x", workspace=str(tmp_path)), timeout=30))
+        assert await asyncio.wait_for(asyncio.to_thread(turn.entered.wait, 5), 2)
+        work.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await work
+        assert await ex.cancel() is True
+        assert await asyncio.wait_for(asyncio.to_thread(turn.stopped.wait, 5), 6)
+
+    asyncio.run(scenario())
+    assert turn.interrupted == ["hermes-1"]
+
+
+def test_cancel_with_nothing_in_flight_does_not_build_a_supervisor():
+    from friday.executors.hermes import HermesExecutor
+
+    ex = HermesExecutor(None)
+    assert asyncio.run(ex.cancel()) is False
+    assert ex._supervisor is None
+
+
+def test_one_failing_interrupt_does_not_skip_the_others(tmp_path):
+    from friday.executors.hermes import HermesExecutor
+
+    class _Two:
+        def __init__(self):
+            self.log, self.interrupted = self, []
+
+        def for_friday_run(self, run_id):
+            return [{"work_run_id": f"w-{run_id}", "status": "WORKING"}]
+
+        def interrupt(self, work_run_id):
+            self.interrupted.append(work_run_id)
+            if work_run_id == "w-a":
+                raise TimeoutError("gateway did not answer")
+
+    sup = _Two()
+    ex = HermesExecutor(None, supervisor=sup)
+    ex._running.update({"a", "b"})
+    assert asyncio.run(ex.cancel()) is True
+    assert sorted(sup.interrupted) == ["w-a", "w-b"]
+
+
+def test_a_hermes_turn_that_outlives_its_wait_is_stopped_and_says_it_timed_out(tmp_path):
+    from friday import agent_composer
+    from friday.executors.claude_code import TaskBundle as DevBundle
+    from friday.executors.hermes import HermesExecutor
+
+    turn = _Turn(ends_after=0.0)
+    res = asyncio.run(HermesExecutor(None, supervisor=turn).execute(
+        DevBundle(goal="x", workspace=str(tmp_path)), timeout=7))
+    assert res.status == "failed"
+    assert "hermes run hermes-1 exceeded 7s" in res.error
+    assert agent_composer._EXECUTOR_TIMEOUT.search(res.error)
+    assert turn.interrupted == ["hermes-1"]
 
 
 def test_the_bridge_bundle_carries_the_development_bundle_reason(tmp_path):
