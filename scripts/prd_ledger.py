@@ -5479,6 +5479,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Direct ClaudeCodeExecutor runs now bind a provider/model/version/billing_class route in the ledger (fill-if-empty, never overwrites a declared route); a PARTIAL close writes a 'partial' evidence event. Slice-1 acceptance tests still pass. (build run, commit 718229127)",
         "next_action": "GAPS: No retention policy for agent_events: the table is append-only by trigger and the acceptance forbids a delete path, so pruning needs an owner decision (archive or compact); saw() still appends one progress event per tool use.; parent_run_id is passed on the composer path (agent_composer.py:394-396) but the direct ClaudeCodeExecutor path has no caller with a parent in scope and TaskBundle has no parent field; not added speculatively.; Direct-path route version is 'unversioned': the CLI picks its model and the init event's model id is not parsed.; A run that ends PARTIAL before any worker_started stays STARTING in the ledger (reconcile only flips RUNNING); it is never in active().; New tests were not run against the pre-change tree (git checkout is denied); bind_route did not exist before, and the packet records the route as empty on this path.",
     }),
+    ('LAB-003', {
+        "status": PARTIAL,
+        "current_implementation": "Slice: closes gap 3, the RAM figure. Process RSS was the only RAM figure, which charged a 64M model with all of FRIDAY's memory. run_task's measure() now reads ram_probe once before a variant's first call. It still records ram_gb (process peak) and adds model_ram_gb = max(0, peak - before), the vari (build run, commit a228c6f75)",
+        "next_action": 'GAPS: Only task_category has labelled rows; team_activation, instruction_to_schema and agent_state_transition still raise UnsupportedTask until LAB-002 labels them (3 of 4 tasks have no report).; Real MiniMind 64M dense / 198M MoE are never loaded or timed on real hardware (no weights, no network here); tests use stubs and training figures remain caller-supplied.; model_ram_gb is accurate only for a variant that loads its weights on first generate(); a preloaded variant shows only working memory (documented in the module docstring).; implementer did not claim acceptance met',
+    }),
 ]
 
 
