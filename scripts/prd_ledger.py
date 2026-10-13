@@ -5459,6 +5459,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Design: this slice closes the gap from the last run that said "a stored profile is never refreshed". I did not take the bigger gap, the production caller. Every call site for it is in a file another build owns this batch: model_gateway.py, toolsets/model_gateway.py, tools/__init__.py, capabilities.p (build run, commit e2be585d8)',
         "next_action": 'GAPS: No production caller yet: onboard_new_routes still has no route-discovery call site. Every candidate seam (model_gateway.py, toolsets/model_gateway.py, tools/__init__.py, capabilities/policy) is owned by another build this batch. route_onboarding stays FUTURE in reachability.; There is no default refresh age. The caller chooses max_age_s; None keeps the old never-refresh behaviour.; The image_url data-URI shape for the vision probe is still an unverified assumption about the worker.',
     }),
+    ('RSCH-001', {
+        "status": PARTIAL,
+        "current_implementation": "This slice closes the row's first gap: a short deep question no longer stops after about 4 sources. Before, a page only counted as gain if it covered one of the question's own terms. A 3-term question is covered by its first page, so R3, R4 and R5 stopped after two waves.\n\nThe fix is a shared helper (build run, commit d6a3586b6)",
+        "next_action": "GAPS: The fact signal is a lexical proxy: on real pages, varied proper nouns (navigation, bylines) can count as new facts, so the gain stop fires less often and deep walks rely more on the source/char budgets. A semantic per-page fact extractor would be stricter.; Drift guard on the live path still judges search title/snippet only; page bodies are not re-judged and results with no title or snippet pass unjudged; Depth routing is still the keyword/length heuristic ('which ... best' routes as R1); A cache hit still returns without depth/stop keys; The R2 default of 3 sources / 9000 chars is unchanged; web_search is still asked for sources*2 results for R4/R5; the provider may return fewer; Gain stop granularity is a wave of 2; waves run sequentially; test_network_scope and test_research_providers not run (impact cap)",
+    }),
 ]
 
 
