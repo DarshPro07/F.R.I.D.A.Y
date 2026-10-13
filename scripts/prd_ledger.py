@@ -5484,6 +5484,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "Slice: closes gap 3, the RAM figure. Process RSS was the only RAM figure, which charged a 64M model with all of FRIDAY's memory. run_task's measure() now reads ram_probe once before a variant's first call. It still records ram_gb (process peak) and adds model_ram_gb = max(0, peak - before), the vari (build run, commit a228c6f75)",
         "next_action": 'GAPS: Only task_category has labelled rows; team_activation, instruction_to_schema and agent_state_transition still raise UnsupportedTask until LAB-002 labels them (3 of 4 tasks have no report).; Real MiniMind 64M dense / 198M MoE are never loaded or timed on real hardware (no weights, no network here); tests use stubs and training figures remain caller-supplied.; model_ram_gb is accurate only for a variant that loads its weights on first generate(); a preloaded variant shows only working memory (documented in the module docstring).; implementer did not claim acceptance met',
     }),
+    ('UCW-005', {
+        "status": PARTIAL,
+        "current_implementation": 'This slice closes part of the second gap, the one about symlinks inside the tree. Before the fix, an attempt that added a directory junction or symlink inside the tree was ACCEPTED. git follows a directory link and reports the files behind it as untracked files of this tree, so a fix could pass veri (build run, commit 11ee4a524)',
+        "next_action": 'GAPS: Still not covered: git hooks, GIT_* or PYTHON* variables set through a caller-supplied env, and .pth or sitecustomize files outside the repo. A SANDBOX-001 style jail is the real fix.; The semantic guard still drops changes to helper files under tests/, so a legitimate fix that needs a changed tests/ helper would be rejected as TEST_WEAKENED.; The loop still refuses a workdir that holds ignored files (deliberate, because the reset deletes them).; Links that were already in the baseline tree are allowed; only links the attempt adds are rejected.; test_ultracode_definition, test_trace_debugger, test_ultracode_spec, test_ultracode_tiers and test_voice_interruption were not rerun (test_impact lists none of them as affected).',
+    }),
 ]
 
 
