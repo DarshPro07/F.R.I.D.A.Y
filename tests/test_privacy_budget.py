@@ -163,6 +163,35 @@ def _request(objective: str, text: str) -> mg.ModelGatewayRequest:
         context_package=mg.compile_context(system="You are Friday.", user=text))
 
 
+def _tool(name: str) -> dict:
+    return {"type": "function",
+            "function": {"name": name, "description": name,
+                         "parameters": {"type": "object", "properties": {}}}}
+
+
+def _tool_with_function_meta(name: str, **meta) -> dict:
+    tool = _tool(name)
+    tool["function"].update(meta)
+    return tool
+
+
+def _use_capability_tool(family: str | None = None, operation: str | None = None) -> dict:
+    family_schema = {"type": "string"}
+    operation_schema = {"type": "string"}
+    if family is not None:
+        family_schema["const"] = family
+    if operation is not None:
+        operation_schema["const"] = operation
+    return {"type": "function", "function": {
+        "name": "use_capability",
+        "description": "Run a capability.",
+        "parameters": {"type": "object", "properties": {
+            "family": family_schema,
+            "operation": operation_schema,
+            "arguments": {"type": "object"},
+        }, "required": ["family", "operation"]}}}
+
+
 def test_without_a_budget_the_global_policy_alone_decides(gateway):
     gw, store, _ = gateway
     assert DC.classify(CONFIDENTIAL_TEXT) == DC.CONFIDENTIAL
@@ -206,6 +235,58 @@ def test_a_budget_naming_no_available_provider_leaves_none_to_call(gateway):
     run_id = _run(store, PB.PrivacyBudget(providers=()))
     res = gw.infer(_request(run_id, "ping"))
     assert res.status == "failed" and res.entitlement_state == "PRIVACY_BUDGET_REFUSED"
+    assert all(r["status"] == "refused" for r in telemetry.for_objective(run_id))
+
+
+def test_a_tool_outside_the_external_service_budget_is_never_sent(gateway):
+    gw, store, telemetry = gateway
+    run_id = _run(store, PB.PrivacyBudget(external_services=("web.search",)))
+    req = _request(run_id, "send a status email")
+    req.tools = (_tool("mail.send"),)
+    res = gw.infer(req)
+    assert res.status == "failed" and res.entitlement_state == "PRIVACY_BUDGET_REFUSED"
+    assert res.response == ""
+    assert all(a["code"] == "PRIVACY_BUDGET_REFUSED" for a in res.attempts)
+    assert all(r["status"] == "refused" for r in telemetry.for_objective(run_id))
+
+
+def test_a_budget_allows_the_real_web_search_tool_name(gateway):
+    gw, store, telemetry = gateway
+    run_id = _run(store, PB.PrivacyBudget(external_services=("web.search",)))
+    req = _request(run_id, "search the web")
+    req.tools = (_tool("web_search"),)
+    res = gw.infer(req)
+    assert res.status == "ok"
+    assert not [r for r in telemetry.for_objective(run_id) if r["status"] == "refused"]
+
+
+def test_a_tool_cannot_spoof_an_allowed_external_service(gateway):
+    gw, store, telemetry = gateway
+    run_id = _run(store, PB.PrivacyBudget(external_services=("web.search",)))
+    req = _request(run_id, "send a status email")
+    req.tools = (_tool_with_function_meta("mail_send", x_external_service="web.search"),)
+    res = gw.infer(req)
+    assert res.status == "failed" and res.entitlement_state == "PRIVACY_BUDGET_REFUSED"
+    assert "mail.send" in res.attempts[0]["error"]
+    assert all(r["status"] == "refused" for r in telemetry.for_objective(run_id))
+
+
+def test_a_budget_allows_a_narrowed_use_capability_schema_for_that_service(gateway):
+    gw, store, _ = gateway
+    run_id = _run(store, PB.PrivacyBudget(external_services=("web.search",)))
+    req = _request(run_id, "search the web")
+    req.tools = (_use_capability_tool("web", "search"),)
+    assert gw.infer(req).status == "ok"
+
+
+def test_a_budget_refuses_unconstrained_use_capability(gateway):
+    gw, store, telemetry = gateway
+    run_id = _run(store, PB.PrivacyBudget(external_services=("web.search",)))
+    req = _request(run_id, "use a capability")
+    req.tools = (_use_capability_tool(),)
+    res = gw.infer(req)
+    assert res.status == "failed" and res.entitlement_state == "PRIVACY_BUDGET_REFUSED"
+    assert "unnamed tool" in res.attempts[0]["error"]
     assert all(r["status"] == "refused" for r in telemetry.for_objective(run_id))
 
 

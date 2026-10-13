@@ -1147,6 +1147,58 @@ CLAUDE_CLI = "claude-cli"
 MCP_ROUTE = "claude-mcp"
 
 
+def _tool_name(tool: dict) -> str:
+    fn = tool.get("function") if isinstance(tool.get("function"), dict) else {}
+    name = fn.get("name") or tool.get("name")
+    return name.strip().lower() if isinstance(name, str) and name.strip() else ""
+
+
+def _single_schema_value(schema: dict, key: str) -> str:
+    fn = schema.get("function") if isinstance(schema.get("function"), dict) else {}
+    params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {}
+    props = params.get("properties") if isinstance(params.get("properties"), dict) else {}
+    prop = props.get(key)
+    if not isinstance(prop, dict):
+        return ""
+    value = prop.get("const")
+    if isinstance(value, str) and value.strip():
+        return value.strip().lower()
+    enum = prop.get("enum")
+    if (isinstance(enum, list) and len(enum) == 1
+            and isinstance(enum[0], str) and enum[0].strip()):
+        return enum[0].strip().lower()
+    return ""
+
+
+def _tool_service(tool: dict) -> str:
+    """Trusted external-service id for one FRIDAY tool schema."""
+    name = _tool_name(tool)
+    if name == "use_capability":
+        family = _single_schema_value(tool, "family")
+        operation = _single_schema_value(tool, "operation")
+        return f"{family}.{operation}" if family and operation else ""
+    try:
+        from friday import capabilities
+        capability = capabilities.by_id(name)
+    except Exception:  # noqa: BLE001 - privacy gate must fail closed.
+        capability = None
+    service = capability.id if capability is not None else name
+    return service.replace("_", ".")
+
+
+def _external_service_refusal(budget, tools: tuple[dict, ...]) -> str:
+    if budget is None or not tools:
+        return ""
+    blocked = sorted({service or "unnamed tool"
+                      for service in (_tool_service(t) for t in tools)
+                      if not budget.permits_service(service)})
+    if not blocked:
+        return ""
+    allowed = budget.external_services
+    return (f"{', '.join(blocked)} is outside this objective's privacy budget "
+            f"(external services: {', '.join(allowed) if allowed else 'none'})")
+
+
 def _flatten_tool_turns(messages: list[dict]) -> list[dict]:
     """The package as plain text turns, for a route that cannot carry tools.
 
@@ -1814,6 +1866,7 @@ class ModelGateway:
         # PRIV-001: the objective's own budget, intersected with the global
         # policy below - it can only narrow what `data_class.decision` allows.
         privacy_budget = self._privacy_budget(request.objective_id)
+        service_refusal = _external_service_refusal(privacy_budget, request.tools)
 
         verdict_domain = request_domain(request)
         routes = self.candidates(request)
@@ -1873,6 +1926,16 @@ class ModelGateway:
                 last_error, last_state = over, "PRIVACY_BUDGET_REFUSED"
                 self._record(request, status="refused", provider=provider, model=model,
                              tier=tier, error=f"PRIVACY_BUDGET_REFUSED: {over}",
+                             input_tokens=input_tokens, failover_count=index,
+                             fingerprint=fingerprint, entitlement_state="PRIVACY_BUDGET_REFUSED")
+                continue
+            if service_refusal:
+                attempts.append({"tier": tier, "provider": provider, "model": model,
+                                 "status": "refused", "code": "PRIVACY_BUDGET_REFUSED",
+                                 "error": service_refusal})
+                last_error, last_state = service_refusal, "PRIVACY_BUDGET_REFUSED"
+                self._record(request, status="refused", provider=provider, model=model,
+                             tier=tier, error=f"PRIVACY_BUDGET_REFUSED: {service_refusal}",
                              input_tokens=input_tokens, failover_count=index,
                              fingerprint=fingerprint, entitlement_state="PRIVACY_BUDGET_REFUSED")
                 continue
@@ -2179,6 +2242,8 @@ class ModelGateway:
             return None
         privacy_budget = self._privacy_budget(request.objective_id)
         if privacy_budget is not None and privacy_budget.refusal(content_class, CLAUDE_CLI):
+            return None
+        if _external_service_refusal(privacy_budget, request.tools):
             return None
         turns, redactions = [], 0
         for msg in _flatten_tool_turns(request.context_package):
