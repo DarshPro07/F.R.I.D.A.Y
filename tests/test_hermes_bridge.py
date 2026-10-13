@@ -539,3 +539,48 @@ def test_a_hermes_worker_records_the_reason_its_bundle_carries(tmp_path, monkeyp
         assert owned.spawn_reason == G.VERIFICATION
     finally:
         supervisor.stop()
+
+
+def _hermes_install(root):
+    """The two things locate() requires of an install directory."""
+    (root / "tui_gateway").mkdir(parents=True)
+    python = root / "venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"")
+    return python
+
+
+@pytest.fixture
+def no_hermes_env(monkeypatch, tmp_path):
+    """No env override, nothing on PATH, LOCALAPPDATA an empty tmp dir."""
+    monkeypatch.delenv("HERMES_PYTHON", raising=False)
+    monkeypatch.delenv("HERMES_DIR", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "empty"))
+    monkeypatch.setattr(hb.shutil, "which", lambda name: None)
+
+
+def test_locate_follows_the_installer_shim_to_hermes_agent(no_hermes_env, monkeypatch, tmp_path):
+    """Measured live 2026-10-13: `hermes` on PATH is the installer's shim
+    <home>/bin/hermes.exe; locate() returned None and 'Ask Hermes...' said
+    Hermes is not installed while the status line said healthy."""
+    home = tmp_path / "hermes"
+    python = _hermes_install(home / "hermes-agent")
+    shim = home / "bin" / "hermes.exe"
+    shim.parent.mkdir(parents=True)
+    shim.write_bytes(b"")
+    monkeypatch.setattr(hb.shutil, "which", lambda name: str(shim))
+    found = hb.locate()
+    assert found and Path(found["root"]) == (home / "hermes-agent").resolve()
+    assert Path(found["python"]) == python.resolve()
+
+
+def test_locate_falls_back_to_the_localappdata_install(no_hermes_env, monkeypatch, tmp_path):
+    local = tmp_path / "local"
+    python = _hermes_install(local / "hermes" / "hermes-agent")
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    found = hb.locate()
+    assert found and Path(found["python"]) == python
+
+
+def test_locate_still_says_none_when_nothing_is_installed(no_hermes_env):
+    assert hb.locate() is None

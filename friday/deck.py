@@ -54,7 +54,7 @@ INTENTS = (
      "says": "world news from the agent (live tool call)"},
     {"id": "plan_today", "label": "PLAN TODAY", "mode": GATED,
      "tool": "objective_start",
-     "args": {"request": "Plan my top three priorities for today and tell me."},
+     "args": {"objective": "Plan my top three priorities for today and tell me."},
      "says": "starts a real objective -- asks you to approve first"},
     {"id": "vault_sync", "label": "VAULT SYNC", "mode": LIVE,
      "says": "re-render the memory as readable markdown in vault/"},

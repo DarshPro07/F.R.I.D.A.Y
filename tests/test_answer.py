@@ -293,3 +293,34 @@ def test_the_codebase_guard_does_not_swallow_real_research(question):
     to sources. A guard that catches everything is not a guard."""
     mode, _ = A.classify(question)
     assert mode == A.RESEARCH, question
+
+
+PRIVATE_SENTENCES = [
+    "what is using my RAM right now",
+    "remind me at 6 pm today",
+    "remember that my meeting is on 2027-01-05",
+    "what is my current balance",
+]
+
+
+@pytest.mark.parametrize('question', PRIVATE_SENTENCES)
+def test_a_private_sentence_with_a_time_word_is_not_sent_to_the_web(question):
+    """Audit 2026-10-13: bare now/today and any 2xxx number counted as the
+    present, so these went to web search before the model saw them. A time
+    word alone is not a world topic, and the boss's own things or a command
+    are never a web question."""
+    mode, why = A.classify(question)
+    assert mode != A.RESEARCH, f"{question!r} routed to the web: {why}"
+
+
+@pytest.mark.parametrize("question", [
+    "what is the current version of python",
+    "what are the recent changes in React",
+    "who won the most medals this year",
+])
+def test_current_and_recent_still_ask_about_the_world(question):
+    """Review 2026-10-13: narrowing the present to world topics dropped
+    current/recent, which qualify a world fact, not this machine. Only the bare
+    time words (now, today, still, yet, a year number) were the bug."""
+    mode, why = A.classify(question)
+    assert mode == A.RESEARCH, f"{question!r} went {mode}: {why}"

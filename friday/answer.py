@@ -79,17 +79,26 @@ class Answer:
     def needs_sources(self) -> bool:
         return self.mode in (RESEARCH, DEEP)
 
-#: Words that put a question in the present. Training data has a horizon and
-#: these are the questions that fall past it.
+#: World topics and the qualifiers that date a world fact. Training data has a
+#: horizon and these are the questions that fall past it. A bare time word (now,
+#: today, tonight, this morning, still, yet, a year) is not one: "what is using
+#: my RAM right now" is about this machine.
 _CURRENT = re.compile(
-    r"\b(?:latest|current|recent|recently|today|tonight|this (?:week|month|"
-    r"year|morning)|right now|nowadays|these days|so far|up to date|"
-    r"newest|new(?:est)? version|still|yet|2\d{3})\b",
+    r"\b(?:latest|newest|current|recent|recently|this (?:week|month|year)|"
+    r"nowadays|these days|so far|new(?:est)? version|up to date|weather|"
+    r"forecast|scores?|elections?)\b",
+    re.IGNORECASE)
+
+#: The boss's own things, or a command. Never a web question, and sending the
+#: sentence to a search engine leaks it.
+_PRIVATE = re.compile(
+    r"^\s*(?:remind|remember|open|play|save|set|delete|create)\b|"
+    r"\b(?:my|our)\b",
     re.IGNORECASE)
 
 #: Asking what is happening, which is always a question about now.
 _NEWS = re.compile(
-    r"\b(?:news|headlines|happening|announced|released|launched|shipped|"
+    r"\b(?:news|headlines|happening|happened|announced|released|launched|shipped|"
     r"price|pricing|cost|stock|market|status of|state of|update on)\b",
     re.IGNORECASE)
 
@@ -158,6 +167,8 @@ def classify(question: str) -> tuple[str, str]:
     if _CURRENT.search(text) or _NEWS.search(text) or _VERSIONED.search(text):
         if _ABOUT_THIS_CODEBASE.search(text):
             return FAST, "about our own source; the answer is on this disk"
+        if _PRIVATE.search(text):
+            return FAST, "about the boss's own things or a command; not the web"
         return RESEARCH, "the answer has a date on it"
 
     if _DEFINITIONAL.match(text):

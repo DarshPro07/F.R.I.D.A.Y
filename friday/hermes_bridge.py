@@ -1364,7 +1364,8 @@ def locate() -> dict | None:
     """
     Where Hermes is on this machine, or None.
 
-    Two env overrides, then the install convention, then PATH. The gateway
+    Two env overrides, then `hermes` on PATH (a git install, a venv, or the
+    installer's shim), then %LOCALAPPDATA%\\hermes\\hermes-agent. The gateway
     is launched as `<hermes python> -m tui_gateway.entry` from the install
     directory - the same way Hermes's own desktop app launches it - because
     the `hermes` console script does not expose a gateway-only mode.
@@ -1374,20 +1375,34 @@ def locate() -> dict | None:
     if python and root and Path(python).exists() and Path(root).is_dir():
         return {"python": python, "root": root, "how": "env"}
 
-    binary = shutil.which("hermes")
-    if binary:
-        # git installs put the venv beside the package: <root>/venv/Scripts.
-        candidate = Path(binary).resolve().parent.parent.parent
+    def installed(candidate, how):
         python_exe = candidate / "venv" / "Scripts" / "python.exe"
         if (candidate / "tui_gateway").is_dir() and python_exe.exists():
             return {"python": str(python_exe), "root": str(candidate),
-                    "how": "hermes-on-path"}
+                    "how": how}
+        return None
+
+    binary = shutil.which("hermes")
+    if binary:
+        here = Path(binary).resolve()
+        # git installs put the venv beside the package: <root>/venv/Scripts.
+        found = installed(here.parent.parent.parent, "hermes-on-path")
+        if found:
+            return found
         # venv-relative: Scripts/python.exe next to the hermes script.
-        sibling = Path(binary).resolve().parent / "python.exe"
-        for parent in Path(binary).resolve().parents:
+        sibling = here.parent / "python.exe"
+        for parent in here.parents:
             if (parent / "tui_gateway").is_dir() and sibling.exists():
                 return {"python": str(sibling), "root": str(parent),
                         "how": "venv-sibling"}
+        # the installer's shim: <home>/bin/hermes.exe beside <home>/hermes-agent.
+        found = installed(here.parent.parent / "hermes-agent", "hermes-shim")
+        if found:
+            return found
+
+    local = os.getenv("LOCALAPPDATA", "").strip()
+    if local:
+        return installed(Path(local) / "hermes" / "hermes-agent", "localappdata")
     return None
 
 
