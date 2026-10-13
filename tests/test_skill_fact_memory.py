@@ -12,6 +12,7 @@ import pytest
 
 from friday.skills import contracts as K
 from friday.skills import dependencies as D
+from friday.skills import fact_memory as FM
 from friday.skills.fact_memory import FACT_ACTIVE, FACT_STALE, Evidence, SkillFactMemory
 from friday.skills.registry import SkillRegistry
 
@@ -123,7 +124,7 @@ def test_a_stale_fact_returns_only_with_new_passing_evidence(world):
     with pytest.raises(K.SkillError):
         memory.revalidate_fact(fact_id, Evidence(kind="test", ref="t", passed=False), commit="def5678")
     assert memory.facts("alpha")[0]["status"] == FACT_STALE
-    memory.revalidate_fact(fact_id, Evidence(kind="readback", ref="pkg/a.py:1", passed=True), commit="def5678")
+    memory.revalidate_fact(fact_id, memory.read_back("pkg/a.py", "A = 2"), commit="def5678")
     fact = memory.facts("alpha")[0]
     assert fact["status"] == FACT_ACTIVE and fact["verified_commit"] == "def5678" and fact["stale_reason"] == ""
     assert memory.sweep() == []                                        # the new fingerprint is the baseline
@@ -142,3 +143,112 @@ def test_an_intake_records_the_upstream_commit_and_package_versions(world):
         memory.record_intake("alpha", upstream_commit="", packages={})
     with pytest.raises(K.SkillError):
         memory.record_intake("nosuchskill", upstream_commit="0123456789abcdef", packages={})
+
+
+def test_an_intake_package_upgrade_marks_the_intake_skill_only(world):
+    _, registry, memory = world
+    installed = importlib.metadata.version("pytest")
+    memory.record_intake("alpha", upstream_commit="0123456789abcdef", packages={"pytest": "0.0.1"})
+    memory.record_intake("beta", upstream_commit="0123456789abcdef", packages={"pytest": installed})
+    assert memory.intake_drift("alpha") == {"pytest": {"recorded": "0.0.1", "installed": installed}}
+    assert memory.intake_drift("beta") == {}
+    assert memory.intake_drift("nosuchskill") == {}
+    marked = memory.sweep()
+    assert [m["skill"] for m in marked] == ["alpha"]
+    assert marked[0]["stale_facts"] == []
+    assert marked[0]["intake_drift"] == {"pytest": {"recorded": "0.0.1", "installed": installed}}
+    assert registry.get("alpha").state == K.NEEDS_REVALIDATION
+    assert registry.get("beta").state == K.ACTIVE
+    assert memory.sweep() == []                                        # already marked, not re-reported
+
+
+def test_an_intake_package_that_is_no_longer_installed_is_drift(world):
+    _, _, memory = world
+    memory.record_intake("alpha", upstream_commit="0123456789abcdef",
+                         packages={"friday-no-such-package-xyz": "1.0"})
+    assert memory.intake_drift("alpha") == {
+        "friday-no-such-package-xyz": {"recorded": "1.0", "installed": D.MISSING}}
+
+
+def test_re_recording_the_intake_re_baselines_its_packages(world):
+    _, _, memory = world
+    installed = importlib.metadata.version("pytest")
+    memory.record_intake("alpha", upstream_commit="0123456789abcdef", packages={"pytest": "0.0.1"})
+    memory.record_intake("alpha", upstream_commit="fedcba9876543210", packages={"pytest": installed})
+    assert memory.intake_drift("alpha") == {}
+    assert memory.sweep() == []
+
+
+def test_a_read_back_reads_the_file_itself_before_a_fact_enters(world):
+    _, _, memory = world
+    seen = memory.read_back("pkg/a.py", "A = 1")
+    assert seen.kind == "readback" and seen.passed and "pkg/a.py" in seen.ref
+    fact_id = _add(memory, "alpha", "A is 1", ["pkg/a.py"], evidence=seen)
+    assert memory.facts("alpha")[0]["id"] == fact_id
+    assert memory.facts("alpha")[0]["evidence_kind"] == "readback"
+    wrong = memory.read_back("pkg/a.py", "A = 2")                       # the claim is not in the file
+    assert wrong.passed is False
+    with pytest.raises(K.SkillError):
+        _add(memory, "beta", "A is 2", ["pkg/a.py"], evidence=wrong)
+    assert memory.facts("beta") == []
+
+
+def test_a_read_back_of_a_missing_file_does_not_pass(world):
+    _, _, memory = world
+    assert memory.read_back("pkg/nope.py", "A = 1").passed is False
+
+
+@pytest.mark.parametrize("path", ["../outside.txt", "pkg/../../outside.txt"])
+def test_a_read_back_stays_inside_the_codebase(world, path):
+    repo, _, memory = world
+    (repo.parent / "outside.txt").write_text("A = 1\n", encoding="utf-8")
+    with pytest.raises(K.SkillError):
+        memory.read_back(path, "A = 1")
+    with pytest.raises(K.SkillError):
+        memory.read_back(str(repo / "pkg" / "a.py"), "A = 1")          # absolute paths are refused
+
+
+def test_a_read_back_needs_the_text_it_checks_for(world):
+    _, _, memory = world
+    with pytest.raises(K.SkillError):
+        memory.read_back("pkg/a.py", "  ")
+
+
+def test_a_hand_built_read_back_is_refused(world):
+    _, _, memory = world
+    forged = Evidence(kind="readback", ref="x", passed=True)            # never came from read_back()
+    with pytest.raises(K.SkillError):
+        _add(memory, "alpha", "A is 1", ["pkg/a.py"], evidence=forged)
+    claimed = Evidence(kind="readback", ref="x", passed=True, path="pkg/a.py", expect="A = 9")
+    with pytest.raises(K.SkillError):                                  # the claim is checked again, not trusted
+        _add(memory, "alpha", "A is 9", ["pkg/a.py"], evidence=claimed)
+    assert memory.facts("alpha") == []
+    fact_id = _add(memory, "alpha", "A is 1", ["pkg/a.py"])
+    with pytest.raises(K.SkillError):
+        memory.revalidate_fact(fact_id, forged, commit="def5678")
+
+
+def test_a_read_back_must_still_hold_when_the_fact_enters(world):
+    repo, _, memory = world
+    seen = memory.read_back("pkg/a.py", "A = 1")
+    (repo / "pkg" / "a.py").write_text("A = 2\n", encoding="utf-8")   # the file changed after the read
+    with pytest.raises(K.SkillError):
+        _add(memory, "alpha", "A is 1", ["pkg/a.py"], evidence=seen)
+    assert memory.facts("alpha") == []
+
+
+def test_a_read_back_must_be_of_a_file_the_fact_depends_on(world):
+    _, _, memory = world
+    other = memory.read_back("pkg/b.py", "B = 1")
+    with pytest.raises(K.SkillError):
+        _add(memory, "alpha", "A is 1", ["pkg/a.py"], evidence=other)
+    assert _add(memory, "alpha", "B is 1", ["pkg/*.py"], evidence=other)   # a glob that covers it is enough
+
+
+def test_a_read_back_does_not_store_the_probed_text_or_read_huge_files(world, monkeypatch):
+    repo, _, memory = world
+    seen = memory.read_back("pkg/a.py", "A = 1")
+    _add(memory, "alpha", "A is 1", ["pkg/a.py"], evidence=seen)
+    assert "A = 1" not in memory.facts("alpha")[0]["evidence_ref"]
+    monkeypatch.setattr(FM, "MAX_READBACK_BYTES", 3)
+    assert memory.read_back("pkg/a.py", "A = 1").passed is False
