@@ -291,6 +291,19 @@ def test_the_step_cap_is_enforced_before_inference(monkeypatch):
     assert calls(fakes)["economy"] == 0
 
 
+@pytest.mark.parametrize("slot,diff,cap", [
+    ("economy", DOCS_DIFF, 8000),
+    ("judge", POLICY_DIFF, 12000),
+], ids=["economy", "judge"])
+def test_a_reply_that_takes_the_step_over_its_cap_is_inconclusive(slot, diff, cap):
+    # the prompt fits; the reply alone is ~4 chars/token past the step's cap
+    fakes = crew(**{slot: "x" * (4 * cap) + "\n" + CLEAN})
+    result = run(diff, fakes)
+    assert result.verdict == "INCONCLUSIVE" and not result.passes
+    assert f"cap {cap}" in result.reason
+    assert calls(fakes)[slot] == 1
+
+
 @pytest.mark.parametrize("slot,field,value,word", [
     ("economy", "model", "MODEL-IMPL", "model"),
     ("security", "model", "model-impl", "model"),

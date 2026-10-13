@@ -33,8 +33,9 @@ Rules this module enforces, each with a test:
 
 When routes are supplied, `run_code_review` resolves each agent step through
 ULTRA-006 role resolution before it calls an actor. The prompt presented to an
-actor is refused when it would exceed that step's cap, so the verdict cannot
-pass on over-budget evidence.
+actor is refused when it would exceed that step's cap, and an answer whose
+prompt and reply together exceed it is refused too, so the verdict cannot pass
+on over-budget evidence or an over-budget answer.
 
 Assumed (owner not asked): files the agent loads as text at run time (AGENTS.md,
 CLAUDE.md, friday/prompts/, .claude/) are trust-boundary content, not inert
@@ -454,12 +455,17 @@ def _bounded(actor: Actor, step) -> Actor:
     """The same actor, with its step's tier, model and cap bound to the call: the
     worker label records the model that actually answers, and a prompt over the
     cap is refused before any inference (perspective_check records the refusal as
-    INCONCLUSIVE, never a pass)."""
+    INCONCLUSIVE, never a pass). The cap covers the reply too: Infer takes no
+    output limit, so a reply that takes the step past its cap cannot be stopped,
+    but its answer is refused rather than counted toward the verdict."""
     def infer(system, user, *, worker, objective_id):
         if _estimate_tokens(system, user) > step.cap:
             raise RuntimeError(f"prompt exceeds cap {step.cap}")
         label = f"{worker}|tier={step.tier}|model={actor.model}|cap={step.cap}"
-        return actor.infer(system, user, worker=label, objective_id=objective_id)
+        reply = actor.infer(system, user, worker=label, objective_id=objective_id)
+        if _estimate_tokens(system, user, reply or "") > step.cap:
+            raise RuntimeError(f"prompt and reply exceed cap {step.cap}")
+        return reply
     return Actor(actor.name, actor.model, actor.session, infer)
 
 
