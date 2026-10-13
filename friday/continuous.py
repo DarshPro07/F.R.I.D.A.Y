@@ -384,9 +384,14 @@ class ContinuousTaskExecutor:
     def __init__(self, store: Store, call_capability: CapabilityPort,
                  executor_id: str | None = None,
                  health_probe=None, health_recover=None,
-                 governor=None) -> None:
+                 governor=None, capability_builder=None) -> None:
         self.store = store
         self.call_capability = call_capability
+        #: Optional CAPB-001 seam (`capability_builder.CapabilityBuilder`): a
+        #: task that failed CAPABILITY_MISSING gets one build attempt, and if
+        #: the person approves the result it is put back to READY and run.
+        #: Without one a missing capability stays a terminal failure.
+        self.capability_builder = capability_builder
         #: Whether the port can carry each task's Run (lineage and envelope,
         #: TRUST-002). Both production ports can; a port that cannot - a test
         #: fake - still sees the envelope enforced here before dispatch.
@@ -569,6 +574,8 @@ class ContinuousTaskExecutor:
                 self._heartbeat(run_id)
                 self._check_invariant(run_id)
 
+                # A plan step the compiler wrote off as an unknown capability.
+                await self._build_missing(run_id)
                 ready = self._ready_snapshot(run_id)
                 if not ready:
                     self._settle_without_work(run_id)
@@ -580,6 +587,10 @@ class ContinuousTaskExecutor:
                 done = await self._execute_tasks(
                     run_id, ready, self.portion_budget - executed)
                 executed += done
+                # A step that turned out missing at call time, before the
+                # all-terminal check below would end the run on it.
+                if await self._build_missing(run_id):
+                    continue
                 if done == 0:
                     self._settle_without_work(run_id)
                     return
@@ -1311,7 +1322,15 @@ class ContinuousTaskExecutor:
         that carries the Run is not trusted to, and one that cannot carry it
         never sees it - so neither check can depend on the port."""
         envelope = run.envelope
-        refusal = envelope.permits(capability_id) or (
+        # CAPB-001: a skill the person enabled by name for THIS objective is
+        # the one capability the compiled envelope could not list, because it
+        # did not exist then. That approval, recorded in forge's registry, is
+        # what stands in for the allowlist; a block and the expiry still bind.
+        builder = self.capability_builder
+        forged = (builder is not None
+                  and capability_id not in envelope.blocked_capabilities
+                  and builder.owns(capability_id, envelope.objective_id))
+        refusal = ("" if forged else envelope.permits(capability_id)) or (
             "this run's envelope has expired" if envelope.expired() else "")
         if refusal:
             return run.record(c.started(run.run_id, capability_id).finish(
@@ -1341,6 +1360,15 @@ class ContinuousTaskExecutor:
                     status=c.FAILED,
                     error=f"BLOCKED: the person allowed at most {ceiling} changes for "
                           f"this objective and {made} have been made or are in progress")).to_dict()
+        if forged:
+            # Run it in forge's sandbox, not through the port that never
+            # heard of it.
+            reply = await builder.call(capability_id, arguments,
+                                       objective_id=envelope.objective_id)
+            return run.record(c.succeeded(
+                c.started(run.run_id, capability_id),
+                verification=c.Verification(**reply["verification"]),
+                output=reply["output"])).to_dict()
         extra: dict = {}
         if self._port_takes_run:
             extra["run"] = run
@@ -1407,6 +1435,57 @@ class ContinuousTaskExecutor:
             run_id, task_id, O.FailureKind.STRUCTURAL,
             f"worker {worker_id} ended {status}: "
             f"{json.dumps(result, default=str)[:500]}")
+
+    async def _build_missing(self, run_id: str) -> int:
+        """
+        CAPB-001: give each CAPABILITY_MISSING task one build attempt.
+
+        A built and approved skill puts its task back to READY (attempts kept)
+        and releases the dependents it had skipped, so the original task runs
+        and the run can complete. A refused build leaves the task FAILED with
+        the build's reason added; nothing is enabled. Returns how many tasks
+        went back to READY.
+        """
+        builder = self.capability_builder
+        if builder is None:
+            return 0
+        from friday import capability_builder as cb
+
+        request = str((self.store.objective_run(run_id) or {}).get("request") or "")
+        restored = 0
+        for task in self.store.objective_tasks(run_id):
+            if (task["status"] != O.TaskStatus.FAILED
+                    or task.get("failure_kind") != O.FailureKind.CAPABILITY_MISSING
+                    or task["capability"] == O.COMPOSITE):
+                continue
+            builds = int((task.get("detail") or {}).get("capability_builds") or 0)
+            if builds >= cb.MAX_BUILDS_PER_TASK:
+                continue
+            task_id = task["task_id"]
+            outcome = await asyncio.to_thread(builder.build, cb.BuildRequest(
+                capability=task["capability"],
+                arguments=task.get("arguments") or {},
+                request=request, objective_id=run_id))
+            self.store.append_objective_event(
+                run_id, cb.EVENT_BUILD, task_id=task_id, detail=outcome.to_dict())
+            if not outcome.built:
+                was = str(task.get("evidence") or "")
+                self.store.update_objective_task(
+                    task_id, evidence=f"{was}; build refused: {outcome.reason}".lstrip("; "),
+                    detail={"capability_builds": builds + 1})
+                continue
+            self.store.update_objective_task(
+                task_id, status=O.TaskStatus.READY, failure_kind=None,
+                evidence=None, finished_at=None,
+                detail={"capability_builds": builds + 1})
+            for other in self.store.objective_tasks(run_id):
+                if (other["status"] == O.TaskStatus.SKIPPED
+                        and other.get("blocked_by") == task_id):
+                    self.store.update_objective_task(
+                        other["task_id"], status=O.TaskStatus.QUEUED,
+                        blocked_by=None, finished_at=None)
+            restored += 1
+        return restored
 
     def _fail_task(self, run_id: str, task_id: str, kind: str,
                    reason: str, *, detail: dict | None = None) -> None:

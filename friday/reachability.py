@@ -399,6 +399,10 @@ DECLARED = {
     "friday/quarantine_guard": (FUTURE,
                                 "copied into a quarantine root and run as the "
                                 "child's entry script, never imported"),
+    "friday/capability_builder": (FUTURE,
+                                  "CAPB-001: seam the objective executor accepts as "
+                                  "`capability_builder=`; no production author is "
+                                  "chosen, run by tests/test_golden_capability_build.py"),
     "friday/lab_benchmark": (FUTURE,
                              "LAB-003: the narrow-task benchmark of routing, a linear "
                              "classifier and MiniMind on the frozen set, run by "

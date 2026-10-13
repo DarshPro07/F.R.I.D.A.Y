@@ -991,6 +991,78 @@ def verify(source: str, spec: CapabilitySpec, *,
         canary_names=list(CANARY_ENV))
 
 
+def invoke(source: str, spec: CapabilitySpec, inputs: dict, *,
+           workdir: Path | None = None) -> dict:
+    """
+    Run an enabled skill once on the caller's real inputs.
+
+    The boundary is the one `verify` uses: refused source is never executed, a
+    separate process, a scrubbed environment, the spec's time budget. Only the
+    inputs the spec declares are passed; a missing one is refused rather than
+    guessed. Returns {"ok": bool, "result": ..., "error": str}.
+    """
+    findings = static_gate(source, spec)
+    if findings:
+        return {"ok": False, "result": None,
+                "error": "static gate: " + "; ".join(str(f) for f in findings)}
+    missing = sorted(set(spec.inputs) - set(inputs))
+    if missing:
+        return {"ok": False, "result": None,
+                "error": f"missing declared input(s): {', '.join(missing)}"}
+
+    if workdir is not None:
+        workdir.mkdir(parents=True, exist_ok=True)
+        return _invoke_in(Path(workdir), source, spec, inputs)
+    # Calls of one skill run concurrently (a wave starts ready tasks
+    # together), so each stages its own request in its own directory.
+    runs = DATA_DIR / "forge" / "run"
+    runs.mkdir(parents=True, exist_ok=True)
+    staged = Path(tempfile.mkdtemp(prefix=f"{spec.name}-", dir=runs))
+    try:
+        return _invoke_in(staged, source, spec, inputs)
+    finally:
+        shutil.rmtree(staged, ignore_errors=True)
+
+
+def _invoke_in(workdir: Path, source: str, spec: CapabilitySpec, inputs: dict) -> dict:
+    skill_path = workdir / "skill.py"
+    skill_path.write_text(source, encoding="utf-8")
+    # The runtime's one protocol is "run these declared cases and report what
+    # came back"; a real call is one case on the real inputs, with no
+    # expectation beyond "a mapping", judged against the spec's outputs below.
+    real = {name: inputs[name] for name in spec.inputs}
+    request = workdir / "request.json"
+    request.write_text(json.dumps({
+        "skill": str(skill_path),
+        "spec": {**spec.to_dict(),
+                 "verification": [{"inputs": real, "expect": {}}]},
+    }), encoding="utf-8")
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-I", "-c", _RUNTIME_CHILD, str(PROJECT_ROOT), str(request)],
+            capture_output=True, text=True, env=scrubbed_env(),
+            cwd=str(PROJECT_ROOT), timeout=spec.budget_seconds + 10)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "result": None,
+                "error": f"exceeded its {spec.budget_seconds}s budget"}
+    try:
+        case = json.loads(completed.stdout.strip().splitlines()[-1])["cases"][0]
+    except (ValueError, IndexError, KeyError):
+        return {"ok": False, "result": None,
+                "error": "the skill process returned nothing usable"}
+    if case.get("error"):
+        return {"ok": False, "result": None, "error": str(case["error"])}
+    got = case.get("got")
+    if not case.get("passed") or not isinstance(got, dict):
+        return {"ok": False, "result": None,
+                "error": "the skill did not return a mapping of its outputs"}
+    absent = sorted(set(spec.outputs) - set(got))
+    if absent:
+        return {"ok": False, "result": None,
+                "error": f"the skill did not return declared output(s): {', '.join(absent)}"}
+    return {"ok": True, "result": got, "error": ""}
+
+
 # ---------------------------------------------------------------------------
 # The registry
 # ---------------------------------------------------------------------------
