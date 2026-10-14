@@ -5709,6 +5709,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'This was a repair, not a new slice. The controller had already staged the change on HEAD 6b28e70. Its only conflict was the __all__ list in friday/ultracode/runner.py:72-75. I resolved it as the union of both sides. Main (ULTRA-006/UCW-002) keeps EVENT_MODELS_CHOSEN, NotDurableRunnerSafe, model_for  (build run, commit 2cd920d90)',
         "next_action": 'GAPS: Carried over: code-stage Hermes output is not checked against the schema (free text is wrapped as {stage,status,work_run_id,text}).; Carried over: the per-stage model string reaches Hermes delegate but not ModelGateway.infer, which routes by quality tier.; Carried over: nothing in production builds StagePort with a real gateway or supervisor yet; that wiring is a later row.; Carried over: the schema retry is a second infer inside the same gate lease.; I did not see the test_impact.py --direct list; only the three named test files ran.',
     }),
+    ('UX-001', {
+        "status": PARTIAL,
+        "current_implementation": 'Root cause: no code hunk was lost. The test helper was wrong. In tests/test_observability_workers.py, `_ui_client` built `TestClient(u.create_app())` without a `base_url`, so every request went out with Host "testserver". GateMiddleware (friday/access.py:434-441) returns 403 "cross-origin blocked" f (build run, commit 2f6e5ca86)',
+        "next_action": 'GAPS: No UI toggle in ui/ (as in the original build); mode/workers are API query params only.; Ledger row `tests` still names tests/test_observability.py; the proving test lives in tests/test_observability_workers.py.; 14 other test_impact files (memory/voice etc.) were not run, per the memory budget.',
+    }),
 ]
 
 
