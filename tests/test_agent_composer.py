@@ -47,6 +47,7 @@ def ledger(store):
 def _request(executor_id="opencode", **over):
     fields = dict(role_id="minimal", executor_id=executor_id, model_route=ROUTE,
                   goal="fix the bug", workspace="/w", limits=LIMITS,
+                  provenance=c.PERSON, attended=True,
                   run_id="AGT-1", allowed_tools=("Read", "Edit"))
     fields.update(over)
     return AC.Request(**fields)

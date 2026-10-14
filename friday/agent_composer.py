@@ -158,6 +158,10 @@ class Request:
     goal: str
     workspace: str
     limits: Limits
+    #: Who asked and whether they are present, carried into the run's Envelope. No
+    #: default: an Envelope that assumes "the person, attended" is how V7-D04 happened.
+    provenance: str
+    attended: bool
     context: tuple[ContextItem, ...] = ()
     packet_cap: int = DEFAULT_PACKET_CAP
     allowed_tools: tuple[str, ...] = ()
@@ -288,7 +292,9 @@ class ExecutorLauncher:
     async def __call__(self, job: Job, channel: Channel) -> Outcome:
         executor = executor_router.build(job.request.executor_id, self.store)
         envelope = c.Envelope(run_id=job.run_id,
-                              tool_call_limit=job.limits.tool_calls)
+                              tool_call_limit=job.limits.tool_calls,
+                              provenance=job.request.provenance,
+                              attended=job.request.attended)
         work = asyncio.ensure_future(executor.execute(
             job.bundle, timeout=job.limits.wall_s, envelope=envelope))
         try:

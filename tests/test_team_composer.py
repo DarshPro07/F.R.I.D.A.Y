@@ -282,6 +282,7 @@ def test_an_approved_role_runs_through_the_agent_composer(comp, store):
             role_id="firmware-developer", executor_id="opencode",
             model_route="anthropic/claude-sonnet/5.5/subscription",
             goal="flash it", workspace="/w/fw", run_id="AGT-fw",
+            provenance="PERSON", attended=True,
             limits=agent_composer.Limits(wall_s=5.0, tool_calls=10,
                                          spend_usd=1.0))
         runner = agent_composer.Composer(
