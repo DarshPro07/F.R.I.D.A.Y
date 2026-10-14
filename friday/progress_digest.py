@@ -77,7 +77,10 @@ def _model_reason(run: dict) -> str:
 
 
 def _milestone_line(run: dict, detail: str = DEFAULT_DETAIL) -> str:
-    summary = (run.get("result") or run.get("line") or
+    # ORCH-004: the room hears the worker's record summary, never the head of
+    # its transcript. Imported here: friday.handoff reaches hermes_bridge.
+    from friday.handoff import work_run_record
+    summary = (work_run_record(run)["summary"] or run.get("line") or
                "finished with no summary").strip().replace("\n", " ")[:200]
     if detail == "critical-only":
         return summary
@@ -138,7 +141,9 @@ def outcome_line(record: dict, *, now: float | None = None,
                 summary = str(_json.loads(raw).get("summary") or "").strip()
             except (TypeError, ValueError, AttributeError):
                 summary = ""
-        summary = summary or " ".join((record.get("result") or "").split())[:200]
+        if not summary:
+            from friday.handoff import work_run_record
+            summary = " ".join(work_run_record(record)["summary"].split())[:200]
     when = ""
     at = record.get("last_event_at") or 0
     if at:

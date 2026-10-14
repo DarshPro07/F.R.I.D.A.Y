@@ -279,3 +279,48 @@ def test_a_supervisor_built_without_a_log_delivers_the_record(tmp_path, monkeypa
     assert "3f2a9c1d7e" in message and "full=true" in message
     assert message.count(NOISE) < 15
     assert sup.log.get(run_id)["result"] == LONG
+
+
+_LABELLED_RESULT = "Commit: deadbee\nTests: tests/test_parser.py\nFixed the parser.\n"
+
+
+def test_a_finished_runs_spoken_milestone_is_the_record_not_the_transcript():
+    """The progress digest is spoken into FRIDAY's session (deliver_message and
+    the `work` tool result); it must carry the record's summary, not the first
+    200 characters of the transcript with its labelled lines."""
+    from friday.handoff import work_run_record
+    from friday.progress_digest import compose
+
+    run = {"work_run_id": "hermes-9", "status": hb.COMPLETE, "seq": 1,
+           "result": _LABELLED_RESULT, "model": "sonnet",
+           "route_reason": "coding"}
+    summary = work_run_record(run)["summary"]
+    assert summary == "Fixed the parser."
+    milestone = compose([run], now=5, last_digest_at=0).milestones[0]
+    assert summary in milestone
+    assert "Commit:" not in milestone and "Tests:" not in milestone
+
+
+def test_a_milestone_with_no_prose_falls_back_to_the_progress_line():
+    from friday.progress_digest import compose
+
+    run = {"work_run_id": "hermes-9", "status": hb.COMPLETE, "seq": 1,
+           "result": "Commit: deadbee\nTests: tests/test_parser.py\n",
+           "line": "wrote the fix", "model": "sonnet", "route_reason": "coding"}
+    milestone = compose([run], now=5, last_digest_at=0).milestones[0]
+    assert "wrote the fix" in milestone
+    assert "Commit:" not in milestone and "Tests:" not in milestone
+
+
+def test_outcome_line_falls_back_to_the_record_not_the_transcript():
+    """With no `handoff` column the "what finished" reply must still say the
+    record's summary, not the transcript head."""
+    from friday.handoff import work_run_record
+    from friday.progress_digest import outcome_line
+
+    record = {"work_run_id": "hermes-9", "status": hb.COMPLETE,
+              "task": "fix the parser", "result": _LABELLED_RESULT,
+              "model": "sonnet", "route_reason": "coding"}
+    line = outcome_line(record, now=0)
+    assert work_run_record(record)["summary"] in line
+    assert "Commit:" not in line and "Tests:" not in line

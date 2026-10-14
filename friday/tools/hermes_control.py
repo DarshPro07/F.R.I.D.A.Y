@@ -71,8 +71,9 @@ def supervisor() -> hb.HermesSupervisor:
             _supervisor = hb.HermesSupervisor(
                 answer_question=_broker_answer, log=log)
             # A run whose delivery row was lost to a crash is swept here in
-            # record form. agent_friday's own startup sweep (plain WorkRunLog)
-            # may reach such a run first; that path is outside this build.
+            # record form. agent_friday's startup sweep goes through
+            # hermes_delivery_log(), also a RecordDeliveryLog, so whichever
+            # sweep reaches such a run first delivers the record.
             try:
                 log.sweep_undelivered()
             except Exception:                                # noqa: BLE001
