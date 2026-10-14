@@ -7,7 +7,8 @@ the UI endpoint and the tests all read the exact same composition logic.
 
 STATICALLY_CONFIRMED shapes it reads (see hermes_bridge.py):
 - `HermesSupervisor.progress(work_run_id)` -> {"work_run_id", "status",
-  "line", "seq", "tools", "current", "elapsed_s", "result"}.
+  "line", "seq", "tools", "current", "elapsed_s", "summary"} - the record's
+  summary, never the transcript.
 - `hermes_work_runs` rows (via `WorkRunLog.active()`/`.get()`) carry
   `provider`, `model`, `route_reason`, `result`, `task`, `status`.
 """

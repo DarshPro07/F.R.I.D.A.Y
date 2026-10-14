@@ -281,6 +281,32 @@ def test_a_supervisor_built_without_a_log_delivers_the_record(tmp_path, monkeypa
     assert sup.log.get(run_id)["result"] == LONG
 
 
+def test_progress_polled_by_the_browser_carries_the_summary_not_the_transcript(
+        tmp_path):
+    """/api/hermes/progress and the digest rows both read progress(); a settled
+    run's `result` there used to be the first 1200 characters of the transcript
+    and `handoff` its 600-character render of it."""
+    log = hb.WorkRunLog(tmp_path / "t.sqlite3")
+    run_id = _finished(log)
+    with log._connect() as db:
+        db.execute("UPDATE hermes_work_runs SET handoff=? WHERE work_run_id=?",
+                   (json.dumps({"summary": NOISE * 40}), run_id))
+    prog = hb.HermesSupervisor(log=log, profile="").progress(run_id)
+    assert not {"result", "handoff"} & set(prog)
+    assert prog["summary"].startswith("Fixed the parser off-by-one.")
+    assert "Commit:" not in prog["summary"] and len(prog["summary"]) <= 300
+    assert json.dumps(prog).count(NOISE) < 15
+    assert _tokens(prog) <= RECORD_TOKEN_CAP
+    assert log.get(run_id)["result"] == LONG               # transcript untouched
+
+
+def test_progress_of_a_run_that_has_not_finished_has_no_summary(tmp_path):
+    log = hb.WorkRunLog(tmp_path / "t.sqlite3")
+    run_id = log.create(task="fix the parser")
+    prog = hb.HermesSupervisor(log=log, profile="").progress(run_id)
+    assert prog["summary"] == ""
+
+
 _LABELLED_RESULT = "Commit: deadbee\nTests: tests/test_parser.py\nFixed the parser.\n"
 
 

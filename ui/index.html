@@ -1205,7 +1205,7 @@ async function pollHermes(){
     const settled=/^(COMPLETE|PARTIAL|FAILED)$/.test(run.status||"");
     if(settled){f.done=true;
       const head=run.status==="COMPLETE"?"Hermes is done, sir.":run.status==="PARTIAL"?"Hermes stopped part way, sir.":"Hermes could not finish, sir.";
-      const body=(run.result||"").replace(/```[\s\S]*?```/g," (code omitted) ").replace(/\s+/g," ").trim().slice(0,600);
+      const body=(run.summary||"").replace(/```[\s\S]*?```/g," (code omitted) ").replace(/\s+/g," ").trim().slice(0,600);
       const say=head+(body?" "+body:"");convAdd("Friday",say);logAction("hermes "+run.status.toLowerCase()+" · "+run.tools+" steps");speak(say);continue;}
     if(run.seq!==f.seq&&run.line&&Date.now()-f.lastSpokeAt>(window.HERMES_MIN_GAP_OVERRIDE??HERMES_MIN_GAP)){
       f.seq=run.seq;f.lastSpokeAt=Date.now();convAdd("Friday",run.line);logAction("hermes · "+run.line);

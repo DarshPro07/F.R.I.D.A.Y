@@ -2571,12 +2571,15 @@ class HermesSupervisor:
         # column - plan_delegation already put the provider name there.
         switched_from = (route_reason.split(" capped until", 1)[0]
                          if " capped until " in route_reason else "")
+        # ORCH-004: a poller hears the record's summary, never the head of the
+        # transcript; the full result stays in the row (hermes_status full=true).
+        from friday.handoff import work_run_record
+        summary = work_run_record(record)["summary"] if record else ""
         return {"work_run_id": work_run_id, "status": status, "line": line,
                 "seq": prog.get("seq", 0), "tools": prog.get("tools", 0),
                 "current": prog.get("current", ""), "elapsed_s": elapsed,
-                "result": (record.get("result") or "")[:1200],
-                "route_reason": route_reason, "switched_from": switched_from,
-                "handoff": record.get("handoff", "")}
+                "summary": summary,
+                "route_reason": route_reason, "switched_from": switched_from}
 
     @_on_the_gateway_running_it
     def steer(self, work_run_id: str, text: str) -> dict:
