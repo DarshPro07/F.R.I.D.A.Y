@@ -320,6 +320,10 @@ DECLARED = {
                               "tests/test_lab_specialist.py"),
     "friday/research_routing": (PRODUCTION,
                                 "web_deep_research routes every completed run through it"),
+    "friday/ultracode/mode": (FUTURE,
+                              "ULTRA-007: the ultracode mode switch and substantive-task "
+                              "gate, no intake caller wired yet, run by "
+                              "tests/test_ultracode_mode.py"),
     "friday/evolution_allowance": (FUTURE,
                                    "EVOLAB-002: evolution's own money, RAM and time allowance, "
                                    "its spend ledger and the foreground yield; the experiment "
