@@ -5639,6 +5639,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'I closed gap 4, the missing foreground-app check, because it is the open gap that bears directly on the acceptance "Cannot bypass FRIDAY authority". Before this change, a grant for app A let read_screen and tap_text act on whatever app was in front. Now the bridge contract has foreground() -> packag (build run, commit 807a670cf)',
         "next_action": 'GAPS: No real Android bridge (adb or Artemis); Artemis has a security review pending, so the provider stays UNAVAILABLE.; Only mobile.app_interaction is implemented; the other PRD 64 permissions (notifications, files, settings, messages, calls, camera, device controls) are not.; No MCP tool wrapper and no capability_router group yet.; The foreground check is check-then-act: the front app could change between the check and the action (marked with a shortcut comment). A bridge that can bind the action to a package should do this atomically.; The sensitive-text regex is a keyword filter and not exhaustive.; mausbot_skills is not linked to the provider.',
     }),
+    ('FAB-001', {
+        "status": PARTIAL,
+        "current_implementation": "This slice closes the first named gap: the billing check missed an API key set in Claude Code's own settings. Before the CLI starts, FRIDAY now reads the settings files the child process will load: CLAUDE_CONFIG_DIR/settings.json (or <child USERPROFILE/HOME>/.claude/settings.json), plus <cwd>/.claud (build run, commit 624322197)",
+        "next_action": "GAPS: Managed (enterprise) settings files are not read. A shortcut comment in cli.claude_settings records this.; A sandbox whose filesystem view differs from the host's is judged by the host path that its environment variables point to.; Two gaps from earlier runs are unchanged: prepaid credit is still declared through FRIDAY_PREPAID_CREDIT_PROVIDERS, and a billable run is still reported, not blocked.; Executor tests that build a real worker environment now read the machine's ~/.claude settings. That only affects a log warning, not what those tests assert.",
+    }),
 ]
 
 
