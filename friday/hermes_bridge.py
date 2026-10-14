@@ -2636,6 +2636,15 @@ class HermesSupervisor:
             level = reason.split("/", 1)[0] if "/" in reason else ""
             tier = (reason.split("/", 1)[1].split(":", 1)[0]
                     if "/" in reason else "")
+            # A WorkRun has no evidence column: what backs a COMPLETE is the
+            # Evidence line of the worker's own report, the same rule
+            # command_center applies. Empty stays empty - unverified, never a
+            # success - and a run that did not finish is never verified.
+            evidence = ()
+            if record.get("status") == COMPLETE:
+                from friday.handoff import Handoff
+                evidence = Handoff.from_work_run(
+                    {"result": record.get("result", "")}).evidence_refs
             RouteOutcomes(self.log._path).record(
                 record["work_run_id"], task_class=task_class,
                 route_level=level, tier=tier,
@@ -2648,7 +2657,9 @@ class HermesSupervisor:
                 cache_read_tokens=cached,
                 duration_s=max(0.0, record.get("last_event_at", 0)
                                - record.get("started_at", 0)),
-                status=record.get("status", ""))
+                status=record.get("status", ""),
+                verification=("worker-report: " + "; ".join(evidence)
+                              if evidence else ""))
         except Exception:                                    # noqa: BLE001
             logger.exception("route-outcome recording failed (non-fatal)")
 

@@ -206,6 +206,33 @@ def test_a_hermes_run_is_recorded_under_a_class_a_gateway_request_can_carry(
     assert {r["executor"] for r in rows} == {ee.EXECUTOR_HERMES}
 
 
+def test_a_hermes_run_is_recorded_verified_only_with_evidence_in_its_report(tmp_path):
+    """COG-002 (ruling 2026-10-13): quality is measured from verified outputs.
+    The recorder stamps `verification` from the Evidence line of a COMPLETE
+    run's own report - the rule command_center applies - and leaves it empty
+    for a COMPLETE with none, and for any run that did not finish."""
+    log = hb.WorkRunLog(tmp_path / "bridge.sqlite3")
+    sup = hb.HermesSupervisor.__new__(hb.HermesSupervisor)
+    sup.log = log
+    reports = [
+        ("COMPLETE", "Status: done\nEvidence: tests/test_x.py::test_y passed; commit abc1234"),
+        ("COMPLETE", "I fixed the login bug."),
+        ("COMPLETE", "Evidence: none"),
+        ("FAILED", "Evidence: tests/test_x.py::test_y passed"),
+        ("PARTIAL", "Evidence: tests/test_x.py::test_y passed"),
+    ]
+    for i, (status, result) in enumerate(reports):
+        sup._record_route_outcome({
+            "work_run_id": f"hermes-ver{i}", "task": "fix the login bug",
+            "route_reason": "", "provider": "p", "model": "m",
+            "status": status, "result": result,
+            "started_at": 1.0, "last_event_at": 2.0})
+    rows = {r["work_run_id"]: r for r in
+            ee.RouteOutcomes(log._path).by_run_prefix("hermes-ver")}
+    assert "tests/test_x.py::test_y passed" in rows["hermes-ver0"]["verification"]
+    assert [rows[f"hermes-ver{i}"]["verification"] for i in range(1, 5)] == [""] * 4
+
+
 def test_one_model_behind_two_executors_is_measured_as_two_routes(tmp_path):
     outcomes = ee.RouteOutcomes(tmp_path / "o.sqlite3")
     _run(outcomes, "h1", provider="p", model="m", tokens=20_000, executor="hermes")
