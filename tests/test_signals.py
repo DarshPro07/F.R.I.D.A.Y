@@ -307,6 +307,78 @@ def test_a_denial_for_a_different_action_or_an_idle_run_changes_nothing():
     assert S.send(store, "Q", "USER_DENIAL", surface="web").effect == S.IGNORED
 
 
+def test_a_targetless_parked_action_is_never_approved_from_any_surface():
+    """Owner ruling 2026-10-13 (row 10): no target, no approval. A parked
+    step that names nothing cannot be approved from any surface, even with a
+    blank operation/target; it can only be denied (or amended)."""
+    from friday import continuous
+
+    store = Store(":memory:")
+    store.open_objective_run("R", request="x", objective_summary="x",
+                             status=O.RUN_RUNNING)
+    store.save_objective_task(
+        task_id="t1", run_id="R", capability="files_write",
+        arguments=json.dumps({"content": "x"}), dependencies="[]",
+        status=O.TaskStatus.RUNNING)
+    executor = ContinuousTaskExecutor(store, Probe().call, executor_id="sig",
+                                      governor=lambda: OneWorker())
+    executor._park_for_approval("R", "t1", store.objective_task("t1"),
+                                "approval_required: write a file")
+    run = store.objective_run("R")
+    assert run["status"] == O.RUN_WAITING_PERMISSION
+    assert "names no target, cannot be approved" in run["blocker"]
+    told = store.pending_objective_deliveries()[-1]["message"].lower()
+    assert "say yes" not in told and "deny" in told
+
+    for payload in ({"operation": "files_write"}, {}):
+        got = S.send(store, "R", "USER_APPROVAL", surface="telegram",
+                     payload=payload)
+        assert got.effect == S.IGNORED and "names no target" in got.reason, got
+        assert store.objective_run("R")["status"] == O.RUN_WAITING_PERMISSION
+        assert store.objective_task("t1")["status"] == O.TaskStatus.WAITING
+    assert continuous.resume_after_approval(store, "R", decided_by="boss") is False
+    decisions = [a["decision"] for a in store.objective_ledger("R")["approvals"]]
+    assert "APPROVED" not in decisions
+
+    denied = S.send(store, "R", "USER_DENIAL", surface="telegram", payload={})
+    assert denied.effect == S.DENIED, denied.reason
+
+
+@pytest.mark.parametrize("arguments", [
+    {"path": [], "content": "x"}, {"target": {}}, {"name": 0}, {"url": "  "}])
+def test_an_empty_valued_target_counts_as_no_target(arguments):
+    store = Store(":memory:")
+    store.open_objective_run("R", request="x", objective_summary="x",
+                             status=O.RUN_RUNNING)
+    store.save_objective_task(
+        task_id="t1", run_id="R", capability="files_write",
+        arguments=json.dumps(arguments), dependencies="[]",
+        status=O.TaskStatus.RUNNING)
+    executor = ContinuousTaskExecutor(store, Probe().call, executor_id="sig",
+                                      governor=lambda: OneWorker())
+    executor._park_for_approval("R", "t1", store.objective_task("t1"),
+                                "approval_required: write a file")
+    got = S.send(store, "R", "USER_APPROVAL", surface="telegram", payload={})
+    assert got.effect == S.IGNORED and "names no target" in got.reason, got
+
+
+def test_a_development_run_parked_on_its_root_is_approvable():
+    store = Store(":memory:")
+    store.open_objective_run("R", request="x", objective_summary="x",
+                             status=O.RUN_WAITING_PERMISSION)
+    store.save_objective_task(
+        task_id="t1", run_id="R", capability="development_run",
+        arguments=json.dumps({"work": "x", "root": "C:/repo"}),
+        dependencies="[]", status=O.TaskStatus.WAITING)
+    store.update_objective_task(
+        "t1", failure_kind=O.FailureKind.USER_REQUIRED,
+        evidence="approval_required: development_run")
+    got = S.send(store, "R", "USER_APPROVAL", surface="web",
+                 payload={"operation": "development_run", "target": "C:/repo"})
+    assert got.effect == S.RESUMED, got.reason
+    assert store.objective_task("t1")["status"] == O.TaskStatus.READY
+
+
 def test_an_answer_resumes_the_run_held_for_an_assumption_after_a_restart(tmp_path):
     path = tmp_path / "objectives.sqlite3"
     store = Store(path)

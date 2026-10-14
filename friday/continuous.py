@@ -1144,8 +1144,7 @@ class ContinuousTaskExecutor:
         told once. Nothing is retried: the same call without a yes is the
         same refusal."""
         arguments = dict(task.get("arguments") or {})
-        target = str(arguments.get("path") or arguments.get("url")
-                     or arguments.get("target") or arguments.get("name") or "")
+        target = _approval_target(arguments)
         self.store.update_objective_task(
             task_id, status=O.TaskStatus.WAITING,
             failure_kind=O.FailureKind.USER_REQUIRED,
@@ -1153,17 +1152,24 @@ class ContinuousTaskExecutor:
         self.store.append_objective_approval(
             run_id, operation=str(task.get("capability") or ""), target=target,
             parameters=arguments, decision="PENDING", decided_by="")
+        blocker = f"approval needed: {task.get('capability')} {target}".strip()
+        message = (f"Boss, I need your go-ahead before I {_describe(task.get('capability'), target)}. "
+                   "Say yes to that exact step and I'll continue from where I stopped.")
+        if not target:
+            # No target, no approval (owner ruling 2026-10-13): never ask for a yes.
+            blocker = (f"approval needed: {task.get('capability')} "
+                       "(names no target, cannot be approved)")
+            message = (f"Boss, the step to {_describe(task.get('capability'), '')} "
+                       "names no target, so I can't take a yes for it. "
+                       "Deny it or amend it to name what it acts on.")
         self.store.touch_objective_run(
             run_id, status=O.RunStatus.WAITING_PERMISSION, next_wake=None,
-            blocker=f"approval needed: {task.get('capability')} {target}".strip())
+            blocker=blocker)
         self.store.append_objective_event(
             run_id, "approval.boundary", task_id=task_id,
             detail={"capability": task.get("capability"), "target": target,
                     "reason": reason[:300]})
-        self.store.create_objective_delivery(
-            run_id,
-            f"Boss, I need your go-ahead before I {_describe(task.get('capability'), target)}. "
-            "Say yes to that exact step and I'll continue from where I stopped.")
+        self.store.create_objective_delivery(run_id, message)
         logger.info("objective.approval_boundary run_id=%s task=%s",
                     run_id, task_id)
         self.release(run_id)
@@ -1960,6 +1966,20 @@ def _describe(capability, target: str) -> str:
     return f"{verb} {target}".strip()
 
 
+#: What a parked action is "on", for an approval to bind to (SIGNAL-001,
+#: owner ruling 2026-10-13: no target, no approval).
+_APPROVAL_TARGET_KEYS = ("path", "url", "target", "name", "root", "destination")
+
+
+def _approval_target(arguments: dict) -> str:
+    """The first non-blank target-like argument, as text; "" when none."""
+    for key in _APPROVAL_TARGET_KEYS:
+        value = arguments.get(key)
+        if value and str(value).strip():
+            return str(value)
+    return ""
+
+
 def _pending_approval(store: Store, run_id: str, operation: str,
                       target: str) -> tuple[dict, dict, str] | None:
     """The WAITING task a run is parked on for an approval, with its arguments
@@ -1976,8 +1996,7 @@ def _pending_approval(store: Store, run_id: str, operation: str,
         return None
     task = parked[0]
     arguments = dict(task.get("arguments") or {})
-    actual_target = str(arguments.get("path") or arguments.get("url")
-                        or arguments.get("target") or arguments.get("name") or "")
+    actual_target = _approval_target(arguments)
     if operation and operation != task.get("capability"):
         return None
     if target and target != actual_target:
@@ -2026,6 +2045,11 @@ def resume_after_approval(store: Store, run_id: str, *, decided_by: str,
     if pending is None:
         return False
     task, arguments, actual_target = pending
+    if not actual_target:
+        # Owner ruling 2026-10-13: no target, no approval. Deny or amend it.
+        logger.warning("objective.approval_refused run_id=%s task=%s: the "
+                       "parked action names no target", run_id, task["task_id"])
+        return False
     # A lease on this plan (APPROVAL-001): bound to what the objective would
     # do at this moment, and to a time after which the person is asked again.
     from friday import modification

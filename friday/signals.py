@@ -148,6 +148,10 @@ def _approve(store: Store, run_id: str, surface: str,
             operation=str(payload.get("operation") or ""),
             target=str(payload.get("target") or "")):
         return RESUMED, ""
+    pending = continuous._pending_approval(store, run_id, "", "")
+    if pending is not None and not pending[2]:
+        return IGNORED, ("the parked action names no target, so it cannot be "
+                         "approved; deny or amend it")
     return IGNORED, "nothing on this run is waiting for that approval"
 
 
