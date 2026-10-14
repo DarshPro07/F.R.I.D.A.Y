@@ -227,3 +227,14 @@ def test_removal_is_classified_by_target_not_verb():
     assert 'removal' in econ.signals and econ.consequence == 'high'
     econ = ee.classify_task('delete the unused import')
     assert 'removal' not in econ.signals and econ.consequence != 'high'
+
+
+def test_removal_location_is_part_of_the_consequence():
+    """A safe target is only low consequence in source code: the same words
+    aimed at a datastore or an environment fail closed."""
+    assert ee.removal_consequence('delete the comments in the production database') == 'high'
+    assert ee.removal_consequence('remove the unused import from the production database') == 'high'
+    assert ee.removal_consequence('remove the debug print in server.py in prod') == 'high'
+    assert ee.removal_consequence('remove the unused import from friday/hermes_bridge.py') == 'low'
+    assert ee.removal_consequence('delete the todo in the test file.') == 'low'
+    assert ee.removal_consequence('remove the unused variable from the function') == 'low'

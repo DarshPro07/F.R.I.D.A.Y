@@ -157,6 +157,7 @@ def test_removal_is_critical_by_target():
     sits; tidying code is ordinary bounded work."""
     for text in ("remove the production database",
                  "remove all the old backups",
+                 "delete the comments in the production database",
                  "i want you to delete the production database"):
         assert TC.classify(text).task_class == TC.CRITICAL, text
     for text in ("delete the unused import",

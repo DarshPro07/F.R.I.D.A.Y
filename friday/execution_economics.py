@@ -111,10 +111,18 @@ _REMOVAL_VERB = re.compile(r"\b(?:delet|remov|eras|purg|destroy|discard)\w*\b")
 #: "can you"/"could you" open a request, not a question.
 _QUESTION_OPENER = re.compile(
     r"^(?:how|what|why|where|when|which|who|is|are|does|do i|should i|can i)\b")
-_SPAN_END = re.compile(r"[,;.]|\b(?:then|and)\b")
+#: A "." ends a span only as sentence punctuation, so "server.py" stays whole.
+_SPAN_END = re.compile(r"[,;]|\.(?:\s|$)|\b(?:then|and)\b")
 _DETERMINER = re.compile(r"\b(?:the|a|an|this|that|these|those|my|our|all|"
                          r"every|some|any)\b")
-_LOCATION = re.compile(r"\s(?:from|in)\b.*$")
+_LOCATION = re.compile(r"\s(?:from|in)\b(.*)$")
+#: A safe target is only low consequence in source code: a path to a source
+#: file or a code scope word names that. Anything else ("the production
+#: database", "prod") fails closed, as an unknown target does.
+_SOURCE_PATH = re.compile(r"\.(?:py|pyi|js|jsx|ts|tsx|go|rs|java|c|h|cpp|cs|"
+                          r"rb|sh|ps1|md|html|css)$")
+_CODE_SCOPES = frozenset({"file", "module", "function", "method", "class",
+                          "script", "test", "line", "code", "source"})
 #: The only targets whose removal is low consequence; anything else is high.
 SAFE_REMOVAL_TARGETS = frozenset({
     "unused import", "dead import", "unused variable", "dead variable",
@@ -127,7 +135,8 @@ SAFE_REMOVAL_TARGETS = frozenset({
 def removal_consequence(text: str) -> str:
     """"high" | "low" | "" for a request that removes something: "" when it
     names no removal or is a question, "low" only when every removed target is
-    on SAFE_REMOVAL_TARGETS, else "high" (an unknown target fails closed).
+    on SAFE_REMOVAL_TARGETS and is removed from source code (or from no stated
+    place), else "high" (an unknown target or location fails closed).
     Deterministic; the one owner of this rule."""
     lowered = " ".join((text or "").lower().split())
     if _QUESTION_OPENER.match(lowered):
@@ -137,10 +146,17 @@ def removal_consequence(text: str) -> str:
         return ""
     for verb in verbs:
         span = _SPAN_END.split(lowered[verb.end():], maxsplit=1)[0]
-        span = _LOCATION.sub("", " " + _DETERMINER.sub(" ", span))
-        target = " ".join(span.split())
+        span = " " + _DETERMINER.sub(" ", span)
+        place = _LOCATION.search(span)
+        target = " ".join(_LOCATION.sub("", span).split())
         if target.removesuffix("s") not in SAFE_REMOVAL_TARGETS:
             return "high"
+        if place:
+            words = place.group(1).split()
+            scope = words[-1] if words else ""
+            if not (_SOURCE_PATH.search(scope)
+                    or scope.removesuffix("s") in _CODE_SCOPES):
+                return "high"
     return "low"
 
 
