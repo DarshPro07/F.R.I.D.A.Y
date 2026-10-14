@@ -437,7 +437,13 @@ def aggregate(task, budget_tokens=None, include_episodes=True, project_scope="")
         # and it is also what "what did Hermes just do?" needs live.
         lines.append("RECENT HERMES OUTCOMES:")
         for d in t7["items"]:
-            if not take("outcome", "- %s" % d["decision"][:300], "outcomes"):
+            # A terminal run is an attempt (hermes_bridge._write_outcome records
+            # "status=<COMPLETE|PARTIAL|FAILED>"), so the live context measures
+            # struggle; short of COMPLETE it failed. No status: not counted.
+            status = re.match(r"status=(\S+)", d.get("rationale") or "")
+            kind = "" if not status else (context_health.ATTEMPT if status.group(1) == "COMPLETE"
+                                          else context_health.FAILED_ATTEMPT)
+            if not take("outcome", "- %s" % d["decision"][:300], "outcomes", kind=kind):
                 break
     if t8["items"]:
         # Ahead of the derived tiers for the same reason as outcomes: this is

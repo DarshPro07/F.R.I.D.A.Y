@@ -427,6 +427,21 @@ def test_aggregate_flags_an_open_contradiction_as_a_scored_entry(db, monkeypatch
     assert [e["kind"] for e in out["layout"] if e.get("kind")] == [H.CONTRADICTION]
 
 
+def test_terminal_hermes_runs_are_the_live_attempts_struggle_is_measured_from(db, monkeypatch):
+    from friday import memory_stack as M
+    rows = [{"decision": "Hermes run %d on the cutover" % i,
+             "rationale": "status=%s model=m route=r" % status if status else None}
+            for i, status in enumerate(("FAILED", "PARTIAL", "COMPLETE", ""))]
+    monkeypatch.setattr(M, "hermes_outcomes", lambda task="", limit=3: {
+        "tier": "outcomes", "items": rows})
+    out = M.aggregate("cutover", budget_tokens=900)
+    kinds = [e.get("kind", "") for e in out["layout"] if e.get("tier") == "outcomes"]
+    # Only a run that recorded its terminal status is an attempt; anything short
+    # of COMPLETE failed.
+    assert kinds == [H.FAILED_ATTEMPT, H.FAILED_ATTEMPT, H.ATTEMPT, ""]
+    assert out["health"]["metrics"]["struggle_score"] == round(2 / 3, 4)
+
+
 def test_the_voice_brain_acts_on_the_verdict(db, monkeypatch):
     from friday import memory_stack as M
     from friday import voice_brain as V
