@@ -5,9 +5,12 @@ a repeatedly useful temporary role proposed (never silently made) permanent.
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
-from friday import hermes_team, roles, specialist
+from friday import agent_composer, hermes_team, roles, specialist
+from friday.agent_ledger import SUCCEEDED, AgentLedger
 from friday.agent_registry import AgentRegistry, RegistryError
 from friday.store import Store
 from friday.team_composer import Composer, ComposerError, RoleNeed
@@ -261,6 +264,36 @@ def test_an_approved_role_runs_as_an_instance_with_its_own_text(comp, store):
     with pytest.raises(specialist.SpecialistError):
         specialist.compose("architect", executor_id="claude",
                            model_route="r", role=role)
+
+
+def test_an_approved_role_runs_through_the_agent_composer(comp, store):
+    comp.compose("x", needs=(FIRMWARE,), ttl_s=HOUR)
+    comp.record_use("firmware-developer", "obj-1", True)
+    comp.record_use("firmware-developer", "obj-2", True)
+    seen = []
+
+    async def launcher(job, channel):
+        seen.append(job.bundle)
+        channel.started()
+        return agent_composer.Outcome(SUCCEEDED, "done", evidence="check passed")
+
+    def run():
+        request = agent_composer.Request(
+            role_id="firmware-developer", executor_id="opencode",
+            model_route="anthropic/claude-sonnet/5.5/subscription",
+            goal="flash it", workspace="/w/fw", run_id="AGT-fw",
+            limits=agent_composer.Limits(wall_s=5.0, tool_calls=10,
+                                         spend_usd=1.0))
+        runner = agent_composer.Composer(
+            AgentLedger(store), launchers={"opencode": launcher},
+            probe=lambda _id: None)
+        return asyncio.run(runner.run(request))
+
+    with pytest.raises(agent_composer.ComposerError, match="firmware-developer"):
+        run()                                    # proposed, not approved
+    comp.approve("firmware-developer", approver="owner")
+    assert run().status == SUCCEEDED
+    assert FIRMWARE.focus in seen[0].context[0]
 
 
 def test_approval_needs_a_proposal_and_an_approver(comp):

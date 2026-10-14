@@ -40,6 +40,7 @@ from typing import Awaitable, Callable
 from friday import contracts as c
 from friday import executor_router, roles
 from friday.agent_ledger import CANCELLED, FAILED, SUCCEEDED, TERMINAL, AgentLedger
+from friday.agent_registry import AgentRegistry
 from friday.executors.runs import RunManager
 from friday.specialist import Specialist, WorkspacePolicy
 from friday import specialist as specialist_module
@@ -368,7 +369,9 @@ class Composer:
         return ExecutorLauncher(self.ledger.store), ""
 
     async def run(self, req: Request) -> Result:
-        if req.role_id not in roles.BY_ID:
+        # The catalogue's role, else a role the owner approved for promotion.
+        role = AgentRegistry(self.ledger.store).role(req.role_id)
+        if role is None:
             raise ComposerError(
                 f"unknown role {req.role_id!r}; roles: {sorted(roles.BY_ID)}")
         launcher, reason = self._launcher_for(req.executor_id)
@@ -385,7 +388,8 @@ class Composer:
             role_id=req.role_id, executor_id=req.executor_id,
             model_route=req.model_route, skills=req.skills,
             allowed_tools=req.allowed_tools,
-            workspace=WorkspacePolicy(allowed_paths=req.allowed_paths))
+            workspace=WorkspacePolicy(allowed_paths=req.allowed_paths),
+            role=None if req.role_id in roles.BY_ID else role)
         bundle = spec.bundle(
             req.goal, req.workspace, run_id=req.run_id,
             context=(packet.text,) if packet.text else (),
