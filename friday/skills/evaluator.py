@@ -190,7 +190,7 @@ class SkillEvaluator:
                        f"about {estimate:,} tokens to load (budget {TOKEN_BUDGET:,})"))
 
         checks.append(self._overlap(record, pool[1:]))
-        checks.append(self._value(record))
+        checks.append(self._value(record, skill.content_hash() if skill.exists() else ""))
 
         result = K.EvaluationReport(skill=record.name, version=record.version,
                                     content_hash=skill.content_hash() if skill.exists() else "",
@@ -209,7 +209,7 @@ class SkillEvaluator:
                 + "; differentiate it or retire the other before activating")
         return ("overlap", PASS, f"no active skill shares {OVERLAP_THRESHOLD:.0%} of its routing words")
 
-    def _value(self, record: K.SkillRecord) -> tuple[str, str, str]:
+    def _value(self, record: K.SkillRecord, content_hash: str) -> tuple[str, str, str]:
         """The with/without comparison on recorded outcomes. No measurement is
         not a pass: a safe skill nobody has shown to help stays inactive."""
         used = [row["outcome"] for row in self.registry.usage(record.name, limit=1000)]
@@ -218,7 +218,13 @@ class SkillEvaluator:
             detail = (f"no measured value: {len(used)} task(s) with the skill, {len(without)} without recorded "
                       f"(need {MIN_TRIALS} of each); it stays inactive until measured")
             if record.state == K.NEEDS_REVALIDATION:
-                return ("value", WARN, f"{detail} - already active, so not re-gated for revalidation")
+                # Only content a passing evaluation verified keeps its standing; an edit needs new evidence.
+                for v in self.registry.versions(record.name):
+                    if v["verified"] and v["content_hash"] == content_hash:
+                        return ("value", WARN, f"{detail} - unchanged since verified version {v['version']}, "
+                                "so not re-gated for revalidation")
+                return ("value", FAIL, f"{detail}; content changed since the last verified version "
+                        "(or never verified): measured outcomes required")
             return ("value", FAIL, detail)
         with_rate, without_rate = success_rate(used), success_rate(without)
         lift = with_rate - without_rate

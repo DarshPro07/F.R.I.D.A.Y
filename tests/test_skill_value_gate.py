@@ -97,13 +97,43 @@ def test_a_measured_lift_activates_and_the_numbers_are_in_the_report(world):
     assert state == "PASS" and "75%" in detail and "25%" in detail and "+50" in detail
 
 
+def verified_legacy(world: World, name: str):
+    """A skill with a verified version row for its current content and NO recorded outcomes."""
+    skill = staged(world, name)
+    record = world.registry.get(name)
+    content = skill.content_hash()
+    world.registry.record_version(name, record.version, content, evaluation=K.EvaluationReport(
+        skill=name, version=record.version, content_hash=content, passed=True, checks=[]))
+    return skill
+
+
 def test_a_skill_that_was_already_active_is_not_regated_for_revalidation(world):
-    skill = staged(world, "veteran")
+    skill = verified_legacy(world, "veteran")
     record = world.registry.get("veteran")
     record.state = K.NEEDS_REVALIDATION          # it earned ACTIVE before; a dependency changed
     report = world.evaluator.evaluate(skill, record, run_tests=False)
     state, detail = check(report, "value")
-    assert state == "WARN" and "already" in detail
+    assert state == "WARN" and "unchanged" in detail
+
+
+def test_a_changed_skill_is_not_waived_on_revalidation(world):
+    skill = verified_legacy(world, "edited")
+    frontmatter, body = skill.read()
+    skill.write(frontmatter, body + " changed")
+    record = world.registry.get("edited")
+    record.state = K.NEEDS_REVALIDATION
+    report = world.evaluator.evaluate(skill, record, run_tests=False)
+    state, detail = check(report, "value")
+    assert state == "FAIL" and "content changed" in detail
+
+
+def test_a_never_verified_skill_in_needs_revalidation_is_not_waived(world):
+    skill = staged(world, "unproven")
+    record = world.registry.get("unproven")
+    record.state = K.NEEDS_REVALIDATION
+    report = world.evaluator.evaluate(skill, record, run_tests=False)
+    state, detail = check(report, "value")
+    assert state == "FAIL"
 
 
 # --- overlap ---------------------------------------------------------------------------
