@@ -5649,6 +5649,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'I followed the RULING 2026-10-13 slice exactly. The ruling says: "The untrusted EXE/DLL is opened read-only and parsed inside an OS-enforced quarantine. No loader invocation, sample execution, imports resolved through execution, external network fetches or host command spawning. Unsupported or malfo (build run, commit 80b10a1f5)',
         "next_action": "GAPS: The row stays PARTIAL per the packet. The wording change in scripts/prd_v7_table.py ('inside an OS-enforced Quarantine', 'fails closed with quarantine_error') is waiting for another build to free that file.; Extra keys in a child report that otherwise passes the schema check are passed through, not filtered against an allowlist. That only matters if the parser child itself were compromised.; pe_worker has no reachability.DECLARED entry. test_reachability passes without one, and the packet says not to touch reachability.py.; I could not run ruff because it is not installed in .venv-build. | RULING 2026-10-13 (owner, docs/plans/build-harness/00-owner-directive-2026-10-13.md): Read-only byte parsing inside OS-enforced quarantine; never execute the binary.",
     }),
+    ('SIDE-001', {
+        "status": PARTIAL,
+        "current_implementation": 'This slice finishes the files toolset. All eight files.* capabilities that change the disk now write a ledger row, and each is listed in LEDGERED so the verifier checks it.\n- files.edit already recorded its row through _write_and_verify (as an irreversible overwrite). The only missing piece was its  (build run, commit 417ebdae8)',
+        "next_action": 'GAPS: Acceptance is still not met across the tree. Other toolsets that report side_effects write no ledger row yet: audio, brain, brightness, desktop, media, memory, music, power, processes, reminders, screen, system, vision, web, windows. desktop, vision and web are owned by other builds in this batch. Each needs a reversibility decision, one LEDGERED entry and one _unledgered/record call on its success path.; Carried over: I did not run the full end-to-end flow (continuous executor -> capability_runtime -> COMPLETED with a row) for these capabilities.; Carried over: the ledger is keyed by run_id and capability, not by target.; implementer did not claim acceptance met',
+    }),
 ]
 
 
