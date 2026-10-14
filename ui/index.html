@@ -1347,8 +1347,11 @@ async function pollDoctor(force){if(LOCKED)return;try{window._DOCTOR=await jget(
 // UX-001: Normal/Developer mode and show/hide workers. The server trims the
 // report (observability.for_mode); these buttons only choose the view.
 const OBS_CHOICES={mode:["normal","developer"],workers:["default","show","hide"]};
+const OBS_KEYS={mode:"fridayObsMode",workers:"fridayObsWorkers"};   // persisted like fridayView
 window._OBS={mode:"normal",workers:"default",report:null};
-function obsView(arg){const [k,v]=String(arg).split(":");if(!(OBS_CHOICES[k]||[]).includes(v))return;window._OBS[k]=v;pollObs();}
+Object.keys(OBS_KEYS).forEach(k=>{try{const s=localStorage.getItem(OBS_KEYS[k]);if(OBS_CHOICES[k].includes(s))window._OBS[k]=s;}catch(e){}});
+function obsView(arg){const [k,v]=String(arg).split(":");if(!(OBS_CHOICES[k]||[]).includes(v))return;window._OBS[k]=v;
+  try{localStorage.setItem(OBS_KEYS[k],v);}catch(e){}pollObs();}
 async function pollObs(){if(LOCKED)return;const o=window._OBS,id=(STATE.objective&&STATE.objective.run_id)||"";
   const q=new URLSearchParams({mode:o.mode});if(o.workers!=="default")q.set("workers",o.workers);if(id)q.set("run_id",id);
   try{o.report=await jget("/api/observability?"+q);if(VIEW==="room")renderRoom();}catch(e){}}
