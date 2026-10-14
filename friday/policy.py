@@ -603,6 +603,10 @@ TOOL_CATEGORIES: dict[str, str] = {
     'capability_processes': READ_LOCAL_SAFE,
     'capability_manifest': READ_LOCAL_SAFE,
     'capability_use': COMMAND_EXECUTION,
+    # CAP-MKT-006: activating a scanned marketplace candidate runs third-party
+    # code. It is an ASK like capability_use, and the approval gate in
+    # friday.capability_search reads this id, so it must be declared to be grantable.
+    'capability_marketplace_activate': COMMAND_EXECUTION,
     'brain_recall': READ_LOCAL_SAFE,
     'brain_remember': MEMORY_WRITE,
     'brain_entity': READ_LOCAL_SAFE,

@@ -260,6 +260,12 @@ DECLARED = {
                                   "EVO-006: evolution admission and stop under the existing "
                                   "governors; the evolution controller that calls it is a later "
                                   "slice, run by tests/test_evolution_governor.py"),
+    "friday/capability_search": (PRODUCTION,
+                                 "CAP-MKT-006: search_capabilities calls this when the "
+                                 "local catalogue has no match; it searches marketplace "
+                                 "sources, scans candidates, and fails closed at the "
+                                 "approval/sandbox gates unless they are explicitly wired, "
+                                 "run by tests/test_capability_search.py"),
     "friday/shadow": (PRODUCTION,
                       "observes every turn from watch_from_the_side"),
     "friday/binary_lab": (FUTURE,

@@ -35,7 +35,7 @@ try:
 except Exception:  # noqa: BLE001
     _turn_detector_plugin = None
 
-from friday import autolearn, capabilities, capability_router, governor, mcp_firewall, objective_cli, ownership, providers, resilience, turn_ledger, turn_timing, write_licence
+from friday import autolearn, capabilities, capability_router, capability_search, governor, mcp_firewall, objective_cli, ownership, providers, resilience, turn_ledger, turn_timing, write_licence
 from friday.continuous import ContinuousTaskExecutor
 
 
@@ -984,8 +984,44 @@ class FridayAgent(Agent):
                           "server is unreachable.",
             })
         if not matches and not families:
-            return (f"nothing matches {query!r}. Capability areas: "
-                    f"{', '.join(sorted(capability_router.GROUPS))}")
+            # The router search above already found nothing locally. The
+            # resolver does blocking source IO (health, catalogue, fetch, scan),
+            # so it runs off the event loop.
+            missing = await asyncio.to_thread(
+                capability_search.resolve_missing_capability,
+                query,
+                local_catalogue=lambda text, limit: [],
+                quarantine_root=_DATA_DIR / "capability-quarantine",
+            )
+            return json.dumps({
+                "found": 0,
+                "capabilities": [],
+                "missing_capability": {
+                    "decision": missing.decision,
+                    "message": missing.message,
+                    "passing_candidates": [
+                        {
+                            "name": candidate.entry.name,
+                            "source": candidate.entry.source,
+                            "state": candidate.state,
+                        }
+                        for candidate in missing.passing_candidates()
+                    ],
+                    "sources": [
+                        {
+                            "source": source.source,
+                            "health": source.health.state,
+                            "detail": source.health.detail,
+                            "listed": source.listed,
+                            "matched": source.matched,
+                            "refused": list(source.refused),
+                        }
+                        for source in missing.sources
+                    ],
+                },
+                "say_this": capability_search.spoken_summary(missing),
+                "areas": sorted(capability_router.GROUPS),
+            })
         result: dict = {"found": len(matches), "capabilities": matches}
         if self._router.needs_clarification():
             result["clarify"] = ("The request names no target or fits several of these equally. "
