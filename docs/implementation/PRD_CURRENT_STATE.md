@@ -153,22 +153,22 @@ That is the first implementation target of this program.
 <!-- build-program:begin -->
 ## Build program (generated; do not edit by hand)
 
-- HEAD: 2d25f87 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-14T08:58:00+00:00
-- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 57, "PARKED_BY_OWNER": 1, "PARTIAL": 130, "VERIFIED": 74}
+- HEAD: b5c9433 on prd-v7/slice-7-adaptive-hardware, updated 2026-10-14T10:18:44+00:00
+- Counts: {"DEFERRED_BY_PRD": 2, "EXISTING_UNVERIFIED": 1, "MISSING": 56, "PARKED_BY_OWNER": 1, "PARTIAL": 131, "VERIFIED": 74}
 - Unresolved P0: 5
 - Last full suite: 4,753 passed, 0 failed at 258e3c0
-- Last wave (421): ORCH-004=FAILED, AGENT-001=SCOUT_DONE
-- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), PKG-001 (partial x4), UX-001 (stale worktree), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), SIGNAL-001 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), CAP-FORGE-011 (blocked), OTEL-001 (stale worktree), SKILL-006 (launch failed), ULTRA-004 (stale worktree), SIDE-002 (stale worktree), CUA-003 (merge queue busy), COG-006 (cascade exhausted), ORCH-002 (blocked), SIDE-001 (REBASE_REQUIRED), ORCH-003 (partial x4), FAB-003 (blocked), EVAL-004 (blocked), SKILL-004 (NOT_RED), EVO-001 (blocked), EVOLAB-003 (stale worktree), EVOLAB-004 (stale worktree), EVO-003 (cascade exhausted), EVOLAB-002 (stale worktree), UCW-006 (stale worktree), OBJ-004 (stale worktree), PRIV-001 (stale worktree), ROUTER-001 (stale worktree), RSCH-004 (stale worktree), EVO-002 (FAILED_INTEGRATION), AGENT-003 (merge queue busy), EVO-006 (REBASE_REQUIRED), SUPPLY-001 (stale worktree), CUA-001 (stale worktree), EPI-001 (stale worktree), FAB-007 (stale worktree), FAB-008 (stale worktree), FAIL-001 (stale worktree), MODEL-007 (stale worktree), ULTRA-003 (stale worktree), MODEL-003 (blocked), EVO-004 (stale worktree), ULTRA-002 (REBASE_REQUIRED), CAP-MKT-006 (repair failed), INTAKE-001 (stale worktree), LAB-004 (stale worktree), COG-002 (stale worktree), KEYS-001 (repair failed), ORCH-009 (launch failed), AGENT-002 (REBASE_REQUIRED), CTX-004 (REBASE_REQUIRED), INTAKE-002 (stale worktree), INTAKE-003 (stale worktree), INTAKE-004 (stale worktree), ACC-002 (stale worktree), ACC-003 (stale worktree), ACC-004 (stale worktree), INTAKE-007 (stale worktree), UCW-003 (stale worktree), SKMKT-001 (stale worktree), SKMKT-002 (stale worktree), SKMKT-003 (stale worktree), SKMKT-004 (stale worktree), LAB-002 (stale worktree), CTX-002 (CONFLICT), FAB-001 (REBASE_REQUIRED), FAB-002 (implementer failed), COG-003 (repair failed), PRO-001 (repair failed), BIN-003 (repair failed), ULTRA-007 (repair failed), ULTRA-006 (NOT_CONFIRMED)
-- Open escalations: 508
-  - ULTRA-007 stale_worktree: F:\F.R.I.D.A.Y\.worktrees\ultra-007 already exists
-  - HARN-001 resolved: controller unpark: controller build integrated: INTEGRATED
-  - CTX-002 integration: {"requirement": "CTX-002", "result": "CONFLICT", "red_green": {"result": "OK", "tests": ["tests/test
-  - FAB-001 rebase: {"requirement": "FAB-001", "result": "REBASE_REQUIRED", "red_green": {}, "verifier": null, "integrat
-  - FAB-002 repair: FAB-002 has no recorded session to repair
-  - COG-003 repair: COG-003 has no recorded session to repair
-  - PRO-001 repair: PRO-001 has no recorded session to repair
-  - BIN-003 repair: BIN-003 has no recorded session to repair
+- Last wave (427): ACC-001=INTEGRATED, INTAKE-005=STALLED
+- Parked: CORE-001 (PARKED_BY_OWNER), CAPB-001 (TEST_TIMEOUT), CODE-001 (blocked), BROW-004 (blocked), ULTRA-001 (blocked), EXEC-SBX-001 (repair failed), SANDBOX-001 (blocked), WF-001 (blocked), ORCH-008 (stale worktree), FAB-005 (partial x4), CAP-MKT-002 (blocked), OTEL-001 (stale worktree), SKILL-006 (launch failed), SIDE-002 (stale worktree), CUA-003 (merge queue busy), COG-006 (cascade exhausted), ORCH-002 (blocked), ORCH-003 (partial x4), FAB-003 (blocked), EVAL-004 (blocked), SKILL-004 (NOT_RED), EVO-001 (blocked), EVOLAB-003 (stale worktree), EVOLAB-004 (stale worktree), EVO-003 (cascade exhausted), EVOLAB-002 (stale worktree), UCW-006 (stale worktree), OBJ-004 (stale worktree), PRIV-001 (stale worktree), ROUTER-001 (stale worktree), RSCH-004 (stale worktree), EVO-002 (FAILED_INTEGRATION), AGENT-003 (merge queue busy), EVO-006 (REBASE_REQUIRED), SUPPLY-001 (stale worktree), CUA-001 (stale worktree), EPI-001 (stale worktree), FAB-007 (stale worktree), FAB-008 (stale worktree), FAIL-001 (stale worktree), MODEL-007 (stale worktree), ULTRA-003 (stale worktree), MODEL-003 (blocked), EVO-004 (stale worktree), ULTRA-002 (REBASE_REQUIRED), CAP-MKT-006 (repair failed), INTAKE-001 (stale worktree), LAB-004 (stale worktree), KEYS-001 (repair failed), ORCH-009 (launch failed), AGENT-002 (REBASE_REQUIRED), CTX-004 (REBASE_REQUIRED), INTAKE-002 (stale worktree), INTAKE-003 (stale worktree), INTAKE-004 (stale worktree), ACC-002 (stale worktree), ACC-003 (stale worktree), ACC-004 (stale worktree), INTAKE-007 (stale worktree), UCW-003 (stale worktree), SKMKT-001 (stale worktree), SKMKT-002 (stale worktree), SKMKT-003 (stale worktree), SKMKT-004 (stale worktree), LAB-002 (stale worktree), CTX-002 (CONFLICT), FAB-002 (implementer failed), COG-003 (repair failed), PRO-001 (repair failed), BIN-003 (repair failed), ULTRA-007 (repair failed), ULTRA-006 (NOT_CONFIRMED), PKG-001 (blocked), CAP-FORGE-011 (launch failed)
+- Open escalations: 516
   - ULTRA-007 repair: ULTRA-007 has no recorded session to repair
   - ULTRA-006 integration: {"requirement": "ULTRA-006", "result": "NOT_CONFIRMED", "red_green": {}, "verifier": {"verdict": "FA
-- Next ready: MODEL-012, ORCH-004
+  - FAB-001 resolved: controller unpark: controller build integrated: INTEGRATED
+  - SIDE-001 resolved: controller unpark: controller build integrated: INTEGRATED
+  - CAP-FORGE-011 resolved: controller unpark: controller build integrated: INTEGRATED
+  - SIGNAL-001 resolved: controller unpark: controller build integrated: INTEGRATED
+  - COG-002 resolved: controller unpark: controller build integrated: INTEGRATED
+  - PKG-001 resolved: controller unpark: controller build integrated: INTEGRATED
+  - PKG-001 blocked: Controller action: enable the Windows Sandbox feature (admin + reboot) only with active jobs parked,
+  - CAP-FORGE-011 launch: git worktree add -b build/cap-forge-011 F:\F.R.I.D.A.Y\.worktrees\cap-forge-011 HEAD failed in F:\F.
+- Next ready: MODEL-012, INTAKE-005
 <!-- build-program:end -->
