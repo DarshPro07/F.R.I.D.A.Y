@@ -34,7 +34,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import itertools
 import json
+import math
 import os
 import sys
 import time
@@ -49,6 +51,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import build_kernel  # noqa: E402
 
 DEVELOPMENT = ROOT / "data" / "corpus" / "development.jsonl"
+CALIBRATION = ROOT / "data" / "corpus" / "calibration.jsonl"
 HOLDOUT = ROOT / "data" / "corpus" / "holdout.jsonl"
 REQ = "CTX-002"
 CHOOSER_CAP_USD = 0.05        # one chooser call's budget: reserved before it, and the CLI's own cap
@@ -81,24 +84,30 @@ def _router():
 
 
 def _rows(path: Path = DEVELOPMENT) -> list[dict]:
-    from label_adjudication import load_overlay
+    from label_adjudication import adjudicate, load_overlay
 
-    overlay = load_overlay()
+    # Calibration is not in the overlay: the same rule labels it here, in memory only.
+    calibration = path == CALIBRATION
+    overlay = {} if calibration else load_overlay()
     rows = []
     for line in path.read_text(encoding="utf-8").splitlines():
         row = json.loads(line)
-        extra = overlay.get(row["id"], {})
+        extra = (adjudicate(row) if calibration else overlay.get(row["id"])) or {}
         row["also_correct"] = sorted({*(row.get("also_correct") or []), *extra.get("also_correct", [])})
         row["clarify"] = bool(extra.get("clarify"))
         rows.append(row)
     return rows
 
 
-def _development_cases(router, path: Path = DEVELOPMENT) -> list[tuple[str, set[str]]]:
+def _case_rows(router, path: Path = DEVELOPMENT) -> list[dict]:
     active = set(router.active_names())
-    return [(row["text"], {row["expect"], *row["also_correct"]}) for row in _rows(path)
+    return [row for row in _rows(path)
             if not row.get("turns") and row["expect"] in router.all_tools
             and row["expect"] not in active]
+
+
+def _development_cases(router, path: Path = DEVELOPMENT) -> list[tuple[str, set[str]]]:
+    return [(row["text"], {row["expect"], *row["also_correct"]}) for row in _case_rows(router, path)]
 
 
 def _abstain_texts() -> list[str]:
@@ -223,21 +232,130 @@ def frozen_run(path: str | None) -> dict:
 
 def _measure(rank, cases) -> tuple[dict, list]:
     """Success@k, MRR and ms per request of `rank(text) -> (ranked names, agree, margin)`."""
-    hits = {k: 0 for k in KS}
-    reciprocal, rows = 0.0, []
+    rows = []
     started = time.perf_counter()
     for text, ok in cases:
         ranked, agree, margin = rank(text)
         rows.append((ranked, agree, margin, ok))
     elapsed = time.perf_counter() - started
-    for ranked, _, _, ok in rows:
+    return ({**_measure_ranked([(ranked, ok) for ranked, _, _, ok in rows]),
+             "ms_per_request": round(1000 * elapsed / len(cases), 2)}, rows)
+
+
+def _measure_ranked(rows) -> dict:
+    """Success@k and MRR of (ranked names, correct names) pairs."""
+    hits = {k: 0 for k in KS}
+    reciprocal = 0.0
+    for ranked, ok in rows:
         for k in KS:
             hits[k] += bool(set(ranked[:k]) & ok)
         position = next((i for i, name in enumerate(ranked) if name in ok), None)
         reciprocal += 1.0 / (position + 1) if position is not None else 0.0
-    n = len(cases)
-    return ({**{f"success_at_{k}": round(hits[k] / n, 4) for k in KS},
-             "mrr": round(reciprocal / n, 4), "ms_per_request": round(1000 * elapsed / n, 2)}, rows)
+    n = len(rows)
+    return {**{f"success_at_{k}": round(hits[k] / n, 4) for k in KS}, "mrr": round(reciprocal / n, 4)}
+
+
+COMPONENTS = ("shipped", "bm25", "ngram", "bge")
+BASELINE_CONFIG = {"kind": "today_two_level", "weights": None, "rrf_k": 10}   # tool_router.RRF_K
+
+
+def sweep_candidates() -> list[dict]:
+    """Every flat weighted fusion of COMPONENTS (weights in {0,1,2,3}, not all zero, no two
+    that differ only by scale) at each RRF k, and today's two-level ranking."""
+    weightings = sorted({tuple(v // math.gcd(*raw) for v in raw)
+                         for raw in itertools.product(range(4), repeat=len(COMPONENTS)) if any(raw)})
+    return [{"kind": "flat_weighted", "weights": list(w), "rrf_k": k}
+            for w in weightings for k in (5, 10, 30, 60)] + [dict(BASELINE_CONFIG)]
+
+
+def _rank_with_config(rankings: dict, config: dict) -> list[str]:
+    from friday import tool_router
+
+    if config["kind"] == "today_two_level":
+        return rankings["hybrid+cards"]
+    # shortcut: each ranker is cut to its top 50 to keep the sweep fast; deepen it if a miss bucket shows the answer sits lower.
+    lists = [rankings.get(name, [])[:50] for name in COMPONENTS]
+    return [name for name, _ in tool_router.fuse(lists, k=config["rrf_k"], weights=config["weights"])]
+
+
+def fit_weighted_fuse(records) -> dict:
+    """The one config chosen from calibration records alone, by S@1 + S@3. Ties go to fewer
+    non-zero weights, then the lexicographically first (weights, k, kind)."""
+    candidates = sweep_candidates()
+    best = None
+    for config in candidates:
+        metrics = _measure_ranked([(_rank_with_config(r["rankings"], config), r["ok"]) for r in records])
+        weights = config["weights"] or [1] * len(COMPONENTS)
+        key = (-round(metrics["success_at_1"] + metrics["success_at_3"], 4),
+               sum(1 for w in weights if w), weights, config["rrf_k"], config["kind"])
+        if best is None or key < best[0]:
+            best = (key, config, metrics)
+    return {"fitted_on": "calibration", "candidates": len(candidates), "config": best[1],
+            "metrics": best[2]}
+
+
+def ablation_report(router, rows, embedder_id: str, embedder) -> tuple[dict, list[dict]]:
+    """Lexical (shipped, bm25, ngram), semantic (bge) and hybrid recall rows over corpus `rows`,
+    and per-request records of every ranking (no request text) for the sweep and taxonomy."""
+    from friday import tool_models, tool_router
+
+    revision = tool_models.PINS[embedder_id].revision if embedder else ""
+    plain = _staged(router, embedder=embedder, revision=revision, cards=False)
+    cards = _staged(router, embedder=embedder, revision=revision, cards=True)
+    records = []
+    for row in rows:
+        text = row["text"]
+        shipped = [m["capability"] for m in router.legacy_search(text, limit=20)]
+        parts = cards.retriever.components(text)       # once per request; every row reuses it
+        records.append({
+            "ok": {row["expect"], *row["also_correct"]}, "expect": row["expect"],
+            "category": row.get("category", "UNKNOWN"),
+            "rankings": {
+                "shipped": shipped, **parts,
+                "hybrid": [n for n, _ in tool_router.fuse([shipped, plain.retriever.first_stage(text)])],
+                "hybrid+cards": [n for n, _ in tool_router.fuse(
+                    [shipped, cards.retriever.first_stage(text, parts=parts)])]}})
+    recall = {"index": "bm25, ngram and bge rank the tool-card index, as hybrid+cards does"}
+    for name in ("shipped", "bm25", "ngram", "bge", "hybrid", "hybrid+cards"):
+        recall[name] = (_measure_ranked([(r["rankings"][name], r["ok"]) for r in records])
+                        if name != "bge" or embedder is not None else {"unavailable": "no embedder"})
+    return recall, records
+
+
+def failure_taxonomy(records, config: dict) -> dict:
+    """Where the right tool sat when it was not first, by miss bucket and corpus category, and
+    the most frequent (expected, wrongly first) pairs. Tool ids and counts only."""
+    buckets = dict.fromkeys(("rank_2", "rank_3", "rank_4_10", "rank_11_20", "absent"), 0)
+    categories: dict[str, int] = {}
+    pairs: dict[tuple[str, str], int] = {}
+    for r in records:
+        ranked = _rank_with_config(r["rankings"], config)[:20]
+        position = next((i for i, name in enumerate(ranked) if name in r["ok"]), None)
+        if position == 0:
+            continue
+        bucket = ("absent" if position is None else "rank_2" if position == 1 else
+                  "rank_3" if position == 2 else "rank_4_10" if position < 10 else "rank_11_20")
+        buckets[bucket] += 1
+        categories[r["category"]] = categories.get(r["category"], 0) + 1
+        pair = (r["expect"], ranked[0] if ranked else "<nothing ranked>")
+        pairs[pair] = pairs.get(pair, 0) + 1
+    return {"misses": sum(buckets.values()), "miss_buckets": buckets,
+            "misses_by_category": dict(sorted(categories.items())),
+            "top_confusions": [{"expected": e, "wrongly_first": w, "count": c} for (e, w), c in
+                               sorted(pairs.items(), key=lambda item: (-item[1], item[0]))[:15]]}
+
+
+def cost_block(router, cases) -> dict:
+    """What the shipped search's payload costs at each result limit, kept apart from recall."""
+    from friday import capability_router as R
+
+    one_label = [(text, sorted(ok)[0]) for text, ok in cases]
+    out = {"label": "payload shape of the shipped search"}
+    for k in (1, 3, 5, 10):
+        summary = _summary(R.disclosure_report(router, one_label, limit=k))
+        out[f"k={k}"] = {key: summary[key] for key in (
+            "starting_chars", "baseline_chars", "starting_reduction", "worst_reduction")}
+    return out
 
 
 def resolve_embedder(embedder_id: str):
@@ -372,6 +490,10 @@ def _chooser_run(args, router, embedder, swept: dict | None, frozen: dict | None
 def _check_chooser_args(args) -> dict | None:
     """Refuse a paid or sealed run that is not set up to be bounded and honest, before any
     model loads. Returns the frozen development run for a holdout measurement."""
+    if getattr(args, "ablate", False) and args.chooser == "cli":
+        raise SystemExit("--ablate is offline: use --chooser none")
+    if getattr(args, "ablate", False) and args.split == "holdout":
+        raise SystemExit("--ablate is development-only; the holdout stays sealed")
     if args.chooser == "cli" and args.sample < 1:
         raise SystemExit("--chooser cli is a paid call per request: pass --sample N (N >= 1), "
                          "the hard cap on chooser calls")
@@ -414,8 +536,12 @@ def main(argv: list[str] | None = None) -> int:
                         "documents per request), beside the same N without it")
     parser.add_argument("--thresholds", action="store_true",
                         help="sweep the direct-route thresholds on development")
+    parser.add_argument("--ablate", action="store_true",
+                        help="offline CTX-002 recall ablation on calibration and development")
     args = parser.parse_args(argv)
     frozen = _check_chooser_args(args)
+    if args.ablate and Path(args.out).exists():
+        raise SystemExit(f"{args.out} exists: an ablation result is never overwritten")
     if args.models_dir:
         os.environ["FRIDAY_MODELS_DIR"] = args.models_dir
 
@@ -424,6 +550,33 @@ def main(argv: list[str] | None = None) -> int:
     router = _router()
     if args.split == "holdout":
         result = {"chooser_run": _chooser_run(args, router, embedder, None, frozen)}
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(json.dumps(result, indent=1), encoding="utf-8")
+        print(json.dumps(result, indent=1))
+        return 0
+    if args.ablate:
+        dev_recall, dev = ablation_report(router, _case_rows(router, DEVELOPMENT), args.embedder, embedder)
+        cal_recall, cal = ablation_report(router, _case_rows(router, CALIBRATION), args.embedder, embedder)
+        fitted = fit_weighted_fuse(cal)
+        frozen_dev = _measure_ranked([(_rank_with_config(r["rankings"], fitted["config"]), r["ok"])
+                                      for r in dev])
+        cal_delta = round(fitted["metrics"]["success_at_1"] - cal_recall["hybrid+cards"]["success_at_1"], 4)
+        dev_delta = round(frozen_dev["success_at_1"] - dev_recall["hybrid+cards"]["success_at_1"], 4)
+        result = {
+            "recall": {
+                "splits": "fitted on calibration only; development reported once; holdout not opened",
+                "pre_registered_rule": ("keep the avenue only if development S@1 >= the same-run "
+                                        "hybrid+cards baseline + 0.03 and the calibration delta has "
+                                        "the same sign; otherwise record no gain and close it"),
+                "calibration": {"requests": len(cal), "rows": cal_recall, "fitted": fitted},
+                "development": {"requests": len(dev), "rows": dev_recall, "frozen_config": frozen_dev},
+                "success_at_1_delta": {"calibration": cal_delta, "development": dev_delta},
+                "verdict": "keep" if dev_delta >= 0.03 and cal_delta > 0 else "no gain: avenue closed",
+                "failure_taxonomy": {"baseline": failure_taxonomy(dev, BASELINE_CONFIG),
+                                     "frozen_config": failure_taxonomy(dev, fitted["config"])},
+            },
+            "cost": cost_block(router, _development_cases(router, DEVELOPMENT)),
+        }
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(json.dumps(result, indent=1), encoding="utf-8")
         print(json.dumps(result, indent=1))

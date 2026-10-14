@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -46,6 +47,18 @@ def test_a_confident_retrieval_routes_directly_without_a_model_call():
     route = staged(chooser, thresholds=EAGER).route("find songs by name")
     assert (route.decision, route.stage, route.uncertain) == ("TOOL", 1, False)
     assert route.tool_id == "music_search" and chooser.seen == []
+
+
+def test_fuse_with_equal_weights_matches_the_unweighted_fuse():
+    rankings = [["b", "a"], ["a", "c"], ["c", "b"]]
+
+    assert tool_router.fuse(rankings, k=10, weights=[1, 1, 1]) == tool_router.fuse(rankings, k=10)
+
+
+def test_a_zero_weight_removes_that_ranker_from_the_fusion():
+    weighted = tool_router.fuse([["a"], ["b"]], k=10, weights=[0, 1])
+
+    assert weighted == [("b", 0.1)]
 
 
 def test_an_unsure_retrieval_hands_the_top_cards_to_the_chooser():
@@ -383,6 +396,144 @@ def test_the_sweep_picks_the_largest_direct_share_that_meets_the_target():
     swept = BENCH.sweep_thresholds(rows, [(0.5, 0.0)])
     assert swept["chosen"]["direct_precision"] >= BENCH.TARGET_PRECISION
     assert swept["chosen"]["direct_share"] == 0.75
+
+
+def _record(ok, **rankings):
+    return {"ok": set(ok), "expect": sorted(ok)[0], "category": "SIMPLE",
+            "rankings": {"shipped": [], "bm25": [], "ngram": [], "bge": [], "hybrid": [],
+                         "hybrid+cards": [], **rankings}}
+
+
+def test_the_weight_sweep_is_fitted_on_calibration_and_never_reads_development_to_choose(monkeypatch, tmp_path):
+    monkeypatch.setattr(BENCH, "DEVELOPMENT", tmp_path / "missing-development.jsonl")
+    monkeypatch.setattr(BENCH, "HOLDOUT", tmp_path / "missing-holdout.jsonl")
+    calibration = [_record({"a"}, shipped=["b", "a"], bm25=["a", "b"]),
+                   _record({"b"}, shipped=["a", "b"], bm25=["b", "a"])]
+
+    fitted = BENCH.fit_weighted_fuse(calibration)
+
+    assert list(inspect.signature(BENCH.fit_weighted_fuse).parameters) == ["records"]
+    assert fitted["fitted_on"] == "calibration"
+    assert fitted["config"]["weights"] == [0, 1, 0, 0] and fitted["config"]["rrf_k"] == 5
+    assert fitted["metrics"]["success_at_1"] == 1.0
+
+
+def test_the_sweep_breaks_ties_deterministically_and_includes_the_baseline_config(monkeypatch, tmp_path):
+    monkeypatch.setattr(BENCH, "HOLDOUT", tmp_path / "missing-holdout.jsonl")
+    candidates = BENCH.sweep_candidates()
+    weightings = {tuple(c["weights"]) for c in candidates if c["kind"] == "flat_weighted"}
+    assert BENCH.BASELINE_CONFIG in candidates
+    assert (2, 2, 0, 0) not in weightings and (1, 1, 0, 0) in weightings and (0, 0, 0, 0) not in weightings
+    assert len(candidates) == len(weightings) * 4 + 1
+
+    # Every flat config ranks "x" first; only today's two-level ranking finds "a", so it wins.
+    only_baseline = [_record({"a"}, shipped=["x"], bm25=["x"], ngram=["x"], bge=["x"],
+                             **{"hybrid+cards": ["a", "x"]})]
+    assert BENCH.fit_weighted_fuse(only_baseline)["config"] == BENCH.BASELINE_CONFIG
+
+    # A tie: fewest non-zero weights, then the lexicographically first, the same in any order.
+    tied = [_record({"a"}, shipped=["a"], bm25=["a"]), _record({"b"}, shipped=["b"], bm25=["b"])]
+    first = BENCH.fit_weighted_fuse(tied)["config"]
+    assert first == {"kind": "flat_weighted", "weights": [0, 1, 0, 0], "rrf_k": 5}
+    assert BENCH.fit_weighted_fuse(tied[::-1])["config"] == first
+
+
+class _RetrieverForAblation:
+    def __init__(self, has_embedder):
+        self.has_embedder, self.calls = has_embedder, 0
+
+    def components(self, query):
+        self.calls += 1
+        out = {"bm25": ["tool_a", "tool_b"], "ngram": ["tool_b", "tool_a"]}
+        if self.has_embedder:
+            out["bge"] = ["tool_b", "tool_a"]
+        return out
+
+    def first_stage(self, query, *, parts=None):
+        return list((parts or self.components(query))["ngram"])
+
+
+class _StagedForAblation:
+    def __init__(self, has_embedder):
+        self.retriever = _RetrieverForAblation(has_embedder)
+
+
+class _RouterForAblation:
+    def legacy_search(self, text, limit=20):
+        return [{"capability": "tool_a"}, {"capability": "tool_b"}]
+
+
+def test_the_ablation_reports_lexical_semantic_and_hybrid_rows_separately(monkeypatch, tmp_path):
+    monkeypatch.setattr(BENCH, "HOLDOUT", tmp_path / "missing-holdout.jsonl")
+    rows = [{"text": "q", "expect": "tool_b", "also_correct": [], "category": "SIMPLE"}]
+    built = {}
+
+    def staged(router, *, embedder, revision, cards):
+        built[cards] = _StagedForAblation(embedder is not None)
+        return built[cards]
+
+    monkeypatch.setattr(BENCH, "_staged", staged)
+    recall, records = BENCH.ablation_report(_RouterForAblation(), rows, tool_models.EMBEDDER.id, object())
+
+    assert {"shipped", "bm25", "ngram", "bge", "hybrid", "hybrid+cards"} <= set(recall)
+    assert recall["shipped"]["success_at_1"] == 0.0 and recall["bm25"]["success_at_1"] == 0.0
+    assert recall["bge"]["success_at_1"] == 1.0 and recall["bge"]["success_at_3"] == 1.0
+    assert built[True].retriever.calls == 1                    # components() once per request
+    assert "q" not in json.dumps([{k: v for k, v in r.items() if k != "ok"} for r in records])
+
+    recall, _ = BENCH.ablation_report(_RouterForAblation(), rows, "none", None)
+    assert recall["bge"] == {"unavailable": "no embedder"}
+    assert recall["bm25"]["success_at_3"] == 1.0
+
+
+def test_calibration_labels_are_adjudicated_in_memory_and_the_overlay_file_is_unchanged(monkeypatch, tmp_path):
+    monkeypatch.setattr(BENCH, "HOLDOUT", tmp_path / "missing-holdout.jsonl")
+    calibration = tmp_path / "calibration.jsonl"
+    calibration.write_text(json.dumps({"id": "c1", "text": "close it", "expect": "apps_close"}) + "\n",
+                           encoding="utf-8")
+    before = LA.OVERLAY.read_bytes()
+    monkeypatch.setattr(BENCH, "CALIBRATION", calibration)
+
+    rows = BENCH._rows(BENCH.CALIBRATION)
+
+    assert rows[0]["clarify"] is True and rows[0]["also_correct"] == []
+    assert "c1" not in LA.load_overlay()
+    assert LA.OVERLAY.read_bytes() == before
+
+
+def test_ablate_refuses_the_holdout_and_a_paid_chooser(tmp_path, monkeypatch):
+    monkeypatch.setattr(BENCH, "HOLDOUT", tmp_path / "sealed" / "holdout.jsonl")
+
+    with pytest.raises(SystemExit, match="--ablate is offline"):
+        BENCH._check_chooser_args(_args(tmp_path, chooser="cli", sample=1, ablate=True))
+    with pytest.raises(SystemExit, match="--ablate is development-only"):
+        BENCH._check_chooser_args(_args(tmp_path, split="holdout", ablate=True))
+    assert BENCH._check_chooser_args(_args(tmp_path, ablate=True)) is None
+
+
+def test_the_cost_block_is_separate_from_recall_and_monotone_in_k(monkeypatch, tmp_path):
+    monkeypatch.setattr(BENCH, "HOLDOUT", tmp_path / "missing-holdout.jsonl")
+
+    class CostRouter:
+        all_tools = {f"tool_{i}": object() for i in range(12)}
+
+        def legacy_search(self, request, limit=6):
+            return [{"capability": f"tool_{i}", "description": "x" * 40} for i in range(limit)]
+
+        def _schema_of(self, name):
+            return {"name": name, "description": "x" * 400}
+
+        def active_names(self):
+            return []
+
+    out = BENCH.cost_block(CostRouter(), [("request", {"tool_0"})])
+
+    assert out["label"] == "payload shape of the shipped search"
+    assert set(out) == {"label", "k=1", "k=3", "k=5", "k=10"}
+    for k in ("k=1", "k=3", "k=5", "k=10"):
+        assert set(out[k]) == {"starting_chars", "baseline_chars", "starting_reduction", "worst_reduction"}
+    worst = [out[k]["worst_reduction"] for k in ("k=1", "k=3", "k=5", "k=10")]
+    assert worst == sorted(worst, reverse=True) and worst[0] > worst[-1]
 
 
 # --- the paid and sealed parts of the benchmark, with fakes: no model call, no real ledger,

@@ -84,11 +84,17 @@ def tool_text(name: str, description: str, intent_examples=(), group_purpose: st
     return " ".join(part for part in parts if part)
 
 
-def fuse(rankings: list[list[str]], k: int = RRF_K) -> list[tuple[str, float]]:
+def fuse(rankings: list[list[str]], k: int = RRF_K,
+         weights: list[float] | None = None) -> list[tuple[str, float]]:
+    if weights is not None and len(weights) != len(rankings):
+        raise ValueError("weights must match rankings")
     score: dict[str, float] = {}
-    for ranking in rankings:
+    for index, ranking in enumerate(rankings):
+        weight = 1.0 if weights is None else weights[index]
+        if weight == 0:
+            continue
         for rank, name in enumerate(ranking):
-            score[name] = score.get(name, 0.0) + 1.0 / (k + rank)
+            score[name] = score.get(name, 0.0) + weight / (k + rank)
     return sorted(score.items(), key=lambda item: (-item[1], item[0]))
 
 

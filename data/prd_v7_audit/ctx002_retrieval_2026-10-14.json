@@ -1,0 +1,362 @@
+{
+ "recall": {
+  "splits": "fitted on calibration only; development reported once; holdout not opened",
+  "pre_registered_rule": "keep the avenue only if development S@1 >= the same-run hybrid+cards baseline + 0.03 and the calibration delta has the same sign; otherwise record no gain and close it",
+  "calibration": {
+   "requests": 629,
+   "rows": {
+    "index": "bm25, ngram and bge rank the tool-card index, as hybrid+cards does",
+    "shipped": {
+     "success_at_1": 0.3927,
+     "success_at_3": 0.6375,
+     "success_at_5": 0.7234,
+     "success_at_10": 0.8251,
+     "success_at_20": 0.9062,
+     "mrr": 0.5412
+    },
+    "bm25": {
+     "success_at_1": 0.337,
+     "success_at_3": 0.5199,
+     "success_at_5": 0.6455,
+     "success_at_10": 0.7679,
+     "success_at_20": 0.8283,
+     "mrr": 0.4652
+    },
+    "ngram": {
+     "success_at_1": 0.2862,
+     "success_at_3": 0.539,
+     "success_at_5": 0.6375,
+     "success_at_10": 0.7727,
+     "success_at_20": 0.814,
+     "mrr": 0.4419
+    },
+    "bge": {
+     "success_at_1": 0.4706,
+     "success_at_3": 0.6932,
+     "success_at_5": 0.7886,
+     "success_at_10": 0.8601,
+     "success_at_20": 0.9269,
+     "mrr": 0.6057
+    },
+    "hybrid": {
+     "success_at_1": 0.4197,
+     "success_at_3": 0.6773,
+     "success_at_5": 0.7615,
+     "success_at_10": 0.8665,
+     "success_at_20": 0.9459,
+     "mrr": 0.5725
+    },
+    "hybrid+cards": {
+     "success_at_1": 0.4261,
+     "success_at_3": 0.7091,
+     "success_at_5": 0.7615,
+     "success_at_10": 0.876,
+     "success_at_20": 0.9491,
+     "mrr": 0.5836
+    }
+   },
+   "fitted": {
+    "fitted_on": "calibration",
+    "candidates": 901,
+    "config": {
+     "kind": "flat_weighted",
+     "weights": [
+      1,
+      0,
+      0,
+      3
+     ],
+     "rrf_k": 60
+    },
+    "metrics": {
+     "success_at_1": 0.5215,
+     "success_at_3": 0.7536,
+     "success_at_5": 0.8331,
+     "success_at_10": 0.9141,
+     "success_at_20": 0.9587,
+     "mrr": 0.6601
+    }
+   }
+  },
+  "development": {
+   "requests": 965,
+   "rows": {
+    "index": "bm25, ngram and bge rank the tool-card index, as hybrid+cards does",
+    "shipped": {
+     "success_at_1": 0.3751,
+     "success_at_3": 0.6238,
+     "success_at_5": 0.7078,
+     "success_at_10": 0.8218,
+     "success_at_20": 0.8839,
+     "mrr": 0.5261
+    },
+    "bm25": {
+     "success_at_1": 0.2953,
+     "success_at_3": 0.5067,
+     "success_at_5": 0.6197,
+     "success_at_10": 0.7264,
+     "success_at_20": 0.8135,
+     "mrr": 0.4368
+    },
+    "ngram": {
+     "success_at_1": 0.256,
+     "success_at_3": 0.5264,
+     "success_at_5": 0.628,
+     "success_at_10": 0.7399,
+     "success_at_20": 0.8041,
+     "mrr": 0.4165
+    },
+    "bge": {
+     "success_at_1": 0.4311,
+     "success_at_3": 0.6746,
+     "success_at_5": 0.7534,
+     "success_at_10": 0.8373,
+     "success_at_20": 0.8995,
+     "mrr": 0.5737
+    },
+    "hybrid": {
+     "success_at_1": 0.4135,
+     "success_at_3": 0.686,
+     "success_at_5": 0.7554,
+     "success_at_10": 0.8404,
+     "success_at_20": 0.9223,
+     "mrr": 0.5662
+    },
+    "hybrid+cards": {
+     "success_at_1": 0.4508,
+     "success_at_3": 0.6995,
+     "success_at_5": 0.7554,
+     "success_at_10": 0.8528,
+     "success_at_20": 0.9285,
+     "mrr": 0.5905
+    }
+   },
+   "frozen_config": {
+    "success_at_1": 0.5005,
+    "success_at_3": 0.7171,
+    "success_at_5": 0.8041,
+    "success_at_10": 0.8819,
+    "success_at_20": 0.9378,
+    "mrr": 0.6344
+   }
+  },
+  "success_at_1_delta": {
+   "calibration": 0.0954,
+   "development": 0.0497
+  },
+  "verdict": "keep",
+  "failure_taxonomy": {
+   "baseline": {
+    "misses": 530,
+    "miss_buckets": {
+     "rank_2": 136,
+     "rank_3": 104,
+     "rank_4_10": 148,
+     "rank_11_20": 73,
+     "absent": 69
+    },
+    "misses_by_category": {
+     "CONFUSABLE": 2,
+     "SIMPLE": 415,
+     "TRANSCRIPTION": 113
+    },
+    "top_confusions": [
+     {
+      "expected": "files_list",
+      "wrongly_first": "files_read",
+      "count": 9
+     },
+     {
+      "expected": "files_info",
+      "wrongly_first": "documents_extract",
+      "count": 8
+     },
+     {
+      "expected": "vision_camera_frame",
+      "wrongly_first": "vision_inspect_screen",
+      "count": 8
+     },
+     {
+      "expected": "windows_minimize",
+      "wrongly_first": "windows_focus",
+      "count": 8
+     },
+     {
+      "expected": "files_copy",
+      "wrongly_first": "files_read",
+      "count": 7
+     },
+     {
+      "expected": "files_roots",
+      "wrongly_first": "files_read",
+      "count": 7
+     },
+     {
+      "expected": "windows_arrange",
+      "wrongly_first": "windows_focus",
+      "count": 7
+     },
+     {
+      "expected": "music_next",
+      "wrongly_first": "music_current",
+      "count": 6
+     },
+     {
+      "expected": "apps_focus",
+      "wrongly_first": "apps_open",
+      "count": 5
+     },
+     {
+      "expected": "files_copy",
+      "wrongly_first": "files_recycle",
+      "count": 5
+     },
+     {
+      "expected": "files_create",
+      "wrongly_first": "files_read",
+      "count": 5
+     },
+     {
+      "expected": "files_read",
+      "wrongly_first": "documents_extract",
+      "count": 5
+     },
+     {
+      "expected": "system_network",
+      "wrongly_first": "vision_inspect_screen",
+      "count": 5
+     },
+     {
+      "expected": "windows_restore",
+      "wrongly_first": "windows_focus",
+      "count": 5
+     },
+     {
+      "expected": "youtube_find_channel",
+      "wrongly_first": "music_current",
+      "count": 5
+     }
+    ]
+   },
+   "frozen_config": {
+    "misses": 482,
+    "miss_buckets": {
+     "rank_2": 150,
+     "rank_3": 59,
+     "rank_4_10": 159,
+     "rank_11_20": 54,
+     "absent": 60
+    },
+    "misses_by_category": {
+     "CONFUSABLE": 2,
+     "SIMPLE": 377,
+     "TRANSCRIPTION": 103
+    },
+    "top_confusions": [
+     {
+      "expected": "windows_minimize",
+      "wrongly_first": "windows_focus",
+      "count": 10
+     },
+     {
+      "expected": "youtube_recent_videos",
+      "wrongly_first": "music_current",
+      "count": 10
+     },
+     {
+      "expected": "windows_arrange",
+      "wrongly_first": "windows_focus",
+      "count": 9
+     },
+     {
+      "expected": "apps_focus",
+      "wrongly_first": "objective_pause",
+      "count": 8
+     },
+     {
+      "expected": "vision_camera_frame",
+      "wrongly_first": "vision_inspect_screen",
+      "count": 8
+     },
+     {
+      "expected": "windows_maximize",
+      "wrongly_first": "windows_focus",
+      "count": 7
+     },
+     {
+      "expected": "windows_restore",
+      "wrongly_first": "windows_focus",
+      "count": 7
+     },
+     {
+      "expected": "audio_sessions",
+      "wrongly_first": "volume_get",
+      "count": 6
+     },
+     {
+      "expected": "files_edit",
+      "wrongly_first": "files_create",
+      "count": 6
+     },
+     {
+      "expected": "system_network",
+      "wrongly_first": "vision_inspect_screen",
+      "count": 6
+     },
+     {
+      "expected": "youtube_find_channel",
+      "wrongly_first": "music_current",
+      "count": 6
+     },
+     {
+      "expected": "files_copy",
+      "wrongly_first": "files_edit",
+      "count": 5
+     },
+     {
+      "expected": "files_info",
+      "wrongly_first": "files_search",
+      "count": 5
+     },
+     {
+      "expected": "files_list",
+      "wrongly_first": "files_read",
+      "count": 5
+     },
+     {
+      "expected": "objective_start",
+      "wrongly_first": "objective_pause",
+      "count": 5
+     }
+    ]
+   }
+  }
+ },
+ "cost": {
+  "label": "payload shape of the shipped search",
+  "k=1": {
+   "starting_chars": 17286,
+   "baseline_chars": 112758,
+   "starting_reduction": 0.8467,
+   "worst_reduction": 0.841
+  },
+  "k=3": {
+   "starting_chars": 17286,
+   "baseline_chars": 112758,
+   "starting_reduction": 0.8467,
+   "worst_reduction": 0.8326
+  },
+  "k=5": {
+   "starting_chars": 17286,
+   "baseline_chars": 112758,
+   "starting_reduction": 0.8467,
+   "worst_reduction": 0.8246
+  },
+  "k=10": {
+   "starting_chars": 17286,
+   "baseline_chars": 112758,
+   "starting_reduction": 0.8467,
+   "worst_reduction": 0.8115
+  }
+ }
+}

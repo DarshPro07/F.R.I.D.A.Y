@@ -128,6 +128,34 @@ never changes the answer, sample and budget, the invocation-rate and p95
 metrics, the Router wiring) and the `chooser_called` / `use_chooser` cases in
 `tests/test_tool_router.py`.
 
+## Recall ablation and weighted-fuse sweep (owner ruling 2026-10-13, offline)
+
+`scripts/bench_tool_disclosure.py --ablate` (bge-small, no paid call, holdout not
+opened) -> `data/prd_v7_audit/ctx002_retrieval_2026-10-14.json`. Calibration (629
+requests, labels adjudicated in memory, overlay untouched) fits the sweep; development
+(965) is reported once. S@1 / S@3 / S@20:
+
+| ranking | calibration | development |
+|---|---|---|
+| shipped (legacy keyword) | 0.393 / 0.638 / 0.906 | 0.375 / 0.624 / 0.884 |
+| bm25 | 0.337 / 0.520 / 0.828 | 0.295 / 0.507 / 0.814 |
+| ngram | 0.286 / 0.539 / 0.814 | 0.256 / 0.526 / 0.804 |
+| bge (semantic) | 0.471 / 0.693 / 0.927 | 0.431 / 0.675 / 0.900 |
+| hybrid | 0.420 / 0.677 / 0.946 | 0.414 / 0.686 / 0.922 |
+| hybrid+cards (today, same run) | 0.426 / 0.709 / 0.949 | 0.451 / 0.700 / 0.929 |
+| frozen: shipped x1 + bge x3, RRF k=60 | 0.522 / 0.754 / 0.959 | 0.501 / 0.717 / 0.938 |
+
+Pre-registered rule: keep the avenue only if dev S@1 >= baseline + 0.03 and the
+calibration delta has the same sign. Dev +0.050, calibration +0.095: **kept**. Dev
+misses at rank 2-3 fall 240 -> 209, mostly sibling pairs (windows_minimize/focus,
+files_list/read, vision_camera_frame/inspect_screen). Cost, kept apart from recall
+(payload shape of the shipped search): starting reduction 0.847, worst 0.841 at k=1
+down to 0.812 at k=10.
+
+The ruling's holdout clause is not yet met: nothing here is measured on the untouched
+holdout, and 0.50 / 0.72 is far below R@1 >= 0.90 / R@3 >= 0.97. CTX-002 stays
+PARTIAL; no threshold changed.
+
 ## Open (listed as evidence gaps)
 - Ruling 1 not done: the stage-2 chooser through a coding-agent CLI (`claude -p`,
   Codex, Antigravity) needs a CLI provider in the model gateway, which does not
