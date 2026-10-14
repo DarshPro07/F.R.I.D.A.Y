@@ -419,7 +419,7 @@ const el=(h)=>{const t=document.createElement("template");t.innerHTML=h.trim();r
    from a hole, and one site here shipped with a RAW nonce.
    Markup now carries data-act/data-arg only; the value never reaches a parser
    as code. The whitelist means a forged data-act cannot call anything else. */
-const DELEGATED=new Set(["openDivision","toggleDivision","gateApprove","gateReject","runIntent","openVault"]);
+const DELEGATED=new Set(["openDivision","toggleDivision","gateApprove","gateReject","runIntent","openVault","obsView"]);
 function runAct(node){const name=node.dataset.act;if(!DELEGATED.has(name))return;
   const fn=window[name];if(typeof fn==="function")fn(node.dataset.arg||"");}
 document.addEventListener("click",(ev)=>{const n=ev.target.closest&&ev.target.closest("[data-act]");
@@ -1232,6 +1232,9 @@ function renderRoom(){const s=STATE;if(!s.system){$("cr").innerHTML='<div class=
   const sch=(deck.schedule||[]).map(r=>row(r.at,esc(r.what),r.state)).join("");L+=sec("Schedule","today",sch||'<div class="empty">Nothing scheduled.</div>');
   const facts=((mem.gbrain&&mem.gbrain.facts)||[]).slice(0,6).map(f=>row("brain",esc(f.slice(0,120)))).join("")+((mem.local&&mem.local.facts)||[]).slice(0,10).map(f=>row(f.subject.split(".").slice(-2).join("."),esc((f.value||"").slice(0,100)))).join("");
   L+=sec("Shared memory",(mem.local&&mem.local.count||0)+" local facts",facts||'<div class="skel"></div>');
+  const ob=window._OBS,seg=(k)=>OBS_CHOICES[k].map(v=>`<button class="${ob[k]===v?"":"quiet"}" data-act="obsView" data-arg="${k}:${v}">${v}</button>`).join(" ");
+  const ov=ob.report?Object.entries(ob.report).map(([k,v])=>row(k,`<span class="mono small">${esc(String(typeof v==="object"?JSON.stringify(v):v).slice(0,160))}</span>`)).join(""):'<div class="skel"></div>';
+  R+=sec("Detail level",ob.mode,`<div class="a">Mode ${seg("mode")}</div><div class="a">Workers ${seg("workers")}</div><div class="muted small">Changes what is shown, not what is allowed.</div>${ov}`);
   const dz=window._DOCTOR;
   if(dz){const rows=dz.checks.map(c=>`<div class="row"><span class="k"><span class="st ${c.ok?"up":"down"}"><i></i></span></span>
       <span class="v">${esc(c.name)}<div class="muted small">${esc(c.detail)}${c.ok?"":' — <span class="err">'+esc(c.fix)+'</span>'}</div></span></div>`).join("");
@@ -1341,10 +1344,18 @@ async function pollMap(){if(LOCKED)return;try{window._MAP=await jget("/api/os_ma
 async function pollHelpers(){if(LOCKED)return;try{window._HELPERS=await jget("/api/helpers");if(VIEW==="os")renderOS();}catch(e){}}
 async function pollGraphStats(){if(LOCKED)return;try{const g=await jget("/api/graph");if(G3&&g.stats.nodes!==(GRAPH&&GRAPH.stats.nodes)){GRAPH=g;G3.graphData(g);renderLegend();}else if(!GRAPH)GRAPH=g;renderMemSummary();}catch(e){}}
 async function pollDoctor(force){if(LOCKED)return;try{window._DOCTOR=await jget("/api/doctor");if(VIEW==="room"||force)renderRoom();}catch(e){}}
+// UX-001: Normal/Developer mode and show/hide workers. The server trims the
+// report (observability.for_mode); these buttons only choose the view.
+const OBS_CHOICES={mode:["normal","developer"],workers:["default","show","hide"]};
+window._OBS={mode:"normal",workers:"default",report:null};
+function obsView(arg){const [k,v]=String(arg).split(":");if(!(OBS_CHOICES[k]||[]).includes(v))return;window._OBS[k]=v;pollObs();}
+async function pollObs(){if(LOCKED)return;const o=window._OBS,id=(STATE.objective&&STATE.objective.run_id)||"";
+  const q=new URLSearchParams({mode:o.mode});if(o.workers!=="default")q.set("workers",o.workers);if(id)q.set("run_id",id);
+  try{o.report=await jget("/api/observability?"+q);if(VIEW==="room")renderRoom();}catch(e){}}
 async function pollAccess(){if(LOCKED)return;try{window._ACCESS=(await jget("/api/auth/recent")).events||[];}catch(e){}}
 function startAll(){if(timers.length)return;poll();pollOrg();pollMem();pollDeck();pollGates();pollControl();pollMap();pollHelpers();pollGraphStats();pollAccess();pollWork();
-  pollDoctor();
-  timers=[setInterval(pollDoctor,120000),setInterval(poll,6000),setInterval(pollMem,20000),setInterval(pollDeck,15000),setInterval(pollGates,4000),setInterval(pollControl,30000),setInterval(pollOrg,90000),setInterval(pollGraphStats,60000),setInterval(pollAccess,30000),setInterval(pollHermes,5000),setInterval(pollWork,5000)];}
+  pollDoctor();pollObs();
+  timers=[setInterval(pollDoctor,120000),setInterval(poll,6000),setInterval(pollMem,20000),setInterval(pollDeck,15000),setInterval(pollGates,4000),setInterval(pollControl,30000),setInterval(pollOrg,90000),setInterval(pollGraphStats,60000),setInterval(pollAccess,30000),setInterval(pollHermes,5000),setInterval(pollWork,5000),setInterval(pollObs,15000)];}
 
 /* ---------------- boot ---------------- */
 (function boot(){let v=new URLSearchParams(location.search).get("view");try{v=v||localStorage.getItem("fridayView");}catch(e){}if(v==="vault")v="mem";
