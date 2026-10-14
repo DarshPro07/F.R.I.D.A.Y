@@ -168,3 +168,25 @@ def test_a_stored_detail_level_the_server_does_not_know_is_ignored(store, monkey
         _open_control_room(page)
         assert _picked(page, "mode:normal").count() == 1 and _picked(page, "workers:default").count() == 1
         assert queries and queries[0].get("mode") == "normal" and "workers" not in queries[0]
+
+
+def test_the_ledgers_ux_001_row_cites_the_tests_that_prove_it():
+    """The row is how a reader finds the proof of "visibility differs,
+    authority does not": it has to name the toggle, the persistence and the
+    authority-unchanged tests, not only the trace file."""
+    import sys
+
+    root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(root / "scripts"))
+    import prd_ledger as PL
+
+    row = {r["id"]: r for r in PL.apply_progress(PL._load_v7(), PL.PROGRESS_V7)}["UX-001"]
+    proof = {
+        "tests/test_observability.py::test_normal_mode_hides_what_developer_mode_shows",
+        "tests/test_observability.py::test_mode_does_not_change_authority",
+        "tests/test_observability_workers.py::test_user_may_show_or_hide_workers_in_either_mode",
+        "tests/test_observability_workers.py::test_control_room_exposes_the_mode_and_workers_toggle",
+        "tests/test_observability_workers.py::test_detail_level_choice_survives_a_page_reload",
+        "tests/test_observability_workers.py::test_a_stored_detail_level_the_server_does_not_know_is_ignored",
+    }
+    assert proof <= set(row["tests"]), sorted(proof - set(row["tests"]))

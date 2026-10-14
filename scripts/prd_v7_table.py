@@ -544,7 +544,7 @@ def table(R7):
            maps_to_v1=['PRD-DEV-001', 'FR-MEM-004', 'FR-AGT-002', 'FR-POL-001'],
            impl="friday/observability.py exposes raw event timeline (docstring confirms: objective ledger, tool-result table, model-gateway ledger, executor runs, trust audit log); friday/policy.py + friday/user_policy.py enforce policy-derived authority independent of any UI concept. Gap: Unchanged from auditor: backend data for Developer Mode exists in observability.py, but no visible Normal-vs-Developer surface (toggle/view/API flag) exists in ui_server.py or ui/, so 'Visibility differs, authority does not' is unverifiable end to end.",
            files=['friday/observability.py:1-40', 'friday/ui_server.py', 'ui/'],
-           tests=['tests/test_observability.py'],
+           tests=['tests/test_observability.py::test_normal_mode_hides_what_developer_mode_shows', 'tests/test_observability.py::test_mode_does_not_change_authority', 'tests/test_observability_workers.py::test_user_may_show_or_hide_workers_in_either_mode', 'tests/test_observability_workers.py::test_control_room_exposes_the_mode_and_workers_toggle', 'tests/test_observability_workers.py::test_detail_level_choice_survives_a_page_reload', 'tests/test_observability_workers.py::test_a_stored_detail_level_the_server_does_not_know_is_ignored'],
            next_action='EXTEND friday/ui_server.py with an explicit mode flag/endpoint gating which observability.py fields are returned, keeping friday/policy.py untouched.'),
         R7('ONB-001', '70', 'Progressive onboarding.', 'P1',
            acceptance='New user completes setup + useful task.',
