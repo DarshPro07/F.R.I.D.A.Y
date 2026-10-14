@@ -5644,6 +5644,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": "This slice closes the first named gap: the billing check missed an API key set in Claude Code's own settings. Before the CLI starts, FRIDAY now reads the settings files the child process will load: CLAUDE_CONFIG_DIR/settings.json (or <child USERPROFILE/HOME>/.claude/settings.json), plus <cwd>/.claud (build run, commit 624322197)",
         "next_action": "GAPS: Managed (enterprise) settings files are not read. A shortcut comment in cli.claude_settings records this.; A sandbox whose filesystem view differs from the host's is judged by the host path that its environment variables point to.; Two gaps from earlier runs are unchanged: prepaid credit is still declared through FRIDAY_PREPAID_CREDIT_PROVIDERS, and a billable run is still reported, not blocked.; Executor tests that build a real worker environment now read the machine's ~/.claude settings. That only affects a log warning, not what those tests assert.",
     }),
+    ('BIN-002', {
+        "status": PARTIAL,
+        "current_implementation": 'I followed the RULING 2026-10-13 slice exactly. The ruling says: "The untrusted EXE/DLL is opened read-only and parsed inside an OS-enforced quarantine. No loader invocation, sample execution, imports resolved through execution, external network fetches or host command spawning. Unsupported or malfo (build run, commit 80b10a1f5)',
+        "next_action": "GAPS: The row stays PARTIAL per the packet. The wording change in scripts/prd_v7_table.py ('inside an OS-enforced Quarantine', 'fails closed with quarantine_error') is waiting for another build to free that file.; Extra keys in a child report that otherwise passes the schema check are passed through, not filtered against an allowlist. That only matters if the parser child itself were compromised.; pe_worker has no reachability.DECLARED entry. test_reachability passes without one, and the packet says not to touch reachability.py.; I could not run ruff because it is not installed in .venv-build. | RULING 2026-10-13 (owner, docs/plans/build-harness/00-owner-directive-2026-10-13.md): Read-only byte parsing inside OS-enforced quarantine; never execute the binary.",
+    }),
 ]
 
 
