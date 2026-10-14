@@ -287,9 +287,40 @@ def launch_billing(launch: Launch, sandbox=None):
     """FAB-001: how this launch will be billed, judged from the environment the
     CLI will actually hold, by variable NAME only. An API-key variable moves
     Claude Code from the subscription to pay-as-you-go."""
+    env = child_environment(launch, sandbox)
+    return _billing(launch, env)
+
+
+def claude_settings(cwd: str, env) -> list[tuple[str, dict]]:
+    """Claude Code's own settings files the child will load: the user file
+    (CLAUDE_CONFIG_DIR, else the child's home/.claude) and the project's two.
+    shortcut: managed (enterprise) settings are not read, add them if a
+    machine ever has one."""
+    from pathlib import Path
+
+    home = env.get("CLAUDE_CONFIG_DIR") or os.path.join(
+        env.get("USERPROFILE") or env.get("HOME") or str(Path.home()), ".claude")
+    paths = (Path(home) / "settings.json", Path(cwd) / ".claude" / "settings.json",
+             Path(cwd) / ".claude" / "settings.local.json")
+    found = []
+    for path in paths:
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            # Claude Code cannot apply a file it cannot parse either.
+            logger.warning("claude: settings %s unreadable for billing check: %s", path, exc)
+            continue
+        if isinstance(data, dict):
+            found.append((str(path), data))
+    return found
+
+
+def _billing(launch: Launch, env):
     from friday import model_gateway
 
-    return model_gateway.claude_code_billing(child_environment(launch, sandbox))
+    return model_gateway.claude_code_billing(env, claude_settings(launch.cwd, env))
 
 
 class Run:
@@ -314,9 +345,7 @@ class Run:
         # HOST or SANDBOX, the worker gets the allowlisted environment - never
         # FRIDAY's own secrets (V7-D18). HOST keeps its reach, not the keys.
         env = child_environment(self.launch, self.sandbox)
-        from friday import model_gateway
-
-        billing = model_gateway.claude_code_billing(env)
+        billing = _billing(self.launch, env)
         if billing.billable:
             logger.warning("claude: %s", billing.report())
 

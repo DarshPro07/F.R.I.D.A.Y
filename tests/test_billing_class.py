@@ -15,6 +15,7 @@ The gateway tests run the real gateway against the scripted worker
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -161,12 +162,15 @@ def test_the_launch_environment_is_what_is_judged(tmp_path, monkeypatch):
     the worker stays on the subscription; a sandbox that hands one over is
     caught."""
     launch = cli.Launch(prompt="x", cwd=str(tmp_path))
+    # Pinned: Claude Code's own settings are judged too, so not the machine's.
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "no-config"))
     monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
     assert not cli.launch_billing(launch).billable
 
     class Box:
         def environment(self):
-            return {"ANTHROPIC_API_KEY": SECRET}
+            return {"ANTHROPIC_API_KEY": SECRET,
+                    "CLAUDE_CONFIG_DIR": str(tmp_path / "no-config")}
 
     assert cli.launch_billing(launch, Box()).billing_class == mg.BILLABLE_API
 
@@ -190,7 +194,8 @@ def test_execute_reports_billable_before_the_cli_starts(tmp_path, monkeypatch):
             yield cli.Event("result", {"result": "done"})
 
     monkeypatch.setattr(execution, "worker_environment",
-                        lambda *a, **k: {"ANTHROPIC_API_KEY": SECRET})
+                        lambda *a, **k: {"ANTHROPIC_API_KEY": SECRET,
+                                         "CLAUDE_CONFIG_DIR": str(tmp_path / "no-config")})
     monkeypatch.setattr(cli, "available", lambda: True)
     monkeypatch.setattr(cli, "Run", FakeRun)
     monkeypatch.setattr(RunManager, "saw",
@@ -207,3 +212,60 @@ def test_execute_reports_billable_before_the_cli_starts(tmp_path, monkeypatch):
     assert order.index("saw") < order.index("start")
     assert any("billable_api" in e and "ANTHROPIC_API_KEY" in e for e in seen)
     assert not any(SECRET in e for e in seen)
+
+
+# -- Claude Code's own settings can carry the key too -------------------------
+
+
+def _settings(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(data if isinstance(data, str) else json.dumps(data), encoding="utf-8")
+
+
+class Box:
+    def __init__(self, env):
+        self.env = env
+
+    def environment(self):
+        return dict(self.env)
+
+
+def test_a_key_in_claude_codes_user_settings_env_is_billable(tmp_path):
+    config = tmp_path / "config"
+    _settings(config / "settings.json", {"env": {"ANTHROPIC_API_KEY": SECRET, "FOO": "1"}})
+    launch = cli.Launch(prompt="x", cwd=str(tmp_path / "work"))
+    verdict = cli.launch_billing(launch, Box({"CLAUDE_CONFIG_DIR": str(config)}))
+    assert verdict.billing_class == mg.BILLABLE_API
+    assert len(verdict.variables) == 1
+    assert "ANTHROPIC_API_KEY" in verdict.variables[0]
+    assert "settings.json" in verdict.variables[0]
+    assert SECRET not in verdict.report() and SECRET not in repr(verdict)
+
+
+def test_an_api_key_helper_in_project_settings_is_billable(tmp_path):
+    work = tmp_path / "work"
+    _settings(work / ".claude" / "settings.local.json", {"apiKeyHelper": "get-key.sh"})
+    launch = cli.Launch(prompt="x", cwd=str(work))
+    verdict = cli.launch_billing(launch, Box({"CLAUDE_CONFIG_DIR": str(tmp_path / "none")}))
+    assert verdict.billable
+    assert "apiKeyHelper" in verdict.variables[0]
+    assert "get-key.sh" not in verdict.report()
+
+
+def test_settings_without_a_key_stay_on_the_subscription(tmp_path):
+    config, work = tmp_path / "config", tmp_path / "work"
+    _settings(config / "settings.json", {"env": {"FOO": "1"}, "model": "opus"})
+    _settings(work / ".claude" / "settings.json", "{ not json")
+    _settings(work / ".claude" / "settings.local.json", ["a", "list"])
+    launch = cli.Launch(prompt="x", cwd=str(work))
+    verdict = cli.launch_billing(launch, Box({"CLAUDE_CONFIG_DIR": str(config)}))
+    assert verdict.billing_class == mg.SUBSCRIPTION_CLI and verdict.variables == ()
+
+
+def test_the_user_settings_default_to_the_childs_home(tmp_path):
+    home = tmp_path / "home"
+    _settings(home / ".claude" / "settings.json", {"env": {"ANTHROPIC_AUTH_TOKEN": SECRET}})
+    launch = cli.Launch(prompt="x", cwd=str(tmp_path / "work"))
+    verdict = cli.launch_billing(launch, Box({"HOME": str(home), "USERPROFILE": str(home)}))
+    assert verdict.billable and "ANTHROPIC_AUTH_TOKEN" in verdict.variables[0]
+

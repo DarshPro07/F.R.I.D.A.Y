@@ -411,15 +411,23 @@ class ClaudeCodeBilling:
     def report(self) -> str:
         if not self.billable:
             return f"billing: {self.billing_class}"
-        return (f"billing: {self.billing_class} - {', '.join(self.variables)} is set in the "
-                "run's environment, so Claude Code bills the API, not the subscription")
+        return (f"billing: {self.billing_class} - {', '.join(self.variables)} is set for the "
+                "run, so Claude Code bills the API, not the subscription")
 
 
-def claude_code_billing(env) -> ClaudeCodeBilling:
-    """Judge a Claude Code environment by the PRESENCE of an API-key variable
-    name. The value is never read: membership only."""
-    found = tuple(name for name in CLAUDE_API_KEY_VARS if name in env)
-    return ClaudeCodeBilling(BILLABLE_API if found else SUBSCRIPTION_CLI, found)
+def claude_code_billing(env, settings=()) -> ClaudeCodeBilling:
+    """Judge a Claude Code launch by the PRESENCE of an API-key variable name in
+    its environment, or in the `env` block or `apiKeyHelper` of Claude Code's
+    own settings (`settings`: (source, parsed dict) pairs). Values are never
+    read: membership only."""
+    found = [name for name in CLAUDE_API_KEY_VARS if name in env]
+    for source, data in settings:
+        block = data.get("env")
+        if isinstance(block, dict):
+            found += [f"{name} in {source}" for name in CLAUDE_API_KEY_VARS if name in block]
+        if "apiKeyHelper" in data:
+            found.append(f"apiKeyHelper in {source}")
+    return ClaudeCodeBilling(BILLABLE_API if found else SUBSCRIPTION_CLI, tuple(found))
 
 
 # ---------------------------------------------------------------------------
