@@ -110,3 +110,97 @@ def test_a_worse_adaptive_policy_is_reported_as_a_regression(report):
     assert len(problems) == 3
     worse['suite_version'] += 1
     assert 're-freeze' in gate.compare_to_baseline(worse, baseline)[0]
+
+
+# ---- measured report (RULING 2026-10-13: real outcomes, not labels) --------
+
+from friday import task_class as TC  # noqa: E402
+
+E, S, D = ee.TIER_ECONOMY, ee.TIER_STANDARD, ee.TIER_DEEP
+
+
+def _rec(outcomes, run_id, tier, *, cls=TC.STANDARD, status='COMPLETE',
+         verification='tests-pass', rework=0, tokens=1000, provider='anthropic'):
+    outcomes.record(run_id, task_class=cls, route_level=ee.HERMES_SINGLE,
+                    tier=tier, provider=provider, prompt_tokens=tokens,
+                    status=status, verification=verification, rework=rework)
+
+
+def test_measured_report_ignores_synthetic_rows_and_label(tmp_path):
+    db = tmp_path / 'm.sqlite3'
+    outcomes = ee.RouteOutcomes(db)
+    for i in range(3):
+        _rec(outcomes, f'golden/{i}', E, provider='golden-eval')
+    _rec(outcomes, 'real/0', E)
+    _rec(outcomes, 'real/0/verify', E)
+    _rec(outcomes, 'real/1/verify', E)
+    report = gate.measured_report(db)
+    std = report[TC.STANDARD]
+    assert std['tiers'][E]['n'] == 1
+    assert std['status'] == 'UNMEASURED'
+    assert std['measured_min_tier'] is None
+    assert set(report) == set(TC.TASK_CLASSES)
+    # the human labels are stratification only: nothing measured, no verdict
+    assert gate.label_vs_measured(report) == []
+
+
+def test_measured_report_is_unmeasured_below_min_runs(tmp_path):
+    db = tmp_path / 'm.sqlite3'
+    report = gate.measured_report(db)
+    assert {c['status'] for c in report.values()} == {'UNMEASURED'}
+    outcomes = ee.RouteOutcomes(db)
+    for i in range(ee.MIN_RANKED_RUNS - 1):
+        _rec(outcomes, f'r/{i}', E)
+    std = gate.measured_report(db)[TC.STANDARD]
+    assert std['status'] == 'UNMEASURED'
+    assert std['measured_min_tier'] is None
+    assert std['tiers'][E]['first_pass_rate'] == 1.0
+
+
+def test_unverified_rows_are_not_success(tmp_path):
+    db = tmp_path / 'm.sqlite3'
+    outcomes = ee.RouteOutcomes(db)
+    for i in range(3):
+        _rec(outcomes, f'r/{i}', E, verification='')
+    std = gate.measured_report(db)[TC.STANDARD]
+    tier = std['tiers'][E]
+    assert std['status'] == 'UNVERIFIED'
+    assert std['measured_min_tier'] is None
+    assert tier['verified'] == 0 and tier['first_pass_rate'] == 0.0
+    assert tier['completion_rate'] == 1.0
+    assert tier['cost_per_success'] == float('inf')
+
+
+def test_measured_min_tier_picks_cheapest_tier_meeting_threshold(tmp_path):
+    db = tmp_path / 'm.sqlite3'
+    outcomes = ee.RouteOutcomes(db)
+    _rec(outcomes, 'e/0', E)
+    _rec(outcomes, 'e/1', E)
+    _rec(outcomes, 'e/2', E, status='FAILED')
+    for tier in (S, D):
+        for i in range(3):
+            _rec(outcomes, f'{tier}/{i}', tier)
+    report = gate.measured_report(db)
+    std = report[TC.STANDARD]
+    assert std['status'] == 'MEASURED'
+    assert std['measured_min_tier'] == S
+    suite = (gate.Task('upd', 'update the retry limit', S),
+             gate.Task('imp', 'remove the unused import', E))
+    diff = gate.label_vs_measured(report, suite=suite)
+    assert diff == [{'task': 'imp', 'task_class': TC.STANDARD,
+                     'label': E, 'measured': S}]
+
+
+def test_rework_and_verify_rows_raise_measured_cost(tmp_path):
+    db = tmp_path / 'm.sqlite3'
+    outcomes = ee.RouteOutcomes(db)
+    for i in range(3):
+        _rec(outcomes, f'r/{i}', E)
+    assert gate.measured_report(db)[TC.STANDARD]['tiers'][E]['cost_per_success'] == 1000
+    _rec(outcomes, 'r/0', E, rework=1)
+    _rec(outcomes, 'r/0/verify', E, tokens=300)
+    tier = gate.measured_report(db)[TC.STANDARD]['tiers'][E]
+    assert tier['n'] == 3 and tier['verified'] == 3
+    assert tier['verification_cost'] == 300
+    assert tier['first_pass_rate'] == 2 / 3
+    assert tier['cost_per_success'] == (3000 + 1000 + 1000 + 300) / 3

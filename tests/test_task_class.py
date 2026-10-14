@@ -149,3 +149,17 @@ def test_a_work_verb_with_a_mechanical_phrase_is_not_simple():
 
 def test_empty_request_is_simple_not_an_error():
     assert TC.classify("").task_class == TC.SIMPLE
+
+
+def test_removal_is_critical_by_target():
+    """COG-002 RULING 2026-10-13: a removal is classified by what it removes,
+    not by its verb. Destroying data is CRITICAL whatever the verb or where it
+    sits; tidying code is ordinary bounded work."""
+    for text in ("remove the production database",
+                 "remove all the old backups",
+                 "i want you to delete the production database"):
+        assert TC.classify(text).task_class == TC.CRITICAL, text
+    for text in ("delete the unused import",
+                 "remove the unused import",
+                 "remove the debug print"):
+        assert TC.classify(text).task_class == TC.STANDARD, text

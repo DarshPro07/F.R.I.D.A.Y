@@ -209,3 +209,21 @@ def test_failed_runs_have_zero_value(tmp_path):
     outcomes.record('hermes-f', task_class='x', route_level='hermes_single', tier='economy', prompt_tokens=10, status='FAILED')
     row = outcomes.by_class('x')[0]
     assert outcomes.execution_value(row) == 0.0
+
+
+def test_removal_is_classified_by_target_not_verb():
+    """COG-002 RULING 2026-10-13: the target decides, and an unknown target
+    fails closed to high consequence."""
+    assert ee.removal_consequence('remove the unused import') == 'low'
+    assert ee.removal_consequence('delete the debug print from server.py') == 'low'
+    assert ee.removal_consequence('remove the foo') == 'high'
+    assert ee.removal_consequence('remove the production database') == 'high'
+    assert ee.removal_consequence('remove the unused import and delete the backups') == 'high'
+    assert ee.removal_consequence('i want you to delete the production database') == 'high'
+    assert ee.removal_consequence('can you delete the old backups') == 'high'
+    assert ee.removal_consequence('how do I remove a file') == ''
+    assert ee.removal_consequence('update the retry limit') == ''
+    econ = ee.classify_task('remove the production database')
+    assert 'removal' in econ.signals and econ.consequence == 'high'
+    econ = ee.classify_task('delete the unused import')
+    assert 'removal' not in econ.signals and econ.consequence != 'high'

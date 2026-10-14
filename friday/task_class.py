@@ -73,7 +73,7 @@ _LONG_RUNNING = _words((
 #: Explicitly destructive, financial, publishing or privileged phrasing.
 #: Whole words only (see module docstring).
 _CRITICAL = _words((
-    "delete", "permanently", "wipe", "format the", "drop table", "rm -rf",
+    "permanently", "wipe", "format the", "drop table", "rm -rf",
     "purchase", "buy", "pay", "transfer money", "send money", "checkout",
     "publish", "post to", "post it", "send the email", "send email",
     "send it to", "deploy", "to production", "password", "passwords",
@@ -139,6 +139,8 @@ def classify(text: str, *, code_refs: int = 0, acceptance: int = 0) -> Classific
     clauses = _clauses(lowered)
 
     critical = _hits(_CRITICAL, lowered)
+    if ee.removal_consequence(lowered) == "high":
+        critical += ("removal",)
     if critical:
         return Classification(CRITICAL, "destructive, financial, publishing or "
                               "security wording: exact-action approval path",

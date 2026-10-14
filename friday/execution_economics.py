@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 _HIGH_CONSEQUENCE = (
     "auth", "security", "credential", "secret", "payment", "policy",
     "permission", "guardrail", "encrypt", "migration", "schema",
-    "delete", "drop ", "deploy", "publish", "release",
+    "drop ", "deploy", "publish", "release",
 )
 _MECHANICAL = (
     "count", "list files", "how many", "file size", "rename file",
@@ -58,7 +58,8 @@ _CLAUSE_START = (r"(?:^|[,;:]\s+|\b(?:then|and)\s+)(?:please\s+)?"
 #: ("stop the music") unless it is "stop X from <doing>". "rename"/"move" are
 #: also the literal mechanical commands "rename file"/"move file", so they are
 #: work verbs only when not followed by "file(s)". Destructive verbs (delete,
-#: drop) are deliberately absent: task_class._CRITICAL owns those.
+#: drop) are deliberately absent: `removal_consequence` and task_class._CRITICAL
+#: own those.
 _WORK_VERB = re.compile(
     _CLAUSE_START + r"(?:change|fix|implement|refactor|build|write|create|add|"
     r"make|prevent|update|remove|replace|migrate|extend|"
@@ -103,11 +104,53 @@ def wants_a_change(text: str) -> bool:
     return bool(_WORK_VERB.search(" ".join((text or "").lower().split())))
 
 
+#: Removal is classified by its target, not its verb (COG-002, RULING
+#: 2026-10-13). The verb matches anywhere, so an indirect imperative ("i want
+#: you to delete ...") still fails closed.
+_REMOVAL_VERB = re.compile(r"\b(?:delet|remov|eras|purg|destroy|discard)\w*\b")
+#: "can you"/"could you" open a request, not a question.
+_QUESTION_OPENER = re.compile(
+    r"^(?:how|what|why|where|when|which|who|is|are|does|do i|should i|can i)\b")
+_SPAN_END = re.compile(r"[,;.]|\b(?:then|and)\b")
+_DETERMINER = re.compile(r"\b(?:the|a|an|this|that|these|those|my|our|all|"
+                         r"every|some|any)\b")
+_LOCATION = re.compile(r"\s(?:from|in)\b.*$")
+#: The only targets whose removal is low consequence; anything else is high.
+SAFE_REMOVAL_TARGETS = frozenset({
+    "unused import", "dead import", "unused variable", "dead variable",
+    "unused function", "dead function", "unused code", "dead code",
+    "debug print", "debug print line", "debug log line", "comment", "todo",
+    "typo", "trailing whitespace", "docstring",
+})
+
+
+def removal_consequence(text: str) -> str:
+    """"high" | "low" | "" for a request that removes something: "" when it
+    names no removal or is a question, "low" only when every removed target is
+    on SAFE_REMOVAL_TARGETS, else "high" (an unknown target fails closed).
+    Deterministic; the one owner of this rule."""
+    lowered = " ".join((text or "").lower().split())
+    if _QUESTION_OPENER.match(lowered):
+        return ""
+    verbs = list(_REMOVAL_VERB.finditer(lowered))
+    if not verbs:
+        return ""
+    for verb in verbs:
+        span = _SPAN_END.split(lowered[verb.end():], maxsplit=1)[0]
+        span = _LOCATION.sub("", " " + _DETERMINER.sub(" ", span))
+        target = " ".join(span.split())
+        if target.removesuffix("s") not in SAFE_REMOVAL_TARGETS:
+            return "high"
+    return "low"
+
+
 def classify_task(text: str, *, code_refs: int = 0,
                   acceptance: int = 0) -> TaskEconomics:
     """One deterministic pass over the task text. No model calls."""
     lowered = " ".join((text or "").lower().split())
-    work = wants_a_change(lowered)
+    # A removal is a change too; its target decides the consequence below.
+    removal = removal_consequence(lowered)
+    work = wants_a_change(lowered) or bool(removal)
 
     def hits(table):
         return tuple(s for s in table if s in lowered)
@@ -123,6 +166,8 @@ def classify_task(text: str, *, code_refs: int = 0,
     mech = () if work else whole_words(_MECHANICAL)
     deep = hits(_DEEP_REASONING)
     high = hits(_HIGH_CONSEQUENCE)
+    if removal == "high":
+        high += ("removal",)
     tiny = hits(_TINY_CHANGE)
     multi = hits(_MULTI_STREAM)
     research = hits(_RESEARCH)

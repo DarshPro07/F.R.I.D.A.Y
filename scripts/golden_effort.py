@@ -27,12 +27,19 @@ first-pass quality at or above `QUALITY_THRESHOLD`, and no deep-labelled task
 routed below deep. Every (policy, task) is recorded through
 `execution_economics.RouteOutcomes` into a throwaway database (never the live
 ledger) and read back, so the durable-ledger path is exercised on every run.
+
+RULING 2026-10-13 (docs/plans/build-harness/00-owner-directive-2026-10-13.md,
+Ruling 6): QUALITY_THRESHOLD (0.90) and TIER_PRICE (1:3:5) are PROVISIONAL, and
+the `min_tier` labels are stratification only, not a quality oracle. The
+oracle is `measured_report`: real RouteOutcomes rows, with retries (rework)
+and verification cost counted. `label_vs_measured` shows where they disagree.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -42,6 +49,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from friday import execution_economics as ee  # noqa: E402
+from friday import task_class as TC  # noqa: E402
 
 BASELINE = ROOT / "docs" / "architecture" / "effort-policy-baseline.json"
 
@@ -241,6 +249,78 @@ def build_report(db_path=None) -> dict:
         "verdict": judge(policies["adaptive"], policies["always_deep"]),
         "rows": results["adaptive"]["rows"],
     }
+
+
+def measured_report(db_path=None, *, min_runs: int = ee.MIN_RANKED_RUNS) -> dict:
+    """The measured oracle (RULING 2026-10-13): per task class, per tier, what
+    real runs achieved and cost. Reads RouteOutcomes; `golden-eval` rows (the
+    label simulation above) and verifier rows are never counted as runs.
+
+    A run is verified when its status is COMPLETE and its verification is
+    non-empty: an empty verification is unverified, never a success. Cost per
+    success is everything the tier spent (run_cost, which already prices each
+    rework as a repair) plus its verification cost, over verified runs.
+
+    Assumed: a verifier run is a sibling row named '<work_run_id>/verify'. No
+    writer produces those yet; revisit if wrong.
+
+    Status per class: UNMEASURED (no tier has `min_runs` runs), UNVERIFIED
+    (rows exist, none verified), MEASURED (a tier meets QUALITY_THRESHOLD) or
+    BELOW_THRESHOLD. Only MEASURED names a `measured_min_tier`."""
+    outcomes = ee.RouteOutcomes(db_path)
+    report = {}
+    for cls in TC.TASK_CLASSES:
+        groups: dict[str, list[dict]] = {}
+        for row in outcomes.by_class(cls, limit=100_000):
+            if (row["provider"] == "golden-eval"
+                    or row["work_run_id"].endswith("/verify")):
+                continue
+            groups.setdefault(row["tier"], []).append(row)
+        tiers = {}
+        for tier, rows in groups.items():
+            n = len(rows)
+            verified = [r for r in rows
+                        if r["status"] == "COMPLETE" and r["verification"] != ""]
+            verification_cost = sum(
+                outcomes.run_cost(v) for r in rows
+                for v in outcomes.by_run_prefix(r["work_run_id"] + "/verify")
+                if v["work_run_id"] == r["work_run_id"] + "/verify")
+            spent = sum(outcomes.run_cost(r) for r in rows) + verification_cost
+            tiers[tier] = {
+                "n": n, "verified": len(verified),
+                "first_pass_rate": sum(r["rework"] == 0 for r in verified) / n,
+                "completion_rate": sum(r["status"] == "COMPLETE" for r in rows) / n,
+                "verification_cost": verification_cost,
+                "cost_per_success": (spent / len(verified) if verified
+                                     else math.inf)}
+        capable = [t for t, g in tiers.items() if t in TIER_RANK
+                   and g["n"] >= min_runs
+                   and g["first_pass_rate"] >= QUALITY_THRESHOLD]
+        best = min(capable, key=TIER_RANK.__getitem__) if capable else None
+        if tiers and not any(g["verified"] for g in tiers.values()):
+            status = "UNVERIFIED"
+        elif all(g["n"] < min_runs for g in tiers.values()):
+            status = "UNMEASURED"
+        else:
+            status = "MEASURED" if best else "BELOW_THRESHOLD"
+        report[cls] = {"status": status, "measured_min_tier": best,
+                       "tiers": tiers}
+    return report
+
+
+def label_vs_measured(report: dict, suite: tuple[Task, ...] = SUITE) -> list[dict]:
+    """Suite tasks whose human `min_tier` label disagrees with the measured
+    cheapest tier of the class live runs record them under (TC.classify, the
+    key hermes_bridge uses). A class with no measured tier has nothing to
+    disagree with, so it lists nothing."""
+    diff = []
+    for task in suite:
+        cls = TC.classify(task.text).task_class
+        measured = report[cls]["measured_min_tier"]
+        if measured is not None and measured != task.min_tier:
+            diff.append({"task": task.id, "task_class": cls,
+                         "label": task.min_tier, "measured": measured})
+    return diff
 
 
 def compare_to_baseline(report: dict, baseline: dict) -> list[str]:
