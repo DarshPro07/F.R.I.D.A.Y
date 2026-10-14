@@ -102,9 +102,9 @@ def _run(tmp_path):
     return SimpleNamespace(envelope=envelope)
 
 
-def _port(spec, *, gateway=None, supervisor=None, store=None) -> R.StagePort:
+def _port(spec, *, gateway=None, supervisor=None, store=None, gate=OPEN) -> R.StagePort:
     cache = R.ResultCache(store or Store(":memory:"), "ws")
-    return R.StagePort(spec, None, cache, _model, OPEN, gateway=gateway,
+    return R.StagePort(spec, None, cache, _model, gate, gateway=gateway,
                        supervisor=supervisor)
 
 
@@ -189,6 +189,31 @@ async def test_a_schema_violating_answer_is_retried_once_and_the_second_answer_i
     retry = gateway.requests[1].context_package[-1]["content"]
     assert "ok" in retry and "boolean" in retry, "the retry says what was wrong"
     assert out["stages"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_retry_is_a_dispatch_of_its_own_and_a_spent_budget_stops_it(tmp_path):
+    class SpentAfterOne(OpenGate):
+        def __init__(self) -> None:
+            self.admits, self.open = 0, 0
+
+        def admit(self, run, stage, arguments) -> str:
+            self.admits += 1
+            if self.admits > 1:
+                raise R.BudgetStop("the run's token budget is spent")
+            self.open += 1
+            return "lease"
+
+        def release(self, lease: str) -> None:
+            self.open -= 1
+
+    spec = _spec(("look", "lookup", "economy"))
+    gateway, gate = FakeGateway(['{"ok": "yes"}', '{"ok": true}']), SpentAfterOne()
+    port = _port(spec, gateway=gateway, gate=gate)
+    with pytest.raises(R.BudgetStop):
+        await port(R.CAPABILITY, _args(spec), _run(tmp_path))
+    assert len(gateway.requests) == 1, "the retry was not sent past the budget"
+    assert gate.open == 0, "the first attempt's lease was released before the retry asked"
 
 
 @pytest.mark.asyncio

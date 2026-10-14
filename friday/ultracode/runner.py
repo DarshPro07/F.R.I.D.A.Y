@@ -427,16 +427,19 @@ class StagePort:
 
     async def _dispatch(self, stage: Stage, values: list, model: str,
                         arguments: dict, run) -> dict:
-        lease = self._gate.admit(run, stage, arguments)
-        try:
-            if self._agent is not None:
-                result = await self._agent(stage, values, model)
-            elif stage.template in CODE_TEMPLATES:
-                result = await self._delegate(stage, values, model, run)
-            else:
-                result = await self._infer(stage, values, run)
-        finally:
-            self._gate.release(lease)
+        if self._agent is None and stage.template not in CODE_TEMPLATES:
+            # An inference is gated per call, not per stage: its retry is a
+            # model call of its own and must pass the budget too.
+            result = await self._infer(stage, values, run, arguments)
+        else:
+            lease = self._gate.admit(run, stage, arguments)
+            try:
+                if self._agent is not None:
+                    result = await self._agent(stage, values, model)
+                else:
+                    result = await self._delegate(stage, values, model, run)
+            finally:
+                self._gate.release(lease)
         self._gate.settle(run, stage, arguments)
         return result
 
@@ -483,10 +486,10 @@ class StagePort:
         return {"stage": stage.id, "status": status,
                 "work_run_id": out.get("work_run_id", ""), "text": text}
 
-    async def _infer(self, stage: Stage, values: list, run) -> dict:
+    async def _infer(self, stage: Stage, values: list, run, arguments: dict) -> dict:
         """One gateway inference, its answer checked against the stage's schema.
         A wrong answer is asked for once more with the problem stated; a second
-        wrong answer raises `SchemaViolation`."""
+        wrong answer raises `SchemaViolation`. Each call takes its own lease."""
         import asyncio
         import json
 
@@ -508,10 +511,13 @@ class StagePort:
                 objective_id=run.envelope.objective_id, task_class=mg.STANDARD,
                 context_package=messages,
                 preferred_quality_tier=_QUALITY_TIERS[stage.tier], worker="ultracode")
+            lease = self._gate.admit(run, stage, arguments)
             try:
                 answer = await asyncio.to_thread(self._gateway.infer, request)
             except mg.GatewayUnavailable as exc:
                 return self._unavailable(stage, f"model gateway unavailable: {exc}")
+            finally:
+                self._gate.release(lease)
             if answer.status == "refused":
                 raise PolicyError(f"stage {stage.id!r}: the model gateway refused "
                                   f"({answer.dispatch or 'no reason given'})")
