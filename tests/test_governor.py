@@ -916,3 +916,58 @@ def test_work_past_its_deadline_or_silent_is_reaped_at_any_pressure():
     gov.reduce_running()
     assert sorted(gone) == ["late", "quiet"]
     assert gov.heartbeat(late.lease) is False and gov.heartbeat(live.lease) is True
+
+
+# -- CPU performance limit (RUL-THERMAL) -------------------------------------
+
+
+def test_cpu_perf_limit_raises_pressure_only_under_load():
+    def judged(cpu, limit):
+        s = sample(cpu=cpu)
+        s.cpu_perf_limit_percent = limit
+        return G.assess(s)    # no baseline: the CPU share alone counts nothing
+
+    idle = judged(10.0, 60.0)
+    assert idle.level == G.NORMAL and idle.reasons == []
+    warm = judged(80.0, 85.0)
+    assert warm.level == G.ELEVATED
+    assert any("performance limit" in r for r in warm.reasons)
+    hot = judged(80.0, 60.0)
+    assert hot.level == G.HIGH
+    assert any("performance limit" in r for r in hot.reasons)
+    unknown = judged(80.0, None)
+    assert not any("performance limit" in r for r in unknown.reasons)
+    assert "cpu_perf_limit_percent" in sample().to_dict()
+
+
+def test_perf_limit_reader_parses_typeperf_and_degrades_to_none(monkeypatch):
+    import shutil
+    import subprocess
+
+    calls = []
+    out = ('\r\n"(PDH-CSV 4.0)","\\\\H\\Processor Information(_Total)\\% Performance Limit"'
+           '\r\n"10/13/2026 20:42:27.559","63.000000"\r\nExiting, please wait...')
+
+    def runner(result):
+        def run(cmd, **kw):
+            calls.append(cmd)
+            if isinstance(result, BaseException):
+                raise result
+            return subprocess.CompletedProcess(cmd, 0, stdout=result, stderr="")
+        return run
+
+    def read(result, platform="win32"):
+        monkeypatch.setattr(G, "_perf_limit_last", None)
+        monkeypatch.setattr(G.sys, "platform", platform)
+        monkeypatch.setattr(shutil, "which", lambda name: "C:/typeperf.exe")
+        monkeypatch.setattr(subprocess, "run", runner(result))
+        return G._perf_limit()
+
+    assert read(out) == 63.0
+    assert G._perf_limit() == 63.0 and len(calls) == 1    # cached within the TTL
+    assert read(OSError("gone")) is None
+    assert read(subprocess.CalledProcessError(1, "typeperf")) is None
+    assert read("garbage\r\nno counter here") is None
+    assert G._perf_limit() is None                          # a failure is cached too
+    calls.clear()
+    assert read(out, platform="linux") is None and calls == []

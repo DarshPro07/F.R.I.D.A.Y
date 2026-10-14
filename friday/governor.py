@@ -157,6 +157,11 @@ class Thresholds:
     gpu_memory_high: float = 90.0
     gpu_memory_critical: float = 98.0
     gpu_busy_high: float = 95.0
+    # Windows '% Performance Limit' (100 = unthrottled): a CPU held below its
+    # limit while busy is running hot or short of power, so work sheds early
+    perf_limit_elevated: float = 90.0
+    perf_limit_high: float = 70.0
+    perf_limit_min_cpu: float = 50.0
     # throughput as a share of the fastest link that is up: a saturated link
     # starves every network-bound worker, so optional work yields first
     network_busy_share: float = 0.90
@@ -201,6 +206,9 @@ class Sample:
     network_mbps: float | None = None
     #: Fastest link among the interfaces that are up, megabits per second.
     network_link_mbps: float | None = None
+    #: Windows '% Performance Limit' of the processor (100 = unthrottled), the
+    #: thermal/power-throttling proxy readable without admin rights; else None.
+    cpu_perf_limit_percent: float | None = None
 
     def total_gb(self) -> float | None:
         if self.ram_total_gb:
@@ -219,6 +227,7 @@ class Sample:
                 "gpu_percent": self.gpu_percent,
                 "network_mbps": self.network_mbps,
                 "network_link_mbps": self.network_link_mbps,
+                "cpu_perf_limit_percent": self.cpu_perf_limit_percent,
                 "disk_free_gb": self.disk_free_gb,
                 "browser_processes": self.browser_processes,
                 "friday_rss_mb": self.friday_rss_mb}
@@ -335,6 +344,44 @@ def _gpu() -> tuple[float | None, float | None]:
     return mem, util
 
 
+#: typeperf takes about a second to start; a reading this recent is reused,
+#: and so is a failure, so a host without the counter does not respawn it.
+PERF_LIMIT_TTL_S = 30.0
+_perf_limit_last: tuple[float, float | None] | None = None   # (monotonic time, value)
+_perf_limit_lock = threading.Lock()
+
+
+def _perf_limit() -> float | None:
+    """The processor's '% Performance Limit' through typeperf (Windows, no
+    admin rights), else None. Below 100 means thermal or power throttling."""
+    global _perf_limit_last
+    if sys.platform != "win32":
+        return None
+    import shutil
+    import subprocess
+
+    with _perf_limit_lock:
+        now = time.monotonic()
+        if _perf_limit_last is not None and now - _perf_limit_last[0] < PERF_LIMIT_TTL_S:
+            return _perf_limit_last[1]
+        value = None
+        exe = shutil.which("typeperf")
+        if exe:
+            try:
+                out = subprocess.run(
+                    [exe, r"\Processor Information(_Total)\% Performance Limit", "-sc", "1"],
+                    capture_output=True, text=True, timeout=5, check=True,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+                lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+                head = next(i for i, ln in enumerate(lines) if ln.startswith('"(PDH-CSV'))
+                value = float(lines[head + 1].split(",")[-1].strip('"'))
+            except (OSError, subprocess.SubprocessError, ValueError, IndexError,
+                    StopIteration) as exc:
+                logger.warning("cpu performance limit unreadable: %s", exc)
+        _perf_limit_last = (time.monotonic(), value)
+        return value
+
+
 def sample_machine(*, cpu_interval: float = 0.0) -> Sample:
     """Measure. `cpu_interval=0` returns the CPU since the last reading,
     which is what a periodic sampler wants - at least `CPU_MIN_WINDOW_S` of
@@ -375,7 +422,8 @@ at=time.time(), cpu_percent=cpu,
                   ram_available_gb=mem.available / 1024**3,
                   disk_free_gb=disk_free, browser_processes=browsers,
                   friday_rss_mb=rss, ram_total_gb=mem.total / 1024**3,
-                  commit_available_gb=commit_available, commit_limit_gb=commit_limit)
+                  commit_available_gb=commit_available, commit_limit_gb=commit_limit,
+                  cpu_perf_limit_percent=_perf_limit())
 
 
 # -- the person and the power (BG-001) ---------------------------------------
@@ -592,6 +640,13 @@ def assess(sample: Sample, thresholds: Thresholds = Thresholds(), *,
 
     if sample.gpu_percent is not None and sample.gpu_percent >= t.gpu_busy_high:
         bump(ELEVATED, f"GPU {sample.gpu_percent:.0f}% busy")
+    limit = sample.cpu_perf_limit_percent
+    if limit is not None and cpu >= t.perf_limit_min_cpu:
+        why = f"CPU held to {limit:.0f}% of its performance limit (thermal or power throttling)"
+        if limit < t.perf_limit_high:
+            bump(HIGH, why)
+        elif limit < t.perf_limit_elevated:
+            bump(ELEVATED, why)
     if sample.network_mbps is not None and sample.network_link_mbps:
         if sample.network_mbps / sample.network_link_mbps >= t.network_busy_share:
             bump(ELEVATED, f"network {sample.network_mbps:.0f} of "
