@@ -116,6 +116,24 @@ class FabricError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class OpContract:
+    """What one operation does, declared so overlap can compare behaviour.
+
+    Owner ruling 2026-10-13: two providers are equivalent only when inputs,
+    outputs, semantics, side effects, errors and permission requirements
+    match. Permissions are not repeated here: the effective requirement is
+    derived from the provider exactly as `call()` enforces it.
+    """
+
+    op: str
+    inputs: tuple[str, ...]
+    outputs: tuple[str, ...]
+    semantics: str
+    side_effects: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Provider:
     """
     One upstream capability, declared. Registering this runs nothing.
@@ -168,6 +186,9 @@ class Provider:
     #: adapter module the descriptor was discovered in.
     module: str = ""
     notes: str = ""
+    #: Behaviour contracts for some of `operations`, at most one per op.
+    #: Overlap judges behaviour where both sides declare one.
+    contracts: tuple[OpContract, ...] = ()
 
     def __post_init__(self) -> None:
         if self.family not in FAMILIES:
@@ -184,6 +205,16 @@ class Provider:
             raise FabricError(f"{self.id}: bad cost_class {self.cost_class!r}")
         if not self.operations:
             raise FabricError(f"{self.id}: declares no operations")
+        seen: set[str] = set()
+        for contract in self.contracts:
+            if contract.op not in self.operations:
+                raise FabricError(
+                    f"{self.id}: contract for undeclared operation "
+                    f"{contract.op!r}")
+            if contract.op in seen:
+                raise FabricError(
+                    f"{self.id}: two contracts for operation {contract.op!r}")
+            seen.add(contract.op)
 
         # NON_NEGOTIABLE 9, made structural. An AGPL provider that declared
         # ADAPTER would be imported into a proprietary process by whoever
@@ -360,16 +391,33 @@ def has_benchmark_improvement(provider: Provider,
     return not _evidence_problem(claim, provider, covering)
 
 
+def _same_behaviour(a: Provider, b: Provider, op: str) -> bool | None:
+    """Whether `a` and `b` behave the same for `op`; None when either side
+    declares no contract for it (unproven, not different). Permissions
+    compared are the effective ones - the rule `call()` enforces."""
+    ca = next((c for c in a.contracts if c.op == op), None)
+    cb = next((c for c in b.contracts if c.op == op), None)
+    if ca is None or cb is None:
+        return None
+    required = [frozenset() if op in p.open_operations
+                else frozenset(p.permissions) for p in (a, b)]
+    return (all(frozenset(getattr(ca, f)) == frozenset(getattr(cb, f))
+                for f in ("inputs", "outputs", "side_effects", "errors"))
+            and ca.semantics.strip().casefold() == cb.semantics.strip().casefold()
+            and required[0] == required[1])
+
+
 def find_overlaps(provider: Provider,
                   existing: Iterable[Provider] | None = None,
                   ) -> list[tuple[str, str]]:
     """(existing provider id, operation) for each operation `provider` shares
     with a runnable provider of the same family.
 
-    Operation names are the registry's only capability vocabulary, so this is
-    name equality within a family, not a judgement about what code does.
-    REFERENCE_ONLY providers never count: they run nothing, so they cover
-    nothing. `existing` defaults to every other provider in the registry; the
+    Names must match, and where both sides declare an `OpContract` for the
+    operation the behaviour must match too (`_same_behaviour`). A contract
+    missing on either side is unproven and still counts as covered, so the
+    safe default stays REFERENCE_ONLY. REFERENCE_ONLY providers never count:
+    they run nothing, so they cover nothing. `existing` defaults to every other provider in the registry; the
     registry loader passes only the providers admitted before this one.
     """
     pool = registry().values() if existing is None else existing
@@ -379,23 +427,36 @@ def find_overlaps(provider: Provider,
             if other.id != provider.id
             and other.family == provider.family
             and other.integration_mode != REFERENCE_ONLY
-            for op in other.operations if op in mine]
+            for op in other.operations
+            if op in mine and _same_behaviour(provider, other, op) is not False]
 
 
 def _recorded_by_overlap(provider: Provider,
-                         overlaps: list[tuple[str, str]]) -> Provider:
+                         overlaps: list[tuple[str, str]],
+                         pool: Iterable[Provider] | None = None) -> Provider:
     """`provider` as REFERENCE_ONLY, with the overlap written into its notes.
+
+    `pool` holds the covering providers (default: the registry), so each
+    covering op can say whether its contracts match or are undeclared.
 
     The notes also carry the CAP-FORGE-014 value-gate verdict for the fully
     covered provider (always REJECT here); the provider is still kept, as a
     reference record only, so the note says so rather than implying removal.
     """
+    others = {p.id: p for p in (registry().values() if pool is None else pool)}
     covering: dict[str, list[str]] = {}
+    marked: dict[tuple[str, str], list[str]] = {}
     for existing_id, op in overlaps:
         covering.setdefault(existing_id, []).append(op)
+        # An id outside `pool` has no contract we can see: undeclared.
+        other = others.get(existing_id)
+        mark = ("equivalent (contracts match)"
+                if other is not None and _same_behaviour(provider, other, op)
+                else "same name, contract undeclared")
+        marked.setdefault((existing_id, mark), []).append(op)
     evidence = "; ".join(
-        f"{existing_id} answers {', '.join(ops)}"
-        for existing_id, ops in covering.items())
+        f"{existing_id} answers {', '.join(ops)} [{mark}]"
+        for (existing_id, mark), ops in marked.items())
     claim = _benchmark_claim(provider)
     rejected = (f" Its stated BENCHMARK_IMPROVEMENT was not honoured: "
                 f"{_evidence_problem(claim, provider, covering)}."
@@ -440,7 +501,7 @@ def _apply_overlap_policy(found: dict[str, Provider]) -> dict[str, Provider]:
             if ({op for _, op in overlaps} >= set(provider.operations)
                     and not has_benchmark_improvement(
                         provider, {existing for existing, _ in overlaps})):
-                provider = _recorded_by_overlap(provider, overlaps)
+                provider = _recorded_by_overlap(provider, overlaps, pool)
                 logger.warning(
                     "fabric provider %s recorded %s: %s", provider_id,
                     REFERENCE_ONLY, provider.notes.rsplit("OVERLAP: ", 1)[-1])

@@ -6,6 +6,8 @@ benchmark shows an improvement.
 
 from __future__ import annotations
 
+from dataclasses import replace as _replace
+
 import pytest
 
 from friday import fabric
@@ -15,11 +17,14 @@ PIN = "a" * 40
 
 def _provider(pid: str, ops: tuple[str, ...], *, family: str = "scraping",
               upstream: str = "someorg/repo", mode: str = fabric.ADAPTER,
-              notes: str = "") -> fabric.Provider:
+              notes: str = "", contracts: tuple = (),
+              permissions: tuple[str, ...] = (),
+              open_ops: tuple[str, ...] = ()) -> fabric.Provider:
     return fabric.Provider(
         id=pid, family=family, upstream=upstream, operations=ops,
         risk="low", license_mode=fabric.PERMISSIVE, integration_mode=mode,
-        commit=PIN if upstream else "", notes=notes)
+        commit=PIN if upstream else "", notes=notes, contracts=contracts,
+        permissions=permissions, open_operations=open_ops)
 
 
 @pytest.fixture
@@ -355,3 +360,82 @@ def test_accepted_overlaps_are_real_and_still_runnable():
         assert covered >= set(provider.operations), (
             f"{pid} no longer overlaps an earlier provider; drop it from "
             f"ACCEPTED_OVERLAPS")
+
+
+# --- behaviour contracts (owner ruling 2026-10-13: compare behaviour, not names)
+
+FETCH = fabric.OpContract(
+    op="fetch", inputs=("url", "timeout"), outputs=("body", "status"),
+    semantics="Fetch a URL and return its body", side_effects=("network",),
+    errors=("timeout", "http_error"))
+
+
+def test_same_name_different_declared_contract_is_not_overlap(load):
+    other = _replace(FETCH, semantics="Fetch a row from a database")
+    old = _provider("old", ("fetch",), contracts=(FETCH,))
+    new = _provider("new", ("fetch",), contracts=(other,))
+    assert fabric.find_overlaps(new, [old]) == []
+    reg = load(old, new)
+    assert reg["new"].integration_mode == fabric.ADAPTER
+    assert "OVERLAP" not in reg["new"].notes
+
+
+def test_same_name_same_contract_is_still_recorded_reference_only_and_note_says_equivalent(load):
+    reg = load(_provider("old", ("fetch",), contracts=(FETCH,)),
+               _provider("dup", ("fetch",), contracts=(FETCH,)))
+    assert reg["dup"].integration_mode == fabric.REFERENCE_ONLY
+    assert "old answers fetch" in reg["dup"].notes
+    assert "equivalent (contracts match)" in reg["dup"].notes
+    assert "contract undeclared" not in reg["dup"].notes
+
+
+def test_same_name_one_side_undeclared_stays_covered(load):
+    declared = _provider("x", ("fetch",), contracts=(FETCH,))
+    bare = _provider("y", ("fetch",))
+    assert fabric.find_overlaps(declared, [bare]) == [("y", "fetch")]
+    assert fabric.find_overlaps(bare, [declared]) == [("x", "fetch")]
+    reg = load(_provider("old", ("fetch",), contracts=(FETCH,)),
+               _provider("dup", ("fetch",)))
+    assert reg["dup"].integration_mode == fabric.REFERENCE_ONLY
+    assert "same name, contract undeclared" in reg["dup"].notes
+    assert "equivalent (contracts match)" not in reg["dup"].notes
+
+
+def test_contract_for_undeclared_operation_is_refused():
+    with pytest.raises(fabric.FabricError, match="crawl"):
+        _provider("p", ("fetch",), contracts=(_replace(FETCH, op="crawl"),))
+    with pytest.raises(fabric.FabricError, match="fetch"):
+        _provider("p", ("fetch",), contracts=(FETCH, FETCH))
+
+
+@pytest.mark.parametrize("dimension", [
+    "inputs", "outputs", "semantics", "side_effects", "errors", "permissions"])
+def test_each_contract_dimension_alone_breaks_equivalence(dimension):
+    old = _provider("old", ("fetch",), contracts=(FETCH,))
+    if dimension == "permissions":
+        new = _provider("new", ("fetch",), contracts=(FETCH,),
+                        permissions=("net.outbound",))
+    else:
+        changed = {"inputs": ("url",), "outputs": ("body",),
+                   "semantics": "Fetch a URL and return its headers",
+                   "side_effects": (), "errors": ("timeout",)}[dimension]
+        new = _provider("new", ("fetch",),
+                        contracts=(_replace(FETCH, **{dimension: changed}),))
+    assert fabric._same_behaviour(new, old, "fetch") is False
+    assert fabric.find_overlaps(new, [old]) == []
+
+
+def test_reordered_contract_fields_are_still_equivalent():
+    old = _provider("old", ("fetch",), contracts=(FETCH,))
+    reordered = _replace(
+        FETCH, inputs=("timeout", "url"), outputs=("status", "body"),
+        semantics="  fetch a url and RETURN its body ",
+        errors=("http_error", "timeout"))
+    new = _provider("new", ("fetch",), contracts=(reordered,))
+    assert fabric._same_behaviour(new, old, "fetch") is True
+    assert fabric.find_overlaps(new, [old]) == [("old", "fetch")]
+    # The permission dimension is the effective one: an op listed in
+    # open_operations requires nothing, whatever `permissions` says.
+    opened = _provider("opened", ("fetch",), contracts=(FETCH,),
+                       permissions=("net.outbound",), open_ops=("fetch",))
+    assert fabric._same_behaviour(opened, old, "fetch") is True
