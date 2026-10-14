@@ -80,6 +80,51 @@ def test_complete_is_verified_only_with_evidence_refs():
     assert got["c"].state == "blocked"
 
 
+_REPORT = ("Done, the repair is in.\n"
+           "Commit: abc1234\n"
+           "Tests: tests/test_x.py::test_y\n"
+           "Evidence: tests/test_x.py::test_y passed; log:run-9\n")
+
+
+def test_a_workrun_row_has_no_evidence_column_so_its_report_is_the_source():
+    # hermes_work_runs keeps the worker's report in `result`; the labelled
+    # Evidence line (REPORTING_CONTRACT) is what backs a COMPLETE.
+    got = _by_id(cc.derive(runs=[
+        _run("with", hb.COMPLETE, result=_REPORT),
+        _run("prose", hb.COMPLETE, result="All done, trust me."),
+        _run("none", hb.COMPLETE, result="Evidence: none\nTests: none"),
+        _run("empty", hb.COMPLETE, result=""),
+    ]))
+    assert got["with"].state == "verified"
+    for run_id in ("prose", "none", "empty"):
+        assert got[run_id].state == "blocked", run_id
+        assert got[run_id].reason == "completion unverified", run_id
+
+
+def test_a_non_complete_workrun_is_not_made_verified_by_its_report():
+    got = cc.derive(runs=[_run("w1", hb.PARTIAL, result=_REPORT,
+                               pending_question="needs a decision")])[0]
+    assert got.state == "blocked" and got.reason == "needs a decision"
+
+
+def test_a_real_hermes_complete_run_reaches_verified_after_a_restart(
+        tmp_path, monkeypatch):
+    # on_terminal would write the outcome into FRIDAY's memory store.
+    monkeypatch.setattr(hb.WorkRunLog, "on_terminal", lambda *a, **k: None)
+    path = tmp_path / "runs.sqlite3"
+    log = hb.WorkRunLog(path)
+    backed = log.create(task="backed")
+    bare = log.create(task="bare")
+    log.update(backed, status=hb.COMPLETE, result=_REPORT)
+    log.update(bare, status=hb.COMPLETE, result="All done, trust me.")
+
+    first = _by_id(cc.derive(runs=log.recent(50)))
+    assert first[backed].state == "verified"
+    assert first[bare].state == "blocked"
+    assert first[bare].reason == "completion unverified"
+    assert _by_id(cc.derive(runs=hb.WorkRunLog(path).recent(50))) == first
+
+
 def test_ledger_row_supplies_role_model_and_parent():
     got = cc.derive(ledger=[_lrow("r2", al.RUNNING, parent_run_id="r1",
                                   role_id="qa", model_route="a/haiku/5/sub")])[0]

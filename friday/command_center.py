@@ -12,8 +12,10 @@ in-memory state to lose in a restart.
 
 Ledger rows are AgentLedger.view() rows (agent_ledger.py: its own status
 vocabulary, role_id/model_route columns, ISO started_at, evidence_refs from the
-finishing event). A status this module does not know is Blocked with the status
-named, never Running.
+finishing event). A WorkRun has no evidence column: its COMPLETE is backed by
+the Evidence line of the worker's report in `result` (handoff.Handoff). A
+status this module does not know is Blocked with the status named, never
+Running.
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ from typing import Callable, Iterable
 
 from friday import agent_ledger as al
 from friday import hermes_bridge as hb
+from friday.handoff import Handoff
 
 QUEUED = "queued"
 RUNNING = "running"
@@ -123,7 +126,7 @@ def _from_ledger(status, refs):
     return _settle(state, "", refs)
 
 
-def _from_workrun(status, question, refs):
+def _from_workrun(status, question, result):
     state = _WORKRUN_STATE.get(status)
     if state is None:
         return BLOCKED, "unknown status %r" % (status,)
@@ -131,7 +134,12 @@ def _from_workrun(status, question, refs):
         reason = question or ("worker disconnected"
                               if status == hb.DISCONNECTED else status)
         return BLOCKED, reason
-    return _settle(state, "", refs)
+    if state == VERIFIED:
+        # hermes_work_runs has no evidence column: what backs a COMPLETE is
+        # the Evidence line of the worker's own report, kept in `result`.
+        return _settle(state, "", Handoff.from_work_run(
+            {"result": result}).evidence_refs)
+    return state, ""
 
 
 def derive(ledger: Iterable = (), runs: Iterable = (), tasks: Iterable = (),
@@ -154,7 +162,7 @@ def derive(ledger: Iterable = (), runs: Iterable = (), tasks: Iterable = (),
     for row in runs:
         state, reason = _from_workrun(_get(row, "status"),
                                       _get(row, "pending_question"),
-                                      _get(row, "evidence_refs", []))
+                                      _get(row, "result"))
         found.setdefault(_get(row, "work_run_id"), (
             _get(row, "friday_run_id"), "hermes", _get(row, "model"),
             state, reason, _epoch(_get(row, "started_at", 0))))
