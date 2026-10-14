@@ -1280,9 +1280,20 @@ def _command_center_state():
         return [("worker", "waiting for a governor lease", i)
                 for i in range(governor().queue_depth())]
 
-    # No ledger source yet: AGENT-001 is not wired into this slice.
-    out = cc.snapshot({"runs": runs, "tasks": tasks, "queue": queue,
-                       "gates": control.pending})
+    def ledger():
+        # AGENT-001 through its own read-only view; a missing table raises
+        # and is named in the reason, it is not read as "no agents".
+        from friday.agent_ledger import AgentLedger
+        conn = _connect()
+        if conn is None:
+            return []
+        try:
+            return AgentLedger.view(conn)
+        finally:
+            conn.close()
+
+    out = cc.snapshot({"ledger": ledger, "runs": runs, "tasks": tasks,
+                       "queue": queue, "gates": control.pending})
     agents = [cc.AgentState(**a) for a in out["agents"]]
     out["events"] = [_event_frame(f.type, f.payload, f.run_id)
                      for f in cc.to_agui(None, agents)]

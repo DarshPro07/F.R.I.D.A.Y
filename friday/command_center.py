@@ -10,16 +10,19 @@ Pure functions, no I/O of their own: the caller passes already-read rows. That
 is also why two derivations from one sqlite file are equal - there is no hidden
 in-memory state to lose in a restart.
 
-Ledger rows are assumed to use the WorkRun status vocabulary
-(hermes_bridge.STATES); a status this module does not know is Blocked with the
-status named, never Running.
+Ledger rows are AgentLedger.view() rows (agent_ledger.py: its own status
+vocabulary, role_id/model_route columns, ISO started_at, evidence_refs from the
+finishing event). A status this module does not know is Blocked with the status
+named, never Running.
 """
 from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Callable, Iterable
 
+from friday import agent_ledger as al
 from friday import hermes_bridge as hb
 
 QUEUED = "queued"
@@ -41,6 +44,13 @@ _WORKRUN_STATE = {
     hb.WAIT_FRIDAY: BLOCKED, hb.WAIT_USER: BLOCKED, hb.PARTIAL: BLOCKED,
     hb.DISCONNECTED: BLOCKED,
     hb.CANCELLING: CANCELLED, hb.FAILED: FAILED, hb.COMPLETE: VERIFIED,
+}
+
+#: agent_runs.status. STARTING is a claim, not a worker; INTERRUPTED (no live
+#: process behind a RUNNING row) is handled in _from_ledger as blocked.
+_LEDGER_STATE = {
+    al.STARTING: QUEUED, al.RUNNING: RUNNING, al.INTERRUPTED: BLOCKED,
+    al.SUCCEEDED: VERIFIED, al.FAILED: FAILED, al.CANCELLED: CANCELLED,
 }
 
 #: run_tasks.status as written by friday/continuity.py.
@@ -91,6 +101,28 @@ def _settle(state, reason, refs):
     return state, reason
 
 
+def _epoch(value) -> float:
+    """Seconds since the epoch from a number (WorkRun) or ISO text (ledger)."""
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        pass
+    try:
+        return datetime.fromisoformat(
+            str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _from_ledger(status, refs):
+    state = _LEDGER_STATE.get(status)
+    if state is None:
+        return BLOCKED, "unknown status %r" % (status,)
+    if status == al.INTERRUPTED:
+        return BLOCKED, "interrupted: no live worker process"
+    return _settle(state, "", refs)
+
+
 def _from_workrun(status, question, refs):
     state = _WORKRUN_STATE.get(status)
     if state is None:
@@ -112,11 +144,12 @@ def derive(ledger: Iterable = (), runs: Iterable = (), tasks: Iterable = (),
     found: dict[str, tuple] = {}   # run_id -> (parent, role, model, state, reason, at)
 
     for row in ledger:
-        state, reason = _from_workrun(_get(row, "status"), "",
-                                      _get(row, "evidence_refs", []))
+        state, reason = _from_ledger(_get(row, "status"),
+                                     _get(row, "evidence_refs", []))
         found.setdefault(_get(row, "run_id"), (
-            _get(row, "parent_run_id"), _get(row, "role"), _get(row, "model"),
-            state, reason, float(_get(row, "started_at", 0) or 0)))
+            _get(row, "parent_run_id"), _get(row, "role_id"),
+            _get(row, "model_route"), state, reason,
+            _epoch(_get(row, "started_at", 0))))
 
     for row in runs:
         state, reason = _from_workrun(_get(row, "status"),
@@ -124,7 +157,7 @@ def derive(ledger: Iterable = (), runs: Iterable = (), tasks: Iterable = (),
                                       _get(row, "evidence_refs", []))
         found.setdefault(_get(row, "work_run_id"), (
             _get(row, "friday_run_id"), "hermes", _get(row, "model"),
-            state, reason, float(_get(row, "started_at", 0) or 0)))
+            state, reason, _epoch(_get(row, "started_at", 0))))
 
     for row in tasks:
         status = _get(row, "status")

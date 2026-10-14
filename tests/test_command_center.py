@@ -13,6 +13,7 @@ import sqlite3
 
 import pytest
 
+from friday import agent_ledger as al
 from friday import command_center as cc
 from friday import hermes_bridge as hb
 
@@ -58,15 +59,19 @@ def test_wait_states_carry_the_pending_question_as_reason():
     assert got.state == "blocked" and got.reason == "Delete the branch?"
 
 
+def _lrow(run_id, status, **kw):
+    """A row as AgentLedger.view returns it (agent_runs + evidence_refs)."""
+    return {"run_id": run_id, "parent_run_id": None, "role_id": "builder",
+            "model_route": "anthropic/sonnet/5.5/subscription",
+            "status": status, "started_at": "2026-10-14T10:00:00+00:00",
+            "evidence_refs": [], **kw}
+
+
 def test_complete_is_verified_only_with_evidence_refs():
     ledger = [
-        {"run_id": "a", "parent_run_id": "", "role": "builder",
-         "model": "sonnet", "status": hb.COMPLETE,
-         "evidence_refs": ["tests/test_x.py::test_y"]},
-        {"run_id": "b", "parent_run_id": "", "role": "builder",
-         "model": "sonnet", "status": hb.COMPLETE, "evidence_refs": []},
-        {"run_id": "c", "parent_run_id": "", "role": "builder",
-         "model": "sonnet", "status": hb.COMPLETE, "evidence_refs": "[]"},
+        _lrow("a", al.SUCCEEDED, evidence_refs=["tests/test_x.py::test_y"]),
+        _lrow("b", al.SUCCEEDED, evidence_refs=[]),
+        _lrow("c", al.SUCCEEDED, evidence_refs="[]"),
     ]
     got = _by_id(cc.derive(ledger=ledger))
     assert got["a"].state == "verified"
@@ -76,11 +81,38 @@ def test_complete_is_verified_only_with_evidence_refs():
 
 
 def test_ledger_row_supplies_role_model_and_parent():
-    got = cc.derive(ledger=[{"run_id": "r2", "parent_run_id": "r1",
-                             "role": "qa", "model": "haiku",
-                             "status": hb.WORKING, "evidence_refs": []}])[0]
+    got = cc.derive(ledger=[_lrow("r2", al.RUNNING, parent_run_id="r1",
+                                  role_id="qa", model_route="a/haiku/5/sub")])[0]
     assert (got.run_id, got.parent_run_id, got.role, got.model, got.state) == \
-        ("r2", "r1", "qa", "haiku", "running")
+        ("r2", "r1", "qa", "a/haiku/5/sub", "running")
+
+
+@pytest.mark.parametrize("status,refs,state", [
+    (al.STARTING, [], "queued"),          # a claim is not a worker
+    (al.RUNNING, [], "running"),
+    (al.INTERRUPTED, [], "blocked"),
+    (al.SUCCEEDED, ["agent_runs:x"], "verified"),
+    (al.SUCCEEDED, [], "blocked"),
+    (al.FAILED, [], "failed"),
+    (al.CANCELLED, [], "cancelled"),
+])
+def test_each_ledger_status_maps_to_one_state(status, refs, state):
+    got = cc.derive(ledger=[_lrow("L", status, evidence_refs=refs)])[0]
+    assert got.state == state
+    if state == "blocked":
+        assert got.reason
+
+
+def test_an_unknown_ledger_status_is_never_running():
+    got = cc.derive(ledger=[_lrow("L", "WORKING")])[0]
+    assert got.state == "blocked" and "WORKING" in got.reason
+
+
+def test_ledger_claims_queue_by_their_start_time():
+    got = _by_id(cc.derive(ledger=[
+        _lrow("late", al.STARTING, started_at="2026-10-14T10:05:00+00:00"),
+        _lrow("early", al.STARTING, started_at="2026-10-14T10:01:00+00:00")]))
+    assert (got["early"].position, got["late"].position) == (1, 2)
 
 
 def test_run_tasks_map_by_status_and_evidence():
@@ -267,3 +299,89 @@ def test_endpoint_reports_real_rows_and_never_raises(monkeypatch, tmp_path):
         assert down.status_code == 200
         assert down.json()["agents"] == []
         assert "runs" in down.json()["reason"]
+
+
+def _seed_real_ledger(path, monkeypatch):
+    """A real AgentLedger file: a claim, a live worker, a cancel, a success."""
+    from friday.executors import runs as R
+    from friday.executors.claude_code import TaskBundle
+    from friday.store import Store
+
+    monkeypatch.setattr(R, "process_alive", lambda pid, started_at=None: True)
+    store = Store(path)
+    try:
+        ledger = al.AgentLedger(store)
+        ledger.start("CLAIM", task="t", workspace="/w", executor_id="claude_code")
+        manager = R.RunManager(store)
+        manager.open(TaskBundle(goal="g", workspace="/w", run_id="LIVE"))
+        manager.running("LIVE", pid=4321)
+        manager.open(TaskBundle(goal="g", workspace="/w", run_id="STOP"))
+        manager.running("STOP", pid=4322)
+        manager.cancelled("STOP")
+        ledger.start("DONE", task="t", workspace="/w", executor_id="claude_code")
+        ledger.finish("DONE", al.SUCCEEDED, ["agent_runs:DONE"])
+    finally:
+        store.close()
+
+
+def _read_ledger(path):
+    conn = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        return al.AgentLedger.view(conn)
+    finally:
+        conn.close()
+
+
+def test_a_real_ledger_derives_equal_states_after_a_restart(tmp_path, monkeypatch):
+    from friday.executors import runs as R
+
+    path = tmp_path / "ledger.sqlite3"
+    _seed_real_ledger(path, monkeypatch)
+
+    first = cc.derive(ledger=_read_ledger(path))
+    got = _by_id(first)
+    assert {k: v.state for k, v in got.items()} == {
+        "CLAIM": "queued", "LIVE": "running", "STOP": "cancelled",
+        "DONE": "verified"}
+    assert got["CLAIM"].position == 1
+    # a second look, from a fresh connection, is the same answer
+    assert cc.derive(ledger=_read_ledger(path)) == first
+
+    # the worker process died while FRIDAY was down: the view says so, and
+    # reading it did not write (the row still says RUNNING)
+    monkeypatch.setattr(R, "process_alive", lambda pid, started_at=None: False)
+    after = _by_id(cc.derive(ledger=_read_ledger(path)))
+    assert after["LIVE"].state == "blocked" and after["LIVE"].reason
+    raw = sqlite3.connect(str(path))
+    try:
+        assert raw.execute("SELECT status FROM agent_runs WHERE run_id='LIVE'"
+                           ).fetchone()[0] == "RUNNING"
+    finally:
+        raw.close()
+
+
+def test_endpoint_reads_the_real_ledger_and_names_it_when_down(monkeypatch, tmp_path):
+    pytest.importorskip("httpx")
+    from starlette.testclient import TestClient
+    from friday import access
+    from friday import ui_server as u
+
+    monkeypatch.setattr(access, "GATE_ENABLED", False)
+    path = tmp_path / "ada.sqlite3"
+    _seed_real_ledger(path, monkeypatch)
+    monkeypatch.setenv("ADA_DB", str(path))
+    with TestClient(u.create_app(), base_url="http://127.0.0.1:8770") as client:
+        body = client.get("/api/command_center/state").json()
+        states = {a["run_id"]: a["state"] for a in body["agents"]}
+        assert states == {"CLAIM": "queued", "LIVE": "running",
+                          "STOP": "cancelled", "DONE": "verified"}
+        assert body["reason"] == ""
+
+        def boom(*a, **k):
+            raise RuntimeError("ledger down")
+        monkeypatch.setattr(al.AgentLedger, "view", staticmethod(boom))
+        down = client.get("/api/command_center/state")
+        assert down.status_code == 200
+        assert down.json()["agents"] == []
+        assert "ledger" in down.json()["reason"]

@@ -50,6 +50,11 @@ class LedgerError(ValueError):
     """The ledger refused a write that would make it lie."""
 
 
+def _orphaned(executor: dict | None) -> bool:
+    """A RUNNING row is a lie when its executor row is gone or not live."""
+    return executor is None or not RunManager.is_live(executor)
+
+
 class AgentLedger:
     def __init__(self, store: Store) -> None:
         self.store = store
@@ -176,7 +181,7 @@ class AgentLedger:
             for row in running:
                 run_id = row["run_id"]
                 executor = self.store.executor_run(run_id)
-                if executor is not None and RunManager.is_live(executor):
+                if not _orphaned(executor):
                     continue
                 conn.execute("UPDATE agent_runs SET status=? WHERE run_id=?",
                              (INTERRUPTED, run_id))
@@ -226,6 +231,34 @@ class AgentLedger:
             "  SELECT 1 FROM agent_events e WHERE e.run_id=agent_runs.run_id "
             "  AND e.kind=?) ORDER BY started_at, run_id",
             (RUNNING, WORKER_STARTED))]
+
+    @staticmethod
+    def view(conn, limit: int = 200) -> list[dict]:
+        """
+        The newest runs as the ledger would report them, read through `conn`
+        (a sqlite3.Row connection; read-only is fine) without writing.
+
+        Same judgement as reconcile(): a RUNNING row with no live process reads
+        INTERRUPTED. `evidence_refs` is that of the run's latest `finished`
+        event, [] when it never finished.
+        """
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM agent_runs ORDER BY started_at DESC, run_id "
+            "LIMIT ?", (limit,))]
+        for row in rows:
+            if row["status"] == RUNNING:
+                executor = conn.execute(
+                    "SELECT * FROM executor_runs WHERE run_id=?",
+                    (row["run_id"],)).fetchone()
+                if _orphaned(dict(executor) if executor else None):
+                    row["status"] = INTERRUPTED
+            finished = conn.execute(
+                "SELECT evidence_refs FROM agent_events WHERE run_id=? "
+                "AND kind='finished' ORDER BY event_id DESC LIMIT 1",
+                (row["run_id"],)).fetchone()
+            row["evidence_refs"] = (json.loads(finished["evidence_refs"])
+                                    if finished else [])
+        return rows
 
     # -- internals ---------------------------------------------------------
 
