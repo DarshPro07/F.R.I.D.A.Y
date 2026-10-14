@@ -253,6 +253,7 @@ SCOPED = {
     "reminders": "a workspace's reminders",
     "ultracode_results": "cached agent output, which can quote private material",
     "opportunities": "a workspace's proactive inbox; each row quotes its own automations",
+    "world_state": "a workspace's devices, accounts and repositories (WORLD-001)",
 }
 
 #: Deliberately global. Each entry is an argument, not an omission.

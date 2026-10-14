@@ -179,6 +179,13 @@ MEMORY_KINDS = (FACT, PREFERENCE, PATTERN, INFERENCE)
 #: `contracts.READ_MATERIAL`, the run lineage the rest of FRIDAY carries.
 TRUST_CLASSES = (PERSON, READ_MATERIAL)
 
+#: PRD v7 WORLD-001 (section 13): the entity types world state is kept for.
+WORLD_ENTITY_TYPES = (
+    "person", "workspace", "team", "project", "application", "account",
+    "website", "device", "repository", "file", "physical_component", "order",
+    "customer", "experiment", "requirement", "capability",
+)
+
 # PRD v3.1 FR-016 memory classes. `kind` above says how much to trust a
 # record (fact vs inference); `memory_type` says what KIND OF THING it is
 # and therefore its lifecycle: working memory dies with the objective,
@@ -1230,6 +1237,31 @@ CREATE TABLE IF NOT EXISTS opportunities (
     resolved_at   TEXT,
     UNIQUE (workspace_id, kind, subject, evidence_key)
 );
+
+-- PRD v7 WORLD-001: structured world state. One row per measurement of one
+-- typed entity; an update marks the prior row superseded and links to it,
+-- like `memories`. `kind` is the memory kind (FACT..INFERENCE) so speculation
+-- stays visibly speculative. `pending` = speculation that disagreed with
+-- non-speculative state: kept here (workspace-scoped), never current.
+CREATE TABLE IF NOT EXISTS world_state (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id         TEXT NOT NULL DEFAULT 'default',
+    entity_type          TEXT NOT NULL,
+    entity_key           TEXT NOT NULL,
+    measurement          TEXT NOT NULL,
+    kind                 TEXT NOT NULL,
+    source               TEXT NOT NULL,
+    source_ref           TEXT NOT NULL DEFAULT '',
+    confidence           REAL NOT NULL DEFAULT 1.0,
+    expected_transitions TEXT NOT NULL DEFAULT '',
+    invalidation         TEXT NOT NULL DEFAULT '',
+    observed_at          TEXT NOT NULL,
+    superseded           INTEGER NOT NULL DEFAULT 0,
+    pending              INTEGER NOT NULL DEFAULT 0,
+    supersedes_id        INTEGER REFERENCES world_state(id)
+);
+CREATE INDEX IF NOT EXISTS idx_world_entity
+    ON world_state(workspace_id, entity_type, entity_key, superseded);
 
 -- PRD v7 EVO-001: the Evolution Controller's proposals. `dedupe_key` is what
 -- makes a repeated trigger the same proposal; `body` carries benefit, risk,
@@ -2713,6 +2745,86 @@ class Store:
                 "WHERE id=?",
                 (resolution, rationale, now_iso(), contradiction_id),
             )
+
+    # -- world state (PRD v7 WORLD-001) -------------------------------------
+
+    def set_world_state(
+        self, entity_type: str, entity_key: str, measurement: str, *,
+        kind: str, source: str, source_ref: str = "", confidence: float = 1.0,
+        expected_transitions: str = "", invalidation: str = "",
+        workspace_id: str | None = None,
+    ) -> dict:
+        """Record the current measurement of one entity.
+
+        Returns {"id", "pending_id"}. An update supersedes the current row
+        with a link, except that speculation (INFERENCE) never replaces
+        non-speculative state (PRD 13): if it agrees, the current row stands
+        and its id is returned; if it disagrees, it is kept as a pending row
+        (linked to the row it disputes, deduplicated) and "id" is None.
+        Only INFERENCE counts as speculation: PATTERN/PREFERENCE supersede.
+        """
+        if entity_type not in WORLD_ENTITY_TYPES:
+            raise ValueError(f"unknown world entity type {entity_type!r}")
+        if kind not in MEMORY_KINDS:
+            raise ValueError(f"unknown memory kind {kind!r}")
+        if not entity_key.strip() or not measurement.strip():
+            raise ValueError("world state requires an entity key and measurement")
+        if not source.strip():
+            raise ValueError("world state requires a source")
+        if not 0.0 <= confidence <= 1.0:
+            raise ValueError(f"confidence must be 0..1, got {confidence}")
+        owner = self._workspace(workspace_id)
+        with self._tx() as conn:
+            prior = conn.execute(
+                "SELECT id, measurement, kind FROM world_state WHERE workspace_id=? "
+                "AND entity_type=? AND entity_key=? AND superseded=0 AND pending=0 "
+                "ORDER BY id DESC LIMIT 1",
+                (owner, entity_type, entity_key)).fetchone()
+            if prior is not None and kind == INFERENCE and prior["kind"] != INFERENCE:
+                if prior["measurement"] == measurement:
+                    return {"id": int(prior["id"]), "pending_id": None}
+                dup = conn.execute(
+                    "SELECT id FROM world_state WHERE pending=1 AND supersedes_id=? "
+                    "AND measurement=?", (prior["id"], measurement)).fetchone()
+                if dup is not None:
+                    return {"id": None, "pending_id": int(dup["id"])}
+                cur = conn.execute(
+                    "INSERT INTO world_state (workspace_id, entity_type, entity_key, "
+                    "measurement, kind, source, source_ref, confidence, "
+                    "expected_transitions, invalidation, observed_at, pending, "
+                    "supersedes_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?)",
+                    (owner, entity_type, entity_key, measurement, kind, source,
+                     source_ref, confidence, expected_transitions, invalidation,
+                     now_iso(), prior["id"]))
+                return {"id": None, "pending_id": int(cur.lastrowid)}
+            if prior is not None:
+                conn.execute("UPDATE world_state SET superseded=1 WHERE id=?",
+                             (prior["id"],))
+            cur = conn.execute(
+                "INSERT INTO world_state (workspace_id, entity_type, entity_key, "
+                "measurement, kind, source, source_ref, confidence, "
+                "expected_transitions, invalidation, observed_at, supersedes_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (owner, entity_type, entity_key, measurement, kind, source,
+                 source_ref, confidence, expected_transitions, invalidation,
+                 now_iso(), prior["id"] if prior is not None else None))
+            return {"id": int(cur.lastrowid), "pending_id": None}
+
+    def world_state(self, entity_type: str | None = None,
+                    entity_key: str | None = None, *, pending: bool = False,
+                    workspace_id: str | None = None) -> list[dict]:
+        """Current world state in one workspace, or (pending=True) the
+        speculation held back because it disputed it."""
+        sql = ("SELECT * FROM world_state WHERE workspace_id=? AND superseded=0 "
+               "AND pending=?")
+        params: list = [self._workspace(workspace_id), int(pending)]
+        if entity_type is not None:
+            sql += " AND entity_type=?"
+            params.append(entity_type)
+        if entity_key is not None:
+            sql += " AND entity_key=?"
+            params.append(entity_key)
+        return [dict(r) for r in self._conn.execute(sql + " ORDER BY id", params)]
 
     def memories_by_scope(self, scope: str, limit: int = 100) -> list[dict]:
         return [dict(r) for r in self._conn.execute(
