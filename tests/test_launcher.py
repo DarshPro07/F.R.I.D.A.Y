@@ -671,6 +671,8 @@ def test_an_unknown_role_is_refused(capsys, monkeypatch, tmp_path):
 def test_exclusive_modes_cannot_be_combined():
     with pytest.raises(SystemExit):
         L.build_parser().parse_args(["--stop", "--doctor"])
+    with pytest.raises(SystemExit):
+        L.build_parser().parse_args(["--stop", "--emergency-stop"])
 
 
 

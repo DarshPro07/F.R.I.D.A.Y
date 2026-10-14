@@ -37,6 +37,10 @@ _HANDLED: set[str] = set()
 _LOCK = threading.Lock()
 _WATCHER: "Watcher | None" = None
 
+#: A latch whose reason starts with this is a graceful stop (RUL-STOP): it
+#: admits no new work, but parks nothing and kills nothing.
+GRACEFUL_PREFIX = "graceful: "
+
 #: The whole utterance is the stop and nothing else: "stop the music" is not
 #: STOP, and neither is a sentence that merely contains the words.
 _PHRASE = re.compile(
@@ -163,7 +167,13 @@ def emergency_stop(reason: str, *, actor: str, store=None) -> dict:
     from friday.contracts import now_iso
 
     db = store or _process_store()
-    db.stop_latch(reason=reason, actor=actor, now=now_iso())
+    if not db.stop_latch(reason=reason, actor=actor, now=now_iso()):
+        current = db.stop_latched() or {}
+        if current.get("reason", "").startswith(GRACEFUL_PREFIX):
+            # Escalate a drain: the new latched_at is fresh, so every watcher
+            # runs its kill hooks for it.
+            db.stop_clear()
+            db.stop_latch(reason=reason, actor=actor, now=now_iso())
     row = db.stop_latched() or {}
     revoked = O.revoke_all_network_grants(db, reason=f"STOP: {reason}", actor=actor)
     paused = O.pause_all_running(db, reason=reason)
@@ -179,6 +189,37 @@ def emergency_stop(reason: str, *, actor: str, store=None) -> dict:
                    actor, reason, len(paused), revoked, local["killed"])
     return {"reason": reason, "grants_revoked": revoked, "paused": paused,
             "hooks": local, "killed": local["killed"]}
+
+
+def graceful_stop(reason: str, *, actor: str, store=None) -> dict:
+    """Admit no new work and let running work reach a checkpoint: latch only -
+    no grant revoked, nothing parked, no hook run, nothing killed."""
+    from friday import trust
+    from friday.contracts import now_iso
+
+    db = store or _process_store()
+    db.stop_latch(reason=GRACEFUL_PREFIX + reason, actor=actor, now=now_iso())
+    trust.audit().record(actor=actor, action="friday.stop", tier=trust.R3,
+                         decision="DRAINING", target="everything",
+                         detail={"reason": reason})
+    logger.warning("graceful STOP by %s: %s", actor, reason)
+    return {"reason": reason, "pending": settled(db)}
+
+
+def settled(store=None) -> list[str]:
+    """The run_ids still holding a live objective lease - the work a graceful
+    stop waits for. Empty means everything has reached a checkpoint.
+
+    shortcut: only work under an objective lease is waited for; a desktop
+    takeover, the workbench and direct tool calls are not, upgrade when they
+    take a lease."""
+    from friday import objectives as O
+    from friday.continuous import _fresh       # naive local time, as leases are written
+
+    return [run["run_id"]
+            for run in (store or _process_store()).objective_runs_in(O.RUN_RUNNING)
+            if run.get("lease_executor_id") and run.get("lease_expiry")
+            and _fresh(run["lease_expiry"])]
 
 
 def resume(*, actor: str, store=None) -> bool:
@@ -226,7 +267,7 @@ class Watcher:
             with _LOCK:
                 fresh = row["latched_at"] not in _HANDLED
                 _HANDLED.add(row["latched_at"])
-            if fresh:
+            if fresh and not row["reason"].startswith(GRACEFUL_PREFIX):
                 run_local_hooks(row["reason"])
 
 

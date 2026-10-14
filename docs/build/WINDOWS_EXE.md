@@ -11,7 +11,8 @@ do from a checkout.
 dist\FRIDAY\FRIDAY.exe                 start everything and stay attached (Ctrl+C stops it)
 dist\FRIDAY\FRIDAY.exe --no-browser    serve the control room without opening a window
 dist\FRIDAY\FRIDAY.exe --no-agent      MCP server + control room only (no LiveKit credentials needed)
-dist\FRIDAY\FRIDAY.exe --stop          stop every process running from this executable
+dist\FRIDAY\FRIDAY.exe --stop          graceful: no new work, wait for a checkpoint, then end every process
+dist\FRIDAY\FRIDAY.exe --emergency-stop  latch STOP, park all work and kill every process now
 dist\FRIDAY\FRIDAY.exe --status        ports 8000/8770 and the processes
 dist\FRIDAY\FRIDAY.exe --doctor        diagnostics; exit 0 PASS, 1 DEGRADED, 2 FAIL
 dist\FRIDAY\FRIDAY.exe --paths         every resolved location (state root, database, logs, .env) as JSON

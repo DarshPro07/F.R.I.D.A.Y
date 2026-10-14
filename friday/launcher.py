@@ -21,7 +21,9 @@ exist and that `.env` is loaded from beside the executable before any of
 them import.
 
     FRIDAY.exe                    start server -> ui -> agent, stay attached
-    FRIDAY.exe --stop             stop everything running from this executable
+    FRIDAY.exe --stop             graceful stop: no new work, wait for running work
+                                  to reach a checkpoint, then end every process
+    FRIDAY.exe --emergency-stop   latch STOP, park all work and kill every process now
     FRIDAY.exe --status           what is listening and what is running
     FRIDAY.exe --doctor           diagnostics; exit 0 PASS, 1 DEGRADED, 2 FAIL
     FRIDAY.exe --version
@@ -691,6 +693,35 @@ def emergency_stop_everything(grace: float = 8.0) -> int:
     return stop_all(grace)
 
 
+def graceful_stop_everything(timeout: float = 60.0, grace: float = 8.0) -> int:
+    """
+    `--stop`: admit no new work, wait until every leased objective run has
+    reached a checkpoint (released its lease), then end every FRIDAY process.
+    On timeout nothing is killed - the owner chooses `--resume` or
+    `--emergency-stop`; this never escalates on its own.
+    """
+    from friday import stop
+
+    try:
+        stop.graceful_stop("from the terminal", actor="person")
+        deadline = time.monotonic() + timeout
+        pending = stop.settled()
+        while pending and time.monotonic() < deadline:
+            _say(f"waiting for {len(pending)} run(s) to reach a checkpoint")
+            time.sleep(1)
+            pending = stop.settled()
+    except Exception as exc:                                # noqa: BLE001 - said; nothing is killed blind
+        _say(f"could not read the store ({type(exc).__name__}: {exc}); nothing was "
+             f"killed - use --emergency-stop to end everything regardless")
+        return 1
+    if pending:
+        _say(f"timed out after {timeout:g}s; still holding a lease: {', '.join(pending)}. "
+             f"Nothing was killed and no new work starts - run --resume to carry on "
+             f"or --emergency-stop to end it now")
+        return 3
+    return stop_all(grace)
+
+
 def resume_everything() -> int:
     """The person clears the emergency stop. Parked objectives stay parked."""
     from friday import stop
@@ -1219,7 +1250,11 @@ def build_parser() -> argparse.ArgumentParser:
         prog="FRIDAY", description="Start, stop and diagnose Friday.",
         epilog="With no options: start the MCP server, the control room and the voice worker.")
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--stop", action="store_true", help="stop every Friday process from this runtime")
+    group.add_argument("--stop", action="store_true",
+                       help="graceful stop: admit no new work, wait (FRIDAY_STOP_TIMEOUT_S, default 60) "
+                            "for running work to reach a checkpoint, then end every Friday process")
+    group.add_argument("--emergency-stop", action="store_true",
+                       help="latch STOP, park all work and kill every Friday process now")
     group.add_argument("--resume", action="store_true",
                        help="clear an emergency stop so new actions may start again")
     group.add_argument("--status", action="store_true", help="ports and processes")
@@ -1311,6 +1346,8 @@ def main(argv: list[str] | None = None) -> int:
     if options.doctor:
         return doctor(options.doctor_scope)
     if options.stop:
+        return graceful_stop_everything(timeout=float(os.getenv("FRIDAY_STOP_TIMEOUT_S", "60")))
+    if options.emergency_stop:
         return emergency_stop_everything()
     if options.resume:
         return resume_everything()

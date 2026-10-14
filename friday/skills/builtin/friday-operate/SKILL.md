@@ -40,7 +40,11 @@ console.
 
 - `FRIDAY.exe` starts the MCP server (:8000), the control room (:8770) and
   the voice worker; Ctrl+C stops what it started.
-- `FRIDAY.exe --stop` stops every process running from that executable.
+- `FRIDAY.exe --stop` is a graceful stop: no new work starts, running work
+  reaches a checkpoint, then every process ends. On timeout it kills nothing
+  and names the runs still working.
+- `FRIDAY.exe --emergency-stop` latches STOP, parks all work and kills every
+  process now; `FRIDAY.exe --resume` clears either stop.
 - `FRIDAY.exe --status` shows the two ports and the processes.
 - `FRIDAY.exe --doctor` exits 0 PASS, 1 DEGRADED, 2 FAIL; it never prints a
   secret value.
@@ -60,8 +64,9 @@ console.
 2. To start, run `FRIDAY.exe` (add `--no-browser` to keep the control room
    from opening a window, `--no-agent` when there are no LiveKit
    credentials yet).
-3. To stop, run `FRIDAY.exe --stop`, then `FRIDAY.exe --status` to confirm
-   both ports are free and no processes remain.
+3. To stop, run `FRIDAY.exe --stop` (or `FRIDAY.exe --emergency-stop` to
+   kill at once), then `FRIDAY.exe --status` to confirm both ports are free
+   and no processes remain.
 4. To find or move state, run `FRIDAY.exe --paths`; edit
    `config\.env` under `state_root` for credentials; never edit anything
    under `_internal`.

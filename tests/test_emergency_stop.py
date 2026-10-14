@@ -380,3 +380,117 @@ def test_stop_ends_a_desktop_takeover_the_way_desktop_stop_does(store):
     S.emergency_stop("drill", actor="person", store=store)
     assert D.ABORT.is_set() and D._PLANS == {}
     D.ABORT.clear()
+
+
+# -- RUL-STOP: `--stop` drains, `--emergency-stop` kills ---------------------
+
+def _leased_run(store, run_id: str, *, expiry: str) -> str:
+    store.open_objective_run(run_id, request="draft the report",
+                             objective_summary="draft the report", status=O.RUN_RUNNING)
+    assert store.acquire_objective_lease(run_id, executor_id="worker-1", expiry=expiry)
+    return run_id
+
+
+def _in(seconds: float) -> str:
+    from datetime import datetime, timedelta
+    return (datetime.now() + timedelta(seconds=seconds)).isoformat()
+
+
+def test_graceful_stop_admits_no_new_work_but_kills_nothing(store):
+    run_id = _leased_run(store, "run-graceful", expiry=_in(300))
+    ran = []
+    S.register_hook("test-service", lambda reason: ran.append(reason))
+    S.graceful_stop("from the terminal", actor="person", store=store)
+    assert store.stop_latched()["reason"] == S.GRACEFUL_PREFIX + "from the terminal"
+    assert ran == [], "a graceful stop ran the kill hooks"
+    assert store.objective_run(run_id)["status"] == O.RUN_RUNNING, "the run was parked"
+    draining = [r for r in trust.audit().query(limit=20)
+                if r["action"] == "friday.stop" and r["decision"] == "DRAINING"]
+    assert draining
+
+
+def test_the_watcher_skips_kill_hooks_for_a_graceful_latch(tmp_path):
+    path = tmp_path / "shared.sqlite3"
+    here, elsewhere = Store(path), Store(path)
+    ran = []
+    try:
+        S.register_hook("test-service", lambda reason: ran.append(reason))
+        watcher = S.Watcher(store=lambda: here, interval=0.05)
+        watcher.start()
+        try:
+            S.graceful_stop("drain", actor="person", store=elsewhere)
+            latched_at = elsewhere.stop_latched()["latched_at"]
+            deadline = time.time() + 5
+            while latched_at not in S._HANDLED and time.time() < deadline:
+                time.sleep(0.05)
+        finally:
+            watcher.stop()
+        assert latched_at in S._HANDLED, "the watcher never saw the graceful latch"
+        assert ran == [], "the watcher killed on a graceful latch"
+    finally:
+        here.close()
+        elsewhere.close()
+
+
+def test_emergency_stop_escalates_over_a_graceful_latch(store):
+    run_id = _leased_run(store, "run-escalate", expiry=_in(300))
+    ran = []
+    S.register_hook("test-service", lambda reason: ran.append(reason))
+    S.graceful_stop("drain", actor="person", store=store)
+    S.emergency_stop("kill it now", actor="person", store=store)
+    assert store.stop_latched()["reason"] == "kill it now"
+    assert ran == ["kill it now"]
+    assert store.objective_run(run_id)["status"] == O.RUN_PAUSED
+
+
+def test_a_lease_expired_in_local_time_counts_as_settled(store):
+    _leased_run(store, "run-stale", expiry=_in(-5))
+    assert S.settled(store) == []
+
+
+def test_graceful_stop_waits_for_a_leased_run_then_ends_processes(monkeypatch):
+    from friday import launcher
+
+    db = S._process_store()
+    _leased_run(db, "run-draining", expiry=_in(300))
+    sleeps, ended = [], []
+
+    def tick(seconds):
+        if not sleeps:
+            db.release_objective_lease("run-draining", executor_id="worker-1")
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(launcher.time, "sleep", tick)
+    monkeypatch.setattr(launcher, "stop_all", lambda grace=8.0: ended.append(S.latched()) or 0)
+    assert launcher.graceful_stop_everything(timeout=60) == 0
+    assert sleeps and ended and ended[0]["reason"].startswith(S.GRACEFUL_PREFIX)
+
+
+def test_graceful_stop_times_out_without_killing(monkeypatch, capsys):
+    from friday import launcher
+
+    _leased_run(S._process_store(), "run-stuck", expiry=_in(300))
+    clock = {"t": 0.0}
+    monkeypatch.setattr(launcher.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(launcher.time, "sleep", lambda s: clock.update(t=clock["t"] + s))
+    ended = []
+    monkeypatch.setattr(launcher, "stop_all", lambda grace=8.0: ended.append(True) or 0)
+    assert launcher.graceful_stop_everything(timeout=3) == 3
+    said = capsys.readouterr()
+    out = said.out + said.err
+    assert ended == [], "a timed-out graceful stop killed the processes"
+    assert "run-stuck" in out and "--emergency-stop" in out and "--resume" in out
+
+
+def test_stop_flag_is_graceful_and_emergency_stop_flag_is_the_old_stop(monkeypatch):
+    from friday import launcher
+
+    called = []
+    monkeypatch.setattr(launcher, "graceful_stop_everything",
+                        lambda timeout=60.0: called.append(("graceful", timeout)) or 0)
+    monkeypatch.setattr(launcher, "emergency_stop_everything",
+                        lambda grace=8.0: called.append(("emergency", None)) or 0)
+    monkeypatch.setenv("FRIDAY_STOP_TIMEOUT_S", "12")
+    assert launcher.main(["--stop"]) == 0
+    assert launcher.main(["--emergency-stop"]) == 0
+    assert called == [("graceful", 12.0), ("emergency", None)]
