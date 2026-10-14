@@ -642,12 +642,21 @@ def _transfer(
         producer=tool_id,
         verification=c.Verification(method="destination_exists", evidence=evidence),
     )
+    effect = f"{'moved' if move else 'copied'} {src} -> {dst}"
+    output = _scoped({"source": str(src), "destination": str(dst),
+                      "size_bytes": dst.stat().st_size})
+    # The destination did not exist, so nothing was destroyed: undo by
+    # deleting the copy or moving the file back.
+    unrecorded = _unledgered(
+        run, started, capability=tool_id, target=dst, effect=effect,
+        output=output, reversibility=side_effects.COMPENSABLE)
+    if unrecorded:
+        return unrecorded
     return run.record(c.succeeded(
         started,
-        output=_scoped({"source": str(src), "destination": str(dst),
-                        "size_bytes": dst.stat().st_size}),
+        output=output,
         artifacts=(artifact,),
-        side_effects=(f"{'moved' if move else 'copied'} {src} -> {dst}",),
+        side_effects=(effect,),
         verification=c.Verification(
             method="destination_exists" + ("_source_absent" if move else ""),
             evidence=evidence,
@@ -725,16 +734,23 @@ def files_recycle(run: c.Run, path: str, *, engine: PolicyEngine = default_engin
             f"{target.name} was sent to the Recycle Bin and is still on disk",
             output=_scoped({"path": str(target), "recycled": False,
                             "deletion_mode": RECYCLE})))
+    output = _scoped({"path": str(target), "recycled": True,
+                      # The mode is part of the result because a caller
+                      # reading "deleted" would draw the wrong conclusion
+                      # about what can be undone; and it goes through
+                      # _scoped like every other output here, so that a
+                      # run's evidence says which machine it happened on.
+                      "deletion_mode": RECYCLE,
+                      "bytes": size, "restorable": True})
+    unrecorded = _unledgered(
+        run, started, capability=tool_id, target=target,
+        effect=f"recycled {target.name}", output=output,
+        reversibility=side_effects.REVERSIBLE)
+    if unrecorded:
+        return unrecorded
     return run.record(c.succeeded(
         started,
-        output=_scoped({"path": str(target), "recycled": True,
-                        # The mode is part of the result because a caller
-                        # reading "deleted" would draw the wrong conclusion
-                        # about what can be undone; and it goes through
-                        # _scoped like every other output here, so that a
-                        # run's evidence says which machine it happened on.
-                        "deletion_mode": RECYCLE,
-                        "bytes": size, "restorable": True}),
+        output=output,
         side_effects=(f"recycled {target.name}",),
         verification=c.Verification(
             method="path_absent_after_recycle",

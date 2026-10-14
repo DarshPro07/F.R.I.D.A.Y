@@ -31,7 +31,8 @@ REVERSIBILITIES = (REVERSIBLE, COMPENSABLE, IRREVERSIBLE)
 
 #: Tool ids (the `tool_id` an ActionResult carries) that write a ledger row.
 LEDGERED = frozenset({
-    "files.write", "files.create", "files.delete", "files.delete_permanent",
+    "files.write", "files.create", "files.edit", "files.copy", "files.move",
+    "files.recycle", "files.delete", "files.delete_permanent",
 })
 
 

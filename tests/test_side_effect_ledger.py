@@ -103,6 +103,31 @@ def test_a_permanent_delete_is_irreversible_and_a_recycle_is_reversible(root, mo
         "files.delete", side_effects.REVERSIBLE)
 
 
+def test_edit_copy_move_and_recycle_each_write_their_row(root, monkeypatch):
+    note = root / "note.txt"
+    note.write_text("old text", encoding="utf-8")
+    copy, moved, binned = root / "copy.txt", root / "moved.txt", root / "binned.txt"
+    binned.write_text("x", encoding="utf-8")
+    monkeypatch.setattr("send2trash.send2trash", lambda path: binned.unlink())
+    calls = [
+        (lambda run: F.files_edit(run, str(note), "old", "new", engine=_engine()),
+         "files.edit", note, side_effects.IRREVERSIBLE),
+        (lambda run: F.files_copy(run, str(note), str(copy), engine=_engine()),
+         "files.copy", copy, side_effects.COMPENSABLE),
+        (lambda run: F.files_move(run, str(copy), str(moved), engine=_engine()),
+         "files.move", moved, side_effects.COMPENSABLE),
+        (lambda run: F.files_recycle(run, str(binned), engine=_engine()),
+         "files.recycle", binned, side_effects.REVERSIBLE),
+    ]
+    for call, capability, target, reversibility in calls:
+        result = call(_run("obj-9"))
+        assert result.status == c.SUCCEEDED, (capability, result.error)
+        assert capability in side_effects.LEDGERED
+        [row] = memory.store().side_effects_for(run_id=result.run_id)
+        assert (row["capability"], row["target"], row["reversibility"],
+                row["objective_id"]) == (capability, str(target), reversibility, "obj-9")
+
+
 def test_a_failed_write_leaves_no_row(root):
     result = F.files_write(_run(), str(root.parent / "outside.txt"), "x", engine=_engine())
     assert result.status != c.SUCCEEDED
