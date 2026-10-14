@@ -5714,6 +5714,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'Root cause: no code hunk was lost. The test helper was wrong. In tests/test_observability_workers.py, `_ui_client` built `TestClient(u.create_app())` without a `base_url`, so every request went out with Host "testserver". GateMiddleware (friday/access.py:434-441) returns 403 "cross-origin blocked" f (build run, commit 2f6e5ca86)',
         "next_action": 'GAPS: No UI toggle in ui/ (as in the original build); mode/workers are API query params only.; Ledger row `tests` still names tests/test_observability.py; the proving test lives in tests/test_observability_workers.py.; 14 other test_impact files (memory/voice etc.) were not run, per the memory budget.',
     }),
+    ('ULTRA-007', {
+        "status": PARTIAL,
+        "current_implementation": 'This slice adds the core gate. New module friday/ultracode/mode.py has:\n- is_on() and set_on(on). The choice is saved in data/ultracode_mode.json, the same way policy.AUTONOMY_FILE saves autonomy. A missing or corrupt file reads as off.\n- substantive(request). A task counts as substantive when task_ (build run, commit ffe2f6ffa)',
+        "next_action": 'GAPS: Voice toggle: next_action names friday/tools/ultracode.py, but registering it needs friday/tools/__init__.py, which another build owns. The tool was not written so no dead wrapper ships. Next: add an ultracode_mode(on) tool and register it.; Control-room toggle and the Playwright criterion (phase and agent rows in #work-list, stopping a run) are not built. ui/ is owned by other builds, and _probe_work in friday/ui_server.py still returns objectives: []. Stopping a run already works through /api/objective/signal.; No intake caller: the planner/objectives intake (owned by others) does not call mode.maybe_start yet. Choosing which workflow definition fits a request is left to the caller.; The no-bypass guard holds by construction: the mode never reaches policy. No test drives a destructive deterministic step through a live workflow to its nonce.; implementer did not claim acceptance met',
+    }),
 ]
 
 
