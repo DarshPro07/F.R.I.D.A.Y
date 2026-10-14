@@ -85,6 +85,8 @@ SKIP_DIRS = frozenset(
         'htmlcov',
         'node_modules',
         'out',
+        # quarantined third-party clones and binaries: untrusted bytes, never this project's source
+        'quarantine',
         'site-packages',
         'target',
         'third_party',
