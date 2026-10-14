@@ -5624,6 +5624,11 @@ PROGRESS_V7: list[tuple[str, dict]] = [
         "current_implementation": 'A run that ends PARTIAL before worker_started no longer stays STARTING in the ledger: the partial event moves a STARTING claim to INTERRUPTED. Acceptance tests (tree round-trip, dead pid, claim not active, unknown parent, append-only) all pass. (build run, commit 2218af4d3)',
         "next_action": "GAPS: No retention policy for agent_events: append-only by trigger and the acceptance forbids a delete path, so pruning (archive or compact) needs an owner decision; saw() still appends one progress event per tool use.; parent_run_id is threaded on the composer path (agent_composer.py:396) and specialist.py, but the direct ClaudeCodeExecutor path has no caller with a parent in scope and TaskBundle has no parent field; not added speculatively.; Direct-path route version is 'unversioned': the CLI picks its model and the init event's model id is not parsed.; A PARTIAL end on a RUNNING run is still flipped to INTERRUPTED by reconcile() on the next read, not at the partial event; only the STARTING case was a stuck state, so only it is handled at write time.",
     }),
+    ('AGENT-004', {
+        "status": PARTIAL,
+        "current_implementation": 'Slice: closes the second named gap. A role the owner approved for promotion was put in agent_registry, but no instance could be made from it, because specialist.compose only knew roles.BY_ID. Design: AgentRegistry.role(role_id) (friday/agent_registry.py) returns the catalogue role, or else rebuilds  (build run, commit 7ae8500ba)',
+        "next_action": 'GAPS: No planner or MCP tool calls Composer.compose yet. friday/planner.py, friday/tools/__init__.py, friday/capabilities.py and friday/capability_router.py are all owned or being integrated by other builds in this batch, so the wiring needs its own slice. The module is still FUTURE in reachability.DECLARED.; agent_composer.Composer (AGENT-003) still checks roles.BY_ID at friday/agent_composer.py:371, so a promoted role cannot run through that path yet.; Expiry is still lazy (done on the next composer call), not a timer.; approve() still registers the role with the default personality, skills and permissions.; implementer did not claim acceptance met',
+    }),
 ]
 
 
