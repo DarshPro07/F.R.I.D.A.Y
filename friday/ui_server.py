@@ -1307,7 +1307,8 @@ async def api_observability(request):
         report, kind = await run_in_threadpool(ob.trace, run_id), "trace"
     else:
         report, kind = await run_in_threadpool(ob.diagnostics), "diagnostics"
-    return JSONResponse(ob.for_mode(report, mode, kind=kind))
+    return JSONResponse(ob.for_mode(report, mode, kind=kind,
+                                    workers=request.query_params.get("workers")))
 
 
 async def api_browser_open(request):

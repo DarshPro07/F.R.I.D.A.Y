@@ -718,9 +718,26 @@ def parse_mode(value) -> str:
     return DEVELOPER if str(value or "").strip().lower() == DEVELOPER else NORMAL
 
 
-def for_mode(report: dict, mode, *, kind: str) -> dict:
-    """`report` is a trace() ("trace") or diagnostics() ("diagnostics") dict."""
+def for_mode(report: dict, mode, *, kind: str, workers=None) -> dict:
+    """`report` is a trace() ("trace") or diagnostics() ("diagnostics") dict.
+
+    `workers` is "show" or "hide" (PRD 69: the user may show/hide workers);
+    anything else keeps the mode's default - Developer shows them, Normal hides.
+    """
     mode = parse_mode(mode)
+    out = _for_mode(report, mode, kind)
+    show = {"show": True, "hide": False}.get(str(workers or "").strip().lower(), mode == DEVELOPER)
+    if kind == "trace" and report.get("found"):
+        rows = [r for r in report.get("timeline", []) if r.get("kind") == "worker"]
+        if show:
+            out["workers"] = [{k: r[k] for k in ("at", "event", "executor", "worker_run_id") if k in r}
+                              for r in rows]
+        elif "timeline" in out:
+            out["timeline"] = [r for r in out["timeline"] if r.get("kind") != "worker"]
+    return out
+
+
+def _for_mode(report: dict, mode: str, kind: str) -> dict:
     if mode == DEVELOPER:
         return {"mode": mode, **report}
     if kind == "diagnostics":
